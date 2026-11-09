@@ -58,6 +58,8 @@
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
             [jonquil.gtk.parts :as gtk-parts]
+            [jonquil.gtk.window.alerts :as win-alerts]
+            [jonquil.gtk.window.status :as win-status]
             [jonquil.parts :as parts]
             [jonquil.restarts :as restarts]
             [jonquil.login-path :as login-path]
@@ -144,26 +146,6 @@
                   (catch :default e
                     (cview/append! cv :error (str "; prompt: " (ex-message e) "\n")))))))
 
-;; The Messages log (LM8) for each window, keyed by its status label: the
-;; one handle every set-status! call already passes, so status lines, the
-;; runtime's start and its connection reach the log without threading it
-;; through sixty call sites. A pointer is a long, so it's a plain map key.
-;; Kept for the process's life: the window is the process.
-(defonce ^:private status-logs (atom {}))
-
-(defn- register-status-log!
-  "Routes entries logged against status-label to log!."
-  [status-label log!]
-  (swap! status-logs assoc status-label log!)
-  nil)
-
-(defn- log-at!
-  "Logs entry to the Messages of the window whose status label this is,
-  when it keeps them (a test's label may not). Safe from any thread."
-  [status-label entry]
-  (when-let [f (get @status-logs status-label)] (f entry))
-  nil)
-
 (defn- watch-connection!
   "For an attach evaluator e, keeps the dialect label and the console's
   prompt in step with its connection (a new connection is a fresh session,
@@ -175,7 +157,7 @@
   (when (satisfies? connection/Attached e)
     (connection/on-connection! e (fn [connected?]
                                    (when (identical? e @ev*)
-                                     (log-at! status-label
+                                     (win-status/log-at! status-label
                                               {:kind :connection :error? (not connected?)
                                                :summary (str (dialect/label @sel*)
                                                              (if connected? " connected" " lost its connection"))}))
@@ -470,101 +452,6 @@
 
 ;; --- ask before closing ------------------------------------------------------
 
-;; Each pending alert dialog tracks its OWN on-choice fn, keyed by the
-;; completion callback's own source_object (GAsyncReadyCallback's first
-;; argument -- for gtk_alert_dialog_choose this is the GtkAlertDialog
-;; itself), never a single "current dialog" atom. With a shared atom, a
-;; second alert would overwrite which dialog the FIRST's real completion
-;; uses: gtk_alert_dialog_choose_finish(wrong-dialog, first-result) fails
-;; GTK's source-object check, returns -1 with NO GError, decodes as {:error
-;; "no index and no GError"}, and close-choice!'s error branch treats that
-;; as a dismissal, silently dropping the user's real Save/Don't Save
-;; choice, while the WRONG dialog is released and the RIGHT one leaks (then
-;; double-releases when it later completes).
-(defonce ^:private alert-on-choice-by-dialog (atom {}))
-
-;; Swappable only for the self-test (row-close-alert-routing): lets
-;; complete-alert! be driven with synthetic, non-GTK "dialog" identities
-;; without ever calling the real g_object_unref on something that isn't a
-;; live GObject. Defaults to the real release.
-(defonce ^:private alert-release! (atom g/g-object-unref))
-
-;; Self-test observability only: counts real GtkAlertDialogs actually
-;; built, so row-close-alert-pending-guard can assert the guard below
-;; really did prevent a second one.
-(defonce ^:private alert-dialog-count (atom 0))
-
-;; Guards close-request-fn (below) against opening a SECOND alert while
-;; one is already pending: set true right before gtk_alert_dialog_choose
-;; starts, cleared once THIS dialog's own on-choice actually runs
-;; (success, Cancel, or dismissal all clear it, via complete-alert!).
-(defonce ^:private alert-pending? (atom false))
-
-;; Each real alert's GCancellable, by its dialog: cancelling one closes the
-;; dialog, and GTK completes it as a dismissal (complete-alert! below, with
-;; {:error ...}, which every alert's choice handler treats as Cancel). The
-;; self-test answers alerts in code, so it dismisses what's left after each
-;; row (dismiss-pending-alerts!); nothing else cancels them.
-(defonce ^:private alert-cancellables (atom {}))
-
-(defn- dismiss-pending-alerts!
-  "Cancels every alert dialog still open, so GTK closes them."
-  []
-  (doseq [c (vals @alert-cancellables)] (g/g-cancellable-cancel c))
-  nil)
-
-(defn- register-alert-choice!
-  "Tracks on-choice under dialog's own identity: a raw pointer for a real
-  GtkAlertDialog (show-alert!, below), or any comparable value in
-  a self-test row driving complete-alert! directly."
-  [dialog on-choice]
-  (swap! alert-on-choice-by-dialog assoc dialog on-choice))
-
-(defn- complete-alert!
-  "Routes ONE alert's async completion by its own identity (src). Looks
-  up and removes src's own on-choice, calls it with the already-decoded
-  result, and releases src exactly once, then clears alert-pending? so a
-  later close-request can open a fresh alert. A src with no registration
-  (already completed, or never registered) is a no-op -- idempotent
-  against a stray re-invocation, so calling this twice with the SAME src
-  never double-releases."
-  [src result]
-  (when-let [c (get @alert-cancellables src)]
-    (swap! alert-cancellables dissoc src)
-    (g/g-object-unref c))
-  (when-let [on-choice (get @alert-on-choice-by-dialog src)]
-    (swap! alert-on-choice-by-dialog dissoc src)
-    (try (on-choice result)
-         (finally (@alert-release! src) (reset! alert-pending? false)))))
-
-(defonce ^:private alert-choose-cb
-  (callable (fn [src res _data] (complete-alert! src (g/finish-choice src res)) nil)
-            [:pointer :pointer :pointer] :void))
-
-(defn- show-alert!
-  "Builds a fresh GtkAlertDialog (g_object_new_with_properties,
-  0 properties -- gtk_alert_dialog_new is variadic and is never bound) for
-  THIS attempt (the message needs the current file name, which can differ
-  between attempts after a Save As), but reuses the ONE retained
-  alert-choose-cb across every attempt. cancel and default are button
-  indexes: the close alerts pass 2 and 0, the tree's trash alert 1 and 1."
-  [win {:keys [message detail buttons]} {:keys [cancel default]} on-choice]
-  (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)
-        cancellable (g/g-cancellable-new)]
-    (swap! alert-dialog-count inc)
-    (register-alert-choice! d on-choice)
-    (swap! alert-cancellables assoc d cancellable)
-    (g/gtk-alert-dialog-set-message d message)
-    (when detail (g/gtk-alert-dialog-set-detail d detail))
-    (ffi/with-c-string-array [labels 4] (conj (vec buttons) nil)
-      (g/gtk-alert-dialog-set-buttons d labels))
-    (g/gtk-alert-dialog-set-cancel-button d cancel)
-    (g/gtk-alert-dialog-set-default-button d default)
-    (g/gtk-alert-dialog-choose d win cancellable alert-choose-cb ffi/null)))
-
-(def ^:private CLOSE-ALERT {:cancel 2 :default 0})
-(def ^:private TRASH-ALERT {:cancel 1 :default 1})
-
 (defn- finish-close!
   "Confirms and re-triggers the window's own close-request:
   gtk_window_close synchronously re-enters close-request-fn (below), which
@@ -693,21 +580,21 @@
           dirty (filterv (fn [t] (editor/dirty? (:ed t))) ts)
           dirty-names (keep-indexed (fn [i t] (when (editor/dirty? (:ed t)) (nth names i))) ts)]
       (if (and (seq dirty) (not @confirmed-close?))
-        (do (when-not @alert-pending?
-              (reset! alert-pending? true)
+        (do (when-not @win-alerts/alert-pending?
+              (reset! win-alerts/alert-pending? true)
             ;; A throw while building the alert would leave alert-pending?
             ;; true for the rest of the session (every later close silently
             ;; doing nothing) and escape into GTK's signal emission. Reset
             ;; the flag and report it instead; the window stays open, since
             ;; the text is still unsaved.
               (try
-                (show-alert!
-                 win (tabs/close-alert dirty-names) CLOSE-ALERT
+                (win-alerts/show-alert!
+                 win (tabs/close-alert dirty-names) win-alerts/CLOSE-ALERT
                  (fn [result] (close-choice! {:dirty-tabs dirty :cv cv :win win :confirmed-close? confirmed-close?
                                               :select! select!}
                                              result)))
                 (catch :default e
-                  (reset! alert-pending? false)
+                  (reset! win-alerts/alert-pending? false)
                   (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
             1)
         (do (reset! closing? true)
@@ -739,24 +626,6 @@
 
 ;; --- Run / Stop ------------------------------------------------------------
 
-(defn- set-status!
-  "Safe from any thread: hands the label update to the GTK thread, and
-  logs the text to the window's Messages as a status line."
-  [status-label text]
-  (log-at! status-label {:kind :status :summary text})
-  (on-gui! (fn [] (g/gtk-label-set-text status-label text))))
-
-(defn- contain-click
-  "A clicked/toggled handler (two pointers in, nothing out) that runs
-  (f button) and puts a throw on the status label as \"; where: message\",
-  the way the editor's and console's own handlers report theirs."
-  [status-label where f]
-  (fn [button _data]
-    (try (f button)
-         (catch :default e
-           (set-status! status-label (str "; " where ": " (ex-message e)))))
-    nil))
-
 ;; The start report's project path is usually under the user's home
 ;; directory; a ~-relative form keeps that line short.
 (defn- home-relative
@@ -768,10 +637,10 @@
       (str "~" (subs path (count home)))
       path)))
 
-;; start-and-report! sits here, after set-status! (just above) and before
-;; apply-selection! (below), which calls it: Jolt resolves an unqualified
-;; symbol at compile time, not lazily, so a forward reference to either fn
-;; from earlier in the file fails bb check with "Unable to resolve symbol".
+;; start-and-report! sits here, before apply-selection! (below), which
+;; calls it: Jolt resolves an unqualified symbol at compile time, not
+;; lazily, so a forward reference to it from earlier in the file fails
+;; bb check with "Unable to resolve symbol".
 (defn- start-and-report!
   "Starts an out-of-process evaluator on a future and says so on the
   console: pid, port and project, then each limitation, or why it couldn't
@@ -779,14 +648,14 @@
   [cv status-label e sel]
   (cond
     (instance? jonquil.nrepl.evaluator.NRepl e)
-    (do (set-status! status-label (str "Starting " (dialect/label sel) "…"))
+    (do (win-status/set-status! status-label (str "Starting " (dialect/label sel) "…"))
         (future
           (try
             (if-let [problem (ev/start! e)]
-              (do (log-at! status-label {:kind :runtime :error? true
+              (do (win-status/log-at! status-label {:kind :runtime :error? true
                                          :summary (str (dialect/label sel) " couldn't start: " problem)})
                   (cview/append! cv :error (str "; " problem "\n; Run will try again.\n")))
-              (do (log-at! status-label {:kind :runtime
+              (do (win-status/log-at! status-label {:kind :runtime
                                          :summary (str (dialect/label sel) " is running (pid " (nrepl/child-pid e) ")")})
                   (cview/append! cv :system
                                  (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
@@ -794,11 +663,11 @@
                   (doseq [l (ev/limitations e)]
                     (cview/append! cv :system (str "; Limit: " l "\n")))))
             (catch :default ex
-              (log-at! status-label {:kind :runtime :error? true
+              (win-status/log-at! status-label {:kind :runtime :error? true
                                      :summary (str (dialect/label sel) " couldn't start: " (ex-message ex))})
               (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
             (finally
-              (when-not (ev/evaluating? e) (set-status! status-label "Ready"))))))
+              (when-not (ev/evaluating? e) (win-status/set-status! status-label "Ready"))))))
 
     ;; An attach evaluator connects on the first Run, so there's nothing to
     ;; start; say it's experimental and what it can't do. satisfies?
@@ -1008,9 +877,9 @@
   [ed cv ev* status-label is-run?]
   {:on-output (fn [kind s] (cview/append! cv kind s))
    :on-wait-input (fn [waiting?]
-                    (set-status! status-label (if waiting? "Waiting for input" "Running…")))
+                    (win-status/set-status! status-label (if waiting? "Waiting for input" "Running…")))
    :on-status-change (fn [status]
-                       (set-status! status-label
+                       (win-status/set-status! status-label
                                     (case status
                                       :running "Running…"
                                       :waiting-input "Waiting for input"
@@ -1026,7 +895,7 @@
                   (docs/clear-doc-cache!)
                   (when-let [f (some-> (:after-eval* cv) deref)]
                     (try (f) (catch :default _ nil)))
-                  (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
+                  (win-status/set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
                   (cview/reset-busy-hint! cv)
                   (on-gui! (fn [] (cview/note-run-end! cv)))
                   (refresh-prompt! cv ev*)
@@ -1140,7 +1009,7 @@
   [{:keys [cv status-label]} kind tab text]
   (when-let [line (plugin-hooks/before-run! {:kind kind :text text :path @(:path tab) :tab (:id tab)})]
     (cview/append! cv :system (str "; " line "\n"))
-    (set-status! status-label (str "; " line))
+    (win-status/set-status! status-label (str "; " line))
     line))
 
 (defn- run-record-ns
@@ -1225,7 +1094,7 @@
              (cview/append! cv :system (tabs/run-banner @path-atom))
              (if problem
                (do (cview/append! cv :error (str problem "\n"))
-                   (set-status! status-label "Ready")
+                   (win-status/set-status! status-label "Ready")
                    (when notify (notify {:problem problem})))
                (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                      warning (ev/eval! @ev* text (opts))]
@@ -1380,7 +1249,7 @@
     (if (editor/apply-op-plain! ed (doc-examples/insert-op (editor/snapshot ed) code))
       (do (popover/hide! full-doc-pop)
           (on-gui! #(when-not @(:destroyed? ed) (editor/focus! ed))))
-      (set-status! status-label "; This tab is read-only."))))
+      (win-status/set-status! status-label "; This tab is read-only."))))
 
 ;; --- MCP hooks: run/eval/run-selection that report back -----------------------
 
@@ -1507,7 +1376,7 @@
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
                                                     :hook-source :form :hook-tab (:id tab)
                                                     :record (tab-record tab ev* :form text (:text snap))}))
-      (set-status! status-label "No form at the caret."))))
+      (win-status/set-status! status-label "No form at the caret."))))
 
 (defn- do-run-changed!
   "Run the forms changed since they last ran (LM3): the tab's changed
@@ -1518,11 +1387,11 @@
   (let [ed (:ed tab)
         ran (some-> (:changed ed) :ran deref)]
     (if (nil? ran)
-      (set-status! status-label "; Run the tab once first.")
+      (win-status/set-status! status-label "; Run the tab once first.")
       (let [text (editor/editor-text ed)
             forms (changed/changed text ran)]
         (if (empty? forms)
-          (set-status! status-label "; Nothing has changed since the last run.")
+          (win-status/set-status! status-label "; Nothing has changed since the last run.")
           (let [code (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) forms))]
             (when-not (or (refuse-foreign! ctx)
                           (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))
@@ -1592,11 +1461,11 @@
       (when-let [defd (:defd reply)]
         (cview/append! cv :system (str "; Defined " defd "\n"))))
     (catch :default e
-      (set-status! status-label (str "; inspect: " (ex-message e)))))
+      (win-status/set-status! status-label (str "; inspect: " (ex-message e)))))
   (when-let [queued (first (reset-vals! inspect-queued nil))]
     (try (queued)
          (catch :default e
-           (set-status! status-label (str "; inspect: " (ex-message e)))))))
+           (win-status/set-status! status-label (str "; inspect: " (ex-message e)))))))
 
 (defn- inspect-last!
   "Cmd/Ctrl+I and the menu's \"Inspect Last Result\": an availability check
@@ -1615,7 +1484,7 @@
    (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [:start {}]))
   ([ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [op extra]]
   (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
-    (set-status! status-label inspect/unavailable-message)
+    (win-status/set-status! status-label inspect/unavailable-message)
     (try-inspect!
      inspecting?
      (fn []
@@ -1662,7 +1531,7 @@
       (refuse-foreign! ctx) nil
 
       (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
-      (set-status! status-label inspect/unavailable-message)
+      (win-status/set-status! status-label inspect/unavailable-message)
 
       @inspecting? nil
 
@@ -1684,7 +1553,7 @@
             (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                   warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
               (when warning (cview/append! cv :system warning))))
-          (set-status! status-label "No form at the caret."))))))
+          (win-status/set-status! status-label "No form at the caret."))))))
 
 ;; --- window commands: F6 focus toggle, clear console, zoom -----------------
 
@@ -1767,7 +1636,7 @@
         looking (str "Looking up " sym "...")
         answer! (fn [doc]
                   (if-let [msg (ev/help-error doc)]
-                    (set-status! status-label (str "; " label ": " msg))
+                    (win-status/set-status! status-label (str "; " label ": " msg))
                     (on-doc doc)))]
     (if-not (ev/server-help? e)
       (on-doc (ev/lookup e sym text pos))
@@ -1777,14 +1646,14 @@
                                      (fn []
                                        (try
                                          (when (= looking (g/label-text status-label))
-                                           (set-status! status-label "Ready"))
+                                           (win-status/set-status! status-label "Ready"))
                                          (when (and (identical? e @ev*) (still?))
                                            (answer! doc))
                                          (catch :default ex
-                                           (set-status! status-label (str "; " label ": " (ex-message ex)))))))))]
+                                           (win-status/set-status! status-label (str "; " label ": " (ex-message ex)))))))))]
         (if (= k :now)
           (answer! doc)
-          (set-status! status-label looking))))))
+          (win-status/set-status! status-label looking))))))
 
 (defn- same-target?
   "Whether snap's help/target is still id ({:symbol :start})."
@@ -1839,7 +1708,7 @@
       (if-let [{:keys [symbol start] :as target} (help/target snap)]
         (let [id (select-keys target [:symbol :start])]
           (if (and (popover/open? help-pop) (= id @last-shown) (satisfies? ev/FullDoc @ev*))
-            (do (set-status! status-label (str "Loading full docs for " symbol "..."))
+            (do (win-status/set-status! status-label (str "Loading full docs for " symbol "..."))
                 (ev/full-doc @ev* symbol (:text snap)
                              (fn [result]
                                (on-gui!
@@ -1851,13 +1720,13 @@
                                       ;; up on a hidden page maps anyway and is lost
                                       ;; on the next switch, so show nothing.
                                       (not (active?))
-                                      (set-status! status-label "Ready")
+                                      (win-status/set-status! status-label "Ready")
 
                                       ;; The caret moved to another symbol while the
                                       ;; server answered: drop the text, but don't
                                       ;; leave "Loading full docs..." behind.
                                       (not= id (select-keys (help/target (editor/snapshot ed)) [:symbol :start]))
-                                      (set-status! status-label "Ready")
+                                      (win-status/set-status! status-label "Ready")
 
                                       (= :ok (:status result))
                                       (do (close-popovers-fn full-doc-pop)
@@ -1866,12 +1735,12 @@
                                            (int (* 0.6 (g/gtk-widget-get-height win)))
                                            {:on-run (fn [code] (do-run-example! example-ctx code))
                                             :on-copy (fn [code] (do-copy-example! example-ctx code))})
-                                          (set-status! status-label "Ready"))
+                                          (win-status/set-status! status-label "Ready"))
 
                                       :else
-                                      (set-status! status-label (help/full-doc-status symbol result)))
+                                      (win-status/set-status! status-label (help/full-doc-status symbol result)))
                                     (catch :default e
-                                      (set-status! status-label (str "; full doc: " (ex-message e))))))))))
+                                      (win-status/set-status! status-label (str "; full doc: " (ex-message e))))))))))
             (ask-lookup! {:ev* ev* :status-label status-label} symbol (:text snap) start
                          (fn [] (and (active?) (live-editor? ed) (same-target? id (editor/snapshot ed))))
                          "quick doc"
@@ -1879,9 +1748,9 @@
                            (reset! last-shown id)
                            (close-popovers-fn help-pop)
                            (help-popover/show-doc! help-pop (help/doc-text symbol doc))))))
-        (set-status! status-label "No symbol at the caret.")))
+        (win-status/set-status! status-label "No symbol at the caret.")))
     (catch :default e
-      (set-status! status-label (str "; quick doc: " (ex-message e))))))
+      (win-status/set-status! status-label (str "; quick doc: " (ex-message e))))))
 
 (defn- show-source!
   "Opens loc in the source panel (painted with the window's current
@@ -1917,7 +1786,7 @@
         (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
         (hide-right-panel! right :source)
         (editor/focus! ed)
-        (set-status! status-label (str "Jumped to " symbol ".")))
+        (win-status/set-status! status-label (str "Jumped to " symbol ".")))
       (show-source! ctx loc))))
 
 (defn- jump-back!
@@ -1943,10 +1812,10 @@
                 (let [{:keys [ed]} (active-tab)]
                   (place-caret-and-scroll! ed (min offset (count (editor/editor-text ed))))
                   (editor/focus! ed)
-                  (set-status! status-label "Back.")
+                  (win-status/set-status! status-label "Back.")
                   true)
                 (recur))))
-        (do (set-status! status-label "Nothing to go back to: those tabs are closed.")
+        (do (win-status/set-status! status-label "Nothing to go back to: those tabs are closed.")
             true)))))
 
 (defn- do-jump!
@@ -1977,9 +1846,9 @@
                                      (same-target? (select-keys t [:symbol :start]) (editor/snapshot ed))))
                          "jump"
                          (fn [doc] (jump-to! ctx symbol (help/jump-target (editor/snapshot ed) doc))))))
-        (set-status! status-label "No symbol at the caret.")))
+        (win-status/set-status! status-label "No symbol at the caret.")))
     (catch :default e
-      (set-status! status-label (str "; jump: " (ex-message e))))))
+      (win-status/set-status! status-label (str "; jump: " (ex-message e))))))
 
 (defn- jump-to!
   "do-jump!'s target in hand (help/jump-target's answer, nil for none)."
@@ -1989,12 +1858,12 @@
     (cond
       (= :buffer (:kind target))
       (do (place-caret-and-scroll! ed (:offset target))
-          (set-status! status-label (str "Jumped to " symbol ".")))
+          (win-status/set-status! status-label (str "Jumped to " symbol ".")))
 
       (and (:path loc) @path (source/same-path? (:path loc) @path))
       (let [text (editor/editor-text ed)]
         (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
-        (set-status! status-label (str "Jumped to " symbol ".")))
+        (win-status/set-status! status-label (str "Jumped to " symbol ".")))
 
       (and (:editable? loc) (:open-file! ctx))
       (do (close-popovers-fn help-pop)
@@ -2009,7 +1878,7 @@
           (help-popover/show-doc! help-pop (help/doc-text symbol (:doc target))))
 
       :else
-      (set-status! status-label (str "No definition found for " symbol ".")))))
+      (win-status/set-status! status-label (str "No definition found for " symbol ".")))))
 
 (defn- do-source-jump!
   "F12/Ctrl+B inside the source panel: the same lookup on the panel
@@ -2048,7 +1917,7 @@
       (let [text (editor/editor-text ed)]
         (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
         (editor/focus! ed)
-        (set-status! status-label (str "Jumped to " symbol ".")))
+        (win-status/set-status! status-label (str "Jumped to " symbol ".")))
       (and (:editable? loc) (:open-file! ctx)) (open-in-tab! ctx symbol loc)
       loc (show-source! ctx loc)
       :else (source-pane/report! sp (str "No source found for " symbol ".")))))
@@ -2100,9 +1969,9 @@
     (if-let [{:keys [symbol]} (help/target (editor/snapshot ed))]
       (do (close-popovers-fn)
           (help-popover/show-rename! rename-pop symbol))
-      (set-status! status-label "Put the caret on a symbol first."))
+      (win-status/set-status! status-label "Put the caret on a symbol first."))
     (catch :default e
-      (set-status! status-label (str "; rename: " (ex-message e))))))
+      (win-status/set-status! status-label (str "; rename: " (ex-message e))))))
 
 (defn- occurrence-count-phrase
   "\"n occurrence\" or \"n occurrences\" -- the plural rule for the rename
@@ -2133,13 +2002,13 @@
         (let [result (edit/rename snap new-name)]
           (editor/apply-op! ed result)
           (popover/hide! rename-pop)
-          (set-status! status-label
+          (win-status/set-status! status-label
                        (str "Renamed " (occurrence-count-phrase (count (:edits result)))
                             " of '" old "' to '" new-name "'."))
           nil)))
     (catch :default e
       (let [msg (str "; rename: " (ex-message e))]
-        (set-status! status-label msg)
+        (win-status/set-status! status-label msg)
         msg))))
 
 ;; --- completion ---------------------------------------------------------
@@ -2154,7 +2023,7 @@
   (try
     (completion/open! completion (editor/snapshot ed))
     (catch :default e
-      (set-status! status-label (str "; complete: " (ex-message e))))))
+      (win-status/set-status! status-label (str "; complete: " (ex-message e))))))
 
 ;; --- REPL completion ----------------------------------------------------
 
@@ -2179,7 +2048,7 @@
     (when-let [snap (cview/input-snapshot cv)]
       (completion/open! repl-completion (assoc snap :extra-context (repl-history-context ev*))))
     (catch :default e
-      (set-status! status-label (str "; complete: " (ex-message e))))))
+      (win-status/set-status! status-label (str "; complete: " (ex-message e))))))
 
 (defn- wire-completion!
   "Joins completion to the popover registry and its own view's key/caret/
@@ -2201,13 +2070,13 @@
                    (try
                      (completion/handle-key! completion keyval state)
                      (catch :default e
-                       (set-status! status-label (str "; complete: " (ex-message e)))
+                       (win-status/set-status! status-label (str "; complete: " (ex-message e)))
                        1)))})
   (on-moved! (fn [& _]
                (try
                  (completion/refine! completion)
                  (catch :default e
-                   (set-status! status-label (str "; complete: " (ex-message e)))))))
+                   (win-status/set-status! status-label (str "; complete: " (ex-message e)))))))
   (on-focus-lost! (fn [] (completion/close! completion))))
 
 ;; --- find/replace bar -------------------------------------------------
@@ -2360,7 +2229,7 @@
     (when-let [err (settings/save-settings! @settings-path {:theme k})]
       (cview/append! cv :system (str "; settings: " err "\n")))
     (when-not (evaluating?)
-      (set-status! status-label (if (= :auto k)
+      (win-status/set-status! status-label (if (= :auto k)
                                   (str "Theme: auto (" (name r) ")")
                                   (str "Theme: " (name k)))))))
 
@@ -2521,7 +2390,7 @@
                 (catch :default _ nil)))
             answer)))
       (catch :default e
-        (set-status! status-label (str "; key: " (ex-message e)))
+        (win-status/set-status! status-label (str "; key: " (ex-message e)))
         1)))))
 
 ;; --- context menus -------------------------------------------------------
@@ -2705,13 +2574,13 @@
     (cond
       (= 1 (count @tabs)) (g/gtk-window-close win)
       (editor/dirty? ed)
-      (when-not @alert-pending?
-        (reset! alert-pending? true)
+      (when-not @win-alerts/alert-pending?
+        (reset! win-alerts/alert-pending? true)
         (try
-          (show-alert! win (tabs/close-alert [(if-let [p @path] (file-name p) "Untitled")]) CLOSE-ALERT
+          (win-alerts/show-alert! win (tabs/close-alert [(if-let [p @path] (file-name p) "Untitled")]) win-alerts/CLOSE-ALERT
                        (fn [result] (close-tab-choice! ctx id result)))
           (catch :default e
-            (reset! alert-pending? false)
+            (reset! win-alerts/alert-pending? false)
             (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
       :else (remove-tab! ctx id))))
 
@@ -2789,8 +2658,8 @@
                   :open-find-fn open-find-fn :open-replace-fn open-replace-fn}
         menu-group
         (install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
-                               (fn [msg] (set-status! status-label msg)))]
-    (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
+                               (fn [msg] (win-status/set-status! status-label msg)))]
+    (editor/set-error-fn! ed (fn [msg] (win-status/set-status! status-label msg)))
     ;; Parinfer: the tab's editor reads its effective mode on every user
     ;; action: the project's .jonquil.edn :parinfer when it names one, else
     ;; the window's global.
@@ -2805,14 +2674,14 @@
     ;; Selection produce; nil follows the Parinfer mode.
     (editor/set-format-style-fn! ed
                                  (fn [] (:format-style (some-> (:project t) deref))))
-    (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
+    (find-bar/set-error-fn! fb (fn [msg] (win-status/set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [dirty]
                                    (refresh-labels! ctx)
                                    (when (active? t) (update-title! ed win path))
                                    ;; A save shows its file in the tree.
                                    (when (and (not dirty) tree-saved!) (tree-saved! t))))
     (g/g-signal-connect-data (:close-btn t) "clicked"
-                             (callable (contain-click status-label "close tab" (fn [_] (close-tab! ctx (:id t))))
+                             (callable (win-status/contain-click status-label "close tab" (fn [_] (close-tab! ctx (:id t))))
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; A dirty->clean transition (a successful Save) re-arms the
@@ -2911,8 +2780,8 @@
                                                    :editor (editor/key-ctx ed)
                                                    :console {:complete! repl-complete-fn}}))
                   (catch :default e
-                    (set-status! status-label (str "; palette: " (ex-message e))))))
-      :on-error (fn [msg] (set-status! status-label msg))})
+                    (win-status/set-status! status-label (str "; palette: " (ex-message e))))))
+      :on-error (fn [msg] (win-status/set-status! status-label msg))})
     (editor/set-rename-fn! ed rename-fn)
     (editor/set-run-form-fn! ed run-form-fn)
     (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
@@ -2921,7 +2790,7 @@
                                          (try
                                            (rename-to-fn (help-popover/rename-entry-text rename-pop))
                                            (catch :default e
-                                             (set-status! status-label (str "; rename: " (ex-message e)))))
+                                             (win-status/set-status! status-label (str "; rename: " (ex-message e)))))
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -3325,14 +3194,14 @@
   "Move to Trash: asks first (Cancel is the default), sharing the close
   alerts' alert-pending? guard, so a second alert never opens over one."
   [{:keys [win cv] :as ctx} path]
-  (when-not @alert-pending?
-    (reset! alert-pending? true)
+  (when-not @win-alerts/alert-pending?
+    (reset! win-alerts/alert-pending? true)
     (try
       (let [f (java.io.File. ^String path)]
-        (show-alert! win (ops/trash-alert (.getName f) (listed-dir? path)) TRASH-ALERT
+        (win-alerts/show-alert! win (ops/trash-alert (.getName f) (listed-dir? path)) win-alerts/TRASH-ALERT
                      (fn [result] (trash-choice! ctx path result))))
       (catch :default e
-        (reset! alert-pending? false)
+        (reset! win-alerts/alert-pending? false)
         (cview/append! cv :error (str "; trash: " (ex-message e) "\n")))))
   nil)
 
@@ -3609,7 +3478,7 @@
                          :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
                          :server-ev server-ev
                          :close-others! close-popovers-fn
-                         :on-error (fn [msg] (set-status! status-label msg))}
+                         :on-error (fn [msg] (win-status/set-status! status-label msg))}
         ;; A second jonquil.gtk.completion instance, on the console's own
         ;; input region -- :position :top (above the input line, vs. the
         ;; editor's own :bottom), :snapshot-fn/:apply-op! overridden to
@@ -3630,7 +3499,7 @@
                           :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
                           :server-ev server-ev
                           :close-others! close-popovers-fn
-                          :on-error (fn [msg] (set-status! status-label msg))
+                          :on-error (fn [msg] (win-status/set-status! status-label msg))
                           :position :top
                           :snapshot-fn (fn [] (cview/input-snapshot cv))
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
@@ -3787,13 +3656,13 @@
                              (if msg
                                (do (reset! parinfer-skip-shown* true)
                                    (when-not (evaluating-fn)
-                                     (set-status! status-label
+                                     (win-status/set-status! status-label
                                                   (str (or (commands/parinfer-label-text @parinfer-mode*)
                                                            "Parinfer")
                                                        " (" msg ")"))))
                                (when (and (compare-and-set! parinfer-skip-shown* true false)
                                           (not (evaluating-fn)))
-                                 (set-status! status-label "Ready"))))
+                                 (win-status/set-status! status-label "Ready"))))
         parinfer-fn (fn [choice]
                       (let [k (commands/parinfer-step @parinfer-mode* choice)]
                         (reset! parinfer-mode* k)
@@ -3808,7 +3677,7 @@
                         ;; names its project's choice, since the command
                         ;; changed only the global.
                         (when-not (evaluating-fn)
-                          (set-status! status-label
+                          (win-status/set-status! status-label
                                        (str "Parinfer: " (commands/parinfer-mode-word k)
                                             (commands/parinfer-pinned-note
                                              k (active-parinfer-override)))))))
@@ -3828,7 +3697,7 @@
         *folder-result (atom nil)
         tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (open-file! @*tab-ctx p))
                                              :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
-                                             :on-error (fn [msg] (set-status! status-label msg))
+                                             :on-error (fn [msg] (win-status/set-status! status-label msg))
                                              :on-new-file (fn [dir n] (tree-new-file! @*tab-ctx dir n))
                                              :on-new-folder (fn [dir n] (tree-new-folder! @*tab-ctx dir n))
                                              :on-rename (fn [p n] (tree-rename! @*tab-ctx p n))
@@ -3859,7 +3728,7 @@
                              (contains? @part-panels* k) ((:open! (get @part-panels* k)))
                              (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
                              :else
-                             (set-status! status-label
+                             (win-status/set-status! status-label
                                             (case k
                                               :inspector "; Nothing inspected yet: inspect a form or a result first."
                                               :source "; The Source panel is empty: jump to a definition first.")))))
@@ -3868,23 +3737,23 @@
         ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
         ;; :exports. A part's error is said on the status line, not thrown.
         part-error! (fn [id ex]
-                      (set-status! status-label (str "; part " id ": " (or (ex-message ex) (str ex)))))
+                      (win-status/set-status! status-label (str "; part " id ": " (or (ex-message ex) (str ex)))))
         part-contribution (parts/install gtk-parts/installs
                                          {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
                                           :tabs tabs :active-tab active-tab :settings-path* settings-path*
                                           :tab-ctx* *tab-ctx
                                           :tab-by-id tab-by-id :select-tab! select-tab! :new-tab! new-tab!
                                           :bang* bang* :recent-tabs recent-tabs
-                                          :contain-click (fn [where f] (contain-click status-label where f))
-                                          :set-status! (fn [text] (set-status! status-label text))
+                                          :contain-click (fn [where f] (win-status/contain-click status-label where f))
+                                          :set-status! (fn [text] (win-status/set-status! status-label text))
                                           :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
                                           :files-btn files-btn :panel-focus-fn panel-focus-fn
                                           :showing-panel showing-panel :show-right-panel! show-right-panel!
                                           :hide-right-panel! hide-right-panel!
-                                          :alert-pending? alert-pending? :show-alert! show-alert!
+                                          :alert-pending? win-alerts/alert-pending? :show-alert! win-alerts/show-alert!
                                           :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!
                                           :unread-label unread-label
-                                          :register-status-log! (fn [log!] (register-status-log! status-label log!))
+                                          :register-status-log! (fn [log!] (win-status/register-status-log! status-label log!))
                                           :plugin-step! plugin-step!
                                           :plugins-on* plugins-on* :review-pane rp
                                           :plugin-list-pane lp :plugin-history-pane hp
@@ -3919,7 +3788,7 @@
                                                                (select-keys (:fns part-contribution)
                                                                             [:result-inspect-fn :result-copy-fn
                                                                              :result-define-fn :result-jump-fn])))
-                               (fn [msg] (set-status! status-label msg)))
+                               (fn [msg] (win-status/set-status! status-label msg)))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
         ;; named, so each tab's palette can build the same per-key ctx
@@ -3930,7 +3799,7 @@
                          :hints-toggle-fn (fn []
                                             (let [on? (swap! hints-on? not)]
                                               (when-not on? (g/gtk-widget-set-visible hint-label 0))
-                                              (set-status! status-label (if on?
+                                              (win-status/set-status! status-label (if on?
                                                                           "; Key hints on: the status bar names the keys for the symbol at the caret."
                                                                           "; Key hints off."))))
                          :run-changed-fn run-changed-fn
@@ -3938,7 +3807,7 @@
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
                                                (select-tab! @*tab-ctx id)
-                                               (set-status! status-label "; Only one tab is open.")))
+                                               (win-status/set-status! status-label "; Only one tab is open.")))
                          :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
@@ -4055,19 +3924,19 @@
     (inspector-pane/apply-theme! pane (theme/theme @theme-name))
     (add-watch theme-name ::inspector-pane (fn [_ _ _ k] (inspector-pane/apply-theme! pane (theme/theme k))))
     (g/g-signal-connect-data run-btn "clicked"
-                             (callable (contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
+                             (callable (win-status/contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data stop-btn "clicked"
-                             (callable (contain-click status-label "stop" (fn [_] (stop-fn))) [:pointer :pointer] :void)
+                             (callable (win-status/contain-click status-label "stop" (fn [_] (stop-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data open-btn "clicked"
-                             (callable (contain-click status-label "open" (fn [_] (open-fn))) [:pointer :pointer] :void)
+                             (callable (win-status/contain-click status-label "open" (fn [_] (open-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data save-btn "clicked"
-                             (callable (contain-click status-label "save" (fn [_] (save-fn))) [:pointer :pointer] :void)
+                             (callable (win-status/contain-click status-label "save" (fn [_] (save-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data reset-chk "toggled"
-                             (callable (contain-click status-label "reset on run"
+                             (callable (win-status/contain-click status-label "reset on run"
                                                       (fn [btn]
                                                         (ev/set-mode! @ev*
                                                                       (if (zero? (g/gtk-check-button-get-active btn))
@@ -4114,7 +3983,7 @@
                                          [:pointer :pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (g/g-action-map-add-action app quit-action))
-    (cview/set-error-fn! cv (fn [msg] (set-status! status-label msg)))
+    (cview/set-error-fn! cv (fn [msg] (win-status/set-status! status-label msg)))
     (editor/set-jump-fn! (:editor sp) source-jump-fn)
     (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
     (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
@@ -4194,7 +4063,7 @@
       ;; Open Folder result and shows it; a file opens in a tab, and one
       ;; that can't be read goes to the status line while the rest still
       ;; open.
-      (reset! current-report (fn [text] (set-status! status-label text)))
+      (reset! current-report (fn [text] (win-status/set-status! status-label text)))
       (reset! current-open-paths
               (fn [paths]
                 (doseq [p paths]
@@ -4205,9 +4074,9 @@
                           ;; too; the toggle handler saves it as a choice.
                           (g/gtk-toggle-button-set-active files-btn 1))
                       (when-let [err (:error (open-file! @*tab-ctx p))]
-                        (set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
+                        (win-status/set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
                     (catch :default e
-                      (set-status! status-label (str "Couldn't open " p ": " (ex-message e))))))))
+                      (win-status/set-status! status-label (str "Couldn't open " p ": " (ex-message e))))))))
       ;; The tree's root, Open Folder..., then the file-tree part's
       ;; :tree-start!: the starting width and visibility (saved, else shown
       ;; only for a directory launch) and the toggle's handler, the one
@@ -4550,14 +4419,14 @@
                  ;; Self-test hooks only: drive complete-alert!'s
                  ;; per-dialog routing directly, with synthetic, non-GTK
                  ;; "dialog" identities.
-                   :alert-dialog-count alert-dialog-count
-                   :alert-pending? alert-pending?
+                   :alert-dialog-count win-alerts/alert-dialog-count
+                   :alert-pending? win-alerts/alert-pending?
                    ;; the self-test closes the alerts it answered in code
-                   :dismiss-alerts!* dismiss-pending-alerts!
-                   :pending-alerts* (fn [] (count @alert-cancellables))
-                   :alert-release! alert-release!
-                   :register-alert-choice-for-test! register-alert-choice!
-                   :complete-alert-for-test! complete-alert!}
+                   :dismiss-alerts!* win-alerts/dismiss-pending-alerts!
+                   :pending-alerts* (fn [] (count @win-alerts/alert-cancellables))
+                   :alert-release! win-alerts/alert-release!
+                   :register-alert-choice-for-test! win-alerts/register-alert-choice!
+                   :complete-alert-for-test! win-alerts/complete-alert!}
                                   part-contribution))))))
 
 (defn- run-application!

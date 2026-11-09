@@ -154,6 +154,8 @@
     jonquil.gtk.parts.time-form
     jonquil.gtk.parts.worlds
     jonquil.gtk.parts
+    jonquil.gtk.window.status
+    jonquil.gtk.window.alerts
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen
