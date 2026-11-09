@@ -59,6 +59,7 @@
             [jonquil.last-session :as last-session]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
+            [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.parts :as parts]
             [jonquil.restarts :as restarts]
@@ -77,30 +78,11 @@
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.plugin-review :as plugin-review]
             [jonquil.runtime-registry :as registry]
-            [jonquil.save-path :as save-path]
             [jonquil.session]
             [jonquil.settings :as settings]
             [jonquil.source :as source]
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
-
-;; --- title -------------------------------------------------------------
-
-(defn- file-name [path]
-  (let [i (str/last-index-of path "/")]
-    (if i (subs path (inc i)) path)))
-
-(defn- update-title!
-  "\"<name> - Jonquil\", name the file's basename or Untitled, prefixed with
-  \"* \" while dirty. GTK-thread only -- every caller here already is one:
-  button/key handlers, the dialog callbacks, the dirty-changed callback, and
-  self-test rows (all invoked from g_timeout_add ticks)."
-  [ed win path-atom]
-  (g/gtk-window-set-title
-   win
-   (str (when (editor/dirty? ed) "* ")
-        (if-let [p @path-atom] (file-name p) "Untitled")
-        " - Jonquil")))
 
 ;; --- dialect and evaluator ---------------------------------------------------
 
@@ -183,273 +165,6 @@
     (g/gtk-widget-set-sensitive reset-chk (if sensitive? 1 0))
     (g/gtk-widget-set-tooltip-text reset-chk tooltip)))
 
-;; --- file dialogs ---------------------------------------------------------
-
-;; One foreign callable per dialog MODE, reused for every call: a callable is
-;; retained forever (jonquil.gtk.callbacks's contract), so building one per
-;; Open/Save would leak a native trampoline per dialog.
-;;
-;; on-result is tracked per DIALOG OBJECT, keyed by the completion callback's
-;; own source_object (GAsyncReadyCallback's first argument), never by a
-;; single "current" atom: with two dialogs of one mode pending, a shared atom
-;; would finish/unref the WRONG object and drop the first's result.
-(defonce ^:private open-on-result-by-dialog (atom {}))
-(defonce ^:private save-on-result-by-dialog (atom {}))
-
-(defn- make-file-dialog-cb
-  "The completion callback one dialog mode shares across every window.
-  on-result is the window's own and contains its own throws (the callers
-  of file-dialog! below report them on their console); anything else that
-  throws here still unrefs the dialog and stops at callable's backstop."
-  [finish on-result-by-dialog]
-  (callable (fn [src res _data]
-              (when-let [on-result (get @on-result-by-dialog src)]
-                (swap! on-result-by-dialog dissoc src)
-                (try (on-result (g/finish-file finish src res))
-                     (finally (g/g-object-unref src))))
-              nil)
-            [:pointer :pointer :pointer] :void))
-
-(defonce ^:private open-cb (make-file-dialog-cb g/gtk-file-dialog-open-finish open-on-result-by-dialog))
-(defonce ^:private save-cb (make-file-dialog-cb g/gtk-file-dialog-save-finish save-on-result-by-dialog))
-;; Open Folder..., same per-dialog routing.
-(defonce ^:private folder-on-result-by-dialog (atom {}))
-(defonce ^:private folder-cb (make-file-dialog-cb g/gtk-file-dialog-select-folder-finish folder-on-result-by-dialog))
-
-(defn- file-dialog!
-  "mode is :open, :save or :folder (Open Folder...).
-  on-result gets {:path s} or {:error msg :code n}. initial-folder, when
-  given, is where the dialog starts."
-  ([mode window on-result] (file-dialog! mode window on-result nil))
-  ([mode window on-result initial-folder]
-   (let [d (g/gtk-file-dialog-new)
-         [on-result-by-dialog cb start]
-         (case mode
-           :open [open-on-result-by-dialog open-cb g/gtk-file-dialog-open]
-           :save [save-on-result-by-dialog save-cb g/gtk-file-dialog-save]
-           :folder [folder-on-result-by-dialog folder-cb g/gtk-file-dialog-select-folder])]
-     (when initial-folder
-       (let [gf (g/g-file-new-for-path initial-folder)]
-         (g/gtk-file-dialog-set-initial-folder d gf)
-         ;; The dialog keeps its own reference, so ours is released.
-         (g/g-object-unref gf)))
-     (swap! on-result-by-dialog assoc d on-result)
-     (start d window ffi/null cb ffi/null))))
-
-;; --- open / save: the no-dialog forms the rows (and the dialog callbacks
-;; below) call -------------------------------------------------------------
-
-(defn- open-path!
-  "Loads path into the editor: slurp, set-text!, remember the path. An
-  error is appended as :error, never swallowed, and returned as {:error
-  msg} too (nil on success) -- source.clj's own read-text/load! shape --
-  so a caller that doesn't hold a console in view (do-source-open!) can
-  still tell whether the open actually landed. Doesn't touch the title --
-  callers hold the window, this doesn't, so update-title! is theirs to
-  call afterward (do-open!, and the ui map's :open-path! below).
-
-  Jolt's slurp maps bad bytes to U+FFFD without throwing, so a
-  non-UTF-8 file loads silently and Save would then write EF BF BD in
-  place of whatever the original bytes were. When the loaded text
-  contains U+FFFD, appends a :system warning naming the risk. A file
-  holding a NUL byte is refused outright: GTK text is C
-  strings, so the buffer would keep only the text before it and Save
-  would write that shortened text back; the console names the line."
-  [ed cv path-atom path]
-  (try
-    (let [text (slurp path)]
-      (if-let [n (tabs/nul-line text)]
-        (let [msg (str path " holds a NUL byte on line " n
-                       ", which Jonquil can't edit, so it wasn't opened.")]
-          (cview/append! cv :error (str "; open: " msg "\n"))
-          {:error msg})
-        (do
-          (editor/set-text! ed text)
-          (reset! path-atom path)
-          (when (str/includes? text "�")
-            (cview/append! cv :system
-                           "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
-          nil)))
-    (catch :default e
-      (cview/append! cv :error (str "; open: " (ex-message e) "\n"))
-      {:error (ex-message e)})))
-
-(defn- temp-path-for
-  "A hidden temp file in the same directory as path: the write-then-
-  rename below needs both on the same filesystem for the rename to be
-  possible at all, atomic or not."
-  [path]
-  (let [i (str/last-index-of path "/")
-        dir (if i (subs path 0 (inc i)) "")
-        name (if i (subs path (inc i)) path)]
-    (str dir "." name ".jonquil-tmp-" (System/nanoTime))))
-
-(defn- copy-permissions!
-  "Copies target's POSIX permissions onto tmp when target already exists:
-  a freshly spit temp file gets the process umask's
-  default mode (probed: rw-r--r--, i.e. 644), so saving over an
-  executable (755) file silently dropped its +x. Files/setPosixFile-
-  Permissions exists and works on this Jolt; java.io.File's
-  setExecutable/setReadable/setWritable do NOT -- probed, and both the
-  1-arg and 2-arg forms raise 'No matching method ... found' -- so there
-  is no fallback to reach for here."
-  [target tmp]
-  (when (.exists (java.io.File. ^String target))
-    (java.nio.file.Files/setPosixFilePermissions
-     (.toPath (java.io.File. ^String tmp))
-     (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String target))))))
-
-(defn- name-user-path
-  "Rewrites any occurrence of tmp (the hidden temp filename) or target
-  (path resolved through symlinks, which can differ from what the user
-  typed) inside an exception message back to path -- an exact literal
-  replacement, not a guessed pattern, since both strings are ones this
-  namespace itself built or resolved a moment earlier. Used so a save
-  error never names a file the user never typed."
-  [msg tmp target path]
-  (-> msg (str/replace tmp path) (str/replace target path)))
-
-(defonce ^:private on-saved
-  ;; (fn [path ed]) run after a save succeeds; the plugins part's
-  ;; :plugins-start! sets it to reload a saved plugin file and to fire
-  ;; :after-save hooks
-  (atom nil))
-
-(defn- save-to!
-  "Writes the editor text to path without ever truncating it in place,
-  and without breaking a symlink or dropping the target's
-  permissions: resolves path to its real underlying file
-  (save-path/resolve-target, which follows links by hand because
-  .getCanonicalPath does not follow a dangling one on Jolt), creates the
-  temp file in THAT file's directory with mode rw------- when the target
-  exists (save-path/create-temp!, so the new content is never in a wider
-  file), spits into it, copies the target's POSIX permissions onto it
-  (copy-permissions!), then renames the temp file over the RESOLVED
-  target with java.nio.file.Files/move + ATOMIC_MOVE (probed against this
-  Jolt) so a failure mid-write can't leave a
-  half-written target -- and so a symlink target gets updated in place
-  rather than replaced by the rename. mark-saved! and remembering path
-  (the user's own path, not the resolved target) only happen once the
-  rename has actually succeeded. An error is appended as :error, naming
-  path rather than the hidden temp file or a resolved target that
-  differs from it, and never swallowed -- losing the mark that a save
-  failed would risk the user believing unsaved work is safe when it
-  isn't -- and the temp file is cleaned up on any failure (a failure to
-  resolve path, such as a symlink loop, is reported the same way, before
-  any temp file exists); the rename
-  never runs at all when the write itself fails, so the target is never
-  touched. Doesn't touch the title; see open-path!'s docstring."
-  [ed cv path-atom path]
-  (let [target (try (save-path/resolve-target path)
-                    (catch :default e
-                      (cview/append! cv :error (str "; save: " (ex-message e) "\n"))
-                      nil))]
-    (when target
-      (let [tmp (temp-path-for target)]
-        (try
-          (save-path/create-temp! tmp target)
-          (spit tmp (editor/editor-text ed))
-          (copy-permissions! target tmp)
-          (java.nio.file.Files/move
-           (.toPath (java.io.File. ^String tmp))
-           (.toPath (java.io.File. ^String target))
-           (into-array java.nio.file.CopyOption
-                       [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                        java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-          (editor/mark-saved! ed)
-          (reset! path-atom path)
-          (when-let [f @on-saved]
-            (try (f path ed)
-                 (catch :default e
-                   (cview/append! cv :error (str "; reloading the saved plugin failed: " (ex-message e) "\n")))))
-          (catch :default e
-            (let [f (java.io.File. ^String tmp)]
-              (when (.exists f) (.delete f)))
-            (cview/append! cv :error
-                           (str "; save: " (name-user-path (ex-message e) tmp target path) "\n"))))))))
-
-(defn- guarded-open!
-  "The dirty-discard gate for loading a file into the active tab: when ed
-  is dirty and the previous attempt hasn't been warned about it yet,
-  refuses and appends a :system warning instead of calling proceed!. The
-  next attempt while STILL dirty (discard-warned? already true) calls
-  proceed! and clears the flag; a dirty->clean transition elsewhere (a
-  successful Save) also clears it, via wire-tab!'s on-dirty-changed!
-  registration, so a later, unrelated dirty streak earns its own warning.
-  Open and Open in window open a tab instead of replacing a buffer, so
-  the ui's :open-path! is this gate's only caller."
-  [ed cv discard-warned? proceed!]
-  (if (and (editor/dirty? ed) (not @discard-warned?))
-    (do (reset! discard-warned? true)
-        (cview/append! cv :system "Unsaved changes. Save first, or Open again to discard them.\n"))
-    (do (reset! discard-warned? false)
-        (proceed!))))
-
-(defn- dialog-dismissed?
-  "True only for GTK's own GTK_DIALOG_ERROR_DISMISSED, checking BOTH
-  the numeric code AND the GError domain quark: code 2 is also
-  G_IO_ERROR_EXISTS in a different domain, and code alone can't tell them
-  apart -- see ffi.clj's gtk-dialog-error-quark citation."
-  [{:keys [code domain]}]
-  (and (= code g/GTK-DIALOG-ERROR-DISMISSED)
-       (= domain (g/gtk-dialog-error-quark))))
-
-(defn- handle-open-result!
-  "The file-dialog! :open callback's decision, factored out so a self-test
-  row can drive it with a synthetic result map shaped like g/finish-file's
-  (the dismissed-dialog case has no other way to reach it without a live
-  dialog)."
-  [open! cv {:keys [path error] :as result}]
-  (cond
-    path (open! path)
-    ;; A cancelled/dismissed dialog is not an error.
-    (dialog-dismissed? result) nil
-    :else (cview/append! cv :error (str "; open: " error "\n"))))
-
-(defn- contained-open-result!
-  "handle-open-result!, with a throw reported on the console as \"; open:
-  ...\" instead of reaching the shared dialog callback. The dialog's
-  on-result, and the self-test's :simulate-open-result!. ctx is {:ed :cv
-  :open!}: open! (fn [path]) is how a chosen file opens -- the real Open
-  goes through open-file!; the ui's simulated result loads into the
-  active tab, as :open-path! does."
-  [{:keys [cv open!]} result]
-  (try (handle-open-result! open! cv result)
-       (catch :default e
-         (cview/append! cv :error (str "; open: " (ex-message e) "\n")))))
-
-(defn- do-open!
-  "Open: the file dialog, then open! with the chosen path. Open never
-  replaces a buffer with unsaved changes -- it opens a tab or fills an
-  untouched Untitled one -- so there's no discard gate."
-  [cv win open!]
-  (file-dialog! :open win (fn [result] (contained-open-result! {:cv cv :open! open!} result))))
-
-(defn- handle-save-result!
-  "handle-open-result!'s counterpart for file-dialog! :save."
-  [ed cv win path-atom {:keys [path error] :as result}]
-  (cond
-    path (do (save-to! ed cv path-atom path)
-             (update-title! ed win path-atom))
-    (dialog-dismissed? result) nil
-    :else (cview/append! cv :error (str "; save: " error "\n"))))
-
-(defn- contained-save-result!
-  "contained-open-result!'s counterpart for :save."
-  [{:keys [ed cv win path-atom]} result]
-  (try (handle-save-result! ed cv win path-atom result)
-       (catch :default e
-         (cview/append! cv :error (str "; save: " (ex-message e) "\n")))))
-
-(defn- do-save-as! [ed cv win path-atom]
-  (file-dialog! :save win (fn [result] (contained-save-result! {:ed ed :cv cv :win win :path-atom path-atom} result))))
-
-(defn- do-save! [ed cv win path-atom]
-  (if-let [path @path-atom]
-    (do (save-to! ed cv path-atom path)
-        (update-title! ed win path-atom))
-    (do-save-as! ed cv win path-atom)))
-
 ;; --- ask before closing ------------------------------------------------------
 
 (defn- finish-close!
@@ -473,14 +188,14 @@
   (if-let [[{:keys [ed path] :as t} & more] (seq dirty-tabs)]
     (let [next! (fn [] (if (editor/dirty? ed) (select! t) (save-all! ctx more)))]
       (if-let [p @path]
-        (do (save-to! ed cv path p) (next!))
+        (do (win-files/save-to! ed cv path p) (next!))
         (do (select! t)
-            (file-dialog!
+            (win-files/file-dialog!
              :save win
              (fn [{p :path err :error :as r}]
                (cond
-                 p (do (save-to! ed cv path p) (next!))
-                 (dialog-dismissed? r) nil
+                 p (do (win-files/save-to! ed cv path p) (next!))
+                 (win-files/dialog-dismissed? r) nil
                  :else (cview/append! cv :error (str "; save: " err "\n"))))))))
     (finish-close! win confirmed-close?)))
 
@@ -927,7 +642,7 @@
   [{:keys [tab cv sel*]}]
   (let [tsel @(:project tab)]
     (when-not (tabs/runnable-here? @sel* tsel)
-      (let [msg (tabs/refusal-message {:file (file-name @(:path tab)) :tab-sel tsel
+      (let [msg (tabs/refusal-message {:file (win-files/file-name @(:path tab)) :tab-sel tsel
                                        :window-sel @sel*})]
         (cview/append! cv :system msg)
         msg))))
@@ -2474,7 +2189,7 @@
     (swap! r (fn [v] (into [(:id t)] (remove #{(:id t)}) v))))
   (close-popovers-fn)
   (parts/run-tab-hooks! ctx :on-switch t)
-  (update-title! (:ed t) win (:path t))
+  (win-files/update-title! (:ed t) win (:path t))
   (let [[line col] (g/cursor-line-col (:buf (:ed t)))]
     (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))
   (editor/focus! (:ed t))
@@ -2556,12 +2271,12 @@
         (= index 1) (remove-tab! ctx id)
         (= index 0)
         (if-let [p @path]
-          (do (save-to! ed cv path p) (close-if-saved!))
-          (file-dialog! :save win
+          (do (win-files/save-to! ed cv path p) (close-if-saved!))
+          (win-files/file-dialog! :save win
                         (fn [{p :path err :error :as r}]
                           (cond
-                            p (do (save-to! ed cv path p) (close-if-saved!))
-                            (dialog-dismissed? r) nil
+                            p (do (win-files/save-to! ed cv path p) (close-if-saved!))
+                            (win-files/dialog-dismissed? r) nil
                             :else (cview/append! cv :error (str "; save: " err "\n"))))))
         :else nil))))
 
@@ -2577,7 +2292,7 @@
       (when-not @win-alerts/alert-pending?
         (reset! win-alerts/alert-pending? true)
         (try
-          (win-alerts/show-alert! win (tabs/close-alert [(if-let [p @path] (file-name p) "Untitled")]) win-alerts/CLOSE-ALERT
+          (win-alerts/show-alert! win (tabs/close-alert [(if-let [p @path] (win-files/file-name p) "Untitled")]) win-alerts/CLOSE-ALERT
                        (fn [result] (close-tab-choice! ctx id result)))
           (catch :default e
             (reset! win-alerts/alert-pending? false)
@@ -2677,7 +2392,7 @@
     (find-bar/set-error-fn! fb (fn [msg] (win-status/set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [dirty]
                                    (refresh-labels! ctx)
-                                   (when (active? t) (update-title! ed win path))
+                                   (when (active? t) (win-files/update-title! ed win path))
                                    ;; A save shows its file in the tree.
                                    (when (and (not dirty) tree-saved!) (tree-saved! t))))
     (g/g-signal-connect-data (:close-btn t) "clicked"
@@ -2899,8 +2614,8 @@
     (if-let [i (tabs/find-open (map (fn [x] {:path @(:path x)}) ts) path)]
       (do (select-tab! ctx (:id (nth ts i))) nil)
       (if (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))})
-        (let [r (open-path! (:ed t) cv (:path t) path)]
-          (update-title! (:ed t) win (:path t))
+        (let [r (win-files/open-path! (:ed t) cv (:path t) path)]
+          (win-files/update-title! (:ed t) win (:path t))
           (refresh-labels! ctx)
           r)
         (let [{:keys [text error]} (read-for-tab cv path)]
@@ -3162,7 +2877,7 @@
                          (doseq [[t p] moves]
                            (reset! (:path t) p))
                          (refresh-labels! ctx)
-                         (let [t (active-tab)] (update-title! (:ed t) win (:path t)))
+                         (let [t (active-tab)] (win-files/update-title! (:ed t) win (:path t)))
                          (show-in-tree! tree-pane new)))
           nil))))
 
@@ -3516,9 +3231,9 @@
               (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT)))
         run-fn (fn [] (do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
         stop-fn (fn [] (do-stop! ev* cv))
-        open-fn (fn [] (do-open! cv win (fn [p] (open-file! @*tab-ctx p))))
-        save-fn (fn [] (let [t (active-tab)] (do-save! (:ed t) cv win (:path t))))
-        save-as-fn (fn [] (let [t (active-tab)] (do-save-as! (:ed t) cv win (:path t))))
+        open-fn (fn [] (win-files/do-open! cv win (fn [p] (open-file! @*tab-ctx p))))
+        save-fn (fn [] (let [t (active-tab)] (win-files/do-save! (:ed t) cv win (:path t))))
+        save-as-fn (fn [] (let [t (active-tab)] (win-files/do-save-as! (:ed t) cv win (:path t))))
         ;; Cmd/Ctrl+W closes the active tab; on the last one close-tab!
         ;; closes the window.
         close-fn (fn [] (close-tab! @*tab-ctx (:id (active-tab))))
@@ -3762,7 +3477,7 @@
                                           :plugin-history-shown plugin-history-shown
                                           :plugin-reviews-changed plugin-reviews-changed
                                           :plugin-console plugin-console
-                                          :on-saved on-saved
+                                          :on-saved win-files/on-saved
                                           :mcp-eval! mcp-eval!
                                           :refresh-labels! (fn [] (refresh-labels! @*tab-ctx))
                                           :inspect! (fn [start]
@@ -3770,7 +3485,7 @@
                                                                      inspector-last-args on-view status-label start))
                                           :ask-lookup! ask-lookup! :jump-to! jump-to!
                                           :source-ctx source-ctx
-                                          :place-caret-and-scroll! place-caret-and-scroll! :file-name file-name
+                                          :place-caret-and-scroll! place-caret-and-scroll! :file-name win-files/file-name
                                           :open-in-tab! open-in-tab! :show-source! show-source!
                                           :rerun-failure! (fn [f t]
                                                             (rerun-failure! {:failure f :tab t :cv cv :ev* ev* :sel* sel*
@@ -4048,7 +3763,7 @@
                                        (apply-selection! sel-ctx (ft/project-selection
                                                                   p (:dialect (settings/load-settings @settings-path*))))))
                                    (parts/run-hooks! part-contribution :on-reroot [{:path p}] part-error!))
-                             (dialog-dismissed? r) nil
+                             (win-files/dialog-dismissed? r) nil
                              :else (cview/append! cv :error (str "; open folder: " err "\n"))))]
       ;; switch-page fired inside that first append, before the tab was in
       ;; tabs, so the tab is made active here, and starts the recent list.
@@ -4082,7 +3797,7 @@
       ;; only for a directory launch) and the toggle's handler, the one
       ;; place that shows, hides and saves.
       (file-tree-pane/show-model! tree-pane (ft/load-model (ft/root-for {:dir dir :file file :cwd cwd})))
-      (reset! *open-folder (fn [] (file-dialog! :folder win
+      (reset! *open-folder (fn [] (win-files/file-dialog! :folder win
                                                 (fn [r] (try (folder-result! r)
                                                              (catch :default e
                                                                (cview/append! cv :error (str "; open folder: " (ex-message e) "\n")))))
@@ -4141,7 +3856,7 @@
                  (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
                (catch :default _ nil)))
         (let [t (active-tab)]
-          (update-title! (:ed t) win (:path t))
+          (win-files/update-title! (:ed t) win (:path t))
           (g/gtk-window-present win)
           (editor/focus! (:ed t)))
         (if (seq (:tabs entry))
@@ -4149,7 +3864,7 @@
                          (fn []
                            (try
                              (let [t (active-tab)]
-                               (update-title! (:ed t) win (:path t))
+                               (win-files/update-title! (:ed t) win (:path t))
                                (editor/focus! (:ed t)))
                              (finally (live!)))))
           (live!))))
@@ -4226,10 +3941,10 @@
                                                               start end notify))
                    :open-path! (fn [p]
                                  (let [{ed :ed path :path :keys [discard-warned?]} (active-tab)]
-                                   (guarded-open! ed cv discard-warned?
-                                                  (fn [] (open-path! ed cv path p) (update-title! ed win path)))))
+                                   (win-files/guarded-open! ed cv discard-warned?
+                                                  (fn [] (win-files/open-path! ed cv path p) (win-files/update-title! ed win path)))))
                    :save-to! (fn [p] (let [{ed :ed path :path} (active-tab)]
-                                       (save-to! ed cv path p) (update-title! ed win path)))
+                                       (win-files/save-to! ed cv path p) (win-files/update-title! ed win path)))
                  ;; Self-test hooks: the exact fns the F6/Cmd+E/Cmd+L/
                  ;; zoom key chords call, so rows can drive them directly.
                    :run-selection!* run-selection-fn
@@ -4388,14 +4103,14 @@
                  ;; without a live dialog. A simulated Open loads into the
                  ;; active tab, as :open-path! does.
                    :simulate-open-result! (fn [result]
-                                            (contained-open-result!
+                                            (win-files/contained-open-result!
                                              {:cv cv
                                               :open! (fn [p] (let [t (active-tab)]
-                                                               (open-path! (:ed t) cv (:path t) p)
-                                                               (update-title! (:ed t) win (:path t))))}
+                                                               (win-files/open-path! (:ed t) cv (:path t) p)
+                                                               (win-files/update-title! (:ed t) win (:path t))))}
                                              result))
                    :simulate-save-result! (fn [result] (let [t (active-tab)]
-                                                         (contained-save-result! {:ed (:ed t) :cv cv :win win :path-atom (:path t)} result)))
+                                                         (win-files/contained-save-result! {:ed (:ed t) :cv cv :win win :path-atom (:path t)} result)))
                  ;; The toolbar's own buttons, so a row can fire their real
                  ;; "clicked" handlers (g/g-signal-emit-by-name).
                    :toolbar {:run run-btn :stop stop-btn :open open-btn :save save-btn}

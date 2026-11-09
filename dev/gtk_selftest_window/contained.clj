@@ -15,7 +15,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
-            [jonquil.gtk.window :as window]))
+            [jonquil.gtk.window :as window]
+            [jonquil.gtk.window.files :as win-files]))
 
 (defn- boom [msg] (fn [& _] (throw (ex-info msg {}))))
 
@@ -67,13 +68,13 @@
 (defn row-open-button-throw-contained [ui]
   (status-row ui {:row-id :open-button-throw-contained :where "open" :msg "forced open failure"
                   :fire! (fn [msg]
-                           (with-redefs [window/do-open! (boom msg)]
+                           (with-redefs [win-files/do-open! (boom msg)]
                              (g/g-signal-emit-by-name (:open (:toolbar ui)) "clicked")))}))
 
 (defn row-save-button-throw-contained [ui]
   (status-row ui {:row-id :save-button-throw-contained :where "save" :msg "forced save failure"
                   :fire! (fn [msg]
-                           (with-redefs [window/do-save! (boom msg)]
+                           (with-redefs [win-files/do-save! (boom msg)]
                              (g/g-signal-emit-by-name (:save (:toolbar ui)) "clicked")))}))
 
 (defn row-reset-toggle-throw-contained
@@ -102,13 +103,13 @@
 (defn row-open-result-throw-contained [ui]
   (console-row ui {:row-id :open-result-throw-contained :where "open" :msg "forced open-result failure"
                    :fire! (fn [msg]
-                            (with-redefs [window/open-path! (boom msg)]
+                            (with-redefs [win-files/open-path! (boom msg)]
                               ((:simulate-open-result! ui) {:path "/nonexistent/contained.clj"})))}))
 
 (defn row-save-result-throw-contained [ui]
   (console-row ui {:row-id :save-result-throw-contained :where "save" :msg "forced save-result failure"
                    :fire! (fn [msg]
-                            (with-redefs [window/save-to! (boom msg)]
+                            (with-redefs [win-files/save-to! (boom msg)]
                               ((:simulate-save-result! ui) {:path "/nonexistent/contained.clj"})))}))
 
 (defn row-dirty-timer-survives-throw

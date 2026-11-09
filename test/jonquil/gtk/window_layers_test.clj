@@ -8,7 +8,8 @@
 
 (def ^:private layers
   "In load order: a namespace may require only those of earlier layers."
-  '[[jonquil.gtk.window.status jonquil.gtk.window.alerts]])
+  '[[jonquil.gtk.window.status jonquil.gtk.window.alerts]
+    [jonquil.gtk.window.files]])
 
 (defn- ns-file [sym]
   (str "src/" (str/replace (str/replace (str sym) "-" "_") "." "/") ".clj"))
