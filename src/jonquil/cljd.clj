@@ -248,6 +248,75 @@
                   (partition 2 1 toks)))))
     []))
 
+(defn- ns-ref-tokens
+  "form's tokens without comments, each as [type word]; a string's quotes
+  are dropped from its word."
+  [form]
+  (->> (syntax/tokenize form)
+       (filterv (fn [[t]] (not= :comment t)))
+       (mapv (fn [[t s e]] (let [w (subs form s e)]
+                             [t (if (= :string t) (str/replace w "\"" "") w)])))))
+
+(defn- ns-ref-lib-after
+  "The lib word of the vector that opens at token index i: its first symbol
+  or string, skipping metatags. nil when something else comes first."
+  [toks i]
+  (loop [j (inc i)]
+    (when-let [[t] (get toks j)]
+      (cond (#{:symbol :special-form :builtin :string} t) (second (get toks j))
+            (= :metatag t) (recur (inc j))
+            :else nil))))
+
+(defn- ns-ref-alias-at
+  "The alias word when token i is :as or :as-alias, in a vector with a lib,
+  followed by a symbol. nil otherwise."
+  [toks i lib]
+  (let [[t w] (get toks i)]
+    (when (and lib (= :keyword t) (#{":as" ":as-alias"} w))
+      (let [[t2 w2] (get toks (inc i))]
+        (when (#{:symbol :special-form :builtin} t2) w2)))))
+
+(defn- ns-ref-refer-at?
+  "True when token i is :refer, in a vector with a lib, followed by a [."
+  [toks i lib]
+  (let [[t w] (get toks i)
+        [t2 w2] (get toks (inc i))]
+    (boolean (and lib (= :keyword t) (= ":refer" w)
+                  (= :bracket t2) (= "[" w2)))))
+
+(defn- ns-ref-collect-refers
+  "Walks the :refer list from token index j, mapping each name to lib in
+  acc. Returns [next-index acc]; next-index is just past the closing ]."
+  [toks j lib acc]
+  (loop [j j acc acc]
+    (if-let [[t2 w2] (get toks j)]
+      (if (and (= :bracket t2) (= "]" w2))
+        [(inc j) acc]
+        (recur (inc j)
+               (if (#{:symbol :special-form :builtin} t2)
+                 (assoc-in acc [:refers w2] lib)
+                 acc)))
+      [j acc])))
+
+(defn- ns-ref-step
+  "One step of buffer-ns-refs' walk over toks at index i. Returns
+  [next-index lib acc]."
+  [toks i lib acc]
+  (let [[t w] (get toks i)]
+    (cond
+      ;; a vector opens: its first symbol or string is the lib
+      (and (= :bracket t) (= "[" w))
+      [(inc i) (ns-ref-lib-after toks i) acc]
+      (and (= :bracket t) (= "]" w))
+      [(inc i) nil acc]
+      (ns-ref-alias-at toks i lib)
+      [(+ i 2) lib (assoc-in acc [:aliases (ns-ref-alias-at toks i lib)] lib)]
+      ;; :refer [a b]: each name maps to lib; :refer :all is skipped
+      (ns-ref-refer-at? toks i lib)
+      (let [[j acc] (ns-ref-collect-refers toks (+ i 2) lib acc)]
+        [(long j) lib acc])
+      :else [(inc i) lib acc])))
+
 (defn buffer-ns-refs
   "The buffer's ns-form require map: {:aliases {alias-str ns-str}
   :refers {name-str ns-str}} from each [lib :as a], [lib :as-alias a] and
@@ -258,45 +327,13 @@
   (let [empty-refs {:aliases {} :refers {}}]
     (try
       (if-let [form (:text (ns-form text))]
-        (let [toks (filterv (fn [[t]] (not= :comment t)) (syntax/tokenize form))
-              word (fn [[t s e]] (let [w (subs form s e)]
-                                   (if (= :string t) (str/replace w "\"" "") w)))
+        (let [toks (ns-ref-tokens form)
               n (count toks)]
           (loop [i 0 lib nil acc empty-refs]
             (if (>= i n)
               acc
-              (let [[t :as tok] (nth toks i)
-                    w (word tok)]
-                (cond
-                  ;; a vector opens: its first symbol or string is the lib
-                  (and (= :bracket t) (= "[" w))
-                  (let [j (loop [j (inc i)]
-                            (when-let [[t2] (and (< j n) (nth toks j))]
-                              (cond (#{:symbol :special-form :builtin :string} t2) j
-                                    (= :metatag t2) (recur (inc j))
-                                    :else nil)))]
-                    (recur (inc i) (when j (word (nth toks j))) acc))
-                  (and (= :bracket t) (= "]" w))
-                  (recur (inc i) nil acc)
-                  (and lib (= :keyword t) (#{":as" ":as-alias"} w)
-                       (when-let [[t2] (and (< (inc i) n) (nth toks (inc i)))]
-                         (#{:symbol :special-form :builtin} t2)))
-                  (recur (+ i 2) lib (assoc-in acc [:aliases (word (nth toks (inc i)))] lib))
-                  ;; :refer [a b]: each name maps to lib; :refer :all is skipped
-                  (and lib (= :keyword t) (= ":refer" w)
-                       (when-let [[t2 :as tok2] (and (< (inc i) n) (nth toks (inc i)))]
-                         (and (= :bracket t2) (= "[" (word tok2)))))
-                  (let [[j acc] (loop [j (+ i 2) acc acc]
-                                  (if-let [[t2 :as tok2] (and (< j n) (nth toks j))]
-                                    (if (and (= :bracket t2) (= "]" (word tok2)))
-                                      [(inc j) acc]
-                                      (recur (inc j)
-                                             (if (#{:symbol :special-form :builtin} t2)
-                                               (assoc-in acc [:refers (word tok2)] lib)
-                                               acc)))
-                                    [j acc]))]
-                    (recur (long j) lib acc))
-                  :else (recur (inc i) lib acc))))))
+              (let [[i lib acc] (ns-ref-step toks i lib acc)]
+                (recur i lib acc)))))
         empty-refs)
       (catch Throwable _ empty-refs))))
 
