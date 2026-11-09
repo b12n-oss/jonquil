@@ -287,7 +287,7 @@
 (defn- ns-ref-collect-refers
   "Walks the :refer list from token index j, mapping each name to lib in
   acc. Returns [next-index acc]; next-index is just past the closing ]."
-  [toks j lib acc]
+  [toks [j lib acc]]
   (loop [j j acc acc]
     (if-let [[t2 w2] (get toks j)]
       (if (and (= :bracket t2) (= "]" w2))
@@ -299,21 +299,22 @@
       [j acc])))
 
 (defn- ns-ref-step
-  "One step of buffer-ns-refs' walk over toks at index i. Returns
-  [next-index lib acc]."
-  [toks i lib acc]
-  (let [[t w] (get toks i)]
+  "One step of buffer-ns-refs' walk over toks at index i, with the walk's
+  [i lib acc]. Returns the next [i lib acc]."
+  [toks [i lib acc]]
+  (let [[t w] (get toks i)
+        alias-word (ns-ref-alias-at toks i lib)]
     (cond
       ;; a vector opens: its first symbol or string is the lib
       (and (= :bracket t) (= "[" w))
       [(inc i) (ns-ref-lib-after toks i) acc]
       (and (= :bracket t) (= "]" w))
       [(inc i) nil acc]
-      (ns-ref-alias-at toks i lib)
-      [(+ i 2) lib (assoc-in acc [:aliases (ns-ref-alias-at toks i lib)] lib)]
+      (some? alias-word)
+      [(+ i 2) lib (assoc-in acc [:aliases alias-word] lib)]
       ;; :refer [a b]: each name maps to lib; :refer :all is skipped
       (ns-ref-refer-at? toks i lib)
-      (let [[j acc] (ns-ref-collect-refers toks (+ i 2) lib acc)]
+      (let [[j acc] (ns-ref-collect-refers toks [(+ i 2) lib acc])]
         [(long j) lib acc])
       :else [(inc i) lib acc])))
 
@@ -332,7 +333,7 @@
           (loop [i 0 lib nil acc empty-refs]
             (if (>= i n)
               acc
-              (let [[i lib acc] (ns-ref-step toks i lib acc)]
+              (let [[i lib acc] (ns-ref-step toks [i lib acc])]
                 (recur i lib acc)))))
         empty-refs)
       (catch Throwable _ empty-refs))))

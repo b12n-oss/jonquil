@@ -33,7 +33,7 @@
 (defn- lookup-doc
   "[ok? doc] for sym-name looked up with ns-sym's namespace as *ns*; [false
   nil] when the lookup throws."
-  [ns-sym sym-name text pos]
+  [{:keys [ns-sym sym-name text pos]}]
   (try [true (binding [*ns* (resolve-ns ns-sym)]
                (syntax/get-symbol-doc sym-name text pos))]
        (catch Exception _ [false nil])))
@@ -56,7 +56,7 @@
         {:keys [gen m]} @doc-cache]
     (if-let [hit (find m k)]
       (val hit)
-      (let [[ok? v] (lookup-doc ns-sym sym-name text pos)]
+      (let [[ok? v] (lookup-doc {:ns-sym ns-sym :sym-name sym-name :text text :pos pos})]
         (when ok? (store-doc! gen k v))
         v))))
 

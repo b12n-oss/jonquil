@@ -60,7 +60,7 @@
   "[stack spans] after the bracket token at offset s, whose following token
   is next-token: an opener is pushed (and its ns form's span recorded), a
   closer pops."
-  [text matches stack spans s next-token]
+  [{:keys [text matches]} [stack spans] s next-token]
   (if (opener? (.charAt ^String text (int s)))
     (let [close (when (and (= \( (.charAt ^String text (int s)))
                            (ns-opener? text stack s next-token))
@@ -73,11 +73,12 @@
   directly inside a reader conditional (#?(:clj (ns ...))), but never one
   in a (comment ...) block or after #_."
   [text tokens]
-  (let [{:keys [matches]} (syntax/compute-brackets text)]
+  (let [{:keys [matches]} (syntax/compute-brackets text)
+        ctx {:text text :matches matches}]
     (loop [ts (seq tokens) stack [] spans []]
       (if-let [[kind s _] (first ts)]
         (if (= :bracket kind)
-          (let [[stack' spans'] (bracket-step text matches stack spans s (second ts))]
+          (let [[stack' spans'] (bracket-step ctx [stack spans] s (second ts))]
             (recur (rest ts) stack' spans'))
           (recur (rest ts) stack spans))
         spans))))

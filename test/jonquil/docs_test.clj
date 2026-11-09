@@ -106,4 +106,6 @@
       (docs/symbol-doc 'user "extra" "" 0)
       (is (= 257 @calls) "the new entry is kept")
       (docs/symbol-doc 'user "n0" "" 0)
-      (is (= 258 @calls) "the older entries are gone"))))
+      (is (= 258 @calls) "the older entries are gone")
+      (docs/symbol-doc 'user "n255" "" 0)
+      (is (= 259 @calls) "n255 is a miss after the restart"))))

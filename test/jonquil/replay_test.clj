@@ -453,3 +453,13 @@
   (is (= [["defmethod" "m" ":k"] ["defn" "f"] :setup :other]
          (map :key (replay/entries {:source :repl :at 1 :dialect "Jolt"
                                     :code "(defmethod m :k [x] x) (defn ^:private f [] 1) (require 'a) (foo)"})))))
+
+(deftest entries-load-file-then-relative-test
+  (is (= [{:kind :file :path "/a/b.clj" :at 7 :dialect "Jolt"}
+          {:kind :form :text "(load-file \"rel.clj\")" :ns "user" :source-file nil :at 7 :dialect "Jolt" :key :other}]
+         (replay/entries {:source :repl :code "(load-file \"/a/b.clj\") (load-file \"rel.clj\")" :at 7 :dialect "Jolt"}))))
+
+(deftest form-end-reader-conditional-test
+  (let [form-end @#'replay/form-end]
+    (is (= 14 (form-end "#?@ (:clj [a]) x" 0)))
+    (is (= 11 (form-end "#? (:clj a) x" 0)))))

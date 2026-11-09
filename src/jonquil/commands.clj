@@ -77,7 +77,7 @@
   "stack after a closing bracket ch ending at e: the open form on top is
   finished and absorbed by its parent when ch matches it, else the closer
   is ignored."
-  [text stack ch e]
+  [{:keys [text stack ch e]}]
   (let [top (peek stack)]
     (if (and (> (count stack) 1) (= ch (:close-ch top)))
       (let [form (-> top (dissoc :close-ch) (assoc :end e))
@@ -98,7 +98,7 @@
       (conj stack {:start (prefix-start ctx i s) :open s :close-ch (syntax/open->close ch) :kids []})
 
       ch
-      (close-bracket text stack ch e)
+      (close-bracket {:text text :stack stack :ch ch :e e})
 
       :else
       (let [form (cond-> {:start (prefix-start ctx i s) :end e} (= t :metatag) (assoc :kind :metatag))]
@@ -202,11 +202,11 @@
       :else (skip-blanks new i (fn [j] (>= (- j line-start) col))))))
 
 (defn- scan-char
-  "One step of the scan through new: ch with seen-code non-whitespace
-  characters and seen-lines newlines already passed gives [seen-code
-  seen-lines] to continue with, or nil to stop at ch (the caret's code
-  has been passed and ch starts the next thing)."
-  [ch code seen-code seen-lines]
+  "One step of the scan through new: ch with seen, the [seen-code
+  seen-lines] counts of non-whitespace characters and newlines already
+  passed, gives the [seen-code seen-lines] to continue with, or nil to stop
+  at ch (the caret's code has been passed and ch starts the next thing)."
+  [ch code [seen-code seen-lines]]
   (cond
     (and (= seen-code code) (not= ch \newline) (Character/isWhitespace ch)) [seen-code seen-lines]
     (= seen-code code) (when (= ch \newline) [seen-code (inc seen-lines)])
@@ -227,16 +227,16 @@
         lines (count (filter #(= \newline %) before))
         col (- caret (inc (or (str/last-index-of before "\n") -1)))
         n (count new)]
-    (loop [i 0 seen-code 0 seen-lines 0]
+    (loop [i 0 seen [0 0]]
       (cond
-        (and (= seen-code code) (= seen-lines lines))
+        (and (= (nth seen 0) code) (= (nth seen 1) lines))
         (settle-on-caret-line {:old old :new new :before before :caret caret :col col :i i})
 
         (>= i n) n
 
         :else
-        (if-let [[sc sl] (scan-char (.charAt ^String new i) code seen-code seen-lines)]
-          (recur (inc i) sc sl)
+        (if-let [seen' (scan-char (.charAt ^String new i) code seen)]
+          (recur (inc i) seen')
           i)))))
 
 (defn format-all-op

@@ -180,3 +180,13 @@
     (testing "history keys with no :history in the view ask for the earlier/later object"
       (is (= [:later] (:request (inspect/key-step s :later))))
       (is (= [:earlier] (:request (inspect/key-step s :earlier)))))))
+
+(deftest key-step-no-request-at-the-ends-test
+  (let [s (inspect/open (page-view 20 5 25))
+        last-row (reduce (fn [st _] (:state (inspect/key-step st :down))) s (range 4))]
+    (is (= 4 (:selected last-row)))
+    (is (= {:state last-row :request nil} (inspect/key-step last-row :down))
+        "down on the last row of the last page"))
+  (let [s (inspect/open (page-view 0 10 25))]
+    (is (= {:state s :request nil} (inspect/key-step s :up))
+        "up on row 0 of the first page")))

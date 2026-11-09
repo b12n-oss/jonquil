@@ -298,3 +298,16 @@
     (is (= {:edits [[0 1 "😀"]] :caret 3 :sel [2 3]}
            (c/replace-current (snap "a a" 0 1) [[0 1] [2 3]] "😀")))
     (is (= 1 (:caret (c/replace-all [[0 1] [2 3]] "😀"))))))
+
+(deftest top-level-forms-edge-test
+  (testing "a stray closer is ignored"
+    (is (= [{:start 0 :open 0 :kids [{:start 1 :end 2} {:start 5 :end 6}] :end 7}]
+           (c/top-level-forms "(a ] b)"))))
+  (testing "a reader conditional prefix belongs to its form"
+    (is (= [{:start 0 :open 2 :kids [{:start 3 :end 7} {:start 8 :end 9}] :end 10} {:start 11 :end 12}]
+           (c/top-level-forms "#?(:clj a) b"))))
+  (testing "a splicing reader conditional inside a vector"
+    (is (= [{:start 0 :open 0 :kids [{:start 1 :open 4 :kids [{:start 5 :end 9} {:start 10 :open 10 :kids [{:start 11 :end 12}] :end 13}] :end 14}] :end 15}]
+           (c/top-level-forms "[#?@(:clj [a])]"))))
+  (testing "an unclosed form is dropped"
+    (is (= [] (c/top-level-forms "(a (b) c")))))

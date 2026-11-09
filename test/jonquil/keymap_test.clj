@@ -237,3 +237,6 @@
       "dispatch passes :physical through")
   (is (= :unmatched (km/dispatch [{:key "f" :mods #{:cmd} :physical? true :command :x}] 0x8f6 ctrl
                                  {:holds? (constantly true) :run! (constantly :handled)}))))
+
+(deftest problems-empty-exact-test
+  (is (= [] (km/problems [{:key "r" :exact #{} :command :x}] #{:x}))))

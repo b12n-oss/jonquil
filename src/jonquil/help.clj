@@ -401,8 +401,9 @@
   "The names bound by a '(' form whose first child is the operator op
   (the symbol text), or nil when it binds nothing. children are the
   form's own children, open and close its span."
-  [^String text tokens matches [open close] op children]
-  (let [vector-span (fn [] (second children))
+  [{:keys [^String text tokens matches span op children]}]
+  (let [[open close] span
+        vector-span (fn [] (second children))
         arity-params (fn [] (fn-arity-params text (rest children)))]
     (cond
       (contains? let-like-forms op)
@@ -441,7 +442,8 @@
     (when-let [[h0s h0e] (first children)]
       (if (and (= \[ (.charAt text h0s)) (bare-arity-clause? text tokens matches open))
         (params-vector-names text tokens matches h0s h0e)
-        (operator-names text tokens matches [open close] (subs text h0s h0e) children)))))
+        (operator-names {:text text :tokens tokens :matches matches :span [open close]
+                         :op (subs text h0s h0e) :children children})))))
 
 (defn- params-vector-names
   "Names bound by a fn/defn param vector or a bare multi-arity clause's own
