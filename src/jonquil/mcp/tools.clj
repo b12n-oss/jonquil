@@ -71,7 +71,7 @@
 ;; --- selection ---------------------------------------------------------------
 
 (defn- select-for
-  "As jonquil.gtk.window's private select-for (which this namespace can't
+  "As jonquil.gtk.window.runtime's select-for (which this namespace can't
   require): dialect/select for a file path, never throwing."
   [path settings-path]
   (try

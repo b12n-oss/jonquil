@@ -720,7 +720,7 @@
                           :view-focused view-focused?
                           :stopped stopped? :text (support/since ui mark)}))))))
 
-;; The "ev* swap hides the panel" minor (apply-selection!, window.clj) has
+;; The "ev* swap hides the panel" minor (apply-selection!, jonquil.gtk.window.runtime) has
 ;; no row here: apply-selection!'s evaluator-swap branch always builds a
 ;; BRAND NEW evaluator via (ev/make sel), even when the newly selected
 ;; profile is Jolt in-process again -- there's no way back to the exact
@@ -732,9 +732,9 @@
 ;; the default one would leave every later row's own idle?/support/check
 ;; reading a session nothing runs against any more -- measured: it broke
 ;; window-keys/row-command-chord-close's own started? check two groups
-;; later. The fix itself (window.clj's apply-selection!, two lines: hide
-;; the root, reset inspector-state to nil) is verified by reading, not by
-;; a row in this shared harness.
+;; later. The fix itself (jonquil.gtk.window.runtime's apply-selection!, two
+;; lines: hide the root, reset inspector-state to nil) is verified by
+;; reading, not by a row in this shared harness.
 
 ;; --- the history of inspected objects -------------------------------------
 

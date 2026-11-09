@@ -17,7 +17,8 @@
 ;; holds both panels' roots, only one visible at a time, and the box itself
 ;; is hidden when neither is. Each root keeps its own visibility, so "is the
 ;; inspector showing?" is still (:root pane)'s own visible flag.
-;; jonquil.gtk.window's apply-selection! hides the slot on a runtime switch.
+;; jonquil.gtk.window.runtime's apply-selection! hides the slot on a
+;; runtime switch.
 
 (defn- right-roots
   "{which root} for the panels right's slot holds, a part's among them; a

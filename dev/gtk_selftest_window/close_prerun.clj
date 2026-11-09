@@ -133,9 +133,9 @@
   "As close-dirty-cancel, but {:index 1} (Don't Save): close-choice! must
   confirm and finish-close! (gtk_window_close again, re-entering close-
   request-fn). suppress-close? intercepts the real close there (see
-  window.clj's close-request-fn docstring) -- closing? becoming true,
-  asserted through this test hook rather than an actual close, is the
-  row's evidence that the confirm-and-close decision fired.
+  jonquil.gtk.window.quit's close-request-fn docstring) -- closing?
+  becoming true, asserted through this test hook rather than an actual
+  close, is the row's evidence that the confirm-and-close decision fired.
 
   Also resets alert-pending? -- see close-dirty-cancel's own note on
   why."

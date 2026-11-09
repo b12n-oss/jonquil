@@ -118,6 +118,9 @@
     jonquil.gtk.window.plugin-agent-test
     jonquil.gtk.window.right-slot-test
     jonquil.gtk.window.theme-test
+    jonquil.gtk.window.runtime-test
+    jonquil.gtk.window.session-test
+    jonquil.gtk.window.quit-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.gtk.processes-pane-test

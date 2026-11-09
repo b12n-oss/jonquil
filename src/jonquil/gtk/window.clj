@@ -42,7 +42,6 @@
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.gutter :as gutter]
             [jonquil.hints :as hints]
-            [jonquil.line-counts :as line-counts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.palette :as palette]
@@ -59,8 +58,11 @@
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.quit :as win-quit]
             [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.right-slot :as win-right-slot]
+            [jonquil.gtk.window.runtime :as win-runtime]
+            [jonquil.gtk.window.session :as win-session]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.theme :as win-theme]
             [jonquil.parts :as parts]
@@ -69,7 +71,6 @@
             [jonquil.nrepl.attach]
             [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.connection :as connection]
-            [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
@@ -83,394 +84,12 @@
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
 
-;; --- dialect and evaluator ---------------------------------------------------
-
-(defn- select-for
-  "jonquil.dialect/select for path (nil for an unsaved window), with the
-  settings file's :dialect as the fallback. Never throws: a failure while
-  reading the project becomes a warning on the fallback selection."
-  [path settings-path]
-  (try
-    (dialect/select dialect/profiles
-                    (dialect/find-project dialect/profiles path)
-                    path
-                    (:dialect (settings/load-settings settings-path)))
-    (catch :default e
-      (update (dialect/select dialect/profiles nil nil nil) :warnings conj
-              (str "couldn't read the project: " (ex-message e))))))
-
-(defn- show-selection!
-  "Puts sel's label in the status bar and each warning on the console.
-  GTK thread only (the label); cview/append! is safe from any thread."
-  [cv dialect-label sel]
-  (g/gtk-label-set-text dialect-label (dialect/label sel))
-  (doseq [w (:warnings sel)]
-    (cview/append! cv :system (str "; project: " w "\n"))))
-
-;; --- the ClojureDart attach evaluator's window state -------------------------
-
-(defn- dialect-text
-  "The status bar's dialect label for selection sel run by evaluator e: an
-  attach evaluator's label says whether it holds a live connection."
-  [sel e]
-  (dialect/label sel (when (satisfies? connection/Attached e)
-                       (if (connection/connected? e) :attached :not-running))))
-
-(defn- refresh-prompt!
-  "Makes the console's prompt read the window's evaluator's own namespace
-  (`user=> `, `demo.core=> `). Safe from any thread: the rewrite goes
-  through on-gui!, and a throw from prompt-ns or set-prompt! lands on the
-  console instead of reaching GTK."
-  [cv ev*]
-  (on-gui! (fn []
-             (try (cview/set-prompt! cv (str (or (ev/prompt-ns @ev*) 'user)))
-                  (catch :default e
-                    (cview/append! cv :error (str "; prompt: " (ex-message e) "\n")))))))
-
-(defn- watch-connection!
-  "For an attach evaluator e, keeps the dialect label and the console's
-  prompt in step with its connection (a new connection is a fresh session,
-  back in its default namespace). The listener runs on whatever thread
-  connected or lost the socket, so it hands both to the GTK thread, and it
-  does nothing once e is no longer the window's evaluator (a later switch
-  made another)."
-  [e ev* sel* dialect-label cv status-label]
-  (when (satisfies? connection/Attached e)
-    (connection/on-connection! e (fn [connected?]
-                                   (when (identical? e @ev*)
-                                     (win-status/log-at! status-label
-                                              {:kind :connection :error? (not connected?)
-                                               :summary (str (dialect/label @sel*)
-                                                             (if connected? " connected" " lost its connection"))}))
-                                   (on-gui! (fn []
-                                              (when (identical? e @ev*)
-                                                (g/gtk-label-set-text dialect-label (dialect-text @sel* e))
-                                                (refresh-prompt! cv ev*))))))))
-
-(defn- apply-reset-toggle!
-  "Reset on Run as dialect/reset-toggle decides for sel: unticked and
-  insensitive, with the profile's own :reset-tooltip, for an attach
-  runtime, and the person's own tick back, with no tooltip, for every
-  other runtime. reset-state is the window's atom holding the tick an
-  attach runtime took down. Setting the tick fires the box's toggled
-  handler, which only calls set-mode! on the current evaluator: a no-op
-  on an attach one, and harmless on the evaluator a switch is about to
-  replace. GTK thread only."
-  [reset-chk reset-state sel]
-  (let [{:keys [state active? sensitive? tooltip]}
-        (dialect/reset-toggle @reset-state sel (not (zero? (g/gtk-check-button-get-active reset-chk))))]
-    (reset! reset-state state)
-    (g/gtk-check-button-set-active reset-chk (if active? 1 0))
-    (g/gtk-widget-set-sensitive reset-chk (if sensitive? 1 0))
-    (g/gtk-widget-set-tooltip-text reset-chk tooltip)))
-
-;; --- ask before closing ------------------------------------------------------
-
-(defn- finish-close!
-  "Confirms and re-triggers the window's own close-request:
-  gtk_window_close synchronously re-enters close-request-fn (below), which
-  this time (confirmed-close? true) either quits for real or, when
-  suppress-close? is set, only records that it WOULD have -- see
-  close-request-fn's docstring for why."
-  [win confirmed-close?]
-  (reset! confirmed-close? true)
-  (g/gtk-window-close win))
-
-(defn- save-all!
-  "Save All: saves each tab in dirty-tabs in order -- a
-  tab with a path through save-to!, an Untitled one through the Save
-  dialog, continuing from its callback. The first tab still dirty after
-  its save (the save failed) or whose dialog is dismissed stops the
-  sequence and is selected, and the window stays open. All saved closes
-  the window. ctx is {:cv :win :confirmed-close? :select!}."
-  [{:keys [cv win confirmed-close? select!] :as ctx} dirty-tabs]
-  (if-let [[{:keys [ed path] :as t} & more] (seq dirty-tabs)]
-    (let [next! (fn [] (if (editor/dirty? ed) (select! t) (save-all! ctx more)))]
-      (if-let [p @path]
-        (do (win-files/save-to! ed cv path p) (next!))
-        (do (select! t)
-            (win-files/file-dialog!
-             :save win
-             (fn [{p :path err :error :as r}]
-               (cond
-                 p (do (win-files/save-to! ed cv path p) (next!))
-                 (win-files/dialog-dismissed? r) nil
-                 :else (cview/append! cv :error (str "; save: " err "\n"))))))))
-    (finish-close! win confirmed-close?)))
-
-(defn- close-choice!
-  "The window-close alert's decision:
-  index 0 Save (Save All with several dirty tabs), 1 Don't Save, 2 Cancel;
-  an :error means the dialog was dismissed. Index 2 and an error both do
-  nothing -- the window stays open and the text untouched. Index 0 runs
-  save-all! over the tabs that were dirty, which closes the window only
-  once every one of them saved. Rows call this directly with a synthetic
-  {:index n}, exactly as the real dialog's own completion
-  callback does. ctx is save-all!'s plus :dirty-tabs."
-  [{:keys [dirty-tabs win confirmed-close?] :as ctx} {:keys [index error]}]
-  (cond
-    error nil
-    (= index 2) nil
-    (= index 1) (finish-close! win confirmed-close?)
-    (= index 0) (save-all! ctx dirty-tabs)
-    :else nil))
-
-;; --- popover teardown --------------------------------------------------
-
-(defn- unparent-registered-popovers!
-  "Unparents every popover in popovers (a jonquil.gtk.popover map) whose
-  GtkWidget parent isn't already null -- gtk_widget_unparent asserts a
-  non-null parent (a critical warning, not a crash, but pointless noise),
-  so an already-unparented entry (a self-test row's own throwaway popover
-  that unparents itself right after hide!) is skipped rather than warned
-  at.
-
-  Hides an OPEN popover FIRST (same idiom close-popovers! uses), before
-  unparenting it. Otherwise an open popover's own :open? atom stays true
-  after its widget is unparented (and, for a floating-ref GtkWidget with
-  no other reference, finalized right there); window teardown then clears
-  the editor's focus, GtkEventControllerFocus's \"leave\" fires this
-  window's hide-on-focus-lost listener, (popover/open? p) still reads
-  true, and hide! calls gtk_popover_popdown on the now-freed widget --
-  measured live: \"Gtk-CRITICAL: gtk_popover_popdown: assertion
-  'GTK_IS_POPOVER (popover)' failed\". Resetting :open? here means every
-  later teardown-triggered listener sees false and skips hide!.
-
-  Called from close-request-fn's REAL-quit branch only, right before
-  g_application_quit and the return 0 that lets GTK start tearing the
-  window down. A session-lifetime popover (jonquil.gtk.popover's hide!
-  never unparents, by design) is still parented to its scrolled-window
-  parent at that point; without this, GTK's dispose reports \"Finalizing
-  GtkScrolledWindow ..., but it still has children left: GtkPopover ...\"
-  (measured live). Never called from the self-test's suppress-close?
-  branch: that path returns 1 and closes nothing, so unparenting there
-  would break every later row's use of the SAME session-lifetime
-  popover."
-  [popovers]
-  (doseq [p @popovers]
-    (let [pop (:popover p)]
-      (when (popover/open? p) (popover/hide! p))
-      (when-not (ffi/null? (g/gtk-widget-get-parent pop))
-        (g/gtk-widget-unparent pop)))))
-
-(defn- close-request-fn
-  "The window's close-request handler. Dirty and unconfirmed shows
-  the alert and suppresses the close (returns 1, GTK does not proceed);
-  otherwise it proceeds to quit -- unless suppress-close? is set, in which
-  case it only flips closing? and still returns 1.
-
-  suppress-close?/closing? exist ONLY for the self-test (dev/gtk_selftest_
-  window.clj's close-dirty-discard/close-dirty-save/close-clean rows): a
-  REAL gtk_window_close/g_application_quit synchronously re-enters this
-  same handler and, once it returns 0, GTK proceeds to actually tear the
-  window down and the pending quit fires as soon as control next reaches
-  the main loop (the very next deferred g_timeout_add wait, which most
-  later rows need) -- ending the shared self-test process before the rest
-  of row-fns runs, silently dropping them from the summary. Only
-  row-command-chord-close (the deliberately-last row) is allowed to
-  trigger the real thing; every other close-confirmation row sets
-  suppress-close? true first and asserts @closing? instead of an actual
-  close. While suppressed, confirmed-close? is also reset to false right
-  here, so the attempt leaves no residue for the next row's own
-  close-request to see -- rows only need to reset suppress-close?/closing?
-  themselves afterward.
-
-  A second close-request while an alert is already pending (alert-pending?)
-  doesn't open a second one: it still suppresses the close (returns 1), so
-  the user just sees the same already-open alert.
-
-  ev* is stopped (ev/stop!, guarded) right before g_application_quit, in
-  the real-quit branch only -- never in the suppress-close? self-test
-  branch, which doesn't actually quit anything.
-
-  save-session! (the open tabs, for the next launch) runs in the
-  real-quit branch only."
-  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!
-           save-session!]}]
-  (fn [_win _data]
-    ;; One alert naming every dirty tab, in tab order.
-    (let [ts @tabs
-          names (tabs/labels (map (fn [t] {:path @(:path t)}) ts))
-          dirty (filterv (fn [t] (editor/dirty? (:ed t))) ts)
-          dirty-names (keep-indexed (fn [i t] (when (editor/dirty? (:ed t)) (nth names i))) ts)]
-      (if (and (seq dirty) (not @confirmed-close?))
-        (do (when-not @win-alerts/alert-pending?
-              (reset! win-alerts/alert-pending? true)
-            ;; A throw while building the alert would leave alert-pending?
-            ;; true for the rest of the session (every later close silently
-            ;; doing nothing) and escape into GTK's signal emission. Reset
-            ;; the flag and report it instead; the window stays open, since
-            ;; the text is still unsaved.
-              (try
-                (win-alerts/show-alert!
-                 win (tabs/close-alert dirty-names) win-alerts/CLOSE-ALERT
-                 (fn [result] (close-choice! {:dirty-tabs dirty :cv cv :win win :confirmed-close? confirmed-close?
-                                              :select! select!}
-                                             result)))
-                (catch :default e
-                  (reset! win-alerts/alert-pending? false)
-                  (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
-            1)
-        (do (reset! closing? true)
-            (if @suppress-close?
-              (do (reset! confirmed-close? false) 1)
-            ;; Unparents every registered popover BEFORE the real quit
-            ;; (see unparent-registered-popovers!), never in the
-            ;; suppress-close? branch above.
-              (do (unparent-registered-popovers! popovers)
-                  (when save-session!
-                    (try (when-let [err (save-session!)]
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the session failed:" err)))
-                         (catch :default e
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the session failed:" (ex-message e))))))
-                  (try (ev/stop! @ev*)
-                       (catch :default e
-                       ;; The window is going away, so the console can't show
-                       ;; it; the process's real stderr can.
-                         (binding [*out* *err*]
-                           (println "jonquil: stopping the runtime failed:" (ex-message e))))
-                     ;; Leaves jonquil.runtime-registry: this evaluator is
-                     ;; stopped (or its stop! at least ran), so
-                     ;; jonquil.main's stop-all! has nothing left for it.
-                       (finally (registry/unregister! @ev*)))
-                  (g/g-application-quit app)
-                  0)))))))
-
 ;; --- Run / Stop ------------------------------------------------------------
-
-;; The start report's project path is usually under the user's home
-;; directory; a ~-relative form keeps that line short.
-(defn- home-relative
-  "path with a leading $HOME replaced by ~, or path unchanged when it isn't
-  under $HOME (or $HOME can't be read)."
-  [path]
-  (let [home (System/getProperty "user.home")]
-    (if (and home (str/starts-with? path (str home "/")))
-      (str "~" (subs path (count home)))
-      path)))
-
-;; start-and-report! sits here, before apply-selection! (below), which
-;; calls it: Jolt resolves an unqualified symbol at compile time, not
-;; lazily, so a forward reference to it from earlier in the file fails
-;; bb check with "Unable to resolve symbol".
-(defn- start-and-report!
-  "Starts an out-of-process evaluator on a future and says so on the
-  console: pid, port and project, then each limitation, or why it couldn't
-  start. The in-process engine has nothing to start or report."
-  [cv status-label e sel]
-  (cond
-    (instance? jonquil.nrepl.evaluator.NRepl e)
-    (do (win-status/set-status! status-label (str "Starting " (dialect/label sel) "…"))
-        (future
-          (try
-            (if-let [problem (ev/start! e)]
-              (do (win-status/log-at! status-label {:kind :runtime :error? true
-                                         :summary (str (dialect/label sel) " couldn't start: " problem)})
-                  (cview/append! cv :error (str "; " problem "\n; Run will try again.\n")))
-              (do (win-status/log-at! status-label {:kind :runtime
-                                         :summary (str (dialect/label sel) " is running (pid " (nrepl/child-pid e) ")")})
-                  (cview/append! cv :system
-                                 (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
-                                      ", port " (nrepl/child-port e) ") in " (home-relative (:project-dir sel)) ".\n"))
-                  (doseq [l (ev/limitations e)]
-                    (cview/append! cv :system (str "; Limit: " l "\n")))))
-            (catch :default ex
-              (win-status/log-at! status-label {:kind :runtime :error? true
-                                     :summary (str (dialect/label sel) " couldn't start: " (ex-message ex))})
-              (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
-            (finally
-              (when-not (ev/evaluating? e) (win-status/set-status! status-label "Ready"))))))
-
-    ;; An attach evaluator connects on the first Run, so there's nothing to
-    ;; start; say it's experimental and what it can't do. satisfies?
-    ;; connection/Attached, not an instance? on any one dialect's record, so
-    ;; a :clj window prints its own limits too -- the experimental line
-    ;; stays gated on the profile's own flag, which cljd and jank set.
-    (satisfies? connection/Attached e)
-    (do (when (:experimental (:profile sel))
-          (cview/append! cv :system (str (:experimental-message (:profile sel)) "\n")))
-        (when (satisfies? ev/StartNote e)
-          (cview/append! cv :system (str "; " (ev/start-note e) "\n")))
-        (doseq [l (ev/limitations e)]
-          (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
 (def ^:private STATUS-MARGIN
   ;; px at each end of the status bar: GNOME's usual 6-12 px gutter, the
   ;; status box's own child spacing (6) plus a little.
   8)
-
-;; apply-selection! sits here, after start-and-report! (above), which it
-;; calls: Jolt resolves an unqualified symbol at compile time, not lazily,
-;; so it can't sit any earlier in the file, before start-and-report! exists.
-(defn- apply-selection!
-  "Makes sel the window's selection. When it needs a different evaluator
-  (jonquil.dialect/selection-key), the old one is interrupted and stopped
-  off the GTK thread and a new one starts, and the inspector panel (if
-  showing) hides and drops its own state (the panel's old view would
-  otherwise call ev/inspect! on an evaluator that may not even implement
-  it). sel-ctx is {:cv :status-label :dialect-label :sel* :ev*
-  :mode-fn :reset-chk :reset-state :right :inspector-state}.
-
-  The new evaluator joins jonquil.runtime-registry as soon as it's made
-  (so jonquil.main's stop-all! can never miss it, even if the window
-  closes before it ever starts); the old one leaves once it's stopped.
-
-  interrupt! and stop! on the old evaluator are guarded separately, so a
-  throw from one still runs the other: each step's own throw is reported
-  on the console rather than skipping the step after it and orphaning the
-  old child.
-
-  An attach evaluator's connection drives the label
-  (watch-connection!), Reset on Run follows the runtime
-  (apply-reset-toggle!), and the label is set last, from the evaluator the
-  window ends up with, so opening another file of the same app keeps
-  reading \"attached\"."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state right inspector-state active-ed]} sel]
-  (let [old-sel @sel*]
-    (reset! sel* sel)
-    (show-selection! cv dialect-label sel)
-    (apply-reset-toggle! reset-chk reset-state sel)
-    (when (not= (dialect/selection-key old-sel) (dialect/selection-key sel))
-      (let [old @ev*
-            new (doto (ev/make sel) registry/register!)]
-        (ev/set-mode! new (mode-fn))
-        (watch-connection! new ev* sel* dialect-label cv status-label)
-        ;; LM7: the prompt history follows the window, not the evaluator
-        (let [items (:items @(ev/history old))]
-          (reset! (ev/history new) {:items items :index (count items) :draft ""}))
-        (reset! ev* new)
-        ;; LM4: counting is the whole process's mode, so leaving the
-        ;; in-process Jolt for another runtime mustn't leave Jonquil counting
-        ;; what it compiles (another in-process session shares the mode)
-        (when-not (instance? jonquil.session.InProcess new)
-          (line-counts/off-if-counting!))
-        ;; Focus inside a panel this hides would go nowhere, so it moves to
-        ;; the active tab's editor, as closing the inspector does.
-        (let [focus-in-panel? (or (win-right-slot/focus-within? (:inspector-root right))
-                                  (win-right-slot/focus-within? (:source-root right)))]
-          (win-right-slot/hide-right-panel! right :inspector)
-          (win-right-slot/hide-right-panel! right :source)
-          (when (and focus-in-panel? active-ed)
-            (when-let [ed (active-ed)] (editor/focus! ed))))
-        (reset! inspector-state nil)
-        ;; their views belong to the old runtime, so a panel switch can't
-        ;; bring them back
-        (when-let [r (:recent-panels right)] (swap! r (fn [v] (vec (remove #{:inspector :source} v)))))
-        (cview/append! cv :system (str "; Switched to " (dialect/label sel)
-                                       ". The previous session is gone.\n"))
-        (future
-          (try (when (ev/evaluating? old) (ev/interrupt! old))
-               (catch :default ex
-                 (cview/append! cv :error (str "; switch: " (ex-message ex) "\n"))))
-          (try (ev/stop! old)
-               (catch :default ex
-                 (cview/append! cv :error (str "; switch: " (ex-message ex) "\n")))
-               (finally (registry/unregister! old))))
-        (start-and-report! cv status-label new sel)))
-    (g/gtk-label-set-text dialect-label (dialect-text sel @ev*))
-    (refresh-prompt! cv ev*)))
 
 (defn- make-eval-opts
   "The opts run-definitions!/submit-repl! share (the lock-caller rule:
@@ -523,7 +142,7 @@
                   (win-status/set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
                   (cview/reset-busy-hint! cv)
                   (on-gui! (fn [] (cview/note-run-end! cv)))
-                  (refresh-prompt! cv ev*)
+                  (win-runtime/refresh-prompt! cv ev*)
                   (let [[kind text] (console/result-line result)]
                     ;; LM1: a result that kept a handle to its value
                     (if-let [ref (:ref result)]
@@ -1953,8 +1572,6 @@
 
 (defn- tab-by-id [tabs id] (some (fn [t] (when (= id (:id t)) t)) @tabs))
 
-(declare session-changed!)
-
 (defn- refresh-labels!
   "Sets every tab's label (jonquil.tabs/labels) and shows the strip only
   while there are two or more tabs. Every open, close and path change comes
@@ -1964,7 +1581,7 @@
     (doseq [[t text] (map vector ts (tabs/labels (map (fn [t] {:path @(:path t) :dirty? (editor/dirty? (:ed t))}) ts)))]
       (tab/set-label! t text))
     (g/gtk-notebook-set-show-tabs notebook (if (> (count ts) 1) 1 0)))
-  (session-changed! ctx))
+  (win-session/session-changed! ctx))
 
 (defn- on-switch!
   "Makes t the active tab: the window's title, Ln/Col and focus follow it,
@@ -1985,7 +1602,7 @@
   ;; The Parinfer label follows the active tab, whose project may override
   ;; the global mode.
   (when-let [f (:parinfer-label-update! ctx)] (f))
-  (session-changed! ctx))
+  (win-session/session-changed! ctx))
 
 (defn- switch-page-fn
   "The notebook's switch-page handler. The tab is found from the
@@ -2045,7 +1662,7 @@
             osel (when only @(:project only))]
         (when (and only (not more) osel
                    (not (tabs/runnable-here? @sel* osel)))
-          (try (apply-selection! sel-ctx osel)
+          (try (win-runtime/apply-selection! sel-ctx osel)
                (catch :default e
                  (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))))
 
@@ -2311,14 +1928,14 @@
     (add-watch path ::dialect
                (fn [_ _ old new]
                  (when (not= old new)
-                   (let [tsel (select-for new @settings-path*)]
+                   (let [tsel (win-runtime/select-for new @settings-path*)]
                      (reset! (:project t) tsel)
                      ;; With one tab the window follows its project; with
                      ;; two or more the window's project is fixed.
                      ;; A loose Jolt file keeps the window's own Jolt, as
                      ;; it does when tabs close down to it (keeps-window-jolt?).
                      (try (when (and (= 1 (count @tabs)) (not (tabs/keeps-window-jolt? @sel* tsel)))
-                            (apply-selection! sel-ctx tsel))
+                            (win-runtime/apply-selection! sel-ctx tsel))
                           (catch :default e
                             (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
                           (finally (editor/set-profile! ed (:profile tsel))
@@ -2342,7 +1959,7 @@
   the tab active itself. ctx is wire-tab!'s map plus {:tabs :next-id
   :notebook :theme-name :completion-opts}."
   [{:keys [tabs next-id notebook theme-name completion-opts settings-path* sel*] :as ctx} {:keys [path text]}]
-  (let [tsel (select-for path @settings-path*)
+  (let [tsel (win-runtime/select-for path @settings-path*)
         t (tab/make-tab! {:id (swap! next-id inc) :path path :text text
                           :theme (theme/theme @theme-name)
                           :profile (:profile (if path tsel @sel*))
@@ -2417,58 +2034,13 @@
 ;; :tree-saved! and :folder-result* (the atom holding Open Folder's result
 ;; handler, set once activate! has built it).
 
-(defn- reopen-tabs?
-  "False only when the settings file holds :reopen-tabs? false."
-  [settings-path]
-  (not (false? (:reopen-tabs? (settings/load-settings settings-path)))))
-
-(defn- session-snapshot
-  "{:root :tabs :active} for sessions.edn: the tree's root, every tab's
-  path in tab order (Untitled ones left out), and the active tab's path."
-  [{:keys [tabs tree-pane active-tab]}]
-  {:root (:root @(:state tree-pane))
-   :tabs (vec (keep (fn [t] @(:path t)) @tabs))
-   :active (some-> (active-tab) :path deref)})
-
-(defn- save-session!
-  "Remembers the open tabs for the tree's root in sessions.edn. nil, or an
-  error string when saving failed; does nothing when :reopen-tabs? is off."
-  [{:keys [settings-path*] :as ctx}]
-  (when (reopen-tabs? @settings-path*)
-    (let [path (last-session/sessions-path @settings-path*)]
-      (last-session/save-sessions!
-       path (last-session/remember (:sessions (last-session/load-sessions path)) (session-snapshot ctx))))))
-
-(defn- session-changed!
-  "Saves the tab list as it changes, not only at quit, so a crash or a
-  force quit keeps it. Does nothing until :session-live? is set, which
-  activate! does once the launch's own tabs are open: before that the
-  first Untitled tab would overwrite the list it's about to reopen. Writes
-  only when the snapshot differs from the last one written (or the state
-  startup ended in), so a label refresh for a dirty mark costs no I/O. With
-  :reopen-tabs? off it does nothing and records nothing, so turning it back
-  on saves at the next change. A failure is said on the console
-  once, until a save works again. ctx without :session-live? (a partial
-  map) does nothing."
-  [{:keys [session-live? session-last session-error cv] :as ctx}]
-  (when (and session-live? @session-live? (reopen-tabs? @(:settings-path* ctx)))
-    (let [snap (session-snapshot ctx)]
-      (when (not= snap @session-last)
-        (let [err (try (save-session! ctx) (catch :default e (ex-message e)))]
-          (if err
-            (when (not= err @session-error)
-              (reset! session-error err)
-              (cview/append! cv :system (str "; sessions: " err "\n")))
-            (do (reset! session-error nil)
-                (reset! session-last snap))))))))
-
 (defn- session-entry!
   "The sessions.edn entry for the tree's root, or nil when :reopen-tabs? is
   off or the file can't be read (said on the console). With reroot? and
   no root, takes the most recent entry and roots the tree at its folder
   when that exists."
   [{:keys [cv tree-pane settings-path* folder-result*]} {:keys [reroot?]}]
-  (when (reopen-tabs? @settings-path*)
+  (when (win-session/reopen-tabs? @settings-path*)
     (let [{:keys [sessions warning]} (last-session/load-sessions (last-session/sessions-path @settings-path*))
           root (:root @(:state tree-pane))]
       (cond
@@ -2802,7 +2374,7 @@
         ;; of dir (measured 2026-10-09).
         sel* (atom (if (and dir (not file))
                      (ft/project-selection dir (:dialect (settings/load-settings @settings-path*)))
-                     (select-for file @settings-path*)))
+                     (win-runtime/select-for file @settings-path*)))
         ev* (atom (doto (ev/make @sel*) registry/register!))
         session @ev*
         evaluating-fn (fn [] (ev/evaluating? @ev*))
@@ -3331,41 +2903,22 @@
                              (callable window-key-fn [:pointer :uint :uint :uint :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller win keyctl)
-    (g/g-signal-connect-data win "close-request"
-                             ;; on-throw 1 refuses the close: a window that
-                             ;; may hold unsaved text stays open.
-                             (callable (close-request-fn {:tabs tabs :select! (fn [t] (select-tab! @*tab-ctx (:id t)))
-                                                          :cv cv :win win :app app
-                                                          :confirmed-close? confirmed-close?
-                                                          :suppress-close? suppress-close? :closing? closing?
-                                                          :popovers popovers :ev* ev*
-                                                          ;; Live saving stops first: nothing after the
-                                                          ;; quit's own save may write a shorter list.
-                                                          ;; A quit before startup's reopen is done
-                                                          ;; stops it and saves nothing, since the
-                                                          ;; tabs open are only part of the list.
-                                                          :save-session! (fn [] (let [c @*tab-ctx
-                                                                                      restoring? (some-> c :session-restoring? deref)]
-                                                                                  (parts/run-hooks! part-contribution :on-quit [] part-error!)
-                                                                                  (some-> c :session-live? (reset! false))
-                                                                                  (some-> c :session-restoring? (reset! false))
-                                                                                  (when-not restoring? (save-session! c))))})
-                                       [:pointer :pointer] :int :on-throw 1)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; Without an application "quit" action, GTK's macOS
-    ;; delegate lets a Quit AppleEvent (Dock -> Quit, logout, shutdown)
-    ;; terminate the process at once -- measured: a dirty ./jonquil sent
-    ;; one by pid exited 0 in ~250ms with no prompt. With it, the delegate
-    ;; activates this action and cancels the terminate; the action closes
-    ;; the window, so a dirty buffer gets the same prompt as the close
-    ;; button (close-request-fn) and a clean one quits. It also takes GTK's
-    ;; default Cmd+Q accelerator for app.quit on macOS.
-    (let [quit-action (g/g-simple-action-new "quit" ffi/null)]
-      (g/g-signal-connect-data quit-action "activate"
-                               (callable (fn [_action _param _data] (g/gtk-window-close win) nil)
-                                         [:pointer :pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      (g/g-action-map-add-action app quit-action))
+    (win-quit/connect! {:tabs tabs :select! (fn [t] (select-tab! @*tab-ctx (:id t)))
+                        :cv cv :win win :app app
+                        :confirmed-close? confirmed-close?
+                        :suppress-close? suppress-close? :closing? closing?
+                        :popovers popovers :ev* ev*
+                        ;; Live saving stops first: nothing after the
+                        ;; quit's own save may write a shorter list.
+                        ;; A quit before startup's reopen is done
+                        ;; stops it and saves nothing, since the
+                        ;; tabs open are only part of the list.
+                        :save-session! (fn [] (let [c @*tab-ctx
+                                                    restoring? (some-> c :session-restoring? deref)]
+                                                (parts/run-hooks! part-contribution :on-quit [] part-error!)
+                                                (some-> c :session-live? (reset! false))
+                                                (some-> c :session-restoring? (reset! false))
+                                                (when-not restoring? (win-session/save-session! c))))})
     (cview/set-error-fn! cv (fn [msg] (win-status/set-status! status-label msg)))
     (editor/set-jump-fn! (:editor sp) source-jump-fn)
     (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
@@ -3428,7 +2981,7 @@
                                          t (first ts)]
                                      (when (and (= 1 (count ts))
                                                 (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))}))
-                                       (apply-selection! sel-ctx (ft/project-selection
+                                       (win-runtime/apply-selection! sel-ctx (ft/project-selection
                                                                   p (:dialect (settings/load-settings @settings-path*))))))
                                    (parts/run-hooks! part-contribution :on-reroot [{:path p}] part-error!))
                              (win-files/dialog-dismissed? r) nil
@@ -3487,16 +3040,16 @@
         (cview/append! cv :system
                        "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
       (try
-        (show-selection! cv dialect-label @sel*)
+        (win-runtime/show-selection! cv dialect-label @sel*)
         ;; The starting evaluator's connection, label and Reset on Run, as
         ;; apply-selection! does for every later one.
-        (watch-connection! @ev* ev* sel* dialect-label cv status-label)
-        (apply-reset-toggle! reset-chk reset-state @sel*)
-        (g/gtk-label-set-text dialect-label (dialect-text @sel* @ev*))
-        (refresh-prompt! cv ev*)
+        (win-runtime/watch-connection! @ev* ev* sel* dialect-label cv status-label)
+        (win-runtime/apply-reset-toggle! reset-chk reset-state @sel*)
+        (g/gtk-label-set-text dialect-label (win-runtime/dialect-text @sel* @ev*))
+        (win-runtime/refresh-prompt! cv ev*)
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
-      (start-and-report! cv status-label @ev* @sel*)
+      (win-runtime/start-and-report! cv status-label @ev* @sel*)
       ;; A launch that named no file reopens the
       ;; tabs open at the last quit in this project. The entry, and any
       ;; re-root, come now, so the tree shows its folder from the first
@@ -3513,7 +3066,7 @@
             ;; anything changed. A re-root alone doesn't save either, for the
             ;; same reason; the next tab change does.
             live! (fn []
-                    (reset! (:session-last tab-ctx) (session-snapshot tab-ctx))
+                    (reset! (:session-last tab-ctx) (win-session/session-snapshot tab-ctx))
                     (reset! (:session-live? tab-ctx) true)
                     (parts/run-hooks! part-contribution :on-start [] part-error!))]
         ;; Say where the child tools' PATH came from. The wait for the
@@ -3656,7 +3209,7 @@
                    :settings-path!* (fn [p] (reset! settings-path* p))
                  ;; What the real quit saves and
                  ;; what a launch with no file restores (without re-rooting).
-                   :save-session!* (fn [] (save-session! @*tab-ctx))
+                   :save-session!* (fn [] (win-session/save-session! @*tab-ctx))
                    :restore-session!* (fn [] (restore-session! @*tab-ctx {:reroot? false}))
                  ;; Live saving on or off, so a row can stand in for a quit
                  ;; and a new launch (off until that launch's restore).
@@ -3788,7 +3341,7 @@
                  ;; button/OS chrome uses. closing?/suppress-close? are
                  ;; self-test-only hooks (close-request-fn's docstring).
                    :close-choice! (fn [result]
-                                    (close-choice! {:dirty-tabs (filterv (fn [t] (editor/dirty? (:ed t))) @tabs)
+                                    (win-quit/close-choice! {:dirty-tabs (filterv (fn [t] (editor/dirty? (:ed t))) @tabs)
                                                     :cv cv :win win :confirmed-close? confirmed-close?
                                                     :select! (fn [t] (select-tab! @*tab-ctx (:id t)))}
                                                    result))

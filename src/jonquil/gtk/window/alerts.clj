@@ -31,10 +31,11 @@
 ;; really did prevent a second one.
 (defonce alert-dialog-count (atom 0))
 
-;; Guards jonquil.gtk.window's close-request-fn against opening a SECOND alert while
-;; one is already pending: set true right before gtk_alert_dialog_choose
-;; starts, cleared once THIS dialog's own on-choice actually runs
-;; (success, Cancel, or dismissal all clear it, via complete-alert!).
+;; Guards jonquil.gtk.window.quit's close-request-fn against opening a
+;; SECOND alert while one is already pending: set true right before
+;; gtk_alert_dialog_choose starts, cleared once THIS dialog's own on-choice
+;; actually runs (success, Cancel, or dismissal all clear it, via
+;; complete-alert!).
 (defonce alert-pending? (atom false))
 
 ;; Each real alert's GCancellable, by its dialog: cancelling one closes the
