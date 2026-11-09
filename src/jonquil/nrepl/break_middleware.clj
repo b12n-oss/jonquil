@@ -76,6 +76,45 @@
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))
 
+(defn- clone-request!
+  "Hands a clone on to next with a new entry's wrapper bound, keeping the
+  entry under the new session id once the clone's reply names it."
+  [sessions next request]
+  (let [e (entry)]
+    (with-bindings (if-let [v (hook-var)] {v (session-wrapper e)} {})
+      (next (assoc request :reply (fn [m]
+                                    (when-let [new-sid (get m "new-session")]
+                                      (swap! sessions assoc new-sid e))
+                                    ((:reply request) m)))))))
+
+(defn- arm-and-pass!
+  "An eval or load-file on session entry e (or none): arms it when the
+  client asked, keeps the reply, and hands the request on."
+  [e next request]
+  (when e
+    (reset! (:armed? e) (= "1" (str (get request "jonquil-break"))))
+    (reset! (:reply e) (:reply request)))
+  (next request))
+
+(defn- break-check-reply []
+  (cond
+    (not (debugger/break-available?)) {"status" ["done"] "available" "false"}
+    (not (hooked?))
+    {"status" ["done"] "available" "false"
+     "reason" (str "This Jolt's nREPL server has no jolt.nrepl/*eval-wrapper*, "
+                   "so its errors can't pause.")}
+    :else {"status" ["done"] "available" "true"}))
+
+(defn- break-eval! [e request]
+  ;; answered from the paused thread, as jonquil-frame-eval is answered
+  (if e
+    (debugger/break-eval! (:break e) (as-long (get request "frame")) (str (get request "code"))
+                          (fn [r]
+                            (server/respond request (if-let [err (:error r)]
+                                                      {"status" ["done"] "error" err}
+                                                      {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))))
+    (server/respond request {"status" ["done"] "error" "Not paused any more."})))
+
 (defn handler
   "The middleware's request handler over sessions (an atom, session id ->
   entry), handing everything but its own ops on to next."
@@ -84,35 +123,10 @@
     (let [sid (get request "session")
           e (get @sessions sid)]
       (case (get request "op")
-        "clone"
-        (let [e (entry)]
-          (with-bindings (if-let [v (hook-var)] {v (session-wrapper e)} {})
-            (next (assoc request :reply (fn [m]
-                                          (when-let [new-sid (get m "new-session")]
-                                            (swap! sessions assoc new-sid e))
-                                          ((:reply request) m))))))
-        ("eval" "load-file")
-        (do (when e
-              (reset! (:armed? e) (= "1" (str (get request "jonquil-break"))))
-              (reset! (:reply e) (:reply request)))
-            (next request))
-        "jonquil-break-check"
-        (server/respond request (cond
-                                  (not (debugger/break-available?)) {"status" ["done"] "available" "false"}
-                                  (not (hooked?))
-                                  {"status" ["done"] "available" "false"
-                                   "reason" (str "This Jolt's nREPL server has no jolt.nrepl/*eval-wrapper*, "
-                                                 "so its errors can't pause.")}
-                                  :else {"status" ["done"] "available" "true"}))
-        "jonquil-break-eval"
-        ;; answered from the paused thread, as jonquil-frame-eval is answered
-        (if e
-          (debugger/break-eval! (:break e) (as-long (get request "frame")) (str (get request "code"))
-                                (fn [r]
-                                  (server/respond request (if-let [err (:error r)]
-                                                            {"status" ["done"] "error" err}
-                                                            {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))))
-          (server/respond request {"status" ["done"] "error" "Not paused any more."}))
+        "clone" (clone-request! sessions next request)
+        ("eval" "load-file") (arm-and-pass! e next request)
+        "jonquil-break-check" (server/respond request (break-check-reply))
+        "jonquil-break-eval" (break-eval! e request)
         "jonquil-break-continue"
         (server/respond request {"status" ["done"]
                                  "continued" (str (boolean (and e (debugger/continue! (:break e)))))})

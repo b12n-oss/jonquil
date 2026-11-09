@@ -74,110 +74,157 @@
     (when-let [[op op-args] args]
       {"status" ["done"] "view" (pr-str (view/run-op state op op-args))})))
 
+(defn- throw-message
+  "A throwable's message, or its class name when it has none."
+  [t]
+  (or (ex-message t) (str (class t))))
+
+(defn- done-data
+  "A done reply carrying (f) printed unbounded."
+  [f]
+  {"status" ["done"]
+   ;; unbounded, as jonquil-frames: a person's *print-length* would cut
+   ;; the map and the reply wouldn't read
+   "data" (binding [*print-length* nil *print-level* nil]
+            (pr-str (f)))})
+
+(defn- data-or-error
+  "done-data, but a throw is an \"error\", never a reply without its data."
+  [f]
+  (try
+    (done-data f)
+    (catch Throwable e {"status" ["done"] "error" (throw-message e)})))
+
+(defn- start-view
+  "The :start view of value v, sized and labelled by the request."
+  [state request v]
+  (view/run-op state :start {:value v :rows (as-long (get request "rows")) :cols (as-long (get request "cols")) :label (get request "label")}))
+
+(defn- frames-reply []
+  (data-or-error
+   (fn []
+     (if-let [e *e]
+       (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file break-middleware/resource-url})
+       {:note "No error yet."}))))
+
+(defn- line-counts-reply [request]
+  (done-data
+   (fn []
+     (case (get request "action")
+       "toggle" (line-counts/toggle!)
+       "fetch" (line-counts/fetch (get request "path"))
+       "clear" (line-counts/clear!)
+       {:error (str "jonquil-line-counts: no action " (pr-str (get request "action")))}))))
+
+(defn- debug-mode-reply []
+  (let [r (try (debugger/toggle-debug-mode!)
+               (catch Throwable e {:error (throw-message e)}))]
+    (if-let [err (:error r)]
+      {"status" ["done"] "error" err}
+      {"status" ["done"] "on" (str (:on? r))})))
+
+(defn- inspect-local-reply [state request]
+  (let [g (fn [k] (get request k))
+        paused (break-middleware/paused-local-for (g "session") (g "error-id") (as-long (g "frame")) (g "local"))
+        v (if-let [e (when (= ::debugger/not-paused paused) *e)]
+            (if (debugger/stale? e (g "error-id"))
+              ::stale
+              (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)}))
+            (if (= ::debugger/not-paused paused) ::debugger/missing paused))]
+    {"status" ["done"]
+     "view" (pr-str (case v
+                      ::debugger/missing {:error "That local is gone."}
+                      ::stale {:error debugger/STALE}
+                      (start-view state request v)))}))
+
+(defn- frame-eval-result
+  "eval-in-frame's map for the request, or an {:error} map when there is no
+  error, or the panel shows an older one."
+  [request token]
+  (let [g (fn [k] (get request k))
+        e *e]
+    (cond (nil? e) {:error "No error yet."}
+          (debugger/stale? e (g "error-id")) {:error debugger/STALE}
+          :else (do (reset! frame-token token)
+                    (debugger/eval-in-frame e (as-long (g "frame")) (g "code")
+                                            {:frames-fn (debugger/frames-fn) :token token})))))
+
+(defn- frame-eval-reply [request]
+  ;; "frame-out", not "out": a client streams any "out" it sees
+  (let [token (debugger/make-token)]
+    (try
+      (let [r (frame-eval-result request token)]
+        (if-let [err (:error r)]
+          {"status" ["done"] "error" err}
+          {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))
+      (catch Throwable t {"status" ["done"] "error" (throw-message t)})
+      (finally (compare-and-set! frame-token token nil)))))
+
+(defn- trace-reply [request]
+  (let [g (fn [k] (get request k))]
+    (data-or-error
+     (fn []
+       (trace-rt/op (keyword (g "action"))
+                    {:sym (g "sym") :ns (g "ns") :since (some-> (g "since") as-long)})))))
+
+(defn- fibers-reply [request]
+  (let [g (fn [k] (get request k))]
+    (data-or-error
+     (fn []
+       ;; "fiber", not "id": every nREPL message's own id is "id"
+       (fibers-rt/op (keyword (g "action")) {:id (some-> (g "fiber") as-long)})))))
+
+(defn- world-reply [request]
+  ;; the child's own namespaces (world-rt/child-namespaces): every one
+  ;; here but the language's and the tooling's is the user's
+  (data-or-error
+   (fn [] (world-rt/op (keyword (get request "action")) {:path (get request "path")}))))
+
+(defn- keep-result-reply [request]
+  ;; the value the eval just made (*1) or its error (*e), kept for the
+  ;; console's line
+  {"status" ["done"]
+   "data" (pr-str (results-rt/keep! (if (= "error" (get request "what")) *e *1)))})
+
+(defn- inspect-result-reply [state request]
+  (let [v (results-rt/value (as-long (get request "result-id")) (get request "result-epoch"))]
+    {"status" ["done"]
+     "view" (pr-str (if (= v ::results-rt/gone)
+                      {:error "That result is gone."}
+                      (start-view state request v)))}))
+
+(defn- inspect-trace-reply [state request]
+  (let [v (trace-rt/value (as-long (get request "trace-id")) (keyword (get request "part")))]
+    {"status" ["done"]
+     "view" (pr-str (cond
+                      (= v ::trace-rt/gone) {:error "That call is gone."}
+                      (= v ::trace-rt/lazy) {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
+                      :else (start-view state request v)))}))
+
+(defn- frame-interrupt-reply []
+  (some-> @frame-token debugger/interrupt-token!)
+  {"status" ["done"]})
+
 (defn handle
   "The response map for one of ops, or nil for any other op. The frames
   ops read jolt.nrepl's global *e, the last error, as inspect-start reads
   *1. state is an atom holding the view."
   [state request]
-  (let [g (fn [k] (get request k))]
-    (case (g "op")
-      "jonquil-frames"
-      ;; a throw is an "error", never a reply without its data
-      (try
-        {"status" ["done"]
-         "data" (binding [*print-length* nil *print-level* nil]
-                  (pr-str (if-let [e *e]
-                            (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file break-middleware/resource-url})
-                            {:note "No error yet."})))}
-        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
-      "jonquil-line-counts"
-      {"status" ["done"]
-       ;; unbounded, as jonquil-frames: a person's *print-length* would cut
-       ;; the map and the reply wouldn't read
-       "data" (binding [*print-length* nil *print-level* nil]
-                (pr-str (case (g "action")
-                        "toggle" (line-counts/toggle!)
-                        "fetch" (line-counts/fetch (g "path"))
-                        "clear" (line-counts/clear!)
-                        {:error (str "jonquil-line-counts: no action " (pr-str (g "action")))})))}
-      "jonquil-debug-mode"
-      (let [r (try (debugger/toggle-debug-mode!)
-                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
-        (if-let [err (:error r)]
-          {"status" ["done"] "error" err}
-          {"status" ["done"] "on" (str (:on? r))}))
-      "inspect-local"
-      ;; a paused break's local first (Break on error), then the last error's
-      (let [paused (break-middleware/paused-local-for (g "session") (g "error-id") (as-long (g "frame")) (g "local"))
-            v (if-let [e (when (= ::debugger/not-paused paused) *e)]
-                (if (debugger/stale? e (g "error-id"))
-                  ::stale
-                  (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)}))
-                (if (= ::debugger/not-paused paused) ::debugger/missing paused))]
-        {"status" ["done"]
-         "view" (pr-str (case v
-                            ::debugger/missing {:error "That local is gone."}
-                            ::stale {:error debugger/STALE}
-                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
-      "jonquil-frame-eval"
-      ;; "frame-out", not "out": a client streams any "out" it sees
-      (let [token (debugger/make-token)]
-        (try
-          (let [e *e
-                r (cond (nil? e) {:error "No error yet."}
-                        (debugger/stale? e (g "error-id")) {:error debugger/STALE}
-                        :else (do (reset! frame-token token)
-                                  (debugger/eval-in-frame e (as-long (g "frame")) (g "code")
-                                                          {:frames-fn (debugger/frames-fn) :token token})))]
-            (if-let [err (:error r)]
-              {"status" ["done"] "error" err}
-              {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))
-          (catch Throwable t {"status" ["done"] "error" (or (ex-message t) (str (class t)))})
-          (finally (compare-and-set! frame-token token nil))))
-      "jonquil-trace"
-      (try
-        {"status" ["done"]
-         "data" (binding [*print-length* nil *print-level* nil]
-                  (pr-str (trace-rt/op (keyword (g "action"))
-                                       {:sym (g "sym") :ns (g "ns") :since (some-> (g "since") as-long)})))}
-        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
-      "jonquil-fibers"
-      (try
-        {"status" ["done"]
-         "data" (binding [*print-length* nil *print-level* nil]
-                  (pr-str ;; "fiber", not "id": every nREPL message's own id is "id"
-                  (fibers-rt/op (keyword (g "action")) {:id (some-> (g "fiber") as-long)})))}
-        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
-      "jonquil-world"
-      ;; the child's own namespaces (world-rt/child-namespaces): every one
-      ;; here but the language's and the tooling's is the user's
-      (try
-        {"status" ["done"]
-         "data" (binding [*print-length* nil *print-level* nil]
-                  (pr-str (world-rt/op (keyword (g "action")) {:path (g "path")})))}
-        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
-      "jonquil-keep-result"
-      ;; the value the eval just made (*1) or its error (*e), kept for the
-      ;; console's line
-      {"status" ["done"]
-       "data" (pr-str (results-rt/keep! (if (= "error" (g "what")) *e *1)))}
-      "inspect-result"
-      (let [v (results-rt/value (as-long (g "result-id")) (g "result-epoch"))]
-        {"status" ["done"]
-         "view" (pr-str (if (= v ::results-rt/gone)
-                            {:error "That result is gone."}
-                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
-      "inspect-trace"
-      (let [v (trace-rt/value (as-long (g "trace-id")) (keyword (g "part")))]
-        {"status" ["done"]
-         "view" (pr-str (cond
-                          (= v ::trace-rt/gone) {:error "That call is gone."}
-                          (= v ::trace-rt/lazy) {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
-                          :else (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
-      "jonquil-frame-interrupt"
-      (do (some-> @frame-token debugger/interrupt-token!)
-          {"status" ["done"]})
-      (view-reply state request))))
+  (case (get request "op")
+    "jonquil-frames" (frames-reply)
+    "jonquil-line-counts" (line-counts-reply request)
+    "jonquil-debug-mode" (debug-mode-reply)
+    ;; a paused break's local first (Break on error), then the last error's
+    "inspect-local" (inspect-local-reply state request)
+    "jonquil-frame-eval" (frame-eval-reply request)
+    "jonquil-trace" (trace-reply request)
+    "jonquil-fibers" (fibers-reply request)
+    "jonquil-world" (world-reply request)
+    "jonquil-keep-result" (keep-result-reply request)
+    "inspect-result" (inspect-result-reply state request)
+    "inspect-trace" (inspect-trace-reply state request)
+    "jonquil-frame-interrupt" (frame-interrupt-reply)
+    (view-reply state request)))
 
 (defonce ^:private state (atom nil))
 
