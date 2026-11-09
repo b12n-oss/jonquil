@@ -182,7 +182,7 @@
     (do (reset! confirmed-close? false) 1)
     (real-quit! ctx)))
 
-(defn close-request-fn
+(defn- close-request-fn
   "The window's close-request handler. Dirty and unconfirmed shows
   the alert and suppresses the close (returns 1, GTK does not proceed);
   otherwise it proceeds to quit -- unless suppress-close? is set, in which

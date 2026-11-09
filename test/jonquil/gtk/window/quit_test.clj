@@ -110,6 +110,20 @@
         (run-stubbed log #{} f))
       (finally (reset! win-alerts/alert-pending? old)))))
 
+(def ^:private pop-1 {:id 1 :popover :pop-widget})
+
+(defn- with-popover-stubs
+  "Runs f with popover/open? true, hide! and gtk-widget-unparent logging
+  [:hide id] and [:unparent widget] into log, and the widget parented."
+  [log f]
+  (with-redefs [popover/open? (fn [_] true)
+                popover/hide! (fn [p] (swap! log conj [:hide (:id p)]))
+                g/gtk-widget-get-parent (fn [_] :parent)
+                g/gtk-widget-unparent (fn [w] (swap! log conj [:unparent w]))]
+    (f)))
+
+(defn- seed-popover! [ctx] (reset! (:popovers ctx) [pop-1]))
+
 (deftest close-request-asks-once-for-every-dirty-tab-test
   (let [log (atom [])
         ctx (close-ctx log [(tab "/r/a.clj" true) (tab "/r/b.clj" false) (tab nil true)] {})
@@ -143,7 +157,9 @@
 (deftest close-request-suppressed-close-test
   (doseq [[ts confirmed?] [[[(tab "/r/a.clj" false)] false] [[(tab "/r/a.clj" true)] true] [[] true]]]
     (let [log (atom []) ctx (close-ctx log ts {:confirmed? confirmed? :suppress? true})]
-      (with-quit-stubs log {} (fn [] (is (= 1 ((#'win-quit/close-request-fn ctx) ::win nil)))))
+      (seed-popover! ctx)
+      (with-popover-stubs log
+        (fn [] (with-quit-stubs log {} (fn [] (is (= 1 ((#'win-quit/close-request-fn ctx) ::win nil)))))))
       (is (true? @(:closing? ctx)))
       (is (false? @(:confirmed-close? ctx)))
       (is (= [] @log)))))
@@ -152,9 +168,11 @@
   (let [log (atom []) err (java.io.StringWriter.)
         ctx (close-ctx log [(tab "/r/a.clj" false)]
                        {:save-session! (fn [] (swap! log conj [:save-session]) "disk full")})]
-    (with-quit-stubs log {}
-      (fn [] (binding [*err* err] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil))))))
-    (is (= [[:save-session] [:stop] [:unregister] [:quit ::app]] @log))
+    (seed-popover! ctx)
+    (with-popover-stubs log
+      (fn [] (with-quit-stubs log {}
+               (fn [] (binding [*err* err] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil))))))))
+    (is (= [[:hide 1] [:unparent :pop-widget] [:save-session] [:stop] [:unregister] [:quit ::app]] @log))
     (is (true? @(:closing? ctx)))
     (is (= "jonquil: saving the session failed: disk full\n" (str err)))))
 
@@ -164,7 +182,35 @@
                                 [(fn [] (throw (ex-info "boom" {}))) "jonquil: saving the session failed: boom\n"]]]
     (let [log (atom []) err (java.io.StringWriter.)
           ctx (close-ctx log [] {:save-session! save-session! :stop-throws? true})]
-      (with-quit-stubs log {}
-        (fn [] (binding [*err* err] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil))))))
-      (is (= [[:stop] [:unregister] [:quit ::app]] @log))
+      (seed-popover! ctx)
+      (with-popover-stubs log
+        (fn [] (with-quit-stubs log {}
+                 (fn [] (binding [*err* err] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil))))))))
+      (is (= [[:hide 1] [:unparent :pop-widget] [:stop] [:unregister] [:quit ::app]] @log))
       (is (= (str said "jonquil: stopping the runtime failed: dead\n") (str err))))))
+
+(deftest close-request-confirmed-dirty-tab-takes-the-real-quit-test
+  (let [log (atom [])
+        ctx (close-ctx log [(tab "/r/a.clj" true)]
+                       {:confirmed? true :save-session! (fn [] (swap! log conj [:save-session]) nil)})]
+    (seed-popover! ctx)
+    (with-popover-stubs log
+      (fn [] (with-quit-stubs log {}
+               (fn [] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil)))))))
+    (is (= [[:hide 1] [:unparent :pop-widget] [:save-session] [:stop] [:unregister] [:quit ::app]] @log))
+    (is (true? @(:closing? ctx)))))
+
+(deftest close-request-alert-save-choice-reaches-close-choice-test
+  (let [log (atom [])
+        ctx (close-ctx log [(tab "/r/a.clj" true) (tab "/r/b.clj" true)] {})]
+    (with-quit-stubs log {}
+      (fn []
+        (reset! win-alerts/alert-pending? false)
+        (is (= 1 ((#'win-quit/close-request-fn ctx) ::win nil)))
+        (let [[_ _ _ _ on-choice] (first (filter #(= :alert (first %)) @log))]
+          (reset! log [])
+          ;; This save-to! never clears the dirty flag, so a's save fails.
+          (with-redefs [win-files/save-to! (fn [_ed _cv _path p] (swap! log conj [:save p]))]
+            (on-choice {:index 0}))
+          (is (= [[:save "/r/a.clj"] [:select "/r/a.clj"]] @log))
+          (is (false? @(:confirmed-close? ctx))))))))
