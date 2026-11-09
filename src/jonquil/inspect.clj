@@ -79,6 +79,44 @@
   [view]
   (contains? view :leaf))
 
+(defn- history-step
+  "The :earlier / :later keys: at either end the view's own :history
+  answers, without a request, so the selection stays where it was."
+  [state key]
+  (let [{at :at n :count} (:history (:view state))]
+    (case key
+      :earlier (if (= 1 at)
+                 {:state (assoc state :note "No earlier object.") :request nil}
+                 {:state (assoc state :pending :first) :request [:earlier]})
+      :later (if (and at (= at n))
+               {:state (assoc state :note "No later object.") :request nil}
+               {:state (assoc state :pending :first) :request [:later]}))))
+
+(defn- row-key-step
+  "Row keys on a view with entries: move the selection, page, or go in."
+  [state key]
+  (let [{:keys [view selected]} state
+        {:keys [start total entries]} view
+        n-entries (count entries)
+        none {:state state :request nil}]
+    (case key
+      :down
+      (cond
+        (< selected (dec n-entries)) {:state (assoc state :selected (inc selected)) :request nil}
+        (< (+ start n-entries) total) {:state (assoc state :pending :first) :request [:page {:delta 1}]}
+        :else none)
+
+      :up
+      (cond
+        (pos? selected) {:state (assoc state :selected (dec selected)) :request nil}
+        (pos? start) {:state (assoc state :pending :last) :request [:page {:delta -1}]}
+        :else none)
+
+      :page-down {:state (assoc state :pending :first) :request [:page {:delta 1}]}
+      :page-up {:state (assoc state :pending :first) :request [:page {:delta -1}]}
+      :in {:state state :request [:in {:idx (+ start selected)}]}
+      none)))
+
 (defn key-step
   "Handle a key press. Returns {:state s :request r} where r is nil when there's no request.
    Every key is a no-op while :disabled? is set (a lost connection):
@@ -86,8 +124,6 @@
    connection can't answer (spec: \"disables the actions\")."
   [state key]
   (let [{:keys [view selected disabled?]} state
-        {:keys [start total entries]} view
-        n-entries (count entries)
         none {:state state :request nil}]
     (if disabled?
       none
@@ -97,35 +133,11 @@
         :meta {:state (assoc state :pending :cursor) :request [:meta {:cursor selected}]}
         :table {:state (assoc state :pending :keep) :request [:table]}
         ;; the history of inspected objects: another root, its first row
-        ;; at either end the view's own :history answers, without a request,
-        ;; so the selection stays where it was
-        :earlier (if (= 1 (:at (:history view)))
-                   {:state (assoc state :note "No earlier object.") :request nil}
-                   {:state (assoc state :pending :first) :request [:earlier]})
-        :later (let [{at :at n :count} (:history view)]
-                 (if (and at (= at n))
-                   {:state (assoc state :note "No later object.") :request nil}
-                   {:state (assoc state :pending :first) :request [:later]}))
+        (:earlier :later) (history-step state key)
         ;; Row keys: nothing to move over on a leaf or an empty collection.
-        (if (or (leaf? view) (zero? n-entries))
+        (if (or (leaf? view) (zero? (count (:entries view))))
           none
-          (case key
-            :down
-            (cond
-              (< selected (dec n-entries)) {:state (assoc state :selected (inc selected)) :request nil}
-              (< (+ start n-entries) total) {:state (assoc state :pending :first) :request [:page {:delta 1}]}
-              :else none)
-
-            :up
-            (cond
-              (pos? selected) {:state (assoc state :selected (dec selected)) :request nil}
-              (pos? start) {:state (assoc state :pending :last) :request [:page {:delta -1}]}
-              :else none)
-
-            :page-down {:state (assoc state :pending :first) :request [:page {:delta 1}]}
-            :page-up {:state (assoc state :pending :first) :request [:page {:delta -1}]}
-            :in {:state state :request [:in {:idx (+ start selected)}]}
-            none))))))
+          (row-key-step state key))))))
 
 (defn on-reply
   "Apply a server reply to the state. reply is a view map, or {:error s :lost? t}."

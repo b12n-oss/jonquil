@@ -397,6 +397,35 @@
                  (letfn-entry? text tokens matches popen pclose))
              (nil? (fn-arity-params text (rest pchildren))))))))
 
+(defn- operator-names
+  "The names bound by a '(' form whose first child is the operator op
+  (the symbol text), or nil when it binds nothing. children are the
+  form's own children, open and close its span."
+  [^String text tokens matches [open close] op children]
+  (let [vector-span (fn [] (second children))
+        arity-params (fn [] (fn-arity-params text (rest children)))]
+    (cond
+      (contains? let-like-forms op)
+      (when-let [[vs ve] (vector-span)] (bindings-vector-names text tokens matches vs ve))
+
+      (contains? #{"for" "doseq"} op)
+      (when-let [[vs ve] (vector-span)] (for-doseq-names text tokens matches vs ve))
+
+      (= "letfn" op)
+      (when-let [[vs ve] (vector-span)] (letfn-names text tokens matches vs ve))
+
+      (contains? fn-like-forms op)
+      (when-let [[vs ve] (arity-params)]
+        (params-vector-names text tokens matches vs ve))
+
+      ;; a letfn entry (name [params] body): its params bind in its
+      ;; body; a multi-arity entry's clauses are bare arity clauses
+      (letfn-entry? text tokens matches open close)
+      (when-let [[vs ve] (arity-params)]
+        (params-vector-names text tokens matches vs ve))
+
+      :else nil)))
+
 (defn- ancestor-names
   "The names the '(' form spanning [open close] binds, or nil when it
   binds nothing. A bare arity clause -- a list whose OWN first child is a
@@ -412,28 +441,7 @@
     (when-let [[h0s h0e] (first children)]
       (if (and (= \[ (.charAt text h0s)) (bare-arity-clause? text tokens matches open))
         (params-vector-names text tokens matches h0s h0e)
-        (let [op (subs text h0s h0e)]
-          (cond
-            (contains? let-like-forms op)
-            (when-let [[vs ve] (second children)] (bindings-vector-names text tokens matches vs ve))
-
-            (contains? #{"for" "doseq"} op)
-            (when-let [[vs ve] (second children)] (for-doseq-names text tokens matches vs ve))
-
-            (= "letfn" op)
-            (when-let [[vs ve] (second children)] (letfn-names text tokens matches vs ve))
-
-            (contains? fn-like-forms op)
-            (when-let [[vs ve] (fn-arity-params text (rest children))]
-              (params-vector-names text tokens matches vs ve))
-
-            ;; a letfn entry (name [params] body): its params bind in its
-            ;; body; a multi-arity entry's clauses are bare arity clauses
-            (letfn-entry? text tokens matches open close)
-            (when-let [[vs ve] (fn-arity-params text (rest children))]
-              (params-vector-names text tokens matches vs ve))
-
-            :else nil))))))
+        (operator-names text tokens matches [open close] (subs text h0s h0e) children)))))
 
 (defn- params-vector-names
   "Names bound by a fn/defn param vector or a bare multi-arity clause's own
