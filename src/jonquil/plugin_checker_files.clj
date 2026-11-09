@@ -31,6 +31,7 @@
    "jonquil/parts/disk_poll.clj" (embedded-text "jonquil/parts/disk_poll.clj")
    "jonquil/parts/debugger.clj" (embedded-text "jonquil/parts/debugger.clj")
    "jonquil/parts/extra.clj" (embedded-text "jonquil/parts/extra.clj")
+   "jonquil/parts/file_tree.clj" (embedded-text "jonquil/parts/file_tree.clj")
    "jonquil/parts/layouts.clj" (embedded-text "jonquil/parts/layouts.clj")
    "jonquil/parts/live_results.clj" (embedded-text "jonquil/parts/live_results.clj")
    "jonquil/parts/locations.clj" (embedded-text "jonquil/parts/locations.clj")

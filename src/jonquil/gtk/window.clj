@@ -683,8 +683,8 @@
   branch, which doesn't actually quit anything.
 
   save-session! (the open tabs, for the next launch) runs in the
-  real-quit branch only, beside save-tree-width!."
-  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select! save-tree-width!
+  real-quit branch only."
+  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!
            save-session!]}]
   (fn [_win _data]
     ;; One alert naming every dirty tab, in tab order.
@@ -717,14 +717,6 @@
             ;; (see unparent-registered-popovers!), never in the
             ;; suppress-close? branch above.
               (do (unparent-registered-popovers! popovers)
-                  ;; The tree's width, when it's showing.
-                  (when save-tree-width!
-                    (try (when-let [err (save-tree-width!)]
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the file tree's width failed:" err)))
-                         (catch :default e
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the file tree's width failed:" (ex-message e))))))
                   (when save-session!
                     (try (when-let [err (save-session!)]
                            (binding [*out* *err*]
@@ -2605,16 +2597,14 @@
   "Makes t the active tab: the window's title, Ln/Col and focus follow it,
   and every open popover closes (one on a hidden page would be lost). The
   saved tab list records the new active tab (session-changed!)."
-  [{:keys [active-id win line-col-label close-popovers-fn tree-pane hint-label] :as ctx} t]
+  [{:keys [active-id win line-col-label close-popovers-fn hint-label] :as ctx} t]
   (reset! active-id (:id t))
   ;; LM6's key hint was for the tab left behind
   (when hint-label (g/gtk-widget-set-visible hint-label 0))
   (when-let [r (:recent-tabs ctx)]
     (swap! r (fn [v] (into [(:id t)] (remove #{(:id t)}) v))))
   (close-popovers-fn)
-  ;; The tree selects the active tab's file (never expanding folders for
-  ;; it).
-  (when tree-pane (file-tree-pane/select-path! tree-pane @(:path t)))
+  (parts/run-tab-hooks! ctx :on-switch t)
   (update-title! (:ed t) win (:path t))
   (let [[line col] (g/cursor-line-col (:buf (:ed t)))]
     (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))
@@ -4006,9 +3996,6 @@
         ;; The tree on the left, its toggle first in the toolbar, and the
         ;; outer paned that holds it beside h-paned.
         *open-folder (atom nil)
-        ;; True while the starting visibility is applied, so the toggled
-        ;; handler doesn't save it as if a person had chosen it.
-        applying-start? (atom false)
         *folder-result (atom nil)
         tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (open-file! @*tab-ctx p))
                                              :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
@@ -4059,6 +4046,7 @@
                                           :tab-ctx* *tab-ctx
                                           :tab-by-id tab-by-id :select-tab! select-tab! :new-tab! new-tab!
                                           :bang* bang* :recent-tabs recent-tabs
+                                          :contain-click (fn [where f] (contain-click status-label where f))
                                           :set-status! (fn [text] (set-status! status-label text))
                                           :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
                                           :files-btn files-btn :panel-focus-fn panel-focus-fn
@@ -4126,13 +4114,6 @@
                                       :status-label status-label :source-keys source-keys
                                       :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                       :digit-tab-fn digit-tab-fn
-                                      :tree-keys {:focused? (fn [] (file-tree-pane/focused? tree-pane win))
-                                                  :leave! (fn [] (editor/focus! (:ed (active-tab))))
-                                                  :menu-open? (fn [] (:open? (file-tree-pane/menu-state tree-pane)))
-                                                  :close-menu! (fn [] (g/gtk-popover-popdown (:popover tree-pane)))}
-                                      :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
-                                                              files-btn
-                                                              (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                                       :parinfer-fn parinfer-fn
                                       :review-proposals-fn (fn [] (plugin-step! {:settings-path @settings-path*
                                                                                  :step (fn [] []) :open? true}))
@@ -4274,12 +4255,6 @@
                                                           :confirmed-close? confirmed-close?
                                                           :suppress-close? suppress-close? :closing? closing?
                                                           :popovers popovers :ev* ev*
-                                                          :save-tree-width!
-                                                          (fn [] (when (pos? (g/gtk-widget-get-visible (:root tree-pane)))
-                                                                   (settings/save-settings!
-                                                                    @settings-path*
-                                                                    {:file-tree {:visible? true
-                                                                                 :width (g/gtk-paned-get-position tree-paned)}})))
                                                           ;; Live saving stops first: nothing after the
                                                           ;; quit's own save may write a shorter list.
                                                           ;; A quit before startup's reopen is done
@@ -4431,31 +4406,9 @@
                                                              (catch :default e
                                                                (cview/append! cv :error (str "; open folder: " (ex-message e) "\n")))))
                                                 (:root @(:state tree-pane)))))
-      (g/gtk-paned-set-position tree-paned (or (:width tree-settings) 240))
-      (g/g-signal-connect-data files-btn "toggled"
-                               (callable (contain-click
-                                          status-label "files"
-                                          (fn [btn]
-                                            (let [show? (pos? (g/gtk-toggle-button-get-active btn))
-                                                  width (g/gtk-paned-get-position tree-paned)
-                                                  had-focus? (file-tree-pane/focused? tree-pane win)]
-                                              (g/gtk-widget-set-visible (:root tree-pane) (if show? 1 0))
-                                              ;; Hiding the focused tree leaves focus nowhere;
-                                              ;; give it to the editor.
-                                              (when (and (not show?) had-focus?) (editor/focus! (:ed (active-tab))))
-                                              ;; Only a person's toggle is a choice worth saving;
-                                              ;; the starting state isn't.
-                                              (when-not @applying-start?
-                                                (when-let [err (settings/save-settings!
-                                                                @settings-path* {:file-tree {:visible? show? :width (max 1 width)}})]
-                                                  (cview/append! cv :system (str "; settings: " err "\n")))))))
-                                         [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      (g/gtk-widget-set-visible (:root tree-pane) 0)
-      (when (if (some? (:visible? tree-settings)) (:visible? tree-settings) (boolean dir))
-        (reset! applying-start? true)
-        (try (g/gtk-toggle-button-set-active files-btn 1)
-             (finally (reset! applying-start? false))))
+      (if-let [f (:tree-start! (:fns part-contribution))]
+        (f {:tree-settings tree-settings :dir dir})
+        (g/gtk-widget-set-visible (:root tree-pane) 0))
       (g/g-signal-connect-data notebook "switch-page"
                                (callable (switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
