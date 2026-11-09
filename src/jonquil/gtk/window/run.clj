@@ -162,9 +162,6 @@
   "The replay recorder (LM7) hears record and result, when both a record and
   a recorder are set. Never throws."
   [{:keys [recorder record]} result]
-  ;; LM7: what the user ran, for the last session's replay.
-  ;; Last, and never throwing into the evaluation: the recorder
-  ;; hands its work to the GTK thread and says its own failures
   (when-let [f (and record (some-> recorder deref))]
     (try (f record result)
          (catch :default _ nil))))
@@ -183,6 +180,9 @@
                               result console/error-text))
   (note-ran! hooks result)
   (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result})
+  ;; LM7: what the user ran, for the last session's replay.
+  ;; Last, and never throwing into the evaluation: the recorder
+  ;; hands its work to the GTK thread and says its own failures
   (record-replay! hooks result))
 
 (defn- hooked-opts
@@ -249,10 +249,10 @@
   (let [{ed :ed path-atom :path id :id} tab
         base (cond-> (assoc (make-eval-opts ed cv ev* status-label true)
                             :run? true :path @path-atom :owner id)
-                     ;; LM7: the replay tab's Run adds to the session, and
-                     ;; what it defines is the REPL's, as if typed there
+               ;; LM7: the replay tab's Run adds to the session, and
+               ;; what it defines is the REPL's, as if typed there
                (= id (:id @(:replay-tab* cv))) (assoc :reset? false :owner :repl)
-                     ;; LM4: a Run counts its own lines alone
+               ;; LM4: a Run counts its own lines alone
                (some-> (:changed ed) :counting? deref (apply []))
                (assoc :clear-line-counts? true))]
     (hooked-opts (assoc (if notify (notifying-opts base out notify) base)

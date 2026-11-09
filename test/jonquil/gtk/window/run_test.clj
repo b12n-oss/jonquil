@@ -379,3 +379,117 @@
                (is (= {:run? true :path "/r/a.clj" :owner :repl :reset? false
                        :clear-line-counts? true}
                       (select-keys @seen [:run? :path :owner :reset? :clear-line-counts?])))))))
+
+(deftest hooked-opts-a-throwing-refresh-keeps-the-counts-test
+  (let [log (atom [])
+        env (assoc-in (hook-env log) [:changed :refresh] (atom (fn [] (throw (ex-info "x" {})))))
+        o (#'win-run/hooked-opts
+           (merge {:hook-source :run :hook-tab 3 :hook-code "(def a 1)"} env))]
+    (with-redefs [plugin-hooks/after-eval! (fn [m] (swap! log conj [:after-eval m]))]
+      (is (nil? ((:on-complete o) {:status :ok}))))
+    (is (= [[:counts :run "(def a 1)"]
+            [:after-eval {:source :run :tab 3 :result {:status :ok}}]]
+           @log))))
+
+(deftest hooked-opts-form-source-records-a-form-test
+  (let [log (atom [])
+        env (hook-env log)
+        o (#'win-run/hooked-opts
+           (merge {:hook-source :form :hook-tab 3 :hook-code "(f)"} env))]
+    (with-redefs [plugin-hooks/after-eval! (fn [_] nil)]
+      ((:on-complete o) {:status :ok}))
+    (is (= (changed/record nil "(f)" :form) @(:ran (:changed env))))
+    (is (some #{[:counts :form "(f)"]} @log))))
+
+(deftest hooked-opts-a-throwing-on-complete-skips-the-later-steps-test
+  (let [log (atom [])
+        env (hook-env log)
+        o (#'win-run/hooked-opts
+           (merge {:hook-source :run :hook-tab 3 :hook-code "(f)"
+                   :record {:source :run :code "(f)"}
+                   :on-complete (fn [_] (throw (ex-info "own" {})))}
+                  env))]
+    (with-redefs [plugin-hooks/after-eval! (fn [m] (swap! log conj [:after-eval m]))]
+      (is (thrown? Exception ((:on-complete o) {:status :ok}))))
+    (is (= [] @log))
+    (is (nil? @(:ran (:changed env))))))
+
+(defn- counting-eval-opts
+  "Redefs make-eval-opts to count its calls in calls, then runs f."
+  [calls f]
+  (let [orig win-run/make-eval-opts]
+    (with-redefs [win-run/make-eval-opts (fn [& args] (swap! calls inc) (apply orig args))]
+      (f))))
+
+(deftest do-run-opts-thunk-stays-lazy-on-early-paths-test
+  (let [t "(+ 1 2)"]
+    (doseq [[label env text]
+            [["refuse" {:runnable? false} t]
+             ["problem" {} "(+ 1"]
+             ["plugin stop" {:stop-line "held"} t]]]
+      (let [log (atom [])
+            calls (atom 0)]
+        (run-env log env
+                 (fn [e _]
+                   (counting-eval-opts
+                    calls
+                    #(win-run/do-run! (run-ctx (run-tab text nil) (run-cv) e) (fn [_] nil)))
+                   (is (= 0 @calls) label)))))
+    (let [log (atom [])
+          calls (atom 0)]
+      (run-env log {}
+               (fn [e _]
+                 (counting-eval-opts
+                  calls
+                  #(win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) nil))
+                 (is (= 1 @calls) "an idle start builds its opts once"))))))
+
+(deftest do-run-idle-eval-warning-says-busy-test
+  (let [t "(+ 1 2)"
+        log (atom [])
+        got (atom [])]
+    (run-env log {:warning "; busy\n"}
+             (fn [e _]
+               (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) #(swap! got conj %))
+               (is (= [{:busy "; busy\n"}] @got))
+               (is (some #{[:append :system "; busy\n"]} @log))))))
+
+(deftest do-run-second-busy-check-skips-note-run-start-test
+  (let [t "(+ 1 2)"
+        log (atom [])
+        n (atom 0)
+        e #_{:clj-kondo/ignore [:missing-protocol-method]}
+        (reify ev/Evaluator
+          (evaluating? [_] (> (swap! n inc) 1))
+          (prompt-ns [_] 'user)
+          (eval! [_ code _] (swap! log conj [:eval code]) nil))]
+    (run-env log {}
+             (fn [_ _]
+               (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) nil)
+               (is (= 2 @n))
+               (is (= [[:eval t]] (filterv #{[:eval t] [:note-start]} @log)))))))
+
+(deftest do-run-without-notify-returns-nil-on-early-paths-test
+  (doseq [[label env text] [["busy" {:busy? true :warning "; busy\n"} "(+ 1 2)"]
+                            ["problem" {} "(+ 1"]
+                            ["plugin stop" {:stop-line "held"} "(+ 1 2)"]]]
+    (let [log (atom [])]
+      (run-env log env
+               (fn [e _]
+                 (is (nil? (win-run/do-run! (run-ctx (run-tab text nil) (run-cv) e) nil)) label))))))
+
+(deftest do-run-record-reaches-hooked-opts-test
+  (let [log (atom [])
+        got (atom nil)
+        tab (run-tab "(f)" nil)]
+    (run-env log {}
+             (fn [e _]
+               (with-redefs [win-run/hooked-opts (fn [o] (reset! got o) {})]
+                 (win-run/do-run! (run-ctx tab (run-cv) e) nil)
+                 (is (= {:source :run :code "(f)" :path "/r/a.clj" :ns (#'win-run/run-record-ns e)}
+                        (:record @got)))
+                 (is (= "user" (:ns (:record @got))))
+                 (reset! got nil)
+                 (win-run/do-run! (run-ctx tab (run-cv) e) (fn [_] nil))
+                 (is (contains? @got :record))
+                 (is (nil? (:record @got))))))))
