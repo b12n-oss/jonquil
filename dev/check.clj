@@ -162,6 +162,7 @@
     jonquil.gtk.window.right-slot
     jonquil.gtk.window.theme
     jonquil.gtk.window.runtime
+    jonquil.gtk.window.quit
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen
