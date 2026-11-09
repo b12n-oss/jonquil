@@ -467,3 +467,28 @@
                         {:wrap-eval (fn [thunk] (swap! ran inc) (thunk))} 3000)]
     (is (= [:ok "3"] [(:status r) (:printed r)]))
     (is (= 1 @ran))))
+
+(deftest before-eval-test
+  (testing "runs on the worker before the evaluation, with *out* already the console's"
+    (let [order (atom [])
+          [r out] (run-sync (sut/make-eval-context) "(+ 1 2)"
+                            {:before-eval (fn [] (swap! order conj :before) (print "hi"))} 3000)]
+      (is (= 3 (:value r)))
+      (is (= [:before] @order))
+      (is (= [[:out "hi"]] @out))))
+  (testing "a throw is reported and the evaluation goes ahead"
+    (let [[r _] (binding [*err* (java.io.StringWriter.)]
+                  (run-sync (sut/make-eval-context) "(+ 1 2)"
+                            {:before-eval (fn [] (throw (ex-info "boom" {})))} 3000))]
+      (is (= 3 (:value r)))))
+  (testing "an interrupt signal thrown from it stops the evaluation"
+    (let [[r _] (run-sync (sut/make-eval-context) "(reset! jonquil.eval-test/counter -1)"
+                          {:before-eval (fn [] (throw (ex-info "stop" {:jolt/interrupted true})))} 3000)]
+      (is (= :interrupted (:status r)))
+      (is (not= -1 @counter) "the code never ran"))))
+
+(deftest quiet-leaves-history-vars-test
+  (let [ctx (sut/make-eval-context)]
+    (run-sync ctx "1")
+    (run-sync ctx "2" {:quiet true} 3000)
+    (is (= "1" (:printed (first (run-sync ctx "*1")))))))
