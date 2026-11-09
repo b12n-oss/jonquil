@@ -5,7 +5,10 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.parts.command-palette :as command-palette-part]
             [jonquil.gtk.parts.debugger :as debugger-part]
+            [jonquil.gtk.parts.file-tree :as file-tree-part]
+            [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.parts.disk-poll :as disk-poll-part]
             [jonquil.gtk.debugger-pane :as debugger-pane]
             [jonquil.gtk.parts.layouts :as layouts-part]
@@ -71,8 +74,8 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :replay] (mapv :id parts/specs)))
-  (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :replay] (mapv :id parts/specs)))
+  (is (= #{:tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
             :panel/processes :processes/show
           :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
           :result/inspect :result/copy :result/define :result/jump
@@ -80,7 +83,8 @@
           :locations/usages-in-project :locations/next :locations/previous
           :compare/disk :compare/head :compare/take
           :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
-          :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define}
+          :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
+          :palette/open :help/describe-key :help/key-bindings :help/recent-keys}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -682,3 +686,100 @@
         (is (false? (@counting?)))
         (is (fn? @counts-refresh))
         (is (= [[:buf "changed"]] (mapv (fn [a] [(first a) (second a)]) @connects)))))))
+
+(deftest command-palette-part-owns-its-commands
+  (let [spec (some #(when (= :command-palette (:id %)) %) parts/specs)]
+    (is (= {:palette/open [:open-palette-fn]
+            :help/describe-key [:describe-key-fn]
+            :help/key-bindings [:key-bindings-fn]
+            :help/recent-keys [:recent-keys-fn]}
+           (update-vals (:commands spec) :call)))
+    (is (false? (:palette? (:palette/open (:commands spec)))))
+    (is (every? #(nil? (get @#'registry/core-window-commands %))
+                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys])
+        "the core table keeps none of them")
+    (is (every? #(some? (get registry/window-commands %))
+                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys]))
+    (is (some? (:help/key-hints registry/window-commands)))))
+
+(defn- palette-wctx [bang*]
+  {:bang* bang* :cv :cv :ev* (atom nil) :active-tab (fn [] {:id 1})
+   :tabs (atom []) :tab-by-id (fn [& _]) :recent-tabs (atom [])
+   :right {:recent-panels (atom [])} :showing-panel (fn [_]) :settings-path* (atom "x")})
+
+(deftest command-palette-describe-key-arms-the-next-key
+  (let [lines (atom [])
+        c ((deref #'command-palette-part/install) (palette-wctx (atom (fn [_]))))
+        fns (:fns c)]
+    (with-redefs [cview/append! (fn [cv kind text] (swap! lines conj [cv kind text]))]
+      ((:describe-key-fn fns))
+      (is (true? @(:describe-pending fns)))
+      (is (= [[:cv :system "; Press the key to describe.\n"]] @lines)))))
+
+(deftest command-palette-installs-the-bang-line
+  (let [before (fn [_text])
+        bang* (atom before)
+        c ((deref #'command-palette-part/install) (palette-wctx bang*))]
+    (is (not= before @bang*))
+    (is (fn? @bang*))
+    (is (fn? (get-in c [:ui :open-palette!*])))
+    (is (= (get-in c [:ui :open-palette!*]) (get-in c [:fns :open-palette-fn])))))
+
+(deftest on-switch-is-a-tab-hook-kind
+  (let [seen (atom [])
+        errors (atom [])
+        sw (install-fn :sw (fn [_] {:hooks {:on-switch (fn [ctx t] (swap! seen conj [ctx t]))}}))
+        c (parts/install [sw] {} (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+    (is (= [] @errors))
+    (is (= [:on-switch] (keys (:hooks c))))
+    (is (nil? (parts/run-tab-hooks! {:part-contribution c :part-error! (fn [& _]) :k 1} :on-switch {:id 7})))
+    (is (= [[1 {:id 7}]] (mapv (fn [[ctx t]] [(:k ctx) t]) @seen))
+        "called with ctx and the tab")))
+
+(deftest file-tree-part-owns-its-command
+  (let [spec (some #(when (= :file-tree (:id %)) %) parts/specs)]
+    (is (= {:tree/toggle [:toggle-tree-fn]} (update-vals (:commands spec) :call)))
+    (is (nil? (get @#'registry/core-window-commands :tree/toggle)))
+    (is (some? (get @#'registry/core-window-commands :tree/close-menu)))
+    (is (some? (get @#'registry/core-window-commands :tree/leave)))
+    (is (some? (get registry/window-commands :tree/toggle)))))
+
+(defn- file-tree-hooks [tree-pane]
+  (:hooks ((deref #'file-tree-part/install)
+           {:win :win :cv :cv :status-label :status :active-tab (fn [])
+            :settings-path* (atom "/s.edn") :tree-pane tree-pane :tree-paned :paned
+            :files-btn :btn :contain-click (fn [_ f] f)})))
+
+(deftest file-tree-quit-saves-width-only-while-showing
+  (let [saved (atom [])
+        hook (:on-quit (file-tree-hooks {:root :root}))]
+    (with-redefs [settings/save-settings! (fn [& args] (swap! saved conj args) nil)
+                  g/gtk-paned-get-position (fn [_] 312)]
+      (with-redefs [g/gtk-widget-get-visible (fn [_] 0)]
+        (hook)
+        (is (= [] @saved)))
+      (with-redefs [g/gtk-widget-get-visible (fn [_] 1)]
+        (hook)
+        (is (= [["/s.edn" {:file-tree {:visible? true :width 312}}]] @saved))))))
+
+(deftest file-tree-quit-reports-a-failed-save
+  (let [hook (:on-quit (file-tree-hooks {:root :root}))
+        said (fn [save]
+               (let [w (java.io.StringWriter.)]
+                 (with-redefs [settings/save-settings! save
+                               g/gtk-paned-get-position (fn [_] 300)
+                               g/gtk-widget-get-visible (fn [_] 1)]
+                   (binding [*err* w] (hook)))
+                 (str w)))]
+    (is (re-find #"jonquil: saving the file tree's width failed: disk full"
+                 (said (fn [& _] "disk full"))))
+    (is (re-find #"jonquil: saving the file tree's width failed: boom"
+                 (said (fn [& _] (throw (ex-info "boom" {}))))))))
+
+(deftest file-tree-switch-selects-the-tab-file
+  (let [recorded (atom [])
+        tp {:root :root}
+        hook (:on-switch (file-tree-hooks tp))]
+    (with-redefs [file-tree-pane/select-path! (fn [p path] (swap! recorded conj [p path]))]
+      (hook {} {:path (atom "/p/a.clj")})
+      (is (= [[tp "/p/a.clj"]] @recorded)))))

@@ -24,7 +24,6 @@
    :file/save-as {:doc "Save the buffer under a new name." :scope :window :run (call :save-as-fn)}
    :file/save {:doc "Save the buffer." :scope :window :run (call :save-fn)}
    :tab/close {:doc "Close the tab (the window, on the last one)." :scope :window :run (call :close-fn)}
-   :tree/toggle {:doc "Show or hide the file tree." :scope :window :run (call :toggle-tree-fn)}
    :run/selection {:doc "Run the selection, or the form at the caret." :scope :window
                    :run (call :run-selection-fn)}
    :console/clear-last-output {:doc "Clear the last entry's output." :scope :window
@@ -58,12 +57,8 @@
    :find/next {:doc "Go to the next find match." :scope :window :run (call :find-next!)}
    :find/previous {:doc "Go to the previous find match." :scope :window :run (call :find-prev!)}
    ;; describing keys: palette-only, no chords
-   :help/describe-key {:doc "Describe the next key you press." :scope :window
-                       :run (call :describe-key-fn)}
    :help/key-hints {:doc "Show what keys do at the caret, in the status bar (on or off)." :scope :window
                     :run (call :hints-toggle-fn)}
-   :help/key-bindings {:doc "List every key binding." :scope :window :run (call :key-bindings-fn)}
-   :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :run (call :recent-keys-fn)}
    :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
                   :run (call :toggle-focus-fn)}
    :source/open-here {:doc "Open the source panel's file in the window." :scope :window :palette? false
@@ -105,8 +100,6 @@
    ;; The palette. :palette? false marks a command that only works inside the
    ;; key chain guarding it (a focus, an Escape step, a tab number), so the
    ;; palette leaves it out
-   :palette/open {:doc "Show the command palette." :scope :window :palette? false
-                  :run (call :open-palette-fn)}
    ;; reload the plugin files that changed, appeared or went
    ;; away; no chord, the palette reaches it
    :plugins/reload {:doc "Reload the plugin files that changed." :scope :window

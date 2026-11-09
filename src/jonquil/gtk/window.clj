@@ -44,7 +44,6 @@
             [jonquil.gtk.gutter :as gutter]
             [jonquil.hints :as hints]
             [jonquil.line-counts :as line-counts]
-            [jonquil.layouts :as layouts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.palette :as palette]
@@ -684,8 +683,8 @@
   branch, which doesn't actually quit anything.
 
   save-session! (the open tabs, for the next launch) runs in the
-  real-quit branch only, beside save-tree-width!."
-  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select! save-tree-width!
+  real-quit branch only."
+  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!
            save-session!]}]
   (fn [_win _data]
     ;; One alert naming every dirty tab, in tab order.
@@ -718,14 +717,6 @@
             ;; (see unparent-registered-popovers!), never in the
             ;; suppress-close? branch above.
               (do (unparent-registered-popovers! popovers)
-                  ;; The tree's width, when it's showing.
-                  (when save-tree-width!
-                    (try (when-let [err (save-tree-width!)]
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the file tree's width failed:" err)))
-                         (catch :default e
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the file tree's width failed:" (ex-message e))))))
                   (when save-session!
                     (try (when-let [err (save-session!)]
                            (binding [*out* *err*]
@@ -2497,7 +2488,7 @@
             key? (and kname (not (describe/modifier-key? kname)))
             ;; the command that took the key, for recent keys
             ran (volatile! nil)]
-        (if (and key? (compare-and-set! (:describe-pending ctx) true false))
+        (if (and key? (some-> (:describe-pending ctx) (compare-and-set! true false)))
           ;; it answers a pending Describe Key: described, never run
           (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
                                                      :state state :physical physical))]
@@ -2606,16 +2597,14 @@
   "Makes t the active tab: the window's title, Ln/Col and focus follow it,
   and every open popover closes (one on a hidden page would be lost). The
   saved tab list records the new active tab (session-changed!)."
-  [{:keys [active-id win line-col-label close-popovers-fn tree-pane hint-label] :as ctx} t]
+  [{:keys [active-id win line-col-label close-popovers-fn hint-label] :as ctx} t]
   (reset! active-id (:id t))
   ;; LM6's key hint was for the tab left behind
   (when hint-label (g/gtk-widget-set-visible hint-label 0))
   (when-let [r (:recent-tabs ctx)]
     (swap! r (fn [v] (into [(:id t)] (remove #{(:id t)}) v))))
   (close-popovers-fn)
-  ;; The tree selects the active tab's file (never expanding folders for
-  ;; it).
-  (when tree-pane (file-tree-pane/select-path! tree-pane @(:path t)))
+  (parts/run-tab-hooks! ctx :on-switch t)
   (update-title! (:ed t) win (:path t))
   (let [[line col] (g/cursor-line-col (:buf (:ed t)))]
     (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))
@@ -3564,7 +3553,7 @@
         closing? (atom false)
         *cv (atom nil)
         ;; LM1's ! commands at the prompt, installed once the palette's
-        ;; pieces exist (below, after open-palette-fn)
+        ;; pieces exist (the command-palette part resets it at install)
         bang* (atom (fn [_text]))
         ;; :failure*, the last failed evaluation, for the restarts
         cv (assoc
@@ -4007,9 +3996,6 @@
         ;; The tree on the left, its toggle first in the toolbar, and the
         ;; outer paned that holds it beside h-paned.
         *open-folder (atom nil)
-        ;; True while the starting visibility is applied, so the toggled
-        ;; handler doesn't save it as if a person had chosen it.
-        applying-start? (atom false)
         *folder-result (atom nil)
         tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (open-file! @*tab-ctx p))
                                              :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
@@ -4020,56 +4006,6 @@
                                              :on-trash (fn [p] (tree-trash! @*tab-ctx p))})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        ;; The palette lists the registry's commands and opens on
-        ;; the active tab, whose palette runs the picked one
-        open-palette-fn (fn [] (let [plugins @plugin-registry/live]
-                                 (palette/open! (:palette (active-tab))
-                                                (into
-                                                 (pal-data/tab-entries
-                                                  (keep (fn [id] (when-let [t (tab-by-id tabs id)]
-                                                                   {:id id :label (g/label-text (:label t))}))
-                                                        @recent-tabs)
-                                                  (:id (active-tab)))
-                                                 (into (into (pal-data/panel-entries @(:recent-panels right)
-                                                                                     (showing-panel right))
-                                                             (layouts/entries (:layouts (settings/load-settings @settings-path*))))
-                                                       (pal-data/entries
-                                                 {:commands (plugin-registry/all-commands plugins)
-                                                  :keymap {:window (plugin-registry/window-bindings plugins)
-                                                           :editor (plugin-registry/editor-bindings plugins)}
-                                                  :os (System/getProperty "os.name")}))))))
-        _ (reset! bang*
-                  (fn [text]
-                    (let [cv @*cv
-                          plugins @plugin-registry/live
-                          es (pal-data/entries {:commands (plugin-registry/all-commands plugins)
-                                                :keymap {:window (plugin-registry/window-bindings plugins)
-                                                         :editor (plugin-registry/editor-bindings plugins)}
-                                                :os (System/getProperty "os.name")})
-                          say (fn [s] (cview/append! cv :system (str s "\n")))
-                          {:keys [run doc choices words none] :as r} (pal-data/bang-pick es text)]
-                      ;; not an entry: Clear the last entry's output reaches the one before
-                      (cview/restore-entry-start! cv)
-                      ;; Up brings the line back, as for any entry
-                      (swap! (ev/history @ev*) eval/history-add (str/trim text))
-                      (cond
-                        (:help r) (say "; ! runs a command by name, as the palette does: !clear line counts")
-                        none (say (str "; ! No command matches \"" none "\". Cmd/Ctrl+Shift+P lists them all."))
-                        choices (say (str "; ! " (count choices) " commands match \"" words "\":\n"
-                                          (str/join "\n" (map #(str ";   " %) (take 8 choices)))
-                                          (when (< 8 (count choices)) "\n;   ...")))
-                        :else (do (say (str "; ! " doc))
-                                  (try ((deref (:on-run (:palette (active-tab)))) run)
-                                       (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
-        ;; Describe Key's pending flag and the recent keys (jonquil.describe's
-        ;; ring), both read and written on the GTK thread only
-        describe-pending (atom false)
-        recent-keys (atom [])
-        live-keys (fn [] (let [plugins @plugin-registry/live]
-                           {:keymap {:window (plugin-registry/window-bindings plugins)
-                                     :editor (plugin-registry/editor-bindings plugins)}
-                            :commands (plugin-registry/all-commands plugins)}))
-        print-lines! (fn [lines] (doseq [l lines] (cview/append! cv :system (str l "\n"))))
         ;; The panel keys and the palette's Switch to panel: focus the panel
         ;; when it shows. Frames, Trace and Plugins otherwise run their own
         ;; command, which asks for what they show now (a hidden one would
@@ -4109,6 +4045,8 @@
                                           :tabs tabs :active-tab active-tab :settings-path* settings-path*
                                           :tab-ctx* *tab-ctx
                                           :tab-by-id tab-by-id :select-tab! select-tab! :new-tab! new-tab!
+                                          :bang* bang* :recent-tabs recent-tabs
+                                          :contain-click (fn [where f] (contain-click status-label where f))
                                           :set-status! (fn [text] (set-status! status-label text))
                                           :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
                                           :files-btn files-btn :panel-focus-fn panel-focus-fn
@@ -4150,13 +4088,7 @@
         ;; (window-key-ctx) a window chord gets
         window-key-args (parts/merge-with-core
                          :fns
-                         {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
-                         :live-keys live-keys :print-lines! print-lines!
-                         :describe-key-fn (fn [] (reset! describe-pending true)
-                                            (print-lines! ["; Press the key to describe."]))
-                         :key-bindings-fn (fn [] (print-lines! (describe/binding-lines
-                                                                (assoc (live-keys) :os (System/getProperty "os.name")))))
-                         :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
+                         {:panel-focus-fn panel-focus-fn
                          :hints-toggle-fn (fn []
                                             (let [on? (swap! hints-on? not)]
                                               (when-not on? (g/gtk-widget-set-visible hint-label 0))
@@ -4182,14 +4114,6 @@
                                       :status-label status-label :source-keys source-keys
                                       :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                       :digit-tab-fn digit-tab-fn
-                                      :tree-keys {:focused? (fn [] (file-tree-pane/focused? tree-pane win))
-                                                  :leave! (fn [] (editor/focus! (:ed (active-tab))))
-                                                  :menu-open? (fn [] (:open? (file-tree-pane/menu-state tree-pane)))
-                                                  :close-menu! (fn [] (g/gtk-popover-popdown (:popover tree-pane)))}
-                                      :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
-                                                              files-btn
-                                                              (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
-                                      :open-palette-fn open-palette-fn
                                       :parinfer-fn parinfer-fn
                                       :review-proposals-fn (fn [] (plugin-step! {:settings-path @settings-path*
                                                                                  :step (fn [] []) :open? true}))
@@ -4331,12 +4255,6 @@
                                                           :confirmed-close? confirmed-close?
                                                           :suppress-close? suppress-close? :closing? closing?
                                                           :popovers popovers :ev* ev*
-                                                          :save-tree-width!
-                                                          (fn [] (when (pos? (g/gtk-widget-get-visible (:root tree-pane)))
-                                                                   (settings/save-settings!
-                                                                    @settings-path*
-                                                                    {:file-tree {:visible? true
-                                                                                 :width (g/gtk-paned-get-position tree-paned)}})))
                                                           ;; Live saving stops first: nothing after the
                                                           ;; quit's own save may write a shorter list.
                                                           ;; A quit before startup's reopen is done
@@ -4479,40 +4397,19 @@
                         (set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
                     (catch :default e
                       (set-status! status-label (str "Couldn't open " p ": " (ex-message e))))))))
-      ;; The tree's root, starting width and visibility (saved, else shown
-      ;; only for a directory launch), Open Folder..., and the toggle's
-      ;; handler -- the one place that shows, hides and saves.
+      ;; The tree's root, Open Folder..., then the file-tree part's
+      ;; :tree-start!: the starting width and visibility (saved, else shown
+      ;; only for a directory launch) and the toggle's handler, the one
+      ;; place that shows, hides and saves.
       (file-tree-pane/show-model! tree-pane (ft/load-model (ft/root-for {:dir dir :file file :cwd cwd})))
       (reset! *open-folder (fn [] (file-dialog! :folder win
                                                 (fn [r] (try (folder-result! r)
                                                              (catch :default e
                                                                (cview/append! cv :error (str "; open folder: " (ex-message e) "\n")))))
                                                 (:root @(:state tree-pane)))))
-      (g/gtk-paned-set-position tree-paned (or (:width tree-settings) 240))
-      (g/g-signal-connect-data files-btn "toggled"
-                               (callable (contain-click
-                                          status-label "files"
-                                          (fn [btn]
-                                            (let [show? (pos? (g/gtk-toggle-button-get-active btn))
-                                                  width (g/gtk-paned-get-position tree-paned)
-                                                  had-focus? (file-tree-pane/focused? tree-pane win)]
-                                              (g/gtk-widget-set-visible (:root tree-pane) (if show? 1 0))
-                                              ;; Hiding the focused tree leaves focus nowhere;
-                                              ;; give it to the editor.
-                                              (when (and (not show?) had-focus?) (editor/focus! (:ed (active-tab))))
-                                              ;; Only a person's toggle is a choice worth saving;
-                                              ;; the starting state isn't.
-                                              (when-not @applying-start?
-                                                (when-let [err (settings/save-settings!
-                                                                @settings-path* {:file-tree {:visible? show? :width (max 1 width)}})]
-                                                  (cview/append! cv :system (str "; settings: " err "\n")))))))
-                                         [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      (g/gtk-widget-set-visible (:root tree-pane) 0)
-      (when (if (some? (:visible? tree-settings)) (:visible? tree-settings) (boolean dir))
-        (reset! applying-start? true)
-        (try (g/gtk-toggle-button-set-active files-btn 1)
-             (finally (reset! applying-start? false))))
+      (if-let [f (:tree-start! (:fns part-contribution))]
+        (f {:tree-settings tree-settings :dir dir})
+        (g/gtk-widget-set-visible (:root tree-pane) 0))
       (g/g-signal-connect-data notebook "switch-page"
                                (callable (switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -4888,7 +4785,6 @@
                  ;; The first tab's command palette, and what
                  ;; Cmd/Ctrl+Shift+P calls to open it
                    :palette palette
-                   :open-palette!* open-palette-fn
                  ;; Load the plugin folder now (call it off the
                  ;; GTK thread; it returns the console lines), and the folder
                    :load-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
