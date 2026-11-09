@@ -31,6 +31,79 @@
   ;; syntax-quote, unquote, deref, and # (sets, fns, reader conditionals).
   #{\' \` \~ \@ \# \?})
 
+(defn- hash-marked-symbol?
+  "True when tok is the symbol sym written right after a # (the ? of #? or
+  the _ of #_), which the tokenizer reads as a symbol of its own."
+  [text sym [t s e]]
+  (and (= :symbol t) (pos? s) (= sym (subs text s e))
+       (= \# (.charAt ^String text (int (dec s))))))
+
+(defn- meta-bracket?
+  "True when the bracket at offset open (or nil) is written right after a ^."
+  [text open]
+  (and open (pos? open) (= \^ (.charAt ^String text (int (dec open))))))
+
+(defn- absorb-form
+  "parent with form folded in: a metadata tag or ^-prefixed bracket is held
+  as :meta-start for the next form, a pending #_ swallows the form, and
+  anything else joins parent's :kids (taking the held metadata start)."
+  [text parent {:keys [start open kind] :as form}]
+  (cond
+    (= kind :metatag)
+    (update parent :meta-start (fn [ms] (or ms start)))
+
+    (meta-bracket? text open)
+    (update parent :meta-start (fn [ms] (or ms (dec open))))
+
+    :else
+    (let [ms (:meta-start parent)
+          form (cond-> form ms (assoc :start ms))
+          parent (dissoc parent :meta-start)]
+      (if (pos? (:discards parent 0))
+        (update parent :discards dec)
+        (update parent :kids conj form)))))
+
+(defn- prefix-start
+  "The offset where the form whose token i starts at s really starts: s
+  moved back over reader prefix characters, but not into the token before."
+  [{:keys [text toks]} i s]
+  (let [floor (if (pos? i) (nth (nth toks (dec i)) 2) 0)]
+    (loop [p s]
+      (if (and (> p floor) (contains? prefix-chars (.charAt ^String text (int (dec p)))))
+        (recur (dec p))
+        p))))
+
+(defn- close-bracket
+  "stack after a closing bracket ch ending at e: the open form on top is
+  finished and absorbed by its parent when ch matches it, else the closer
+  is ignored."
+  [text stack ch e]
+  (let [top (peek stack)]
+    (if (and (> (count stack) 1) (= ch (:close-ch top)))
+      (let [form (-> top (dissoc :close-ch) (assoc :end e))
+            stack (pop stack)]
+        (conj (pop stack) (absorb-form text (peek stack) form)))
+      stack)))
+
+(defn- tree-step
+  "stack after reading token i of ctx's :toks."
+  [{:keys [text toks] :as ctx} stack i]
+  (let [[t s e :as tok] (nth toks i)
+        ch (when (= :bracket t) (.charAt ^String text (int s)))]
+    (cond
+      (hash-marked-symbol? text "_" tok)
+      (conj (pop stack) (update (peek stack) :discards (fnil inc 0)))
+
+      (and ch (syntax/open->close ch))
+      (conj stack {:start (prefix-start ctx i s) :open s :close-ch (syntax/open->close ch) :kids []})
+
+      ch
+      (close-bracket text stack ch e)
+
+      :else
+      (let [form (cond-> {:start (prefix-start ctx i s) :end e} (= t :metatag) (assoc :kind :metatag))]
+        (conj (pop stack) (absorb-form text (peek stack) form))))))
+
 (defn- form-tree
   "text's forms as a tree: a vector of top-level {:start :end :open :kids}.
   A bracketed form has :open (its opening bracket's offset) and :kids, an
@@ -46,57 +119,14 @@
   dropped and its two characters count as prefix, the _ is dropped and
   marks the discard."
   [text]
-  (let [cond-mark? (fn [[t s e]] (and (= :symbol t) (pos? s) (= "?" (subs text s e))
-                                      (= \# (.charAt ^String text (int (dec s))))))
-        discard-mark? (fn [[t s e]] (and (= :symbol t) (pos? s) (= "_" (subs text s e))
-                                         (= \# (.charAt ^String text (int (dec s))))))
-        meta-bracket? (fn [open] (and open (pos? open) (= \^ (.charAt ^String text (int (dec open))))))
-        absorb (fn [parent {:keys [start open kind] :as form}]
-                 (cond
-                   (= kind :metatag)
-                   (update parent :meta-start (fn [ms] (or ms start)))
-
-                   (meta-bracket? open)
-                   (update parent :meta-start (fn [ms] (or ms (dec open))))
-
-                   :else
-                   (let [ms (:meta-start parent)
-                         form (cond-> form ms (assoc :start ms))
-                         parent (dissoc parent :meta-start)]
-                     (if (pos? (:discards parent 0))
-                       (update parent :discards dec)
-                       (update parent :kids conj form)))))
-        toks (filterv (fn [[t :as tok]] (not (or (= :comment t) (cond-mark? tok)))) (syntax/tokenize text))
-        n (count toks)
-        prefixed (fn [i s]
-                   (let [floor (if (pos? i) (nth (nth toks (dec i)) 2) 0)]
-                     (loop [p s]
-                       (if (and (> p floor) (contains? prefix-chars (.charAt ^String text (int (dec p)))))
-                         (recur (dec p))
-                         p))))]
+  (let [toks (filterv (fn [[t :as tok]] (not (or (= :comment t) (hash-marked-symbol? text "?" tok))))
+                      (syntax/tokenize text))
+        ctx {:text text :toks toks}
+        n (count toks)]
     (loop [i 0 stack [{:kids []}]]
       (if (= i n)
         (:kids (first stack))
-        (let [[t s e :as tok] (nth toks i)
-              ch (when (= :bracket t) (.charAt ^String text (int s)))]
-          (cond
-            (discard-mark? tok)
-            (recur (inc i) (conj (pop stack) (update (peek stack) :discards (fnil inc 0))))
-
-            (and ch (syntax/open->close ch))
-            (recur (inc i) (conj stack {:start (prefixed i s) :open s :close-ch (syntax/open->close ch) :kids []}))
-
-            ch
-            (let [top (peek stack)]
-              (if (and (> (count stack) 1) (= ch (:close-ch top)))
-                (let [form (-> top (dissoc :close-ch) (assoc :end e))
-                      stack (pop stack)]
-                  (recur (inc i) (conj (pop stack) (absorb (peek stack) form))))
-                (recur (inc i) stack)))
-
-            :else
-            (let [form (cond-> {:start (prefixed i s) :end e} (= t :metatag) (assoc :kind :metatag))]
-              (recur (inc i) (conj (pop stack) (absorb (peek stack) form))))))))))
+        (recur (inc i) (tree-step ctx stack i))))))
 
 (defn- form-around
   "The form in forms (siblings in order) that holds caret: the one it is
@@ -143,6 +173,47 @@
         (when form
           {:text (subs text (:start form) (:end form)) :start (:start form) :end (:end form)})))))
 
+(defn- skip-blanks
+  "The first offset in text at or after i that is not a space or tab, or
+  where stop? (a fn of the offset) says to halt, or the text's end."
+  [text i stop?]
+  (let [n (count text)]
+    (loop [j i]
+      (if (and (< j n) (#{\space \tab} (.charAt ^String text (int j))) (not (stop? j)))
+        (recur (inc j))
+        j))))
+
+(defn- settle-on-caret-line
+  "Where the caret lands once the scan in new has reached offset i, the
+  caret's line and after its code: keep the column if the caret was in
+  leading space, else stop here. old, before (old's text up to caret),
+  caret and col (its column) describe the caret's place in old."
+  [{:keys [old new before caret col i]}]
+  (let [line-start (inc (or (str/last-index-of (subs new 0 i) "\n") -1))
+        blank-before? (str/blank? (subs before (- caret col)))
+        at-code? (and (< caret (count old))
+                      (not (Character/isWhitespace (.charAt ^String old caret))))]
+    (cond
+      ;; mid-line: step over the same spaces and tabs the caret had
+      ;; after its code (format never changes space inside a line)
+      (not blank-before?) (let [gap (count (take-while #{\space \tab} (reverse before)))]
+                            (skip-blanks new i (fn [j] (>= (- j i) gap))))
+      at-code? (skip-blanks new i (constantly false))
+      :else (skip-blanks new i (fn [j] (>= (- j line-start) col))))))
+
+(defn- scan-char
+  "One step of the scan through new: ch with seen-code non-whitespace
+  characters and seen-lines newlines already passed gives [seen-code
+  seen-lines] to continue with, or nil to stop at ch (the caret's code
+  has been passed and ch starts the next thing)."
+  [ch code seen-code seen-lines]
+  (cond
+    (and (= seen-code code) (not= ch \newline) (Character/isWhitespace ch)) [seen-code seen-lines]
+    (= seen-code code) (when (= ch \newline) [seen-code (inc seen-lines)])
+    (= ch \newline) [seen-code (inc seen-lines)]
+    (Character/isWhitespace ch) [seen-code seen-lines]
+    :else [(inc seen-code) seen-lines]))
+
 (defn carry-caret
   "Where caret, an offset in old, lands in new when the two differ only in
   whitespace (formatting re-indents): after the same number of
@@ -159,33 +230,14 @@
     (loop [i 0 seen-code 0 seen-lines 0]
       (cond
         (and (= seen-code code) (= seen-lines lines))
-        ;; on the caret's line, after its code: keep the column if the caret
-        ;; was in leading space, else stop here.
-        (let [line-start (inc (or (str/last-index-of (subs new 0 i) "\n") -1))
-              blank-before? (str/blank? (subs before (- caret col)))
-              at-code? (and (< caret (count old))
-                            (not (Character/isWhitespace (.charAt ^String old caret))))
-              skip (fn [stop?] (loop [j i]
-                                 (if (and (< j n) (#{\space \tab} (.charAt ^String new j)) (not (stop? j)))
-                                   (recur (inc j))
-                                   j)))]
-          (cond
-            ;; mid-line: step over the same spaces and tabs the caret had
-            ;; after its code (format never changes space inside a line)
-            (not blank-before?) (let [gap (count (take-while #{\space \tab} (reverse before)))
-                                      start i]
-                                  (skip (fn [j] (>= (- j start) gap))))
-            at-code? (skip (constantly false))
-            :else (skip (fn [j] (>= (- j line-start) col)))))
+        (settle-on-caret-line {:old old :new new :before before :caret caret :col col :i i})
+
         (>= i n) n
+
         :else
-        (let [ch (.charAt ^String new i)]
-          (cond
-            (and (= seen-code code) (not= ch \newline) (Character/isWhitespace ch)) (recur (inc i) seen-code seen-lines)
-            (= seen-code code) (if (= ch \newline) (recur (inc i) seen-code (inc seen-lines)) i)
-            (= ch \newline) (recur (inc i) seen-code (inc seen-lines))
-            (Character/isWhitespace ch) (recur (inc i) seen-code seen-lines)
-            :else (recur (inc i) (inc seen-code) seen-lines)))))))
+        (if-let [[sc sl] (scan-char (.charAt ^String new i) code seen-code seen-lines)]
+          (recur (inc i) sc sl)
+          i)))))
 
 (defn format-all-op
   "Re-indents the whole buffer as one edit (one undo step). nil when the

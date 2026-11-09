@@ -62,6 +62,16 @@
         (is (= (str/index-of n "(inc") (c/carry-caret o n (str/index-of o "(inc"))) "before (inc")
         (is (= (dec (str/index-of n "(inc")) (c/carry-caret o n (dec (str/index-of o "(inc")))) "before the space")))))
 
+(deftest carry-caret-edges-test
+  (testing "mid-line, the caret keeps the spaces it had after its code"
+    (is (= 4 (c/carry-caret "a  b" "a  b" 4)))
+    (is (= 3 (c/carry-caret "a  b" "a  b" 3)))
+    (is (= 2 (c/carry-caret "a \t b" "a \t b" 2))))
+  (testing "a caret past the old text clamps to its end"
+    (is (= 3 (c/carry-caret "abc" "abc" 99))))
+  (testing "the new text ending early gives its end"
+    (is (= 1 (c/carry-caret "a b" "a" 3)))))
+
 (deftest format-ops-carry-the-caret-test
   (let [text "(defn f [x]\n(let [y 1]\n(inc x)))"
         caret (str/index-of text "inc")
@@ -186,6 +196,20 @@
   (let [t "^:private (defn f [] 1)"
         {:keys [text start end]} (c/run-form {:text t :caret (str/index-of t "defn")})]
     (is (= text (subs t start end)) "the range still matches the text")))
+
+(deftest top-level-forms-tree-test
+  (testing "the tree: spans, :open and :kids for brackets, prefixes in :start"
+    (is (= [{:start 0 :end 7 :open 0 :kids [{:start 1 :end 2} {:start 3 :end 6 :open 3 :kids [{:start 4 :end 5}]}]}]
+           (c/top-level-forms "(a (b))")))
+    (is (= [{:start 0 :end 4 :open 1 :kids [{:start 2 :end 3}]}] (c/top-level-forms "'(a)"))))
+  (testing "metadata nested inside a form attaches to the form after it"
+    (is (= [{:start 1 :end 8} {:start 9 :end 10}]
+           (mapv #(select-keys % [:start :end]) (:kids (first (c/top-level-forms "(^:a [x] y)")))))))
+  (testing "a #_ discard nested inside a form drops the next form"
+    (is (= ["a" "c"]
+           (mapv (fn [{:keys [start end]}] (subs "(a #_ b c)" start end)) (:kids (first (c/top-level-forms "(a #_ b c)")))))))
+  (testing "blank text has no forms"
+    (is (= [] (c/top-level-forms "  ")))))
 
 (deftest parinfer-step-test
   (testing "a mode choice sets it, :next walks off -> Smart -> Indent -> Paren -> off"
