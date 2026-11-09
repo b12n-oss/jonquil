@@ -152,11 +152,18 @@
 
 (deftest eval-path-picks-the-project
   (let [d (temp-dirs/temp-dir! "jonquil-mcp-test-")
-        _ (spit (io/file d "deps.edn") "{}")
         _ (spit (io/file d ".jonquil.edn") "{:runtime :in-process}")
-        _ (spit (io/file d "a.clj") "(ns a)")
+        f (str (io/file d "a.clj"))
+        _ (spit f "(ns a)")
         tt (tools/make-tools {:dir (dir) :settings-path (str (io/file d "s.edn"))})
-        c (fn [args] ((:call tt) "jonquil_eval" args))]
-    (is (= {:text "=> 3" :error? false} (c {"code" "(+ 1 2)" "path" (str (io/file d "a.clj"))})) "a file picks its project")
-    (is (= {:text "=> 3" :error? false} (c {"code" "(+ 1 2)" "path" (str d)})) "a directory picks its project")
-    (is (= {:text "=> 3" :error? false} (c {"code" "(+ 1 2)" "path" "a.clj"})) "a relative path resolves against the server dir")))
+        asked (atom [])
+        select @#'tools/selection]
+    (with-redefs [tools/selection (fn [ctx path] (swap! asked conj path) (select ctx path))]
+      (is (= {:text "=> 3" :error? false} ((:call tt) "jonquil_eval" {"code" "(+ 1 2)" "path" f})))
+      (is (seq @asked))
+      (is (every? #(= (.getCanonicalPath (io/file f)) (.getCanonicalPath (io/file %))) @asked)
+          "every project lookup the eval makes is for the path it was given")
+      (reset! asked [])
+      (is (= {:text "=> 3" :error? false} ((:call tt) "jonquil_eval" {"code" "(+ 1 2)"})))
+      (is (seq @asked))
+      (is (every? nil? @asked) "with no path, the lookup is for no path"))))
