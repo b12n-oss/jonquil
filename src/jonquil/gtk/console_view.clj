@@ -233,7 +233,7 @@
   already moved out-end past where the mark needs to sit, so reading it
   early, before that work happens, is the only correct offset. drain!
   (below) calls this for a queued :mark item instead (mark-entry-start!'s
-  own citation), for echo-entry!/jonquil.gtk.window's do-run!, whose own
+  own citation), for echo-entry!/jonquil.gtk.window.run's do-run!, whose own
   new content DOES go through append! -- there, reading out-end THEN,
   once the drain reaches this item, is what makes it land after
   everything queued before it and before that entry's own echo/banner."

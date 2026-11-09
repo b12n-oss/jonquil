@@ -358,8 +358,8 @@
 (defn row-clear-last-while-running
   "Cmd/Ctrl+Shift+L while a program is STILL printing: the
   chord clears what it has printed SO FAR -- everything since the Run
-  banner, which is exactly where window.clj's do-run! marks the entry's
-  own start -- without needing the program to finish, and output the
+  banner, which is exactly where jonquil.gtk.window.run's do-run! marks the
+  entry's own start -- without needing the program to finish, and output the
   program prints AFTER the clear keeps landing normally, since clear-last-
   output! only ever deletes up to out-end's offset AT THE TIME of the key."
   [ui]

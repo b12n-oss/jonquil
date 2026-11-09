@@ -278,9 +278,9 @@
   nil)
 
 (defn set-flash-cancel-fn!
-  "Registers f (fn [] -> nil), Run Form's own flash cancel (window.clj's
-  make-flash-fn, called from handle-key! below before any
-  other key handling). See set-quick-doc-fn!."
+  "Registers f (fn [] -> nil), Run Form's own flash cancel
+  (jonquil.gtk.window.run's make-flash-fn, called from handle-key! below
+  before any other key handling). See set-quick-doc-fn!."
   [ed f]
   (reset! (:flash-cancel-fn ed) f)
   nil)
