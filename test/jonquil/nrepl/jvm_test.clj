@@ -11,6 +11,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.inspect :as inspect]
             [jonquil.nrepl.connection :as connection]
+            [jonquil.nrepl.generic :as generic]
             [jonquil.nrepl.jvm :as jvm]
             [temp-dirs]))
 
@@ -1123,3 +1124,30 @@
     (is (= {:error "Debug mode is Jolt's: the JVM keeps no locals."} (answer #(ev/toggle-debug-mode! e %))))
     (is (= {:error "Evaluating in a frame needs Jolt: the JVM keeps no locals."}
            (answer #(ev/eval-in-frame! e 0 "1" nil %))))))
+
+;; --- run-worker! characterization (task 22) ---
+
+(deftest generic-stdin-notice-test
+  ;; The nREPL dialect says once, before the request, that a server without
+  ;; a stdin op can't answer a read; the request still goes out.
+  (with-project {:ops (remove #{"stdin"} fake/jvm-ops)}
+    (fn [srv dir _]
+      (let [code "(def f (fn [] (read-line)))"
+            e (jvm/make-jvm {:profile dialect/nrepl :runtime :attach :project-dir dir}
+                            {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200
+                             :help-timeout-ms 200 :full-doc-timeout-ms 500})
+            {:keys [result out]} (run e code {:run? false})]
+        (is (= :ok (:status result)))
+        (is (= 1 (count (filter #{[:system generic/stdin-notice]} out))))
+        (is (some #(= code (get % "code")) (fake/requests srv)))))))
+
+(deftest worker-throw-finishes-with-error-test
+  ;; Anything thrown inside the worker ends the evaluation with an error
+  ;; result and clears :running.
+  (with-project {}
+    (fn [_ dir _]
+      (let [e (make dir)]
+        (with-redefs [jvm/register-inspect! (fn [_] (throw (ex-info "boom" {})))]
+          (let [{:keys [result]} (run e "(+ 1 2)" {:run? false})]
+            (is (= {:status :error :error-text "Error: boom"} result))
+            (is (not (ev/evaluating? e)))))))))
