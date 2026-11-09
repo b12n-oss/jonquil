@@ -115,6 +115,8 @@
     jonquil.gtk.window.status-test
     jonquil.gtk.window.alerts-test
     jonquil.gtk.window.files-test
+    jonquil.gtk.window.plugin-agent-test
+    jonquil.gtk.window.right-slot-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.gtk.processes-pane-test

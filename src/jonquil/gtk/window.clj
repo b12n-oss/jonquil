@@ -60,6 +60,8 @@
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
+            [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.parts :as parts]
             [jonquil.restarts :as restarts]
@@ -73,10 +75,7 @@
             [jonquil.nrepl.shadow]
             [jonquil.palette :as pal-data]
             [jonquil.plugin-hooks :as plugin-hooks]
-            [jonquil.plugin-list :as plugin-list]
-            [jonquil.plugin-loader :as plugin-loader]
             [jonquil.plugin-registry :as plugin-registry]
-            [jonquil.plugin-review :as plugin-review]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]
@@ -397,99 +396,10 @@
         (doseq [l (ev/limitations e)]
           (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
-(def ^:private PANEL-WIDTH
-  ;; estimate: matched against jonquil.gtk.inspector-pane/WIDTH-REQUEST
-  ;; (360) plus room for the paned's handle.
-  420)
-
-;; --- the right-hand slot: the inspector and the source panel -------------
-;; One slot, last wins: a vertical GtkBox
-;; holds both panels' roots, only one visible at a time, and the box itself
-;; is hidden when neither is. Each root keeps its own visibility, so "is the
-;; inspector showing?" is still (:root pane)'s own visible flag. These sit
-;; above apply-selection!, which hides the slot on a runtime switch.
-
 (def ^:private STATUS-MARGIN
   ;; px at each end of the status bar: GNOME's usual 6-12 px gutter, the
   ;; status box's own child spacing (6) plus a little.
   8)
-
-(defonce ^:private plugin-history-shown
-  ;; The id whose history panel is open, or nil. Set when
-  ;; History is pressed, cleared by show-right-panel! for any other panel
-  ;; and by hide-right-panel! :history, so it follows the panel; plugin-step!
-  ;; reads it to rebuild that history off the GTK thread.
-  (atom nil))
-
-(defn- right-roots
-  "{which root} for the panels right's slot holds, a part's among them; a
-  right without :review-root, :plugins-root or :history-root (a test's) has
-  fewer, and one without :part-panels* has no part panels."
-  [{:keys [inspector-root source-root review-root plugins-root history-root
-           part-panels*]}]
-  (cond-> (into {:inspector inspector-root :source source-root}
-                (map (fn [[id p]] [id (:root p)]))
-                (some-> part-panels* deref))
-    review-root (assoc :review review-root)
-    plugins-root (assoc :plugins plugins-root)
-    history-root (assoc :history history-root)))
-
-(defn- show-right-panel!
-  "Shows which (:inspector, :source, :review, :plugins, :history,
-  :locations, :debugger, :trace or :messages) in
-  the slot and hides the others; any but :history clears
-  plugin-history-shown, and which moves to the front of right's
-  :recent-panels when it has one. When the slot was hidden, also sizes h-paned so
-  the panel claims about PANEL-WIDTH; while
-  it's showing, the split stays where the person put it. right is {:win
-  :h-paned :slot :inspector-root :source-root :review-root}. GTK-thread
-  only."
-  [{:keys [win h-paned slot] :as right} which]
-  (let [was-hidden? (zero? (g/gtk-widget-get-visible slot))
-        roots (right-roots right)]
-    (when (not= which :history) (reset! plugin-history-shown nil))
-    (doseq [[k root] roots :when (not= k which)] (g/gtk-widget-set-visible root 0))
-    (g/gtk-widget-set-visible (get roots which) 1)
-    (g/gtk-widget-set-visible slot 1)
-    ;; the recent panels, most recently shown first (a test's right has none)
-    (when-let [r (:recent-panels right)]
-      (swap! r (fn [v] (into [which] (remove #{which}) v))))
-    (when was-hidden?
-      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))
-    ))
-
-(defn- showing-panel
-  "The key of the right-hand panel on screen, or nil when the slot is
-  hidden."
-  [{:keys [slot] :as right}]
-  (when (pos? (g/gtk-widget-get-visible slot))
-    (some (fn [[k root]] (when (pos? (g/gtk-widget-get-visible root)) k)) (right-roots right))))
-
-(defn- focus-within?
-  "True when keyboard focus is widget or inside it."
-  [widget]
-  (let [root (g/gtk-widget-get-root widget)]
-    (when-not (ffi/null? root)
-      (let [f (g/gtk-root-get-focus root)]
-        (and (not (ffi/null? f))
-             (or (= f widget) (pos? (g/gtk-widget-is-ancestor f widget))))))))
-
-(defn- hide-right-panel!
-  "Hides which's root, and the slot once no root is showing. Hiding
-  :source also cancels any re-scroll settling still in flight for it
-  (source-pane/cancel-scroll-settle!), so the
-  shared settle timeout stops touching the view behind a hidden panel
-  instead of only finding out once the view is actually destroyed.
-  close-source-panel! reaches this same cancellation by calling through
-  here, not by calling cancel-scroll-settle! a second time."
-  [{:keys [slot source-pane] :as right} which]
-  (let [roots (right-roots right)]
-    (g/gtk-widget-set-visible (get roots which) 0)
-    (when (= which :history) (reset! plugin-history-shown nil))
-    (when (= which :source)
-      (source-pane/cancel-scroll-settle! (:scroll-cancelled? source-pane)))
-    (when (every? #(zero? (g/gtk-widget-get-visible %)) (vals roots))
-      (g/gtk-widget-set-visible slot 0))))
 
 ;; apply-selection! sits here, after start-and-report! (above), which it
 ;; calls: Jolt resolves an unqualified symbol at compile time, not lazily,
@@ -538,10 +448,10 @@
           (line-counts/off-if-counting!))
         ;; Focus inside a panel this hides would go nowhere, so it moves to
         ;; the active tab's editor, as closing the inspector does.
-        (let [focus-in-panel? (or (focus-within? (:inspector-root right))
-                                  (focus-within? (:source-root right)))]
-          (hide-right-panel! right :inspector)
-          (hide-right-panel! right :source)
+        (let [focus-in-panel? (or (win-right-slot/focus-within? (:inspector-root right))
+                                  (win-right-slot/focus-within? (:source-root right)))]
+          (win-right-slot/hide-right-panel! right :inspector)
+          (win-right-slot/hide-right-panel! right :source)
           (when (and focus-in-panel? active-ed)
             (when-let [ed (active-ed)] (editor/focus! ed))))
         (reset! inspector-state nil)
@@ -1127,7 +1037,7 @@
   Close button, or Escape while the rows view itself has focus) and the
   window keymap's :inspector/close Escape binding."
   [right ed]
-  (hide-right-panel! right :inspector)
+  (win-right-slot/hide-right-panel! right :inspector)
   (editor/focus! ed))
 
 (defn- show-inspector-panel!
@@ -1137,7 +1047,7 @@
   later open, while it's already showing, leaves the split exactly where
   the person put it. See show-right-panel!. GTK-thread only."
   [right]
-  (show-right-panel! right :inspector))
+  (win-right-slot/show-right-panel! right :inspector))
 
 (defn- try-inspect!
   "The window sends at most one inspect! at a time. Runs f
@@ -1475,7 +1385,7 @@
   [{:keys [sp right sel*]} loc]
   (source-pane/set-profile! sp (:profile @sel*))
   (source-pane/open-location! sp loc)
-  (show-right-panel! right :source)
+  (win-right-slot/show-right-panel! right :source)
   (source-pane/focus! sp))
 
 (declare jump-to! source-jump-to!)
@@ -1499,7 +1409,7 @@
         ;; to there.
         (when-not (= id from-id) (swap! jump-back* source/push from))
         (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
-        (hide-right-panel! right :source)
+        (win-right-slot/hide-right-panel! right :source)
         (editor/focus! ed)
         (win-status/set-status! status-label (str "Jumped to " symbol ".")))
       (show-source! ctx loc))))
@@ -1642,7 +1552,7 @@
   hide-right-panel! also cancels any re-scroll settling still in flight
   for it."
   [right ed]
-  (hide-right-panel! right :source)
+  (win-right-slot/hide-right-panel! right :source)
   (editor/focus! ed))
 
 (defn- do-source-open!
@@ -2988,62 +2898,6 @@
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
 
-(defonce ^:private plugin-console
-  ;; (fn [line]) printing one line on the window's console; the plugins
-  ;; part's :plugins-start! sets it
-  (atom (fn [line] (binding [*out* *err*] (println "jonquil:" line)))))
-
-(defonce ^:private plugin-loads
-  ;; Every plugin load (startup, Reload Plugins, a saved plugin
-  ;; file) runs here, one at a time, so a load starts from what the last
-  ;; one left; the state is the last step's console lines. It keeps going
-  ;; after a throw, which is reported, so no later load is lost.
-  (plugin-loader/load-agent
-   (fn [e] (@plugin-console (str "loading plugins failed: " (or (ex-message e) (str e)))))))
-
-(defonce ^:private plugin-reviews-changed
-  ;; (fn [{:keys [reviews open? lines after done]}]) taking the
-  ;; pending proposals' reviews after every plugin step; the plugins
-  ;; part's :plugins-start! sets it to update the pending count and the
-  ;; review panel. done, when given, is a promise it delivers once the
-  ;; window has changed.
-  (atom (fn [{:keys [done]}] (when done (deliver done true)))))
-
-(defn- plugin-step!
-  "Queues step (a no-arg fn answering console lines) on plugin-loads. Its
-  lines go to the console; then, still off the GTK thread, the pending
-  proposals' reviews are built (jonquil.plugin-review/pending-reviews over
-  the settings file's plugins folder and the live registry) and handed to
-  plugin-reviews-changed with open? (open the review panel), after (fn
-  [lines] run once the window has changed) and done. So are
-  the plugin list's rows (jonquil.plugin-list/rows, with the disabled ids
-  from the settings file) and open-list? (open the list), and the
-  open history's version rows (jonquil.plugin-list/version-rows for
-  plugin-history-shown, with its :id) and open-history?. Returns the
-  agent, whose state is the step's lines."
-  [{:keys [settings-path step open? open-list? open-history? after done]}]
-  (send-off plugin-loads
-            (fn [_]
-              (let [lines (step)]
-                (try (doseq [l lines] (@plugin-console l))
-                     (catch :default e
-                       (binding [*out* *err*] (println "jonquil: plugin console:" (ex-message e)))))
-                (try
-                  (let [dir (plugin-loader/plugins-dir settings-path)
-                        reg @plugin-registry/live]
-                    (@plugin-reviews-changed
-                     {:reviews (plugin-review/pending-reviews {:plugins-dir dir :registry reg})
-                      :rows (plugin-list/rows {:plugins-dir dir :registry reg
-                                               :disabled (:disabled (:plugins (settings/load-settings settings-path)))})
-                      :history (when-let [id @plugin-history-shown]
-                                 (assoc (plugin-list/version-rows dir id) :id id))
-                      :open? open? :open-list? open-list? :open-history? open-history?
-                      :lines lines :after after :done done}))
-                  (catch :default e
-                    (when done (deliver done true))
-                    (@plugin-console (str "reading the plugin proposals failed: " (or (ex-message e) (str e))))))
-                lines))))
-
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
   (let [;; An atom, not a plain value: :settings-path!* (self-test hook
         ;; only) repoints it at an impossible path so a save can be forced
@@ -3295,18 +3149,9 @@
                                         :on-def on-inspector-def
                                         :state inspector-state})
         _ (reset! *pane pane)
-        slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        ;; {id {:root :focus! :open!}} of the parts' panels, reset once the
-        ;; parts install (after part-contribution): panel-focus-fn and
-        ;; right-roots are built first, like *tab-ctx.
-        part-panels* (atom {})
-        right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
-               :review-root (:root rp) :plugins-root (:root lp)
-               :history-root (:root hp) :source-pane sp
-               ;; the panels shown, most recent first: the palette's
-               ;; Switch to panel entries, and the panel keys' "open it"
-               :recent-panels (atom [])
-               :part-panels* part-panels*}
+        {:keys [slot part-panels* right panel-focus-fn]}
+        (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
+                               :settings-path* settings-path* :status-label status-label})
         _ (reset! *right right)
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
@@ -3419,34 +3264,6 @@
                                              :on-trash (fn [p] (tree-trash! @*tab-ctx p))})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        ;; The panel keys and the palette's Switch to panel: focus the panel
-        ;; when it shows. Frames, Trace and Plugins otherwise run their own
-        ;; command, which asks for what they show now (a hidden one would
-        ;; show the calls or the error from before). The inspector, source
-        ;; panel and locations list come back with their state when they
-        ;; showed before and it still holds (a dialect switch and a cleared
-        ;; list take them off the recent list); with nothing to show they
-        ;; say what fills them.
-        panel-focus-fn (fn [k]
-                         (let [focus! (fn []
-                                        (case k
-                                          :inspector (inspector-pane/focus! pane)
-                                          :source (source-pane/focus! sp)
-                                          :plugins (g/gtk-widget-grab-focus (:list lp))
-                                          (if-let [p (get @part-panels* k)]
-                                            ((:focus! p))
-                                            (throw (IllegalArgumentException. (str "No matching clause: " k))))))]
-                           (cond
-                             (= k (showing-panel right)) (focus!)
-                             (= k :plugins) (plugin-step! {:settings-path @settings-path*
-                                                           :step (fn [] []) :open-list? true})
-                             (contains? @part-panels* k) ((:open! (get @part-panels* k)))
-                             (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
-                             :else
-                             (win-status/set-status! status-label
-                                            (case k
-                                              :inspector "; Nothing inspected yet: inspect a form or a result first."
-                                              :source "; The Source panel is empty: jump to a definition first.")))))
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         ;; Window parts (jonquil.gtk.parts): each install fn reads the core
         ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
@@ -3463,20 +3280,20 @@
                                           :set-status! (fn [text] (win-status/set-status! status-label text))
                                           :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
                                           :files-btn files-btn :panel-focus-fn panel-focus-fn
-                                          :showing-panel showing-panel :show-right-panel! show-right-panel!
-                                          :hide-right-panel! hide-right-panel!
+                                          :showing-panel win-right-slot/showing-panel :show-right-panel! win-right-slot/show-right-panel!
+                                          :hide-right-panel! win-right-slot/hide-right-panel!
                                           :alert-pending? win-alerts/alert-pending? :show-alert! win-alerts/show-alert!
                                           :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!
                                           :unread-label unread-label
                                           :register-status-log! (fn [log!] (win-status/register-status-log! status-label log!))
-                                          :plugin-step! plugin-step!
+                                          :plugin-step! win-plugin-agent/plugin-step!
                                           :plugins-on* plugins-on* :review-pane rp
                                           :plugin-list-pane lp :plugin-history-pane hp
                                           :pending-label pending-label
                                           :open-file! (fn [p] (open-file! @*tab-ctx p))
-                                          :plugin-history-shown plugin-history-shown
-                                          :plugin-reviews-changed plugin-reviews-changed
-                                          :plugin-console plugin-console
+                                          :plugin-history-shown win-plugin-agent/plugin-history-shown
+                                          :plugin-reviews-changed win-plugin-agent/plugin-reviews-changed
+                                          :plugin-console win-plugin-agent/plugin-console
                                           :on-saved win-files/on-saved
                                           :mcp-eval! mcp-eval!
                                           :refresh-labels! (fn [] (refresh-labels! @*tab-ctx))
