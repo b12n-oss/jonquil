@@ -61,7 +61,6 @@
             [jonquil.parts :as parts]
             [jonquil.restarts :as restarts]
             [jonquil.login-path :as login-path]
-            [jonquil.mcp.window :as mcp-window]
             [jonquil.nrepl.attach]
             [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.connection :as connection]
@@ -329,8 +328,9 @@
   (-> msg (str/replace tmp path) (str/replace target path)))
 
 (defonce ^:private on-saved
-  ;; (fn [path ed]) run after a save succeeds; the window sets it to
-  ;; reload a saved plugin file and to fire :after-save hooks
+  ;; (fn [path ed]) run after a save succeeds; the plugins part's
+  ;; :plugins-start! sets it to reload a saved plugin file and to fire
+  ;; :after-save hooks
   (atom nil))
 
 (defn- save-to!
@@ -3405,7 +3405,8 @@
            (catch :default _ nil)))))
 
 (defonce ^:private plugin-console
-  ;; (fn [line]) printing one line on the window's console; activate! sets it
+  ;; (fn [line]) printing one line on the window's console; the plugins
+  ;; part's :plugins-start! sets it
   (atom (fn [line] (binding [*out* *err*] (println "jonquil:" line)))))
 
 (defonce ^:private plugin-loads
@@ -3418,8 +3419,9 @@
 
 (defonce ^:private plugin-reviews-changed
   ;; (fn [{:keys [reviews open? lines after done]}]) taking the
-  ;; pending proposals' reviews after every plugin step; activate! sets it
-  ;; to update the pending count and the review panel. done, when given, is
+  ;; pending proposals' reviews after every plugin step; the plugins part's
+  ;; :plugins-start! sets it to update the pending count and the review
+  ;; panel. done, when given, is
   ;; a promise it delivers once the window has changed.
   (atom (fn [{:keys [done]}] (when done (deliver done true)))))
 
@@ -3457,34 +3459,6 @@
                     (when done (deliver done true))
                     (@plugin-console (str "reading the plugin proposals failed: " (or (ex-message e) (str e))))))
                 lines))))
-
-(defn- load-step
-  "The step of a plugin load: jonquil.plugin-loader/load-step! over the
-  live registry, with the plugins folder and disabled ids from the settings
-  file, all files or just only. plugins? false (--no-plugins) makes it
-  refuse; nil runs it."
-  ([settings-path only] (load-step settings-path only nil))
-  ([settings-path only plugins?]
-   (fn [] (plugin-loader/load-step! plugin-registry/live
-                                    {:settings-path settings-path :os (System/getProperty "os.name") :only only
-                                     :plugins? plugins?}))))
-
-(defn- plugin-load!
-  "Queues a plugin load (load-step) through plugin-step!. Returns the
-  agent, for a caller that wants to wait."
-  [{:keys [settings-path only plugins?]}]
-  (plugin-step! {:settings-path settings-path :step (load-step settings-path only plugins?)}))
-
-(defn- plugin-step-now!
-  "plugin-step!, waited for up to 10 s, and for the window to change after
-  it: the step's lines, or a line saying it didn't finish. For the
-  self-test hooks and an MCP propose, called off the GTK thread."
-  [opts]
-  (let [done (promise)
-        a (plugin-step! (assoc opts :done done))]
-    (if (and (await-for 10000 a) (deref done 10000 false))
-      @a
-      ["the plugin step didn't finish in 10 s"])))
 
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
   (let [;; An atom, not a plain value: :settings-path!* (self-test hook
@@ -3602,11 +3576,8 @@
         ;; jump opens it; its root joins the right-hand slot once the
         ;; inspector exists (*right, reset below).
         sp (source-pane/make-pane)
-        ;; The review panel shares the slot, and review-state is
-        ;; what it shows, {:reviews [review ...] :index i}, rebuilt from the
-        ;; history after every plugin step
+        ;; The review panel shares the slot
         rp (review-pane/make-pane)
-        review-state (atom {:reviews [] :index 0})
         ;; The plugin list shares the slot too; its rows are rebuilt after
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
@@ -3753,41 +3724,6 @@
                :recent-panels (atom [])
                :part-panels* part-panels*}
         _ (reset! *right right)
-        ;; After a plugin step, each tab on a plugin file whose
-        ;; file now holds other text than the tab last saved follows it: a
-        ;; clean tab reloads as one undo step, keeping its caret's offset, and a dirty one
-        ;; keeps its edits, is warned once on the console and takes the disk
-        ;; text as its saved baseline. GTK-thread only.
-        sync-plugin-tabs! (fn []
-                            (let [dir (plugin-loader/plugins-dir @settings-path*)]
-                              ;; a throw here is one console line and never
-                              ;; skips the rest of the step's window update
-                              (try
-                                (doseq [t @tabs
-                                        :let [path @(:path t)
-                                              ed (:ed t)]
-                                        :when (and path (plugin-loader/plugin-file-or-target? dir path))
-                                        :let [disk (try (slurp path) (catch :default _ nil))
-                                              ;; NUL-bearing disk text must never reach
-                                              ;; set-text! or rebase-saved! (either would
-                                              ;; truncate or leave the tab permanently dirty), so
-                                              ;; it gets disk-sync's "missing" case, with one line.
-                                              nul (when disk (tabs/nul-line disk))
-                                              disk (when-not nul disk)]]
-                                  (when nul
-                                    (cview/append! cv :system (str "; " path " changed on disk but now holds a NUL byte, so this tab keeps its text.\n")))
-                                  (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
-                                                    :buffer (editor/editor-text ed)})
-                                    :reload (do (editor/reload-text! ed disk)
-                                              (cview/append! cv :system (str "; " path " changed on disk, so this tab was reloaded.\n"))
-                                              (refresh-labels! @*tab-ctx))
-                                    :warn (do (editor/rebase-saved! ed disk)
-                                              (cview/append! cv :system (str "; " path " changed on disk. This tab keeps your unsaved edits, and saving it will write over the version on disk.\n"))
-                                              (refresh-labels! @*tab-ctx))
-                                    :rebase (do (editor/rebase-saved! ed disk) (refresh-labels! @*tab-ctx))
-                                    nil))
-                              (catch :default e
-                                (cview/append! cv :error (str "; keeping plugin tabs in step failed: " (or (ex-message e) (str e)) "\n"))))))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
@@ -3954,10 +3890,11 @@
                                           :plugin-list-pane lp :plugin-history-pane hp
                                           :pending-label pending-label
                                           :open-file! (fn [p] (open-file! @*tab-ctx p))
-                                          ;; Interim, until the load code joins the part
-                                          :review-state review-state
-                                          :plugin-step-now! plugin-step-now!
                                           :plugin-history-shown plugin-history-shown
+                                          :plugin-reviews-changed plugin-reviews-changed
+                                          :plugin-console plugin-console
+                                          :on-saved on-saved
+                                          :mcp-eval! mcp-eval!
                                           :refresh-labels! (fn [] (refresh-labels! @*tab-ctx))
                                           :inspect! (fn [start]
                                                       (inspect-last! ev* right pane inspector-state inspecting?
@@ -4015,9 +3952,7 @@
                                       :status-label status-label :source-keys source-keys
                                       :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                       :digit-tab-fn digit-tab-fn
-                                      :parinfer-fn parinfer-fn
-                                      :reload-plugins-fn (fn [] (plugin-load! {:settings-path @settings-path*
-                                                                               :cv cv :plugins? @plugins-on*}))}
+                                      :parinfer-fn parinfer-fn}
                          part-contribution)
         window-key-fn (on-window-key window-key-args)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
@@ -4349,154 +4284,10 @@
                                (editor/focus! (:ed t)))
                              (finally (live!)))))
           (live!))))
-    ;; The user's plugins load off the GTK thread once the window is up;
-    ;; keys pressed before the swap see none yet
-    (reset! plugin-console (fn [line] (on-gui! #(cview/append! cv :system (str "; " line "\n")))))
-    ;; After every plugin step, the pending count and, when
-    ;; it's showing or being opened, the review panel: the same plugin's
-    ;; proposal again if it's still pending, else the first
-    (reset! plugin-reviews-changed
-            (fn [{:keys [reviews rows history open? open-list? open-history? lines after done]}]
-              (on-gui!
-               (fn []
-                 (try
-                   ;; tabs on a file the step rewrote follow it
-                   (sync-plugin-tabs!)
-                   ;; the list, before the review, which hides
-                   ;; it when it opens
-                   (when (or open-list? (pos? (g/gtk-widget-get-visible (:root lp))))
-                     (plugin-list-pane/show! lp rows (:id (plugin-list-pane/selected-row lp))
-                                             (str "No plugins yet. A plugin is a file in "
-                                                  (plugin-loader/plugins-dir @settings-path*) "."))
-                     (when open-list?
-                       (plugin-list-pane/report! lp "")
-                       (show-right-panel! right :plugins)))
-                   ;; the history, kept on the same version
-                   ;; while it stays open
-                   (when (and history (or open-history? (pos? (g/gtk-widget-get-visible (:root hp)))))
-                     (plugin-history-pane/show! hp history
-                                                (when-not open-history? (:n (plugin-history-pane/selected-row hp))))
-                     (when open-history?
-                       (plugin-history-pane/report! hp "")
-                       (show-right-panel! right :history)))
-                   (let [n (count reviews)]
-                     (g/gtk-label-set-text pending-label (str n " plugin proposal" (when (not= 1 n) "s")))
-                     (g/gtk-widget-set-visible pending-label (if (pos? n) 1 0))
-                     (when (or open? (pos? (g/gtk-widget-get-visible (:root rp))))
-                       (if (zero? n)
-                         (do (reset! review-state {:reviews [] :index 0})
-                             (hide-right-panel! right :review)
-                             (when open? (g/gtk-label-set-text status-label "No plugin proposals to review.")))
-                         (let [{old :reviews index :index} @review-state
-                               shown (get old index)
-                               i (or (first (keep-indexed (fn [i r] (when (= (:id shown) (:id r)) i)) reviews)) 0)
-                               r (nth reviews i)
-                               showing? (pos? (g/gtk-widget-get-visible (:root rp)))]
-                           ;; a newer version of the shown
-                           ;; plugin replacing it arms a one-time refusal of
-                           ;; Accept, kept while that version stays shown
-                           (reset! review-state (cond-> {:reviews reviews :index i}
-                                                  (and showing? (= (:id shown) (:id r)) (not= (:n shown) (:n r)))
-                                                  (assoc :swapped [(:id r) (:n shown) (:n r)])
-                                                  (and showing? (= [(:id shown) (:n shown)] [(:id r) (:n r)])
-                                                       (= (:n r) (get (:swapped @review-state) 2)))
-                                                  (assoc :swapped (:swapped @review-state))))
-                           ;; the same proposal still shown keeps
-                           ;; the note being typed, the diff's place and the
-                           ;; footer
-                           (if (and showing? (= [(:id shown) (:n shown)] [(:id r) (:n r)]))
-                             (review-pane/update-summary! rp r i n)
-                             (review-pane/show! rp r i n))
-                           (show-right-panel! right :review))))
-                     (when after (after lines)))
-                   (finally (when done (deliver done true))))))))
-    ;; The effect functions a plugin's :run command reaches,
-    ;; each a turn on the GTK thread (it runs on a worker) acting on the
-    ;; tab with that id, which may have closed since the command started
-    (let [turn (fn [f] (plugin-registry/gui-turn on-gui! f 5000))
-          ;; as the MCP's stop: never interrupt an idle evaluator (an attach
-          ;; evaluator would detach)
-          stop-eval! (fn [] (turn #(when (ev/evaluating? @ev*) (ev/interrupt! @ev*))))
-          ;; Jonquil's own lines during a plugin's eval reach the console
-          notice! (fn [kind text] (on-gui! #(cview/append! cv kind text)))
-          tab-of (fn [id] (or (some #(when (= id (:id %)) %) @tabs)
-                              (throw (ex-info "that tab was closed" {}))))]
-      (reset! plugin-registry/effects
-              {:active-tab (fn [] (:id (active-tab)))
-               ;; the same, for a plugin MCP tool's ctx,
-               ;; whose call arrives on the MCP serve thread
-               :active-tab-turn (fn [] (turn #(:id (active-tab))))
-               :print! (fn [s] (turn #(cview/append! cv :system (str s "\n"))))
-               :status! (fn [s] (turn #(g/gtk-label-set-text status-label (str s))))
-               :buffer-text (fn [id] (turn #(editor/editor-text (:ed (tab-of id)))))
-               :replace-text! (fn [id text]
-                                ;; A plugin's text lands exactly as sent,
-                                ;; like an MCP edit. A NUL in it
-                                ;; would truncate at the insert (apply-op!
-                                ;; refuses the op), so the throw names it
-                                ;; rather than claiming read-only.
-                                (when-let [n (when (string? text) (tabs/nul-line text))]
-                                  (throw (ex-info (str "the new text holds a NUL byte on line " n
-                                                       ", which Jonquil's editor can't keep, so nothing was changed") {})))
-                                (turn #(let [ed (:ed (tab-of id))]
-                                         (when-not (editor/apply-op-plain! ed (mcp-window/replace-op (editor/editor-text ed) text))
-                                           (throw (ex-info "that tab is read-only" {}))))))
-               :open! (fn [path]
-                        (turn #(let [r (open-file! @*tab-ctx (str path))]
-                                 (when (and (map? r) (:error r)) (throw (ex-info (str (:error r)) {})))
-                                 (:id (active-tab)))))
-               ;; both run through the tab's id, on the
-               ;; plugin's worker; await-eval! stops one that times out
-               :eval! (fn [id code opts]
-                        (plugin-registry/await-eval!
-                         {:timeout-ms (:timeout-ms opts)
-                          :interrupt! stop-eval!
-                          :on-notice notice!
-                          :fire (fn [cbs]
-                                  ;; the dialect is checked on the evaluator the
-                                  ;; eval goes to, in the same turn
-                                  (turn #(let [t (tab-of id)
-                                               e @ev*]
-                                           (when-not (plugin-registry/quiet-capable? e)
-                                             (throw (ex-info "p/eval! works with Jolt for now; p/repl! works with every dialect" {})))
-                                           (ev/eval! e code (assoc cbs :quiet (str "jonquil-quiet-" (random-uuid) ":")
-                                                                   :ns-source (editor/editor-text (:ed t))
-                                                                   :owner id)))))}))
-               :repl! (fn [id code opts]
-                        (dissoc (plugin-registry/await-eval!
-                                 {:timeout-ms (:timeout-ms opts)
-                                  :interrupt! stop-eval!
-                                  ;; the person can answer a read at the console
-                                  :input-stops? false
-                                  :on-notice notice!
-                                  :fire (fn [{:keys [on-output on-complete]}]
-                                          (turn #(let [t (tab-of id)
-                                                       busy (atom nil)]
-                                                   (mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
-                                                              code {:ns-source (editor/editor-text (:ed t)) :owner id}
-                                                              (fn [m]
-                                                                (if-let [w (:busy m)]
-                                                                  (reset! busy w)
-                                                                  (let [{:keys [result output]} (:done m)]
-                                                                    (on-output :out output)
-                                                                    (on-complete result)))))
-                                                   @busy)))})
-                                :err))
-               :report! (fn [line]
-                          (on-gui! #(do (cview/append! cv :system (str "; " line "\n"))
-                                        (g/gtk-label-set-text status-label (str "; " line)))))}))
-    (when @plugins-on*
-      (plugin-load! {:settings-path @settings-path* :cv cv}))
-    ;; saving a plugin file reloads that plugin, and any save fires the
-    ;; :after-save hooks on the saved tab; save-to! runs on the GTK
-    ;; thread, so the tab lookup is safe here
-    (reset! on-saved (fn [path ed]
-                       (when (and @plugins-on*
-                                  (plugin-loader/plugin-file? (plugin-loader/plugins-dir @settings-path*) path))
-                         (plugin-load! {:settings-path @settings-path* :cv cv :only path}))
-                       (plugin-hooks/run-hooks! {:point :after-save
-                                                 :tab (some #(when (identical? ed (:ed %)) (:id %)) @tabs)
-                                                 :event {:path path}})))
+    ;; The plugins part's :plugins-start!: the console, the reviews
+    ;; callback, the effects, the startup load and the save hook, set once
+    ;; the window is up.
+    (when-let [f (:plugins-start! (:fns part-contribution))] (f))
     (when on-ready
       ;; The per-tab keys below are the FIRST tab's objects; rows that
       ;; need another tab use :tabs* and :active-tab*. Actions that act on
@@ -4661,40 +4452,6 @@
                  ;; The first tab's command palette, and what
                  ;; Cmd/Ctrl+Shift+P calls to open it
                    :palette palette
-                 ;; Load the plugin folder now (call it off the
-                 ;; GTK thread; it returns the console lines), and the folder
-                   :load-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
-                   :reload-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil @plugins-on*)}))
-                   :plugins-on!* (fn [b] (reset! plugins-on* (boolean b)) nil)
-                   :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
-                 ;; What the plugin MCP tools read, and an
-                 ;; agent's propose: the isolated check on the caller's
-                 ;; thread (never the GTK one), then propose-step! on the
-                 ;; plugin agent, which refreshes the count and the panel
-                   :plugin-state* (fn [] (let [path @settings-path*]
-                                           {:plugins? @plugins-on*
-                                            :plugins-dir (plugin-loader/plugins-dir path)
-                                            :registry @plugin-registry/live
-                                            :disabled (:disabled (:plugins (settings/load-settings path)))}))
-                 ;; The live plugins' MCP tools, read on
-                 ;; every message the MCP server handles
-                   :plugin-tools* (fn [] (plugin-registry/mcp-tools @plugin-registry/live))
-                   :watch-plugin-tools* (fn [notify!] (plugin-registry/watch-tools! plugin-registry/live notify!))
-                   :plugin-propose!* (fn [{:keys [id source reason]}]
-                                       (let [path @settings-path*
-                                             result (plugin-loader/propose-check
-                                                     {:registry @plugin-registry/live :id id :source source
-                                                      :os (System/getProperty "os.name")})
-                                             out (promise)
-                                             lines (plugin-step-now!
-                                                    {:settings-path path
-                                                     :step (fn []
-                                                             (let [r (plugin-loader/propose-step!
-                                                                      {:settings-path path :id id :source source
-                                                                       :reason reason :result result})]
-                                                               (deliver out r)
-                                                               (:lines r)))})]
-                                         (deref out 0 {:status :unknown :n nil :problems [] :lines lines})))
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; The ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
@@ -4730,14 +4487,10 @@
                  ;; and buttons call.
                    :source-pane sp
                    :right-slot slot
-                 ;; The review panel, the status bar's pending
-                 ;; count, what Review Plugin Proposals does (waited for),
-                 ;; and what the panel shows now
+                 ;; The review panel and the status bar's pending count
                    :review-pane rp
                    :pending-label pending-label
-                 ;; The plugin list, what Plugins… does (waited
-                 ;; for), Enable, Disable and Open on an id's row as the
-                 ;; buttons do, and what the list shows now
+                 ;; The plugin list
                    :plugin-list-pane lp
                    :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
@@ -4748,10 +4501,7 @@
                    :panel-focus!* panel-focus-fn
                    ;; the inspector's own Close
                    :close-inspector!* on-inspector-close
-                 ;; History on an id's list row, Revert on
-                 ;; version n (nil: whatever's selected) with a reason, Back,
-                 ;; each as the button does and waited for, and what the
-                 ;; history shows now
+                 ;; The plugin history
                    :plugin-history-pane hp
                    :source-jump!* source-jump-fn
                    :source-open!* source-open-fn

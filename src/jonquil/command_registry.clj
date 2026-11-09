@@ -100,10 +100,7 @@
    ;; The palette. :palette? false marks a command that only works inside the
    ;; key chain guarding it (a focus, an Escape step, a tab number), so the
    ;; palette leaves it out
-   ;; reload the plugin files that changed, appeared or went
-   ;; away; no chord, the palette reaches it
-   :plugins/reload {:doc "Reload the plugin files that changed." :scope :window
-                    :run (call :reload-plugins-fn)}})
+   })
 
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])

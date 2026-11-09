@@ -25,6 +25,7 @@
             [jonquil.gtk.trace-pane :as trace-pane]
             [jonquil.gtk.parts.worlds :as worlds-part]
             [jonquil.palette :as palette]
+            [jonquil.plugin-registry :as plugin-registry]
             [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
 
@@ -77,7 +78,7 @@
 
 (deftest registry-tables-hold-the-specs
   (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :replay] (mapv :id parts/specs)))
-  (is (= #{:plugins/review :plugins/list :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
+  (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
             :panel/processes :processes/show
           :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
           :result/inspect :result/copy :result/define :result/jump
@@ -795,21 +796,25 @@
    :plugin-list-pane {:root :l :handlers (atom {})}
    :plugin-history-pane {:root :h :handlers (atom {})}
    :plugin-step! (fn [o] (swap! calls conj o) nil)
-   :plugin-step-now! (fn [o] (swap! calls conj o) [])
    :settings-path* (atom "/s/settings.edn")
    :plugin-history-shown (atom "p1")
    :plugins-on* (atom true)
-   :review-state (atom {:reviews [] :index 0})})
+   :active-tab (fn [] {:id 1})
+   :plugin-console (atom nil)
+   :plugin-reviews-changed (atom nil)
+   :on-saved (atom nil)})
 
 (deftest plugins-part-owns-its-commands
   (let [spec (some #(when (= :plugins (:id %)) %) parts/specs)]
-    (is (= {:plugins/review [:review-proposals-fn] :plugins/list [:plugins-list-fn]}
+    (is (= {:plugins/review [:review-proposals-fn] :plugins/list [:plugins-list-fn]
+            :plugins/reload [:reload-plugins-fn]}
            (update-vals (:commands spec) :call)))
     (is (nil? (get @#'registry/core-window-commands :plugins/review)))
     (is (nil? (get @#'registry/core-window-commands :plugins/list)))
     (is (some? (get registry/window-commands :plugins/review)))
     (is (some? (get registry/window-commands :plugins/list)))
-    (is (some? (get @#'registry/core-window-commands :plugins/reload)))))
+    (is (nil? (get @#'registry/core-window-commands :plugins/reload)))
+    (is (some? (get registry/window-commands :plugins/reload)))))
 
 (deftest plugins-part-answers-its-ui-keys
   (let [c ((deref #'plugins-part/install) (plugins-wctx (atom [])))]
@@ -817,8 +822,13 @@
              :plugins-list!* :plugin-enable!* :plugin-disable!* :plugin-open!*
              :plugin-history!* :plugin-revert!* :plugin-history-back!*
              :plugin-history-close!* :plugin-history-shown* :plugin-list-shown*
-             :review-shown*}
-           (set (keys (:ui c)))))))
+             :review-shown*
+             :load-plugins!* :reload-plugins!* :plugins-on!* :plugins-dir*
+             :plugin-state* :plugin-tools* :watch-plugin-tools* :plugin-propose!*}
+           (set (keys (:ui c)))))
+    (is (= 23 (count (:ui c))))
+    (is (fn? (get-in c [:fns :reload-plugins-fn])))
+    (is (fn? (get-in c [:fns :plugins-start!])))))
 
 (deftest plugins-review-and-list-ask-for-a-step
   (let [calls (atom [])
@@ -861,3 +871,60 @@
     (is (nil? @(:plugin-history-shown w)))
     (is (= 1 (count @calls)))
     (is (true? (:open-list? (first @calls))))))
+
+(defn- call-restoring-effects [f]
+  (let [saved @plugin-registry/effects]
+    (try (f) (finally (reset! plugin-registry/effects saved)))))
+
+(defmacro ^:private with-effects-restored [& body]
+  `(call-restoring-effects (fn [] ~@body)))
+
+(deftest plugins-start-sets-the-globals-at-start
+  (with-effects-restored
+    (let [w (plugins-wctx (atom []))
+          console @(:plugin-console w)
+          changed @(:plugin-reviews-changed w)
+          saved @(:on-saved w)
+          effects @plugin-registry/effects
+          c ((deref #'plugins-part/install) w)]
+      (is (identical? console @(:plugin-console w)))
+      (is (identical? changed @(:plugin-reviews-changed w)))
+      (is (identical? saved @(:on-saved w)))
+      (is (identical? effects @plugin-registry/effects))
+      (reset! (:plugins-on* w) false)
+      ((get-in c [:fns :plugins-start!]))
+      (is (fn? @(:plugin-console w)))
+      (is (fn? @(:plugin-reviews-changed w)))
+      (is (fn? @(:on-saved w)))
+      (is (not (identical? effects @plugin-registry/effects)))
+      (is (= 1 ((:active-tab @plugin-registry/effects)))))))
+
+(deftest plugins-later-window-wins
+  (with-effects-restored
+    (let [shared (select-keys (plugins-wctx (atom [])) [:plugin-console :plugin-reviews-changed :on-saved])
+          w1 (merge (plugins-wctx (atom [])) shared {:plugins-on* (atom false) :active-tab (fn [] {:id 1})})
+          w2 (merge (plugins-wctx (atom [])) shared {:plugins-on* (atom false) :active-tab (fn [] {:id 2})})
+          s1 (get-in ((deref #'plugins-part/install) w1) [:fns :plugins-start!])
+          s2 (get-in ((deref #'plugins-part/install) w2) [:fns :plugins-start!])]
+      (s1)
+      (let [console1 @(:plugin-console w1)]
+        (is (= 1 ((:active-tab @plugin-registry/effects))))
+        (s2)
+        (is (= 2 ((:active-tab @plugin-registry/effects))))
+        (is (not (identical? console1 @(:plugin-console w1))))
+        (s1)
+        (is (= 1 ((:active-tab @plugin-registry/effects))))))))
+
+(deftest plugins-start-loads-only-when-on
+  (with-effects-restored
+    (let [calls (atom [])
+          w (assoc (plugins-wctx calls) :plugin-step! (fn [o] (swap! calls conj o) nil))
+          start (get-in ((deref #'plugins-part/install) w) [:fns :plugins-start!])]
+      (reset! (:plugins-on* w) false)
+      (start)
+      (is (empty? @calls))
+      (reset! (:plugins-on* w) true)
+      (start)
+      (is (= 1 (count @calls)))
+      (is (= "/s/settings.edn" (:settings-path (first @calls))))
+      (is (fn? (:step (first @calls)))))))
