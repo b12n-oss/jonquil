@@ -521,6 +521,8 @@
   back, so the token line quiet-code prints never reaches on-output."
   [{:keys [ev code quiet-out] {:keys [on-output] :as opts} :opts}]
   (if-let [token (:quiet opts)]
+    ;; keep :out back, so the token line
+    ;; quiet-code prints never reaches on-output
     @(send-main! ev (ops/quiet-code code token (some-> (:ns-source opts) clj/buffer-ns))
                  (assoc opts :on-output (fn [k text]
                                           (if (= :out k)
@@ -611,6 +613,8 @@
   "Stop also stops a form evaluated in a frame: sent whether or not one
   runs (the window may have stopped waiting for it), harmless when none"
   [ev]
+  ;; Stop also stops a form evaluated in a frame: sent whether or not one
+  ;; runs (the window may have stopped waiting for it), harmless when none
   (when-let [{:keys [conn session ops]} (runtime ev)]
     (when (contains? ops "jonquil-frame-interrupt")
       (future (try (client/request-sync conn {:op "jonquil-frame-interrupt" :session session} 2000)

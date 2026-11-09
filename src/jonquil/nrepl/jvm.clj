@@ -223,6 +223,9 @@
   moves the prompt namespace to the buffer's own."
   [{:keys [state] :as ev} code {:keys [path] :as opts}]
   (let [f (when path (io/file path))
+        ;; Run: load-file, never told an :ns (the fixture's own ns form
+        ;; decides what the server evaluates it in). A successful Run
+        ;; moves the prompt namespace to the buffer's own.
         do-request! (request-fn ev opts)
         msgs (do-request! {:op "load-file" :file code
                            :file-path (if f (.getAbsolutePath f) "untitled.clj")
@@ -240,7 +243,13 @@
   never moves for these (never the buffer's ns form
   itself, only named as :ns)."
   [{:keys [state] :as ev} code {:keys [ns-source] :as opts}]
-  (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
+  (let [;; REPL line (no ns-source): eval in the prompt namespace, and a
+        ;; successful reply's own :ns moves the prompt. Selection/Form
+        ;; (ns-source present): eval in the buffer's own namespace, or
+        ;; the prompt namespace when the buffer has none; the prompt
+        ;; never moves for these (never the buffer's ns form
+        ;; itself, only named as :ns).
+        ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
         do-request! (request-fn ev opts)
         msgs (do-request! {:op "eval" :code code :ns ns})]
     (if (clj/ns-not-found? msgs)
@@ -316,6 +325,12 @@
   ended, since a nil :interrupt-id would interrupt
   whatever runs next in the session."
   [{:keys [state] :as ev} {:keys [token conn session id on-output]}]
+  ;; The send and the fallback clock are separate futures,
+  ;; so a peer that stops reading (send! blocked on a full
+  ;; buffer) still gets the interrupt-failed detach on
+  ;; time. The send is skipped once this evaluation has
+  ;; ended, since a nil :interrupt-id would interrupt
+  ;; whatever runs next in the session.
   (future
     (try
       (when (identical? token (get-in @state [:running :token]))

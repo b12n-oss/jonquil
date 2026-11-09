@@ -149,6 +149,8 @@
   "Reset: a child that already ran something is replaced, so the Run starts
   from a clean jank."
   [{:keys [state] :as ev} {:keys [run? on-output]}]
+  ;; Reset: a child that already ran something is replaced, so the
+  ;; Run starts from a clean jank.
   (when (and run? (= :reset (:mode @state)) (:used? @state))
     (kill-child! ev)
     (connection/say! on-output :system (str jank/reset-message "\n"))))

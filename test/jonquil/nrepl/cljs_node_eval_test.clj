@@ -885,3 +885,138 @@
     (is (nil? (#'node/apropos-symbols form [(ret {:exception true})])) "an exception ret is no list")
     (is (nil? (#'node/apropos-symbols form [(ret {:form "(other)"})])) "another form's ret is skipped")
     (is (nil? (#'node/apropos-symbols form [])))))
+
+;; --- launch, discard and routing edges of the split steps -----------------
+
+(defn- launch-node
+  "A node evaluator on srv whose :launch hook is launch-fn; returns the
+  evaluator, the launch count and the kills."
+  [srv overrides launch-fn]
+  (let [launches (atom 0)
+        {:keys [ev kills]} (make-test-node srv (merge {:launch (fn [o] (swap! launches inc) (launch-fn o))}
+                                                      overrides))]
+    {:ev ev :launches launches :kills kills}))
+
+(deftest no-clojure-is-a-notice-and-launches-nothing-test
+  (let [srv (fake/start! {})
+        {:keys [ev launches]} (launch-node srv {:find-clojure (fn [] nil)} (fn [_] nil))]
+    (try
+      (is (= {:status :notice :text cljs-node/no-clojure-message}
+             (:result (run ev "(+ 1 1)" {:run? false}))))
+      (is (zero? @launches))
+      (finally (ev/stop! ev) (fake/stop! srv)))))
+
+(deftest ensure-launcher-throwing-is-a-start-failed-notice-test
+  (let [srv (fake/start! {})
+        {:keys [ev launches]} (launch-node srv {:ensure-launcher (fn [] (throw (ex-info "boom" {})))}
+                                           (fn [_] nil))]
+    (try
+      (let [{:keys [result out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= {:status :notice :text (cljs-node/start-failed-message "boom")} result))
+        (is (not (re-find #"Starting ClojureScript" (text-of out))) "no starting line"))
+      (is (zero? @launches))
+      (finally (ev/stop! ev) (fake/stop! srv)))))
+
+(deftest launch-error-is-a-start-failed-notice-test
+  (let [srv (fake/start! {})
+        {:keys [ev launches]} (launch-node srv {} (fn [_] {:error "bad"}))]
+    (try
+      (is (= {:status :notice :text (cljs-node/start-failed-message "bad")}
+             (:result (run ev "(+ 1 1)" {:run? false}))))
+      (is (= 1 @launches))
+      (is (nil? (:child @(:state ev))))
+      (finally (ev/stop! ev) (fake/stop! srv)))))
+
+(deftest launch-cancelled-is-interrupted-and-stores-nothing-test
+  (let [srv (fake/start! {})
+        {:keys [ev]} (launch-node srv {} (fn [_] {:error :cancelled}))]
+    (try
+      (is (= {:status :interrupted} (:result (run ev "(+ 1 1)" {:run? false}))))
+      (is (nil? (:child @(:state ev))))
+      (finally (ev/stop! ev) (fake/stop! srv)))))
+
+(deftest stop-during-launch-stores-then-kills-the-child-test
+  (let [srv (fake/start! {})
+        holder (promise)
+        {:keys [ev kills launches]}
+        (launch-node srv {} (fn [_]
+                              (ev/interrupt! @holder)
+                              {:port (:port srv) :pid -1 :log "/fake/log"}))]
+    (deliver holder ev)
+    (try
+      (is (= {:status :interrupted} (:result (run ev "(+ 1 1)" {:run? false}))))
+      (is (= 1 @launches))
+      (is (= 1 @kills) "the child the launch produced was killed")
+      (is (nil? (:child @(:state ev))))
+      (finally (ev/stop! ev) (fake/stop! srv)))))
+
+(deftest a-dead-connection-without-a-failed-setup-relaunches-quietly-test
+  (with-node {:slow-ms 5000} {}
+    (fn [srv {:keys [ev launches kills]}]
+      (let [done (promise)]
+        (ev/eval! ev "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (loop [n 0]
+          (when (and (< n 250) (not (some #(re-find #"slow" %) (fake/received-forms srv))))
+            (Thread/sleep 20) (recur (inc n))))
+        (doseq [s @(:conns srv)] (.close ^java.net.Socket s))
+        (is (= {:status :error :error-text node/exited-text} (deref done 5000 :timeout)))
+        (is (= 1 @launches))
+        (is (= 1 @kills)))
+      (let [{:keys [result out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= "2" (:printed result)))
+        (is (= 2 @launches))
+        (is (not (re-find #"setup failed" (text-of out))))))))
+
+(deftest a-second-closed-reaches-the-sink-once-test
+  (let [srv {:port 0}
+        {:keys [ev]} (make-test-node srv {})
+        closed? (atom false)
+        calls (atom 0)]
+    (swap! (:state ev) assoc :sink (fn [_] (swap! calls inc)))
+    (#'node/dispatch-reply! ev closed? {:tag :closed})
+    (#'node/dispatch-reply! ev closed? {:tag :closed})
+    (is (= 1 @calls))
+    (is (true? @closed?))))
+
+(deftest route-reply-notifies-when-the-drained-setup-answers-test
+  (let [ev (node/make-cljs-node
+            {:profile dialect/cljs :runtime :launch :project-dir nil :cljs-target :browser} {})
+        notes (atom [])]
+    (connection/add-listener! ev (fn [connected] (swap! notes conj connected)))
+    (swap! (:state ev) assoc :drain cljs-node/setup-form :setup-pending true :sink nil)
+    (#'node/dispatch-reply! ev (atom false) {:tag :ret :form cljs-node/setup-form :val "nil"})
+    (is (= [true] @notes))
+    (let [s @(:state ev)]
+      (is (nil? (:setup-pending s)))
+      (is (true? (:ready? s)))
+      (is (nil? (:drain s))))))
+
+(deftest ready-child-stopping-after-a-live-run-never-reconnects-test
+  (with-node {} {}
+    (fn [srv {:keys [ev launches kills]}]
+      (is (= "2" (:printed (:result (run ev "(+ 1 1)" {:run? false})))))
+      (let [before (count (fake/received-forms srv))
+            done (promise) connects (atom 0) real prepl/connect!]
+        (is (= 0 @kills))
+        (swap! (:state ev) assoc :ready? false :stopped? true)
+        (with-redefs-fn {#'prepl/connect! (fn [h p f] (swap! connects inc) (real h p f))}
+          (fn []
+            (#'node/run-worker! ev "(+ 5 5)" {:run? false :on-output (fn [_ _])
+                                              :on-complete (fn [r] (deliver done r))})))
+        (is (= {:status :interrupted} (deref done 1000 :timeout)))
+        (is (= 1 @kills))
+        (is (= 1 @launches))
+        (is (= before (count (fake/received-forms srv))) "no new setup form")
+        (is (zero? @connects))))))
+
+(deftest fetch-syms-catch-swallows-a-throwing-exchange-test
+  (with-node {:apropos-val "(cljs.user/twice)"} {}
+    (fn [srv {:keys [ev]}]
+      (is (= :ok (:status (:result (run ev "(def a 1)" {:run? true})))))
+      (swap! (:state ev) assoc :n "x")
+      (is (nil? (#'node/fetch-syms! ev)))
+      (let [s @(:state ev)]
+        (is (false? (:helping s)))
+        (is (nil? (:analyzer-stale? s)))
+        (is (nil? (:analyzer-syms s))))
+      (is (zero? (apropos-sends srv))))))

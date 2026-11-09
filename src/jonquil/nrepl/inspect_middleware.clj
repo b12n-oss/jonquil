@@ -91,6 +91,7 @@
 (defn- data-or-error
   "done-data, but a throw is an \"error\", never a reply without its data."
   [f]
+  ;; a throw is an "error", never a reply without its data
   (try
     (done-data f)
     (catch Throwable e {"status" ["done"] "error" (throw-message e)})))
@@ -125,6 +126,7 @@
 
 (defn- inspect-local-reply [state request]
   (let [g (fn [k] (get request k))
+        ;; a paused break's local first (Break on error), then the last error's
         paused (break-middleware/paused-local-for (g "session") (g "error-id") (as-long (g "frame")) (g "local"))
         v (if-let [e (when (= ::debugger/not-paused paused) *e)]
             (if (debugger/stale? e (g "error-id"))
@@ -214,7 +216,6 @@
     "jonquil-frames" (frames-reply)
     "jonquil-line-counts" (line-counts-reply request)
     "jonquil-debug-mode" (debug-mode-reply)
-    ;; a paused break's local first (Break on error), then the last error's
     "inspect-local" (inspect-local-reply state request)
     "jonquil-frame-eval" (frame-eval-reply request)
     "jonquil-trace" (trace-reply request)

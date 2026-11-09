@@ -210,7 +210,7 @@
 (defn- launch-and-store!
   "Launches the child with the ensured launcher: nil once stored, else the
   result to finish the evaluation with."
-  [ev on-output clojure launcher]
+  [ev {:keys [on-output clojure launcher]}]
   (connection/say! on-output :system (str (cljs-node/starting-message clojure) "\n"))
   (let [[started port-changed?] (launch-child! ev clojure launcher)]
     (cond
@@ -227,7 +227,7 @@
     (let [launcher (try ((:ensure-launcher hooks)) (catch Throwable e e))]
       (if (instance? Throwable launcher)
         {:status :notice :text (cljs-node/start-failed-message (ex-message launcher))}
-        (launch-and-store! ev on-output clojure launcher)))
+        (launch-and-store! ev {:on-output on-output :clojure clojure :launcher launcher})))
     {:status :notice :text cljs-node/no-clojure-message}))
 
 (defn- ensure-child!

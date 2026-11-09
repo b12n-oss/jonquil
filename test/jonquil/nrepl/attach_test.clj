@@ -556,3 +556,40 @@
         (swap! (:state e) assoc-in [:running :stop-requested?] true)
         (is (= {:status :interrupted} (deref done 2000 :timeout))
             "Stop landing during the asleep probes still ends the evaluation as :interrupted, not a not-awake notice")))))
+
+(deftest stop-after-clone-closes-and-publishes-nothing-test
+  ;; finish-handshake!'s own (stop? ev) after the clone: the second call to
+  ;; the dialect's stop-requested? answers true, so the handshake that just
+  ;; cloned a session closes its connection and publishes no :conn.
+  (with-app {}
+    (fn [_srv dir _]
+      (let [e (make dir) calls (atom 0) conns (atom [])
+            real client/connect-to]
+        (with-redefs [client/connect-to (fn [h p] (let [c (real h p)] (swap! conns conj c) c))
+                      attach/stop-requested? (fn [_] (= 2 (swap! calls inc)))]
+          (let [[r _out] (run e "1" {:run? false})]
+            (is (= {:status :interrupted} r))))
+        (is (= 1 (count @conns)))
+        (is (not (client/open? (first @conns))) "the connection was closed")
+        (is (not (attach/connected? e)))
+        (is (nil? (:conn @(:state e))) "nothing was published as the live conn")))))
+
+(deftest stop-before-the-connecting-publish-is-interrupted-test
+  ;; publish-connecting! loses when Stop landed between the socket opening
+  ;; and the :connecting swap: the socket is closed, describe is never sent.
+  (with-app {}
+    (fn [srv dir _]
+      (let [e (make dir) conns (atom [])
+            real client/connect-to]
+        (with-redefs [client/connect-to (fn [h p]
+                                          (let [c (real h p)]
+                                            (swap! conns conj c)
+                                            (swap! (:state e) assoc-in [:running :stop-requested?] true)
+                                            c))
+                      attach/stop-requested? (fn [_] false)]
+          (let [[r _out] (run e "1" {:run? false})]
+            (is (= {:status :interrupted} r))))
+        (is (= 1 (count @conns)))
+        (is (not (client/open? (first @conns))) "the connection was closed")
+        (is (not (attach/connected? e)))
+        (is (not (some #{"describe"} (fake/ops-seen srv))) "describe was never sent")))))
