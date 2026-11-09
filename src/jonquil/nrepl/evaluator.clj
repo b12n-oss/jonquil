@@ -491,8 +491,91 @@
     (when (and on-output (seq out)) (on-output :out out))
     result))
 
+(defn- announce-runtime!
+  "The console notices before a worker's evaluation: a restarted runtime,
+  and a read from stdin on a child without the stdin op."
+  [{:keys [ev code on-output had-runtime? was-live?]}]
+  (when (and on-output had-runtime? (not was-live?))
+    (on-output :system "; The Jolt runtime had exited, so a new one was started.\n"))
+  (when (and on-output (ops/reads-stdin? code) (not (contains? (:ops (runtime ev)) "stdin")))
+    (on-output :system stdin-notice)))
+
+(defn- reset-created!
+  "A Run in :reset mode clears what the owner and the REPL created."
+  [{:keys [ev conn session owner opts]}]
+  (when (and (:run? opts) (= :reset (:mode @(:state ev))) (not (false? (:reset? opts))))
+    (let [created (:created @(:state ev))]
+      (eval-sync! conn session (ops/reset-code (concat (get created owner) (get created :repl))))
+      (swap! (:state ev) update :created dissoc owner :repl))))
+
+(defn- clear-line-counts!
+  ;; LM4: a Run counts its own lines alone, cleared on this worker
+  ;; before the Run goes out, so the two can't race
+  [{:keys [ev conn session opts]}]
+  (when (and (:run? opts) (:clear-line-counts? opts) (contains? (:ops (runtime ev)) "jonquil-line-counts"))
+    (try (client/request-sync conn {:op "jonquil-line-counts" :action "clear" :session session} request-timeout-ms)
+         (catch Throwable _ nil))))
+
+(defn- send-and-wait
+  "The replies to the Run's or entry's request. A :quiet eval keeps :out
+  back, so the token line quiet-code prints never reaches on-output."
+  [{:keys [ev code quiet-out] {:keys [on-output] :as opts} :opts}]
+  (if-let [token (:quiet opts)]
+    @(send-main! ev (ops/quiet-code code token (some-> (:ns-source opts) clj/buffer-ns))
+                 (assoc opts :on-output (fn [k text]
+                                          (if (= :out k)
+                                            (swap! quiet-out conj text)
+                                            (on-output k text)))))
+    @(send-main! ev code opts)))
+
+(defn- evaluation-result
+  "The finished evaluation's result map: its status, the quiet reply, the
+  kept-value :ref and, for a Run, the prompt's ns."
+  [{:keys [ev code msgs quiet-out] {:keys [run? on-output] :as opts} :opts}]
+  (let [r (cond-> (ops/eval-result msgs (stop-requested? ev))
+            (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output))
+        ;; LM1: the console's line keeps a handle to this value
+        ref (when (and (not (:quiet opts)) (#{:ok :error} (:status r)))
+              (keep-result! ev (:status r)))
+        r (cond-> r ref (assoc :ref ref))]
+    ;; a Run's prompt is the buffer's ns, as the
+    ;; JVM and jank evaluators do: a plain server
+    ;; on a Jolt with #1460 answers load-file
+    ;; with the ns it started in
+    (if (and run? (not (:quiet opts)))
+      (assoc r :ns (clj/prompt-after-run code r (:ns r)))
+      r)))
+
+(defn- evaluate-and-finish!
+  "Sends the evaluation between its two namespace snapshots, records what
+  it created for the owner, and finishes."
+  [{:keys [ev code opts conn session owner]}]
+  (let [before (ns-snapshot conn session)
+        quiet-out (atom [])
+        msgs (send-and-wait {:ev ev :code code :opts opts :quiet-out quiet-out})
+        after (ns-snapshot conn session)]
+    (when (and before after)
+      (swap! (:state ev) update-in [:created owner] (fnil into #{})
+             (session/namespaces-created (first before) (first after) (second after))))
+    (finish! ev opts (evaluation-result {:ev ev :code code :opts opts :msgs msgs :quiet-out quiet-out}))))
+
+(defn- run-started!
+  "The worker's path once the runtime is up and no Stop came before the
+  request."
+  [{:keys [ev opts] :as ctx}]
+  (announce-runtime! (assoc ctx :on-output (:on-output opts)))
+  (auto-require! ev (:on-output opts))
+  (let [{:keys [conn session]} (runtime ev)
+        ctx (assoc ctx :conn conn :session session
+                   :owner (:owner opts (if (:run? opts) :run :repl)))]
+    (reset-created! ctx)
+    (clear-line-counts! ctx)
+    (if (stop-requested? ev)
+      (finish! ev opts {:status :interrupted})
+      (evaluate-and-finish! ctx))))
+
 (defn- run-worker!
-  [ev code {:keys [run? on-output on-status-change] :as opts}]
+  [ev code {:keys [on-status-change] :as opts}]
   (try
     (when on-status-change (on-status-change :running))
     (let [had-runtime? (some? (runtime ev))
@@ -502,54 +585,8 @@
         problem (finish! ev opts {:status :error :error-text problem})
         ;; Stop before the request went out: nothing to interrupt.
         (stop-requested? ev) (finish! ev opts {:status :interrupted})
-        :else
-        (do
-          (when (and on-output had-runtime? (not was-live?))
-            (on-output :system "; The Jolt runtime had exited, so a new one was started.\n"))
-          (when (and on-output (ops/reads-stdin? code) (not (contains? (:ops (runtime ev)) "stdin")))
-            (on-output :system stdin-notice))
-          (auto-require! ev on-output)
-          (let [{:keys [conn session]} (runtime ev)
-                owner (:owner opts (if run? :run :repl))]
-            (when (and run? (= :reset (:mode @(:state ev))) (not (false? (:reset? opts))))
-              (let [created (:created @(:state ev))]
-                (eval-sync! conn session (ops/reset-code (concat (get created owner) (get created :repl))))
-                (swap! (:state ev) update :created dissoc owner :repl)))
-            ;; LM4: a Run counts its own lines alone, cleared on this worker
-            ;; before the Run goes out, so the two can't race
-            (when (and run? (:clear-line-counts? opts) (contains? (:ops (runtime ev)) "jonquil-line-counts"))
-              (try (client/request-sync conn {:op "jonquil-line-counts" :action "clear" :session session} request-timeout-ms)
-                   (catch Throwable _ nil)))
-            (if (stop-requested? ev)
-              (finish! ev opts {:status :interrupted})
-              (let [before (ns-snapshot conn session)
-                    quiet-out (atom [])
-                    msgs (if-let [token (:quiet opts)]
-                           ;; keep :out back, so the token line
-                           ;; quiet-code prints never reaches on-output
-                           @(send-main! ev (ops/quiet-code code token (some-> (:ns-source opts) clj/buffer-ns))
-                                        (assoc opts :on-output (fn [k text]
-                                                                 (if (= :out k)
-                                                                   (swap! quiet-out conj text)
-                                                                   (on-output k text)))))
-                           @(send-main! ev code opts))
-                    after (ns-snapshot conn session)]
-                (when (and before after)
-                  (swap! (:state ev) update-in [:created owner] (fnil into #{})
-                         (session/namespaces-created (first before) (first after) (second after))))
-                (finish! ev opts (let [r (cond-> (ops/eval-result msgs (stop-requested? ev))
-                                           (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output))
-                                       ;; LM1: the console's line keeps a handle to this value
-                                       ref (when (and (not (:quiet opts)) (#{:ok :error} (:status r)))
-                                             (keep-result! ev (:status r)))
-                                       r (cond-> r ref (assoc :ref ref))]
-                                   ;; a Run's prompt is the buffer's ns, as the
-                                   ;; JVM and jank evaluators do: a plain server
-                                   ;; on a Jolt with #1460 answers load-file
-                                   ;; with the ns it started in
-                                   (if (and run? (not (:quiet opts)))
-                                     (assoc r :ns (clj/prompt-after-run code r (:ns r)))
-                                     r)))))))))
+        :else (run-started! {:ev ev :code code :opts opts
+                             :had-runtime? had-runtime? :was-live? was-live?})))
     (catch Throwable e
       (finish! ev opts (if (stop-requested? ev)
                          {:status :interrupted}
@@ -569,6 +606,42 @@
       (on-output :error (str "; Stop couldn't restart the Jolt runtime: " problem "\n")))
     (when on-output
       (on-output :system "; Stop restarted the Jolt runtime, so its definitions are gone.\n"))))
+
+(defn- interrupt-frame-eval!
+  "Stop also stops a form evaluated in a frame: sent whether or not one
+  runs (the window may have stopped waiting for it), harmless when none"
+  [ev]
+  (when-let [{:keys [conn session ops]} (runtime ev)]
+    (when (contains? ops "jonquil-frame-interrupt")
+      (future (try (client/request-sync conn {:op "jonquil-frame-interrupt" :session session} 2000)
+                   (catch Throwable _ nil))))))
+
+(defn- wait-until-ended
+  "True once nothing is running, false after interrupt-timeout-ms."
+  [state]
+  (loop [n 0]
+    (cond (not (:running @state)) true
+          (>= (* n 20) interrupt-timeout-ms) false
+          :else (do (Thread/sleep 20) (recur (inc n))))))
+
+(defn- interrupt-or-restart!
+  "Asks the child to interrupt request id; restarts the child when it
+  doesn't answer or the evaluation doesn't end in time."
+  [{:keys [state] :as ev} id on-output]
+  (try
+    (let [{:keys [conn session ops]} (runtime ev)
+          answered? (and (contains? ops "interrupt")
+                         (vector? (client/request-sync conn {:op "interrupt" :session session :interrupt-id id}
+                                                       interrupt-timeout-ms)))
+          ended? (and answered? (wait-until-ended state))]
+      (when-not ended? (restart-for-stop! ev on-output)))
+    ;; A throw here would be stored in the future and lost.
+    ;; Report it the same way a failed restart is, and never let
+    ;; it escape.
+    (catch Throwable e
+      (when on-output
+        (try (on-output :error (str "; Stop failed: " (ex-message e) "\n"))
+             (catch Throwable _ nil))))))
 
 (defn frames-reply
   "The child's jonquil-frames responses as the Frames panel's data, or
@@ -655,12 +728,7 @@
         (do (future (run-worker! this code opts))
             nil))))
   (interrupt! [this]
-    ;; Stop also stops a form evaluated in a frame: sent whether or not one
-    ;; runs (the window may have stopped waiting for it), harmless when none
-    (when-let [{:keys [conn session ops]} (runtime this)]
-      (when (contains? ops "jonquil-frame-interrupt")
-        (future (try (client/request-sync conn {:op "jonquil-frame-interrupt" :session session} 2000)
-                     (catch Throwable _ nil)))))
+    (interrupt-frame-eval! this)
     ;; One swap, keyed by identity of the exact :running map read here
     ;; (separate swaps against a separately-read :running let a finish!
     ;; landing between the read and a write recreate {:running {...}} out
@@ -680,25 +748,7 @@
         ;; the flag and finishes as :interrupted without sending it, and
         ;; send-main! re-checks it once the id lands.
         (when (and id (identical? running (:running old)) (not (:restart-triggered? running)))
-          (future
-            (try
-              (let [{:keys [conn session ops]} (runtime this)
-                    answered? (and (contains? ops "interrupt")
-                                   (vector? (client/request-sync conn {:op "interrupt" :session session :interrupt-id id}
-                                                                 interrupt-timeout-ms)))
-                    ended? (and answered?
-                                (loop [n 0]
-                                  (cond (not (:running @state)) true
-                                        (>= (* n 20) interrupt-timeout-ms) false
-                                        :else (do (Thread/sleep 20) (recur (inc n))))))]
-                (when-not ended? (restart-for-stop! this (:on-output opts))))
-              ;; A throw here would be stored in the future and lost.
-              ;; Report it the same way a failed restart is, and never let
-              ;; it escape.
-              (catch Throwable e
-                (when-let [on-output (:on-output opts)]
-                  (try (on-output :error (str "; Stop failed: " (ex-message e) "\n"))
-                       (catch Throwable _ nil)))))))))
+          (future (interrupt-or-restart! this id (:on-output opts))))))
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] (boolean (get-in @state [:running :waiting?])))
