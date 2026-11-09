@@ -92,10 +92,33 @@
         (err (str id "'s history can't be read: " error))
         (f hdir entries)))))
 
+(defn- version-text
+  "read-text's answer for one version of id."
+  [hdir entries id version]
+  (if-let [src (history/version-source hdir version)]
+    (ok (str id " v" version ": "
+             (if-let [s (history/version-status entries version)] (name s) "not in its history")
+             "\n\n" src))
+    (err (str id " has no v" version ". Call jonquil_plugin_read with just the id to see its history."))))
+
+(defn- live-text
+  "read-text's answer for id's live source and history."
+  [{:keys [plugins-dir registry id]} hdir entries]
+  (let [loaded (get-in registry [:plugins (keyword id)])
+        live-n (:n (history/latest-accepted entries))
+        src (or (:source loaded) (when live-n (history/version-source hdir live-n)))]
+    (if (and (empty? entries) (not loaded) (not (.isFile (io/file plugins-dir (str id ".clj")))))
+      (err (str "There's no plugin " id ". Call jonquil_plugins_list to see them."))
+      (ok (str/join "\n" (concat [(str id ": " (if live-n (str "live v" live-n) "no live version"))]
+                                 (when src ["" src])
+                                 (when (seq entries)
+                                   (into ["" "History:"]
+                                         (map #(plugin-list/history-line entries %) (distinct (map :n entries)))))))))))
+
 (defn read-text
   "jonquil_plugin_read: id's live source and history, or with :version
   that version's status and source."
-  [{:keys [plugins-dir registry id version] :as state}]
+  [{:keys [id version] :as state}]
   (guarded
    "reading the plugin"
    (fn []
@@ -103,21 +126,24 @@
        state
        (fn [hdir entries]
          (if version
-           (if-let [src (history/version-source hdir version)]
-             (ok (str id " v" version ": "
-                      (if-let [s (history/version-status entries version)] (name s) "not in its history")
-                      "\n\n" src))
-             (err (str id " has no v" version ". Call jonquil_plugin_read with just the id to see its history.")))
-           (let [loaded (get-in registry [:plugins (keyword id)])
-                 live-n (:n (history/latest-accepted entries))
-                 src (or (:source loaded) (when live-n (history/version-source hdir live-n)))]
-             (if (and (empty? entries) (not loaded) (not (.isFile (io/file plugins-dir (str id ".clj")))))
-               (err (str "There's no plugin " id ". Call jonquil_plugins_list to see them."))
-               (ok (str/join "\n" (concat [(str id ": " (if live-n (str "live v" live-n) "no live version"))]
-                                          (when src ["" src])
-                                          (when (seq entries)
-                                            (into ["" "History:"]
-                                                  (map #(plugin-list/history-line entries %) (distinct (map :n entries))))))))))))))))
+           (version-text hdir entries id version)
+           (live-text state hdir entries)))))))
+
+(defn- status-follow-up
+  "The sentence after a proposal's status, by status st: e1 is its latest
+  entry and es all its entries."
+  [st e1 es]
+  (case st
+    :pending " The user decides in the window. Call jonquil_plugin_status again later."
+    :rejected (str (if (:note e1) (str " The user's note: " (:note e1)) " The user left no note.")
+                   " Call jonquil_plugin_propose with a new version to try again.")
+    :rejected-by-checks (str " Problems: " (str/join "; " (:problems (first es))) "."
+                             ;; the kept log, while it's there
+                             (when-let [log (:check-log (first es))]
+                               (when (.isFile (io/file log)) (str " The check's log: " log ".")))
+                             " Fix them and call jonquil_plugin_propose again.")
+    :superseded " A newer proposal replaced it."
+    ""))
 
 (defn status-text
   "jonquil_plugin_status: version n's status (default: id's latest agent
@@ -138,18 +164,7 @@
              :else
              (let [e1 (last es)
                    st (:status e1)]
-               (ok (str id " v" n ": " (some-> st name) "."
-                        (case st
-                          :pending " The user decides in the window. Call jonquil_plugin_status again later."
-                          :rejected (str (if (:note e1) (str " The user's note: " (:note e1)) " The user left no note.")
-                                         " Call jonquil_plugin_propose with a new version to try again.")
-                          :rejected-by-checks (str " Problems: " (str/join "; " (:problems (first es))) "."
-                                                   ;; the kept log, while it's there
-                                                   (when-let [log (:check-log (first es))]
-                                                     (when (.isFile (io/file log)) (str " The check's log: " log ".")))
-                                                   " Fix them and call jonquil_plugin_propose again.")
-                          :superseded " A newer proposal replaced it."
-                          "")))))))))))
+               (ok (str id " v" n ": " (some-> st name) "." (status-follow-up st e1 es)))))))))))
 
 ;; --- propose -----------------------------------------------------------------
 

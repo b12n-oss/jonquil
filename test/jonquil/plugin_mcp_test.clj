@@ -149,6 +149,23 @@
   (is (= {:text "There's no plugin zz. Call jonquil_plugins_list to see them." :error? true}
          (pm/read-text (assoc (state (dir)) :id "zz")))))
 
+(deftest read-text-file-without-history-test
+  ;; a plugin file on disk with no history and not loaded is not "no plugin"
+  (let [d (dir)]
+    (spit (io/file d "zz.clj") "(zz)")
+    (is (= {:text "zz: no live version" :error? false}
+           (pm/read-text (assoc (state d) :id "zz"))))))
+
+(deftest read-text-version-not-in-history-test
+  ;; a version whose source is kept but whose entry is gone says so
+  (let [d (histories)
+        hdir (history/history-dir d "a")
+        f (io/file hdir "history.edn")
+        entries (:entries (history/read-entries hdir))]
+    (spit f (pr-str (vec (remove #(= 2 (:n %)) entries))))
+    (is (= {:text "a v2: not in its history\n\n(a2)" :error? false}
+           (pm/read-text (assoc (state d) :id "a" :version 2))))))
+
 (defn- status-of [d id & [n]] (pm/status-text (assoc (state d) :id id :n n)))
 
 (deftest status-text-test

@@ -357,6 +357,19 @@
       (is (zero? @turns))
       (finally (reset! reg/effects before)))))
 
+(deftest mcp-tools-window-failure-frees-the-tool-test
+  ;; a :buffer tool whose tab turn throws never started, so the tool is
+  ;; free for the next call and the error is the throwable's message
+  (let [before @reg/effects
+        r (tool-plugin #{:buffer} echo-row)]
+    (try
+      (reset! reg/effects {:active-tab-turn (fn [] (throw (ex-info "The window did not respond." {})))})
+      (is (= {:text "plugin fmt: The window did not respond." :error? true}
+              (call-tool r "plugin_fmt_echo" {"text" "a"})))
+      (is (= {:text "plugin fmt: The window did not respond." :error? true}
+              (call-tool r "plugin_fmt_echo" {"text" "a"})) "not stuck as still running")
+      (finally (reset! reg/effects before)))))
+
 ;; --- watch-tools! --------------------------------------------
 
 (deftest watch-tools-fires-on-tool-change
