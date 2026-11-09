@@ -5,7 +5,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.window :as gw]
+            [jonquil.gtk.window.run :as win-run]
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
             [jonquil.mcp.tools :as tools]
@@ -282,7 +282,7 @@
         got (atom nil)
         base {:on-output (fn [_ _] nil)
               :on-complete (fn [_] (throw (ex-info "malformed" {})))}
-        opts (#'gw/notifying-opts base out (fn [m] (reset! got m)))]
+        opts (#'win-run/notifying-opts base out (fn [m] (reset! got m)))]
     ((:on-output opts) :out "hi")
     (is (thrown? Throwable ((:on-complete opts) {:status :weird})))
     (is (= {:done {:result {:status :weird} :output "hi"}} @got))))

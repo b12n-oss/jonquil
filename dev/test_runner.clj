@@ -121,6 +121,7 @@
     jonquil.gtk.window.runtime-test
     jonquil.gtk.window.session-test
     jonquil.gtk.window.quit-test
+    jonquil.gtk.window.run-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.gtk.processes-pane-test

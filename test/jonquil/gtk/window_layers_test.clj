@@ -10,7 +10,8 @@
   "In load order: a namespace may require only those of earlier layers."
   '[[jonquil.gtk.window.status jonquil.gtk.window.alerts jonquil.gtk.window.plugin-agent jonquil.gtk.window.session]
     [jonquil.gtk.window.files jonquil.gtk.window.right-slot jonquil.gtk.window.theme]
-    [jonquil.gtk.window.runtime jonquil.gtk.window.quit]])
+    [jonquil.gtk.window.runtime jonquil.gtk.window.quit]
+    [jonquil.gtk.window.run]])
 
 (defn- ns-file [sym]
   (str "src/" (str/replace (str/replace (str sym) "-" "_") "." "/") ".clj"))
