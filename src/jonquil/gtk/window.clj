@@ -4397,9 +4397,10 @@
                         (set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
                     (catch :default e
                       (set-status! status-label (str "Couldn't open " p ": " (ex-message e))))))))
-      ;; The tree's root, starting width and visibility (saved, else shown
-      ;; only for a directory launch), Open Folder..., and the toggle's
-      ;; handler -- the one place that shows, hides and saves.
+      ;; The tree's root, Open Folder..., then the file-tree part's
+      ;; :tree-start!: the starting width and visibility (saved, else shown
+      ;; only for a directory launch) and the toggle's handler, the one
+      ;; place that shows, hides and saves.
       (file-tree-pane/show-model! tree-pane (ft/load-model (ft/root-for {:dir dir :file file :cwd cwd})))
       (reset! *open-folder (fn [] (file-dialog! :folder win
                                                 (fn [r] (try (folder-result! r)

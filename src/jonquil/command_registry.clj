@@ -24,7 +24,7 @@
    :file/save-as {:doc "Save the buffer under a new name." :scope :window :run (call :save-as-fn)}
    :file/save {:doc "Save the buffer." :scope :window :run (call :save-fn)}
    :tab/close {:doc "Close the tab (the window, on the last one)." :scope :window :run (call :close-fn)}
-    :run/selection {:doc "Run the selection, or the form at the caret." :scope :window
+   :run/selection {:doc "Run the selection, or the form at the caret." :scope :window
                    :run (call :run-selection-fn)}
    :console/clear-last-output {:doc "Clear the last entry's output." :scope :window
                                :run (call :clear-last-fn)}
