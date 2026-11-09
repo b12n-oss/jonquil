@@ -1,8 +1,10 @@
 (ns jonquil.gtk.window.run-test
   (:require [clojure.test :refer [deftest is]]
             [jonquil.changed :as changed]
+            [jonquil.commands :as commands]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.window.run :as win-run]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.plugin-hooks :as plugin-hooks]
@@ -245,3 +247,135 @@
       ((:on-complete (mk (atom nil))) {:status :ok})
       (is (nil? (:root (second (last @log)))))
       (is (= :recorder (first (last @log)))))))
+
+(defn- run-env
+  "Runs f with the console, status, plugin and tab seams stubbed to log into
+  log. opts: busy? (the engine is evaluating), warning (what eval! answers),
+  stop-line (what :before-run answers), runnable? (default true). Answers
+  the atom holding eval!'s last opts."
+  [log {:keys [busy? warning stop-line runnable?] :or {runnable? true}} f]
+  (let [seen (atom nil)
+        e #_{:clj-kondo/ignore [:missing-protocol-method]}
+        (reify ev/Evaluator
+          (evaluating? [_] busy?)
+          (prompt-ns [_] 'user)
+          (eval! [_ code opts]
+            (swap! log conj [:eval code])
+            (reset! seen opts)
+            warning))]
+    (with-redefs [editor/editor-text :text
+                  cview/append! (fn [_ kind text] (swap! log conj [:append kind text]))
+                  cview/mark-entry-start! (fn [_] (swap! log conj [:mark]))
+                  cview/note-run-start! (fn [_] (swap! log conj [:note-start]))
+                  win-status/set-status! (fn [_ text] (swap! log conj [:status text]))
+                  plugin-hooks/before-run! (fn [m] (swap! log conj [:before-run m]) stop-line)
+                  tabs/runnable-here? (fn [_ _] runnable?)
+                  tabs/refusal-message (fn [_] "; refused\n")]
+      (f e seen))))
+
+(defn- run-tab [text ed-extra]
+  {:id 7 :ed (merge {:text text} ed-extra) :path (atom "/r/a.clj") :project (atom nil)})
+
+(defn- run-cv []
+  {:replay-tab* (atom nil) :failure* (atom nil) :recorder* (atom nil) :replay-root* (atom nil)})
+
+(defn- run-ctx [tab cv e]
+  {:tab tab :cv cv :ev* (atom e) :status-label ::l :sel* (atom nil)})
+
+(deftest do-run-refuses-a-foreign-tab-test
+  (is (= '([ctx] [{:keys [tab cv ev* status-label] :as ctx} notify])
+         (:arglists (meta #'win-run/do-run!))))
+  (let [log (atom [])
+        got (atom [])
+        t "(+ 1 2)"]
+    (run-env log {:runnable? false}
+             (fn [e _]
+               (let [ret (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) #(swap! got conj %))]
+                 (is (= "" (ret)))
+                 (is (= [{:refused "; refused\n"}] @got))
+                 (is (= [[:append :system "; refused\n"]] @log)))
+               (reset! log [])
+               (is (nil? (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) nil)))))))
+
+(deftest do-run-while-busy-says-the-warning-test
+  (let [t "(+ 1 2)"
+        log (atom [])
+        got (atom [])]
+    (run-env log {:busy? true :warning "; busy\n"}
+             (fn [e _]
+               (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) #(swap! got conj %))
+               (is (= [[:eval t] [:append :system "; busy\n"]] @log))
+               (is (= [{:busy "; busy\n"}] @got))))
+    (let [log (atom [])
+          got (atom [])]
+      (run-env log {:busy? true :warning nil}
+               (fn [e _]
+                 (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) #(swap! got conj %))
+                 (is (= [[:eval t]] @log))
+                 (is (= [] @got)))))))
+
+(deftest do-run-bracket-problem-test
+  (let [t "(+ 1"
+        log (atom [])
+        got (atom [])
+        problem (commands/pre-run-problem t)]
+    (run-env log {}
+             (fn [e _]
+               (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) #(swap! got conj %))
+               (is (= [[:mark]
+                       [:append :system (tabs/run-banner "/r/a.clj")]
+                       [:append :error (str problem "\n")]
+                       [:status "Ready"]]
+                      @log))
+               (is (= [{:problem problem}] @got))))))
+
+(deftest do-run-plugin-stop-test
+  (let [t "(+ 1 2)"
+        log (atom [])
+        got (atom [])]
+    (run-env log {:stop-line "held"}
+             (fn [e _]
+               (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) #(swap! got conj %))
+               (is (= [[:before-run {:kind :run :text t :path "/r/a.clj" :tab 7}]
+                       [:append :system "; held\n"]
+                       [:status "; held"]]
+                      @log))
+               (is (= [{:refused "held"}] @got))))))
+
+(deftest do-run-starts-and-hands-over-its-opts-test
+  (let [t "(+ 1 2)"
+        log (atom [])
+        got (atom [])]
+    (run-env log {}
+             (fn [e seen]
+               (let [ret (win-run/do-run! (run-ctx (run-tab t nil) (run-cv) e) #(swap! got conj %))
+                     o @seen]
+                 (is (= [[:before-run {:kind :run :text t :path "/r/a.clj" :tab 7}]
+                         [:mark]
+                         [:append :system (tabs/run-banner "/r/a.clj")]
+                         [:note-start]
+                         [:eval t]]
+                        @log))
+                 (is (= {:run? true :path "/r/a.clj" :owner 7}
+                        (select-keys o [:run? :path :owner :reset? :clear-line-counts?])))
+                 (is (not-any? #(contains? o %)
+                               [:hook-source :hook-tab :hook-code :failure* :changed
+                                :recorder :replay-root :record]))
+                 ((:on-output o) :out "x")
+                 (is (= "x" (ret)))))))
+  (let [log (atom [])]
+    (run-env log {}
+             (fn [e seen]
+               (is (nil? (win-run/do-run! (run-ctx (run-tab "(f)" nil) (run-cv) e))))
+               (is (= 7 (:owner @seen)))))))
+
+(deftest do-run-opts-follow-the-replay-tab-and-counting-test
+  (let [log (atom [])
+        cv (assoc (run-cv) :replay-tab* (atom {:id 7}))
+        tab (run-tab "(f)" {:changed {:counting? (atom (constantly true))}})]
+    (run-env log {}
+             (fn [e seen]
+               (win-run/do-run! (run-ctx tab cv e) nil)
+               (is (= {:run? true :path "/r/a.clj" :owner :repl :reset? false
+                       :clear-line-counts? true}
+                      (select-keys @seen [:run? :path :owner :reset? :clear-line-counts?])))))))

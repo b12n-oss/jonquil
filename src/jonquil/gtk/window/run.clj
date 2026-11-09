@@ -4,7 +4,8 @@
   failure's retry, and the MCP server's notifying Run, eval and Run Selection,
   with the opts every evaluation shares (make-eval-opts) and the hooks chained
   onto them (hooked-opts). Internal to the window, as jonquil.gtk.window.status
-  is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in its
+  is. Moved out of jonquil.gtk.window unchanged, then hooked-opts' completion
+  and do-run!'s branches split into named steps; the lock caller rule in its
   docstring applies here. build makes activate!'s Run, Stop, Run Selection and
   Run Changed fns, in its order."
   (:require [clojure.string :as str]
@@ -231,6 +232,64 @@
   [ev]
   (if (instance? jonquil.session.InProcess ev) "user" (str (ev/prompt-ns ev))))
 
+(defn- say-busy!
+  "A Run's busy refusal: when ev/eval! answered warning instead of starting,
+  it goes on the console and, with notify, {:busy warning} reports it."
+  [cv notify warning]
+  (when warning
+    (cview/append! cv :system warning)
+    (when notify (notify {:busy warning}))))
+
+(defn- run-opts
+  "do-run!'s opts for ev/eval!, built as the Run is submitted: make-eval-opts'
+  map for tab's Run, with the replay tab's and LM4's changes, notifying-opts
+  when notify is given (collecting into out), then hooked-opts with the Run's
+  hook keys and, for a Run that isn't MCP's, its replay record."
+  [{:keys [tab cv ev* status-label]} notify out]
+  (let [{ed :ed path-atom :path id :id} tab
+        base (cond-> (assoc (make-eval-opts ed cv ev* status-label true)
+                            :run? true :path @path-atom :owner id)
+                     ;; LM7: the replay tab's Run adds to the session, and
+                     ;; what it defines is the REPL's, as if typed there
+               (= id (:id @(:replay-tab* cv))) (assoc :reset? false :owner :repl)
+                     ;; LM4: a Run counts its own lines alone
+               (some-> (:changed ed) :counting? deref (apply []))
+               (assoc :clear-line-counts? true))]
+    (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
+                        :hook-source :run :hook-tab id
+                        :hook-code (editor/editor-text ed) :failure* (:failure* cv)
+                        :changed (:changed ed) :recorder (:recorder* cv)
+                        :replay-root (:replay-root* cv)
+                        ;; MCP's Run (notify) is never recorded
+                        :record (when-not notify
+                                  {:source :run :code (editor/editor-text ed)
+                                   :path @path-atom :ns (run-record-ns @ev*)})))))
+
+(defn- run-idle!
+  "do-run!'s branch for an idle engine: the bracket check, then the plugins'
+  :before-run, then the entry mark and the banner, then the problem (Ready,
+  nothing evaluated) or the eval. opts is do-run!'s thunk."
+  [{:keys [tab cv ev* status-label] :as ctx} notify opts]
+  (let [{ed :ed path-atom :path} tab
+        text (editor/editor-text ed)
+        problem (commands/pre-run-problem text)
+        ;; A plugin may stop a Run that would start; nothing then
+        ;; shows but its line, not even the banner
+        stopped (when-not problem (before-run-stopped ctx :run tab text))]
+    (if stopped
+      (when notify (notify {:refused stopped}))
+      (do
+        (cview/mark-entry-start! cv)
+        ;; A saved tab's banner names its file.
+        (cview/append! cv :system (tabs/run-banner @path-atom))
+        (if problem
+          (do (cview/append! cv :error (str problem "\n"))
+              (win-status/set-status! status-label "Ready")
+              (when notify (notify {:problem problem})))
+          (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                warning (ev/eval! @ev* text (opts))]
+            (say-busy! cv notify warning)))))))
+
 (defn do-run!
   "The upstream banner, printed ONLY when the Run actually starts.
   ev/evaluating? is checked BEFORE ev/eval! and the banner (when printed)
@@ -263,56 +322,19 @@
   went -- {:refused msg}, {:busy warning}, {:problem text}, or, from the
   eval worker, {:done {:result r :output s}} -- and the return value is a
   reader, (fn [] output-so-far); without it this returns nil as before."
+  {:arglists '([ctx] [{:keys [tab cv ev* status-label] :as ctx} notify])}
   ([ctx] (do-run! ctx nil))
-  ([{:keys [tab cv ev* status-label] :as ctx} notify]
-   (let [{ed :ed path-atom :path id :id} tab
+  ([{:keys [tab cv ev*] :as ctx} notify]
+   (let [{ed :ed} tab
          out (atom [])
          refused (refuse-foreign! ctx)
-         opts (fn [] (let [base (cond-> (assoc (make-eval-opts ed cv ev* status-label true)
-                                               :run? true :path @path-atom :owner id)
-                                       ;; LM7: the replay tab's Run adds to the session, and
-                                       ;; what it defines is the REPL's, as if typed there
-                                  (= id (:id @(:replay-tab* cv))) (assoc :reset? false :owner :repl)
-                                       ;; LM4: a Run counts its own lines alone
-                                  (some-> (:changed ed) :counting? deref (apply []))
-                                  (assoc :clear-line-counts? true))]
-                       (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
-                                           :hook-source :run :hook-tab id
-                                           :hook-code (editor/editor-text ed) :failure* (:failure* cv)
-                                           :changed (:changed ed) :recorder (:recorder* cv)
-                                           :replay-root (:replay-root* cv)
-                                           ;; MCP's Run (notify) is never recorded
-                                           :record (when-not notify
-                                                     {:source :run :code (editor/editor-text ed)
-                                                      :path @path-atom :ns (run-record-ns @ev*)})))))]
+         opts (fn [] (run-opts ctx notify out))]
      (cond
        refused (when notify (notify {:refused refused}))
        (ev/evaluating? @ev*)
        (let [warning (ev/eval! @ev* (editor/editor-text ed) (opts))]
-         (when warning
-           (cview/append! cv :system warning)
-           (when notify (notify {:busy warning}))))
-       :else
-       (let [text (editor/editor-text ed)
-             problem (commands/pre-run-problem text)
-             ;; A plugin may stop a Run that would start; nothing then
-             ;; shows but its line, not even the banner
-             stopped (when-not problem (before-run-stopped ctx :run tab text))]
-         (if stopped
-           (when notify (notify {:refused stopped}))
-           (do
-             (cview/mark-entry-start! cv)
-             ;; A saved tab's banner names its file.
-             (cview/append! cv :system (tabs/run-banner @path-atom))
-             (if problem
-               (do (cview/append! cv :error (str problem "\n"))
-                   (win-status/set-status! status-label "Ready")
-                   (when notify (notify {:problem problem})))
-               (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-                     warning (ev/eval! @ev* text (opts))]
-                 (when warning
-                   (cview/append! cv :system warning)
-                   (when notify (notify {:busy warning})))))))))
+         (say-busy! cv notify warning))
+       :else (run-idle! ctx notify opts))
      (when notify (fn [] (apply str @out))))))
 
 (defn- do-stop!
