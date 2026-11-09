@@ -21,7 +21,7 @@
 
 (defn update-title!
   "\"<name> - Jonquil\", name the file's basename or Untitled, prefixed with
-  \"* \" while dirty. GTK-thread only -- every caller here already is one:
+  \"* \" while dirty. GTK-thread only -- every caller already is one:
   button/key handlers, the dialog callbacks, the dirty-changed callback, and
   self-test rows (all invoked from g_timeout_add ticks)."
   [ed win path-atom]

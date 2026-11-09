@@ -90,9 +90,8 @@
   'GTK_IS_POPOVER (popover)' failed\". Resetting :open? here means every
   later teardown-triggered listener sees false and skips hide!.
 
-  Called from close-request-fn's REAL-quit branch only, right before
-  g_application_quit and the return 0 that lets GTK start tearing the
-  window down. A session-lifetime popover (jonquil.gtk.popover's hide!
+  Called from real-quit! only, right before g_application_quit and the
+  return 0 that lets GTK start tearing the window down. A session-lifetime popover (jonquil.gtk.popover's hide!
   never unparents, by design) is still parented to its scrolled-window
   parent at that point; without this, GTK's dispose reports \"Finalizing
   GtkScrolledWindow ..., but it still has children left: GtkPopover ...\"

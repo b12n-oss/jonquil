@@ -57,12 +57,12 @@
   one, and the console since the open holds expect (a string) or, for
   nil, no \"; project:\" line at all.
 
-  cview/append! (window.clj's show-selection!, called synchronously from
-  open-path!'s add-watch) never writes the buffer itself -- it queues and
-  schedules a drain via on-gui!, which always defers through g_idle_add,
-  even when already called from the GTK thread (measured: jonquil.gtk.
-  callbacks/on-gui!'s own doc). Reading `since` right after (:open-path!
-  ui) returns races that drain and reads
+  cview/append! (jonquil.gtk.window.runtime's show-selection!, called
+  synchronously from open-path!'s add-watch) never writes the buffer
+  itself -- it queues and schedules a drain via on-gui!, which always
+  defers through g_idle_add, even when already called from the GTK thread
+  (measured: jonquil.gtk.callbacks/on-gui!'s own doc). Reading `since`
+  right after (:open-path! ui) returns races that drain and reads
   the console before the warning (if any) has actually landed, so `warned`
   is read here, inside run-and-await's own second on-gtk step, after the
   run has gone idle -- by then the main loop has ticked many times, and
