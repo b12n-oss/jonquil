@@ -9,7 +9,8 @@
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.cljs-node :as node]
             [jonquil.nrepl.connection :as connection]
-            [jonquil.nrepl.jank]))
+            [jonquil.nrepl.jank]
+            [jonquil.nrepl.prepl :as prepl]))
 
 (defn- make-test-node [srv overrides]
   (let [launches (atom 0) kills (atom 0)
@@ -771,3 +772,116 @@
             "the second read waits; no stale line fed it")
         (ev/send-input! ev "c")
         (is (= "\"c\"" (:printed (deref done 10000 :timeout))))))))
+
+;; --- characterization: run-worker!, connect!, fetch-syms! branches --------
+
+(deftest status-changes-bracket-the-evaluation-test
+  ;; run-worker! says :running first, finish! says :idle, then on-complete
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (let [order (atom []) done (promise)]
+        (ev/eval! ev "(+ 1 2)" {:run? false
+                                :on-output (fn [_ _])
+                                :on-status-change (fn [s] (swap! order conj [:status s]))
+                                :on-complete (fn [r] (swap! order conj :complete) (deliver done r))})
+        (deref done 10000 nil)
+        (is (= [[:status :running] [:status :idle] :complete] @order))))))
+
+(deftest a-throw-inside-the-worker-becomes-an-error-result-test
+  ;; the outer catch of run-worker!: kill, then finish with "Error: <message>"
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (let [done (promise)]
+        (ev/eval! ev "(+ 1 2)" {:run? false
+                                :on-output (fn [_ _])
+                                :on-status-change (fn [s] (when (= :running s) (throw (ex-info "boom" {}))))
+                                :on-complete (fn [r] (deliver done r))})
+        (is (= {:status :error :error-text "Error: boom"} (deref done 10000 :timeout)))
+        (is (= "2" (:printed (:result (run ev "(+ 1 1)" {:run? false})))) "the evaluator recovers")))))
+
+(deftest node-setup-timeout-is-named-test
+  (with-node {:hold-setup-ms 800} {:timings {:setup-timeout-ms 150}}
+    (fn [_ {:keys [ev kills]}]
+      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
+        (is (= {:status :notice
+                :text (cljs-node/start-failed-message "the session setup timed out. The log: /fake/log")}
+               r)))
+      (is (= 1 @kills)))))
+
+(deftest a-stop-after-the-child-is-live-finishes-interrupted-test
+  ;; run-worker!'s (stopping? ev) branch after a usable child
+  (with-node {} {}
+    (fn [srv {:keys [ev]}]
+      (is (= "2" (:printed (:result (run ev "(+ 1 1)" {:run? false})))))
+      (let [before (count (fake/received-forms srv))
+            done (promise)]
+        (swap! (:state ev) assoc :stopped? true)
+        (#'node/run-worker! ev "(+ 5 5)" {:run? false :on-output (fn [_ _])
+                                          :on-complete (fn [r] (deliver done r))})
+        (is (= {:status :interrupted} (deref done 1000 :timeout)))
+        (is (= before (count (fake/received-forms srv))) "nothing was sent")))))
+
+(deftest connect-stopped-closes-the-connection-test
+  (let [srv (fake/start! {})
+        {:keys [ev]} (make-test-node srv {})]
+    (try
+      (swap! (:state ev) assoc :child {:port (:port srv) :pid -1} :stopped? true)
+      (is (= {:status :interrupted} (#'node/connect! ev)))
+      (is (not (prepl/open? (:conn @(:state ev)))) "the connection was closed")
+      (is (empty? (fake/received-forms srv)) "no setup form went out")
+      (finally (fake/stop! srv)))))
+
+(deftest connect-retries-once-on-a-reset-test
+  (let [srv (fake/start! {})
+        {:keys [ev]} (make-test-node srv {})
+        real prepl/connect!
+        attempts (atom 0)]
+    (try
+      (swap! (:state ev) assoc :child {:port (:port srv) :pid -1})
+      (with-redefs-fn {#'prepl/connect! (fn [h p f]
+                                          (if (= 1 (swap! attempts inc))
+                                            (throw (java.io.IOException. "Connection reset"))
+                                            (real h p f)))}
+        (fn []
+          (is (nil? (#'node/connect! ev)))))
+      (is (= 2 @attempts))
+      (is (true? (:ready? @(:state ev))))
+      (finally (ev/stop! ev) (fake/stop! srv)))))
+
+(deftest connect-does-not-retry-another-error-test
+  (let [srv (fake/start! {})
+        killed (atom [])
+        {:keys [ev]} (make-test-node srv {:kill (fn [c] (swap! killed conj c))})
+        attempts (atom 0)]
+    (try
+      (swap! (:state ev) assoc :child {:port 4321 :pid -1 :log "/fake/log"})
+      (with-redefs-fn {#'prepl/connect! (fn [_ _ _] (swap! attempts inc) (throw (ex-info "kaboom" {})))}
+        (fn []
+          (is (= {:status :notice
+                  :text (cljs-node/start-failed-message
+                         "couldn't connect to port 4321: kaboom. The log: /fake/log")}
+                 (#'node/connect! ev)))))
+      (is (= 1 @attempts))
+      (is (= 1 (count @killed)))
+      (finally (fake/stop! srv)))))
+
+(deftest fetch-syms-skips-while-an-evaluation-runs-or-helps-test
+  (with-node {:apropos-val "(cljs.user/twice)"} {}
+    (fn [srv {:keys [ev]}]
+      (run ev "(def a 1)" {:run? true})
+      (doseq [busy [{:running {:opts {}}} {:helping true}]]
+        (swap! (:state ev) assoc :analyzer-stale? true)
+        (swap! (:state ev) merge {:running nil :helping nil} busy)
+        (#'node/fetch-syms! ev)
+        (is (zero? (apropos-sends srv)) (pr-str busy))
+        (is (true? (:analyzer-stale? @(:state ev))) "the stale mark is kept")
+        (is (nil? (:analyzer-syms @(:state ev)))))
+      (is (= true (:helping @(:state ev))) "a running helper's :helping is left alone"))))
+
+(deftest apropos-symbols-takes-only-a-clean-matching-ret-test
+  (let [form cljs-node/apropos-form
+        ret (fn [m] (merge {:tag :ret :form form :val "(cljs.user/twice)"} m))]
+    (is (seq (#'node/apropos-symbols form [{:tag :out :val "x"} (ret {})])))
+    (is (nil? (#'node/apropos-symbols form [(ret {:exception true})])) "an exception ret is no list")
+    (is (nil? (#'node/apropos-symbols form [(ret {:form "(other)"})])) "another form's ret is skipped")
+    (is (nil? (#'node/apropos-symbols form [])))))
