@@ -4,6 +4,7 @@
   is its namespace plus one entry here. A part may read another's :exports
   only when it comes later."
   (:require [jonquil.parts.extra :as extra]
+            [jonquil.gtk.parts.command-palette :as command-palette]
             [jonquil.gtk.parts.debugger :as debugger]
             [jonquil.gtk.parts.disk-poll :as disk-poll]
             [jonquil.gtk.parts.layouts :as layouts]
@@ -19,4 +20,4 @@
 (def installs
   "Install fns, in order: the real parts, then any registered in
   jonquil.parts.extra."
-  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part trace/part live-results/part locations/part debugger/part replay/part] @extra/installs*))
+  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part trace/part live-results/part locations/part debugger/part command-palette/part replay/part] @extra/installs*))

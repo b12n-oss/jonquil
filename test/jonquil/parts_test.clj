@@ -5,6 +5,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.parts.command-palette :as command-palette-part]
             [jonquil.gtk.parts.debugger :as debugger-part]
             [jonquil.gtk.parts.disk-poll :as disk-poll-part]
             [jonquil.gtk.debugger-pane :as debugger-pane]
@@ -71,7 +72,7 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :replay] (mapv :id parts/specs)))
   (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
             :panel/processes :processes/show
           :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
@@ -80,7 +81,8 @@
           :locations/usages-in-project :locations/next :locations/previous
           :compare/disk :compare/head :compare/take
           :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
-          :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define}
+          :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
+          :palette/open :help/describe-key :help/key-bindings :help/recent-keys}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -682,3 +684,41 @@
         (is (false? (@counting?)))
         (is (fn? @counts-refresh))
         (is (= [[:buf "changed"]] (mapv (fn [a] [(first a) (second a)]) @connects)))))))
+
+(deftest command-palette-part-owns-its-commands
+  (let [spec (some #(when (= :command-palette (:id %)) %) parts/specs)]
+    (is (= {:palette/open [:open-palette-fn]
+            :help/describe-key [:describe-key-fn]
+            :help/key-bindings [:key-bindings-fn]
+            :help/recent-keys [:recent-keys-fn]}
+           (update-vals (:commands spec) :call)))
+    (is (false? (:palette? (:palette/open (:commands spec)))))
+    (is (every? #(nil? (get @#'registry/core-window-commands %))
+                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys])
+        "the core table keeps none of them")
+    (is (every? #(some? (get registry/window-commands %))
+                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys]))
+    (is (some? (:help/key-hints registry/window-commands)))))
+
+(defn- palette-wctx [bang*]
+  {:bang* bang* :cv :cv :ev* (atom nil) :active-tab (fn [] {:id 1})
+   :tabs (atom []) :tab-by-id (fn [& _]) :recent-tabs (atom [])
+   :right {:recent-panels (atom [])} :showing-panel (fn [_]) :settings-path* (atom "x")})
+
+(deftest command-palette-describe-key-arms-the-next-key
+  (let [lines (atom [])
+        c ((deref #'command-palette-part/install) (palette-wctx (atom (fn [_]))))
+        fns (:fns c)]
+    (with-redefs [cview/append! (fn [cv kind text] (swap! lines conj [cv kind text]))]
+      ((:describe-key-fn fns))
+      (is (true? @(:describe-pending fns)))
+      (is (= [[:cv :system "; Press the key to describe.\n"]] @lines)))))
+
+(deftest command-palette-installs-the-bang-line
+  (let [before (fn [_text])
+        bang* (atom before)
+        c ((deref #'command-palette-part/install) (palette-wctx bang*))]
+    (is (not= before @bang*))
+    (is (fn? @bang*))
+    (is (fn? (get-in c [:ui :open-palette!*])))
+    (is (= (get-in c [:ui :open-palette!*]) (get-in c [:fns :open-palette-fn])))))

@@ -44,7 +44,6 @@
             [jonquil.gtk.gutter :as gutter]
             [jonquil.hints :as hints]
             [jonquil.line-counts :as line-counts]
-            [jonquil.layouts :as layouts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.palette :as palette]
@@ -2497,7 +2496,7 @@
             key? (and kname (not (describe/modifier-key? kname)))
             ;; the command that took the key, for recent keys
             ran (volatile! nil)]
-        (if (and key? (compare-and-set! (:describe-pending ctx) true false))
+        (if (and key? (some-> (:describe-pending ctx) (compare-and-set! true false)))
           ;; it answers a pending Describe Key: described, never run
           (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
                                                      :state state :physical physical))]
@@ -3564,7 +3563,7 @@
         closing? (atom false)
         *cv (atom nil)
         ;; LM1's ! commands at the prompt, installed once the palette's
-        ;; pieces exist (below, after open-palette-fn)
+        ;; pieces exist (the command-palette part resets it at install)
         bang* (atom (fn [_text]))
         ;; :failure*, the last failed evaluation, for the restarts
         cv (assoc
@@ -4020,56 +4019,6 @@
                                              :on-trash (fn [p] (tree-trash! @*tab-ctx p))})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        ;; The palette lists the registry's commands and opens on
-        ;; the active tab, whose palette runs the picked one
-        open-palette-fn (fn [] (let [plugins @plugin-registry/live]
-                                 (palette/open! (:palette (active-tab))
-                                                (into
-                                                 (pal-data/tab-entries
-                                                  (keep (fn [id] (when-let [t (tab-by-id tabs id)]
-                                                                   {:id id :label (g/label-text (:label t))}))
-                                                        @recent-tabs)
-                                                  (:id (active-tab)))
-                                                 (into (into (pal-data/panel-entries @(:recent-panels right)
-                                                                                     (showing-panel right))
-                                                             (layouts/entries (:layouts (settings/load-settings @settings-path*))))
-                                                       (pal-data/entries
-                                                 {:commands (plugin-registry/all-commands plugins)
-                                                  :keymap {:window (plugin-registry/window-bindings plugins)
-                                                           :editor (plugin-registry/editor-bindings plugins)}
-                                                  :os (System/getProperty "os.name")}))))))
-        _ (reset! bang*
-                  (fn [text]
-                    (let [cv @*cv
-                          plugins @plugin-registry/live
-                          es (pal-data/entries {:commands (plugin-registry/all-commands plugins)
-                                                :keymap {:window (plugin-registry/window-bindings plugins)
-                                                         :editor (plugin-registry/editor-bindings plugins)}
-                                                :os (System/getProperty "os.name")})
-                          say (fn [s] (cview/append! cv :system (str s "\n")))
-                          {:keys [run doc choices words none] :as r} (pal-data/bang-pick es text)]
-                      ;; not an entry: Clear the last entry's output reaches the one before
-                      (cview/restore-entry-start! cv)
-                      ;; Up brings the line back, as for any entry
-                      (swap! (ev/history @ev*) eval/history-add (str/trim text))
-                      (cond
-                        (:help r) (say "; ! runs a command by name, as the palette does: !clear line counts")
-                        none (say (str "; ! No command matches \"" none "\". Cmd/Ctrl+Shift+P lists them all."))
-                        choices (say (str "; ! " (count choices) " commands match \"" words "\":\n"
-                                          (str/join "\n" (map #(str ";   " %) (take 8 choices)))
-                                          (when (< 8 (count choices)) "\n;   ...")))
-                        :else (do (say (str "; ! " doc))
-                                  (try ((deref (:on-run (:palette (active-tab)))) run)
-                                       (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
-        ;; Describe Key's pending flag and the recent keys (jonquil.describe's
-        ;; ring), both read and written on the GTK thread only
-        describe-pending (atom false)
-        recent-keys (atom [])
-        live-keys (fn [] (let [plugins @plugin-registry/live]
-                           {:keymap {:window (plugin-registry/window-bindings plugins)
-                                     :editor (plugin-registry/editor-bindings plugins)}
-                            :commands (plugin-registry/all-commands plugins)}))
-        print-lines! (fn [lines] (doseq [l lines] (cview/append! cv :system (str l "\n"))))
         ;; The panel keys and the palette's Switch to panel: focus the panel
         ;; when it shows. Frames, Trace and Plugins otherwise run their own
         ;; command, which asks for what they show now (a hidden one would
@@ -4109,6 +4058,7 @@
                                           :tabs tabs :active-tab active-tab :settings-path* settings-path*
                                           :tab-ctx* *tab-ctx
                                           :tab-by-id tab-by-id :select-tab! select-tab! :new-tab! new-tab!
+                                          :bang* bang* :recent-tabs recent-tabs
                                           :set-status! (fn [text] (set-status! status-label text))
                                           :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
                                           :files-btn files-btn :panel-focus-fn panel-focus-fn
@@ -4150,13 +4100,7 @@
         ;; (window-key-ctx) a window chord gets
         window-key-args (parts/merge-with-core
                          :fns
-                         {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
-                         :live-keys live-keys :print-lines! print-lines!
-                         :describe-key-fn (fn [] (reset! describe-pending true)
-                                            (print-lines! ["; Press the key to describe."]))
-                         :key-bindings-fn (fn [] (print-lines! (describe/binding-lines
-                                                                (assoc (live-keys) :os (System/getProperty "os.name")))))
-                         :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
+                         {:panel-focus-fn panel-focus-fn
                          :hints-toggle-fn (fn []
                                             (let [on? (swap! hints-on? not)]
                                               (when-not on? (g/gtk-widget-set-visible hint-label 0))
@@ -4189,7 +4133,6 @@
                                       :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
                                                               files-btn
                                                               (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
-                                      :open-palette-fn open-palette-fn
                                       :parinfer-fn parinfer-fn
                                       :review-proposals-fn (fn [] (plugin-step! {:settings-path @settings-path*
                                                                                  :step (fn [] []) :open? true}))
@@ -4888,7 +4831,6 @@
                  ;; The first tab's command palette, and what
                  ;; Cmd/Ctrl+Shift+P calls to open it
                    :palette palette
-                   :open-palette!* open-palette-fn
                  ;; Load the plugin folder now (call it off the
                  ;; GTK thread; it returns the console lines), and the folder
                    :load-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
