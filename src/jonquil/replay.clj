@@ -179,6 +179,25 @@
     (contains? setup-heads head) :setup
     :else :other))
 
+(defn- form-step
+  "What one top-level form f of code adds: {:ns the ns for the later forms
+  :entry the entry or nil}. A top-level (in-ns 'x) moves the ns and has no
+  entry; an absolute (load-file ...) is a file entry."
+  [{:keys [f code cur-ns source-file at dialect]}]
+  (let [kids (:kids f)
+        texts (mapv #(kid-text code %) kids)
+        head (when (and (seq kids) (not (:open (first kids)))) (first texts))
+        lf (load-file-path head texts)
+        target (when (contains? #{"ns" "in-ns"} head)
+                 (in-ns-target head (second texts)))]
+    {:ns (or target cur-ns)
+     :entry (cond
+              (and target (= "in-ns" head)) nil
+              lf {:kind :file :path lf :at at :dialect dialect}
+              :else {:kind :form :text (kid-text code f) :ns cur-ns
+                     :source-file source-file :at at :dialect dialect
+                     :key (key-of head texts)})}))
+
 (defn entries
   "Entries for what one action ran. source is :run (a whole buffer: a saved
   one is a file entry, an untitled one is split into forms), :form,
@@ -193,19 +212,10 @@
     (let [source-file (when (contains? #{:form :selection} source) path)]
       (loop [forms (commands/top-level-forms (or code "")) cur-ns (or ns "user") out []]
         (if-let [f (first forms)]
-          (let [kids (:kids f)
-                texts (mapv #(kid-text code %) kids)
-                head (when (and (seq kids) (not (:open (first kids)))) (first texts))
-                lf (load-file-path head texts)
-                target (when (contains? #{"ns" "in-ns"} head)
-                         (in-ns-target head (second texts)))]
-            (recur (rest forms) (or target cur-ns)
-                   (cond
-                     (and target (= "in-ns" head)) out
-                     lf (conj out {:kind :file :path lf :at at :dialect dialect})
-                     :else (conj out {:kind :form :text (kid-text code f) :ns cur-ns
-                                      :source-file source-file :at at :dialect dialect
-                                      :key (key-of head texts)}))))
+          (let [{step-ns :ns entry :entry}
+                (form-step {:f f :code code :cur-ns cur-ns :source-file source-file
+                            :at at :dialect dialect})]
+            (recur (rest forms) step-ns (if entry (conj out entry) out)))
           out)))))
 
 ;; --- slots ---------------------------------------------------------------
@@ -345,30 +355,52 @@
         (max j (inc i))
         (recur (inc j))))))
 
+(declare form-end)
+
+(defn- form-after
+  "Index just past the form that follows the blanks from j, or nil when none."
+  [^String s j]
+  (let [k (skip-blank s j)]
+    (when (< k (count s)) (form-end s k))))
+
+(defn- prefix-end
+  "Index just past the form a one-character prefix at i (' ` ~ @, and the
+  two-character ~@) applies to."
+  [^String s i]
+  (let [n (count s)
+        c (nth s i)
+        c2 (when (< (inc i) n) (nth s (inc i)))]
+    (form-after s (if (and (= c \~) (= c2 \@)) (+ i 2) (inc i)))))
+
+(defn- dispatch-end
+  "Index just past the # form that starts at i: #( #[ #{, #\", #', #?, #?@,
+  #_, or a tagged literal read as an atom."
+  [^String s i]
+  (let [n (count s)
+        c2 (when (< (inc i) n) (nth s (inc i)))]
+    (cond
+      (contains? #{\( \[ \{} c2) (bracket-end s (inc i))
+      (= c2 \") (string-end s (inc i))
+      (= c2 \') (form-after s (+ i 2))
+      (= c2 \?) (form-after s (if (and (< (+ i 2) n) (= (nth s (+ i 2)) \@)) (+ i 3) (+ i 2)))
+      (= c2 \_) (when-let [e (form-after s (+ i 2))] (form-after s e))
+      :else (atom-end s (inc i)))))
+
 (defn- form-end
   "Index just past the form that starts at i (not blank there), or nil when
   none follows: a prefix (quote, deref, syntax quote, unquote, metadata, #',
   #?, a nested #_) is part of the form it applies to."
   [^String s i]
-  (let [n (count s)]
-    (when (< i n)
-      (let [c (nth s i)
-            c2 (when (< (inc i) n) (nth s (inc i)))
-            after (fn [j] (let [k (skip-blank s j)] (when (< k n) (form-end s k))))]
-        (cond
-          (= c \") (string-end s i)
-          (contains? #{\( \[ \{} c) (bracket-end s i)
-          (= c \\) (atom-end s (inc i))
-          (contains? #{\' \` \~ \@} c) (after (if (and (= c \~) (= c2 \@)) (+ i 2) (inc i)))
-          (= c \^) (when-let [e (after (inc i))] (after e))
-          (= c \#) (cond
-                     (contains? #{\( \[ \{} c2) (bracket-end s (inc i))
-                     (= c2 \") (string-end s (inc i))
-                     (= c2 \') (after (+ i 2))
-                     (= c2 \?) (after (if (and (< (+ i 2) n) (= (nth s (+ i 2)) \@)) (+ i 3) (+ i 2)))
-                     (= c2 \_) (when-let [e (after (+ i 2))] (after e))
-                     :else (atom-end s (inc i)))
-          :else (atom-end s i))))))
+  (when (< i (count s))
+    (let [c (nth s i)]
+      (cond
+        (= c \") (string-end s i)
+        (contains? #{\( \[ \{} c) (bracket-end s i)
+        (= c \\) (atom-end s (inc i))
+        (contains? #{\' \` \~ \@} c) (prefix-end s i)
+        (= c \^) (when-let [e (form-after s (inc i))] (form-after s e))
+        (= c \#) (dispatch-end s i)
+        :else (atom-end s i)))))
 
 (defn- skipped-texts
   "The set of texts of the forms that top-level #_ discards in text, one

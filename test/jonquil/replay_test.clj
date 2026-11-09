@@ -413,3 +413,43 @@
         ms (/ (- (System/nanoTime) t0) 1e6)]
     (is (= 2000 (count (:current r))))
     (is (< ms 1500))))
+
+;; --- form-end and entries, characterization --------------------------------
+
+(def ^:private form-end @#'replay/form-end)
+
+(deftest form-end-shapes-test
+  (doseq [[s i e] [["" 0 nil] ["abc" 3 nil]
+                   ["abc def" 0 3] ["\"a\\\"b\" x" 0 6]
+                   ["(a [b] {c d}) x" 0 13] ["[1 2] x" 0 5] ["{:a 1} x" 0 6]
+                   ["\\a x" 0 2] ["\\space x" 0 6] ["\\( x" 0 2]
+                   ["'a x" 0 2] ["' a x" 0 3] ["`(a) x" 0 4] ["@a x" 0 2] ["~a x" 0 2]
+                   ["~@a x" 0 3] ["~ @a x" 0 4] ["'" 0 nil] ["~@" 0 nil]
+                   ["^:k a x" 0 5] ["^{:k 1} a x" 0 9] ["^:k" 0 nil] ["^:k  ;c\n a x" 0 10]
+                   ["#(a %) x" 0 6] ["#[a] x" 0 4] ["#{a b} x" 0 6]
+                   ["#\"re\" x" 0 5] ["#'v x" 0 3] ["#' v x" 0 4] ["#'" 0 nil]
+                   ["#?(:clj a) x" 0 10] ["#?@(:clj [a]) x" 0 13] ["#?" 0 nil] ["#?@" 0 nil]
+                   ["#_a b" 0 5] ["#_a" 0 nil] ["#_ #_ a b c" 0 11]
+                   ["#inst \"2020\" x" 0 5] ["# x" 0 2]
+                   ["a,b" 0 1] ["a;b" 0 1] ["(a" 0 2] ["x (a) y" 2 5]]]
+    (is (= e (form-end s i)) (pr-str [s i]))))
+
+(deftest entries-branches-test
+  (is (= [] (ents {:source :repl :code nil})))
+  (is (= [] (ents {:source :repl :ns "x" :code "  ; nothing\n"})))
+  (is (= [:other] (map :key (replay/entries {:source :repl :at 1 :dialect "Jolt" :code "((f) 1)"}))))
+  (is (= [(form "(in-ns x)" "user") (form "(def y 1)" "user")]
+         (ents {:source :repl :code "(in-ns x) (def y 1)"})))
+  (is (= [(form "(ns 'x)" "user") (form "(def y 1)" "user")]
+         (ents {:source :repl :code "(ns 'x) (def y 1)"})))
+  (is (= [(form "(ns ^:a b)" "user") (form "(def y 1)" "b")]
+         (ents {:source :repl :code "(ns ^:a b) (def y 1)"})))
+  (is (= [(form "(def y 1)" "user" :source-file "/p/s.clj")]
+         (ents {:source :selection :path "/p/s.clj" :code "(def y 1)"})))
+  (is (= [(form "(def y 1)" "user")]
+         (ents {:source :run :path nil :code "(def y 1)"})))
+  (is (= [(form "(def y 1)" "user")]
+         (ents {:source :repl :path "/p/s.clj" :code "(def y 1)"})))
+  (is (= [["defmethod" "m" ":k"] ["defn" "f"] :setup :other]
+         (map :key (replay/entries {:source :repl :at 1 :dialect "Jolt"
+                                    :code "(defmethod m :k [x] x) (defn ^:private f [] 1) (require 'a) (foo)"})))))
