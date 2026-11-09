@@ -499,3 +499,17 @@
                 (is (= {:on? false} (call ev/toggle-line-counts!))))))
         (finally (when mode ((requiring-resolve 'jolt.profile/instrument!) mode))
                  (when-not mode (try ((requiring-resolve 'jolt.profile/instrument!) false) (catch Throwable _ nil))))))))
+
+;; --- inspect! edges: gone, lazy and failing values ----------------------------
+
+(deftest inspect-gone-and-error-test
+  (let [s (session/make-session)]
+    (testing "a result whose ref is not kept any more"
+      (is (= {:error "That result is gone."}
+             (inspect-sync s :start-result {:id -1 :epoch "none" :rows 10 :cols 40}))))
+    (testing "a trace call that is not in the log"
+      (is (= {:error "That call is gone."}
+             (inspect-sync s :start-trace {:id -1 :part :ret :rows 10 :cols 40}))))
+    (testing "an op the view cannot run reports the failure through on-view"
+      (let [r (inspect-sync s :no-such-op {:rows 10 :cols 40})]
+        (is (map? r))))))

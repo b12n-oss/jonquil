@@ -38,6 +38,67 @@
                    (-> c (update :repl (fnil into #{}) nss) (dissoc owner))
                    c))))
 
+(defn- inspect-local-value
+  "The :start-local value for an inspect request: the paused break's local,
+  else the last error's, or ::stale / ::debugger/missing."
+  [state op args]
+  (let [paused (when (= op :start-local)
+                 (debugger/paused-local (:break @state) (:error-id args) (:frame args) (:local args)))]
+    (when (= op :start-local)
+      (if-let [e (when (= ::debugger/not-paused paused) (:last-error @state))]
+        (if (debugger/stale? e (:error-id args))
+          ::stale
+          (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
+        (if (= ::debugger/not-paused paused) ::debugger/missing paused)))))
+
+(defn- inspect-traced-value
+  "The :start-trace / :start-result value, ::trace-rt/gone when it was dropped."
+  [op args]
+  (case op
+    :start-trace (trace-rt/value (:id args) (:part args))
+    :start-result (let [v (results-rt/value (:id args) (:epoch args))]
+                    (if (= v ::results-rt/gone) ::trace-rt/gone v))
+    nil))
+
+(defn- inspect-request
+  "[op args] to hand to the view, the value filled in for the :start ops."
+  [state op args {:keys [local traced]}]
+  (case op
+    :start [:start (assoc args :value (:last-value @state))]
+    :start-local [:start (assoc args :value local)]
+    :start-trace [:start (assoc args :value traced)]
+    :start-result [:start (assoc args :value traced)]
+    :def [:def (assoc args :target-ns (the-ns (:prompt-ns @state)))]
+    [op args]))
+
+(defn- inspect-view
+  "What the panel shows: an error map for a missing value, else the view's."
+  [state op op' args' local]
+  (case local
+    ::debugger/missing {:error "That local is gone."}
+    ::stale {:error debugger/STALE}
+    ::gone {:error (if (= op :start-result) "That result is gone." "That call is gone.")}
+    ::lazy {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
+    (view/run-op (:inspect-view @state) op' args')))
+
+(defn- inspect-run!
+  "The body of InProcess inspect!, on its future: resolves the value, runs the
+  view op and hands the result to on-view; a failure goes to on-view as an
+  error map, and a failing on-view is ignored."
+  [state op args on-view]
+  (try
+    (let [local (inspect-local-value state op args)
+          traced (inspect-traced-value op args)
+          local (cond (= traced ::trace-rt/gone) ::gone
+                      (= traced ::trace-rt/lazy) ::lazy
+                      :else local)
+          [op' args'] (inspect-request state op args {:local local :traced traced})]
+      (try (on-view (inspect-view state op op' args' local))
+           (catch Throwable _)))
+    (catch Throwable e
+      (try (on-view {:error (or (ex-message e) (str (class e)))})
+           (catch Throwable _)))))
+
 (defrecord InProcess [ctx state]
   ev/Evaluator
   (start! [_] nil)
@@ -76,41 +137,7 @@
   (quiet-eval? [_] true)
   ev/Inspector
   (inspect! [_ op args on-view]
-    (future
-      (try
-        (let [paused (when (= op :start-local)
-                       (debugger/paused-local (:break @state) (:error-id args) (:frame args) (:local args)))
-              local (when (= op :start-local)
-                      (if-let [e (when (= ::debugger/not-paused paused) (:last-error @state))]
-                        (if (debugger/stale? e (:error-id args))
-                          ::stale
-                          (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
-                        (if (= ::debugger/not-paused paused) ::debugger/missing paused)))
-              traced (case op
-                       :start-trace (trace-rt/value (:id args) (:part args))
-                       :start-result (let [v (results-rt/value (:id args) (:epoch args))]
-                                       (if (= v ::results-rt/gone) ::trace-rt/gone v))
-                       nil)
-              local (cond (= traced ::trace-rt/gone) ::gone
-                          (= traced ::trace-rt/lazy) ::lazy
-                          :else local)
-              [op' args'] (case op
-                            :start [:start (assoc args :value (:last-value @state))]
-                            :start-local [:start (assoc args :value local)]
-                            :start-trace [:start (assoc args :value traced)]
-                            :start-result [:start (assoc args :value traced)]
-                            :def [:def (assoc args :target-ns (the-ns (:prompt-ns @state)))]
-                            [op args])]
-          (try (on-view (case local
-                          ::debugger/missing {:error "That local is gone."}
-                          ::stale {:error debugger/STALE}
-                          ::gone {:error (if (= op :start-result) "That result is gone." "That call is gone.")}
-                          ::lazy {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
-                          (view/run-op (:inspect-view @state) op' args')))
-               (catch Throwable _)))
-        (catch Throwable e
-          (try (on-view {:error (or (ex-message e) (str (class e)))})
-               (catch Throwable _)))))
+    (future (inspect-run! state op args on-view))
     nil)
   (inspectable? [_] true)
   ev/Frames
@@ -267,67 +294,94 @@
             (println (eval/format-error e))
             (println (clj/auto-require-failed auto-require-retry))))))))
 
+(defn- eval-tell-fn
+  "The call for a break handler k (:on-eval-start, :on-eval-end) of this
+  evaluation; a no-op for a quiet one (eval-id nil), which calls neither."
+  [state eval-id]
+  (fn [k] (when eval-id
+            (when-let [f (k (:break-handlers @state))]
+              (try (f eval-id) (catch Throwable _ nil))))))
+
+(defn- eval-auto-require!
+  [ctx state dir opts]
+  (if (and (:quiet opts) (:on-output opts))
+    ;; a quiet eval's *out* is the plugin's:
+    ;; the auto-require lines are the person's
+    (let [s (with-out-str (binding [*err* *out*]
+                            (auto-require! ctx state dir)))]
+      (when (seq s) ((:on-output opts) :system s)))
+    (auto-require! ctx state dir)))
+
+(defn- eval-before-fn
+  "The :before-eval step: the break handlers hear a person's evaluation
+  start. Then the project's :paths and :deps as Jolt's roots, resolved on
+  the worker: a first resolve can fetch dependencies, which mustn't freeze
+  the window."
+  [{:keys [ctx state tell dir opts]}]
+  (fn []
+    (tell :on-eval-start)
+    (when dir
+      (roots/use-project-deps! dir)
+      (eval-auto-require! ctx state dir opts))))
+
+(defn- eval-wrapper
+  "Break on error; a quiet eval (completion, help, a plugin's) never pauses"
+  [state opts]
+  (when (and (:break-on? @state) (not (:quiet opts)))
+    (debugger/break-wrapper
+     (:break @state)
+     (assoc (:break-handlers @state)
+            :resolve-file (fn [f] (:file (source/resolve-file {:file f})))))))
+
+(defn- keep-result-ref
+  "LM1: the console's line keeps a handle to this value"
+  [opts result]
+  (when (and (not (:quiet opts)) (#{:ok :error} (:status result)))
+    (try (results-rt/keep! (if (= :ok (:status result)) (:value result) (:error result)))
+         (catch Throwable _ nil))))
+
+(defn- record-result!
+  [{:keys [state opts before result]}]
+  (swap! state
+         (fn [s]
+           (cond-> (-> s
+                       (update-in [:created (:owner opts)] (fnil into #{})
+                                  (namespaces-created before (ns-names) (loaded-libs)))
+                       (cond-> (not (:quiet opts)) (assoc :prompt-ns (:ns result))))
+             (and (= :ok (:status result)) (not (:quiet opts)))
+             (assoc :last-value (:value result))
+             ;; the Frames panel's error; a quiet eval's
+             ;; (completion, help) never replaces it
+             (and (= :error (:status result)) (not (:quiet opts)))
+             (assoc :last-error (:error result))))))
+
+(defn- eval-complete-fn
+  [{:keys [state opts tell user-complete] :as step}]
+  (fn [result]
+    ;; the backstop for a pause whose cleanup a Stop skipped
+    (debugger/end-stale-pause! (:break @state) (:break-handlers @state))
+    (let [ref (keep-result-ref opts result)
+          result (cond-> result ref (assoc :ref ref))]
+      (record-result! (assoc step :result result))
+      ;; the end after on-complete, which records the failure
+      (try (when user-complete (user-complete result))
+           (finally (tell :on-eval-end))))))
+
 (defn- evaluate!
   [{:keys [ctx state]} code ns-sym opts]
-  (let [before (ns-names)
-        user-complete (:on-complete opts)
-        dir (:project-dir @state)
-        ;; this evaluation, for the break handlers' :on-eval-start and
-        ;; :on-eval-end; a quiet one calls neither
-        eval-id (when-not (:quiet opts) (Object.))
-        tell (fn [k] (when eval-id
-                       (when-let [f (k (:break-handlers @state))]
-                         (try (f eval-id) (catch Throwable _ nil)))))]
+  (let [step {:ctx ctx :state state :opts opts
+              :before (ns-names)
+              :user-complete (:on-complete opts)
+              :dir (:project-dir @state)
+              ;; this evaluation, for the break handlers' :on-eval-start and
+              ;; :on-eval-end; a quiet one calls neither
+              :tell (eval-tell-fn state (when-not (:quiet opts) (Object.)))}]
     (eval/eval-async ctx code
                      (assoc opts
-                            ;; The break handlers hear a person's evaluation
-                            ;; start. Then the project's :paths and :deps as
-                            ;; Jolt's roots, resolved on the worker: a first
-                            ;; resolve can fetch dependencies, which mustn't
-                            ;; freeze the window.
-                            :before-eval (fn []
-                                           (tell :on-eval-start)
-                                           (when dir
-                                             (roots/use-project-deps! dir)
-                                             (if (and (:quiet opts) (:on-output opts))
-                                               ;; a quiet eval's *out* is the plugin's:
-                                               ;; the auto-require lines are the person's
-                                               (let [s (with-out-str (binding [*err* *out*]
-                                                                       (auto-require! ctx state dir)))]
-                                                 (when (seq s) ((:on-output opts) :system s)))
-                                               (auto-require! ctx state dir))))
+                            :before-eval (eval-before-fn step)
                             :ns-name ns-sym
-                            ;; Break on error; a quiet eval (completion,
-                            ;; help, a plugin's) never pauses
-                            :wrap-eval (when (and (:break-on? @state) (not (:quiet opts)))
-                                         (debugger/break-wrapper
-                                          (:break @state)
-                                          (assoc (:break-handlers @state)
-                                                 :resolve-file (fn [f] (:file (source/resolve-file {:file f}))))))
-                            :on-complete
-                            (fn [result]
-                              ;; the backstop for a pause whose cleanup a Stop skipped
-                              (debugger/end-stale-pause! (:break @state) (:break-handlers @state))
-                              ;; LM1: the console's line keeps a handle to this value
-                              (let [ref (when (and (not (:quiet opts)) (#{:ok :error} (:status result)))
-                                          (try (results-rt/keep! (if (= :ok (:status result)) (:value result) (:error result)))
-                                               (catch Throwable _ nil)))
-                                    result (cond-> result ref (assoc :ref ref))]
-                              (swap! state
-                                     (fn [s]
-                                       (cond-> (-> s
-                                                   (update-in [:created (:owner opts)] (fnil into #{})
-                                                              (namespaces-created before (ns-names) (loaded-libs)))
-                                                   (cond-> (not (:quiet opts)) (assoc :prompt-ns (:ns result))))
-                                         (and (= :ok (:status result)) (not (:quiet opts)))
-                                         (assoc :last-value (:value result))
-                                         ;; the Frames panel's error; a quiet eval's
-                                         ;; (completion, help) never replaces it
-                                         (and (= :error (:status result)) (not (:quiet opts)))
-                                         (assoc :last-error (:error result)))))
-                              ;; the end after on-complete, which records the failure
-                              (try (when user-complete (user-complete result))
-                                   (finally (tell :on-eval-end)))))))))
+                            :wrap-eval (eval-wrapper state opts)
+                            :on-complete (eval-complete-fn step)))))
 
 (defn- program-vars
   "{var meta} for every var interned in a namespace that isn't a loaded
