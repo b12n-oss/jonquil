@@ -932,3 +932,31 @@
       (is (identical? before @live))
       (is (not (.exists (io/file d "pw.clj"))))
       (is (= :pending (history/version-status (entries d "pw") 1))))))
+
+;; --- characterization for the revert-step! / propose-step! split ---
+
+(deftest propose-refuses-non-text-source-test
+  (let [d (dir-with [])]
+    (is (= {:status :refused :n nil :lines [] :problems ["a proposal needs its source as text"]}
+           (propose! d "pw" nil passed)))
+    (is (not (.exists (io/file d ".history"))))))
+
+(deftest propose-refuses-when-the-history-write-fails-test
+  (let [d (dir-with [])]
+    (with-redefs [history/record-proposal! (fn [_] {:error "disk full"})]
+      (is (= {:status :refused :n nil :lines [] :problems ["the proposal wasn't recorded: disk full"]}
+             (propose! d "pw" (source "pw") passed))))))
+
+(deftest propose-step-never-throws-test
+  (let [d (dir-with [])]
+    (with-redefs [history/record-proposal! (fn [_] (throw (ex-info "kaboom" {})))]
+      (is (= {:status :refused :n nil :lines [] :problems ["the proposal wasn't recorded: kaboom"]}
+             (propose! d "pw" (source "pw") passed))))))
+
+(deftest revert-says-when-its-history-wasnt-recorded-test
+  (let [[d live] (with-v1-and-v2 "wrap")
+        lines (with-redefs [history/record! (fn [_] {:error "no space"})]
+                (revert! live d "wrap" 1))]
+    (is (= "plugin wrap reverted to v1, but its history wasn't recorded: no space" (last lines)) (pr-str lines))
+    (is (= (source "wrap") (slurp (io/file d "wrap.clj"))))
+    (is (= (source "wrap") (get-in @live [:plugins :wrap :source])))))

@@ -334,6 +334,64 @@
   [hdir n]
   (boolean (some #(and (= n (:n %)) (= :accepted (:status %))) (:entries (history/read-entries hdir)))))
 
+(defn- revert-refusal
+  "The line saying why version n of id can't be reverted to, or nil when
+  it can: src is that version's text (nil when there is none), live-reg
+  the live registry, opts the folder options."
+  [{:keys [opts live-reg id n src]}]
+  (let [dir (:dir opts)
+        hdir (history/history-dir dir id)]
+    (cond
+      (nil? src) (str "plugin " id " has no v" n " to revert to")
+      (contains? (set (:disabled opts)) (keyword id)) (str "plugin " id " is disabled, so it wasn't reverted")
+      (not (was-live? hdir n)) (str "plugin " id ": v" n " was never live, so it wasn't reverted")
+      (disk-changed dir live-reg id) (str "plugin " id " wasn't reverted: " (disk-changed dir live-reg id))
+      ;; the file's there (disk-changed says it holds the live text), so
+      ;; there's nothing to put back; a deleted one is written back
+      (and (= src (get-in live-reg [:plugins (keyword id) :source])) (.isFile (io/file dir (str id ".clj"))))
+      (str "plugin " id ": v" n " is already live, so it wasn't reverted"))))
+
+(defn- revert-write-failed
+  "The lines for a revert whose write of <id>.clj failed with why: the
+  check loaded src into the plugin's namespace, so the live version goes
+  back, as reload-one does on a fail."
+  [{:keys [old id why]}]
+  (let [restored (when-let [live-src (get-in old [:plugins (keyword id) :source])]
+                   (:problems (protocol/load-candidate {:source live-src :file-id id})))]
+    (into [(str "plugin " id " wasn't reverted: " why)]
+          (map #(str "plugin " id ": putting the live version back: " %) restored))))
+
+(defn- revert-commit!
+  "Makes a passed revert live: resets the live registry, records the
+  :revert version and the changes it brought to later plugins. The
+  lines, ending in the outcome."
+  [{:keys [live opts old registry lines id n src reason now]}]
+  (let [dir (:dir opts)
+        k (keyword id)
+        _ (reset! live registry)
+        r (history/record! {:plugins-dir dir :id id :text src :source :revert :always? true :now now
+                            :reason (str "revert to v" n
+                                         (when-not (str/blank? reason) (str ": " reason)))})
+        others (record-changed! dir old (update registry :plugins dissoc k) now)]
+    (-> (vec lines) (into others)
+        (conj (if (:n r)
+                (str "plugin " id " reverted to v" n " (now v" (:n r) ")")
+                (str "plugin " id " reverted to v" n ", but its history wasn't recorded: " (:error r)))))))
+
+(defn- revert-apply!
+  "Runs the revert of id to src (version n) through reload and, on a
+  pass, writes <id>.clj and commits it. The lines after warn."
+  [{:keys [live opts warn id n src reason now]}]
+  (let [old @live
+        path (str (:dir opts) "/" id ".clj")
+        {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))]
+    (if (not= src (get-in registry [:plugins (keyword id) :source]))
+      (-> warn (into lines) (conj (str "plugin " id " wasn't reverted to v" n)))
+      (if-let [why (history/write-atomic! path src)]
+        (into warn (revert-write-failed {:old old :id id :why why}))
+        (into warn (revert-commit! {:live live :opts opts :old old :registry registry :lines lines
+                                    :id id :n n :src src :reason reason :now now}))))))
+
 (defn revert-step!
   "Reverts plugin id to its version n, on the plugin agent like load-step!
   (opts as load-step!'s, plus :id, :n and an optional :reason): the old
@@ -346,41 +404,10 @@
     (plugins-off (str "plugin " id " wasn't reverted"))
     (try
       (let [[warn opts] (step-opts opts)
-            dir (:dir opts)
-            k (keyword id)
-            src (history/version-source (history/history-dir dir id) n)]
-        (cond
-          (nil? src) (conj warn (str "plugin " id " has no v" n " to revert to"))
-          (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so it wasn't reverted"))
-          (not (was-live? (history/history-dir dir id) n)) (conj warn (str "plugin " id ": v" n " was never live, so it wasn't reverted"))
-          (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
-          ;; the file's there (disk-changed says it holds the live text), so
-          ;; there's nothing to put back; a deleted one is written back
-          (and (= src (get-in @live [:plugins k :source])) (.isFile (io/file dir (str id ".clj"))))
-          (conj warn (str "plugin " id ": v" n " is already live, so it wasn't reverted"))
-          :else
-          (let [old @live
-                path (str dir "/" id ".clj")
-                {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))]
-            (if (not= src (get-in registry [:plugins k :source]))
-              (-> warn (into lines) (conj (str "plugin " id " wasn't reverted to v" n)))
-              (if-let [why (history/write-atomic! path src)]
-                ;; the check loaded src into the plugin's namespace: put the
-                ;; live version back, as reload-one does on a fail
-                (let [restored (when-let [live-src (get-in old [:plugins k :source])]
-                                 (:problems (protocol/load-candidate {:source live-src :file-id id})))]
-                  (-> warn
-                      (conj (str "plugin " id " wasn't reverted: " why))
-                      (into (map #(str "plugin " id ": putting the live version back: " %) restored))))
-                (let [_ (reset! live registry)
-                      r (history/record! {:plugins-dir dir :id id :text src :source :revert :always? true :now now
-                                          :reason (str "revert to v" n
-                                                       (when-not (str/blank? reason) (str ": " reason)))})
-                      others (record-changed! dir old (update registry :plugins dissoc k) now)]
-                  (-> warn (into lines) (into others)
-                      (conj (if (:n r)
-                              (str "plugin " id " reverted to v" n " (now v" (:n r) ")")
-                              (str "plugin " id " reverted to v" n ", but its history wasn't recorded: " (:error r)))))))))))
+            src (history/version-source (history/history-dir (:dir opts) id) n)]
+        (if-let [why (revert-refusal {:opts opts :live-reg @live :id id :n n :src src})]
+          (conj warn why)
+          (revert-apply! {:live live :opts opts :warn warn :id id :n n :src src :reason reason :now now})))
       (catch Throwable e
         [(str "reverting plugin " id " failed: " (or (ex-message e) (str e)))]))))
 
@@ -396,6 +423,47 @@
 
 (def ^:private review-hint "(Review Plugin Proposals in the palette)")
 
+(defn- proposal-refused
+  "A refused proposal's result, saying why."
+  [why]
+  {:status :refused :n nil :problems [why] :lines []})
+
+(defn- proposal-problem
+  "Why a proposal of source for id, with reason, can't be recorded, or nil."
+  [id reason source]
+  (cond
+    (not (plugin-id? id))
+    (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter")
+    (str/blank? reason) "a proposal needs a reason"
+    (not (string? source)) "a proposal needs its source as text"))
+
+(defn- proposal-entry
+  "What history/record-proposal! takes for a proposal: pending when pass?,
+  else rejected by the checks, keeping the check's result."
+  [{:keys [dir id source reason result now pass?]}]
+  (let [based-on (:n (history/latest-accepted (:entries (history/read-entries (history/history-dir dir id)))))]
+    (cond-> {:plugins-dir dir :id id :text source :reason reason :based-on based-on :now now
+             :status (if pass? :pending :rejected-by-checks)}
+      pass? (assoc :check {:warnings (vec (:warnings result)) :timings (or (:timings result) {})
+                           :plugin (when-not (:unchecked? result) (:plugin result))
+                           :unchecked? (boolean (:unchecked? result))})
+      (not pass?) (assoc :problems (vec (:problems result)) :check-log (:log result)))))
+
+(defn- proposal-pending
+  "The result of a recorded pending proposal r of id, with reason."
+  [{:keys [id reason result r]}]
+  {:status :pending :n (:n r) :problems []
+   :lines (cond-> [(str "plugin " id ": an agent proposes v" (:n r)
+                        (when (:unchecked? result) ", unchecked since there's no jolt to check it in")
+                        ": " reason " " review-hint)]
+            (:superseded r) (conj (str "plugin " id ": v" (:superseded r) " is superseded by v" (:n r))))})
+
+(defn- proposal-rejected
+  "The result of a recorded proposal r that the checks rejected."
+  [result r]
+  (cond-> {:status :rejected-by-checks :n (:n r) :problems (vec (:problems result)) :lines []}
+    (:log result) (assoc :log (:log result))))
+
 (defn propose-step!
   "Records an agent's proposal of source for id, with reason, given its
   check's result (propose-check's), on the plugin agent: {:status :n
@@ -407,36 +475,20 @@
   blank reason or a history that can't be written is :refused, recording
   nothing. opts are load-step!'s folder options. Never throws."
   [{:keys [id source reason result now] :as opts}]
-  (let [refused (fn [why] {:status :refused :n nil :problems [why] :lines []})]
-    (try
-      (let [[_ opts] (step-opts opts)
-            dir (:dir opts)]
-        (cond
-          (not (plugin-id? id))
-          (refused (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
-          (str/blank? reason) (refused "a proposal needs a reason")
-          (not (string? source)) (refused "a proposal needs its source as text")
-          :else
-          (let [pass? (boolean (or (:ok? result) (:unchecked? result)))
-                based-on (:n (history/latest-accepted (:entries (history/read-entries (history/history-dir dir id)))))
-                r (history/record-proposal!
-                   (cond-> {:plugins-dir dir :id id :text source :reason reason :based-on based-on :now now
-                            :status (if pass? :pending :rejected-by-checks)}
-                     pass? (assoc :check {:warnings (vec (:warnings result)) :timings (or (:timings result) {})
-                                          :plugin (when-not (:unchecked? result) (:plugin result))
-                                          :unchecked? (boolean (:unchecked? result))})
-                     (not pass?) (assoc :problems (vec (:problems result)) :check-log (:log result))))]
-            (cond
-              (:error r) (refused (str "the proposal wasn't recorded: " (:error r)))
-              pass? {:status :pending :n (:n r) :problems []
-                     :lines (cond-> [(str "plugin " id ": an agent proposes v" (:n r)
-                                          (when (:unchecked? result) ", unchecked since there's no jolt to check it in")
-                                          ": " reason " " review-hint)]
-                              (:superseded r) (conj (str "plugin " id ": v" (:superseded r) " is superseded by v" (:n r))))}
-              :else (cond-> {:status :rejected-by-checks :n (:n r) :problems (vec (:problems result)) :lines []}
-                      (:log result) (assoc :log (:log result)))))))
-      (catch Throwable e
-        (refused (str "the proposal wasn't recorded: " (or (ex-message e) (str e))))))))
+  (try
+    (let [[_ opts] (step-opts opts)]
+      (if-let [why (proposal-problem id reason source)]
+        (proposal-refused why)
+        (let [pass? (boolean (or (:ok? result) (:unchecked? result)))
+              r (history/record-proposal!
+                 (proposal-entry {:dir (:dir opts) :id id :source source :reason reason
+                                  :result result :now now :pass? pass?}))]
+          (cond
+            (:error r) (proposal-refused (str "the proposal wasn't recorded: " (:error r)))
+            pass? (proposal-pending {:id id :reason reason :result result :r r})
+            :else (proposal-rejected result r)))))
+    (catch Throwable e
+      (proposal-refused (str "the proposal wasn't recorded: " (or (ex-message e) (str e)))))))
 
 (defn- pending-n?
   "Whether version n of id under dir is the pending proposal."
