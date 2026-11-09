@@ -143,3 +143,9 @@
       (is (str/includes? (:text r) (.getCanonicalPath (io/file p))))
       (is (str/includes? (:text r) "Chosen by: fallback")))
     (is (= before (count @@#'registry/live)))))
+
+(deftest unknown-tool-throws-and-nil-args-count-as-empty
+  (let [ex (try (call "jonquil_nope" {}) nil (catch Throwable e e))]
+    (is (= "Unknown tool: jonquil_nope" (ex-message ex))))
+  (is (= "Missing required argument: symbol"
+         (ex-message (try ((:call (:t @env)) "jonquil_doc" nil) nil (catch Throwable e e))))))
