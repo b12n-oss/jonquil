@@ -337,8 +337,10 @@ port.
   over the repo and prints its Markdown report: a refactoring queue worst
   first, git hotspots, unused requires and functions nothing mentions, then
   per-file numbers and coupling. `bb metrics:edn` gives every finding as
-  data. Extra arguments go to its CLI (an output file, `--top N`,
-  `--no-git`, `--exclude GLOB`). Findings never fail it; only bad usage
+  data, `bb metrics:json` a lean JSON report for tools, and `bb
+  metrics:html` one self-contained page (`target/metrics.html` unless a
+  file comes first). Extra arguments go to its CLI (an output file, whose
+  extension picks the format, `--top N`, `--no-git`, `--exclude GLOB`). Findings never fail it; only bad usage
   does. `.jolt-metrics.edn` at the root counts `test` and `dev` as test code
   (measured, never queued) and leaves out build output, clj-kondo's cache,
   the smoke fixtures and `docs`. Upstream-lifted code (`src/jonquil/syntax.clj`,
