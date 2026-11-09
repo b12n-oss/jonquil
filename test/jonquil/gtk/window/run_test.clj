@@ -122,3 +122,24 @@
     ((:on-complete o) ::r)
     (is (= [[:out :out "a"] [:out :out "b"] [:base ::r]] @log))
     (is (= [{:done {:result ::r :output "ab"}}] @notified))))
+
+(deftest build-adds-the-run-fns-test
+  (let [log (atom [])
+        active (atom ::t1)
+        w {:active-tab (fn [] @active) :cv ::cv :ev* ::ev :sel* ::sel :status-label ::l :x 1}]
+    (with-redefs [win-run/do-run! (fn [c] (swap! log conj [:run c]))
+                  win-run/do-stop! (fn [ev* cv] (swap! log conj [:stop ev* cv]))
+                  win-run/do-run-selection! (fn [c] (swap! log conj [:sel c]))
+                  win-run/do-run-changed! (fn [c] (swap! log conj [:changed c]))]
+      (let [built (win-run/build w)
+            c {:tab ::t2 :cv ::cv :ev* ::ev :sel* ::sel :status-label ::l}]
+        (is (= (set (keys w)) (set (keys (dissoc built :run-fn :stop-fn :run-selection-fn :run-changed-fn)))))
+        (is (= #{:run-fn :stop-fn :run-selection-fn :run-changed-fn}
+               (set (remove (set (keys w)) (keys built)))))
+        (is (= 1 (:x built)))
+        (reset! active ::t2)
+        ((:run-fn built))
+        ((:stop-fn built))
+        ((:run-selection-fn built))
+        ((:run-changed-fn built))
+        (is (= [[:run c] [:stop ::ev ::cv] [:sel c] [:changed c]] @log))))))

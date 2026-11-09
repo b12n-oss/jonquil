@@ -5,7 +5,8 @@
   with the opts every evaluation shares (make-eval-opts) and the hooks chained
   onto them (hooked-opts). Internal to the window, as jonquil.gtk.window.status
   is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in its
-  docstring applies here."
+  docstring applies here. build makes activate!'s Run, Stop, Run Selection and
+  Run Changed fns, in its order."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.changed :as changed]
@@ -293,7 +294,7 @@
                    (when notify (notify {:busy warning})))))))))
      (when notify (fn [] (apply str @out))))))
 
-(defn do-stop!
+(defn- do-stop!
   "A running Stop's detached line comes from that evaluation's own
   on-output (attach/interrupt! calls it directly). An idle Stop has no
   evaluation and so no on-output to print through, and on-connection!
@@ -344,7 +345,7 @@
   {:source source :code code :path @(:path tab)
    :ns (or (clj/buffer-ns buffer-text) (str (ev/prompt-ns @ev*)))})
 
-(defn do-run-selection!
+(defn- do-run-selection!
   "Cmd/Ctrl+E: commands/run-selection-text on the editor's snapshot
   is nil for a blank line, else the selection or the caret's whole line.
   When non-nil, echoes \"> text\" to the console as if typed, then goes
@@ -568,7 +569,7 @@
                                                     :record (tab-record tab ev* :form text (:text snap))}))
       (win-status/set-status! status-label "No form at the caret."))))
 
-(defn do-run-changed!
+(defn- do-run-changed!
   "Run the forms changed since they last ran (LM3): the tab's changed
   top-level forms, in buffer order and joined by newlines, sent once the
   way Run Selection sends code. Says so instead when the tab never ran or
@@ -640,3 +641,18 @@
         (let [[new-hist text] (eval/history-next hist)]
           (reset! h new-hist)
           text)))))
+
+(defn build
+  "activate!'s Run, Stop, Run Selection and Run Changed fns, in activate!'s
+  order. w holds what they read: :active-tab (activate!'s fn answering the
+  active tab, called each time a fn runs) :cv :ev* :sel* :status-label.
+  Returns w with :run-fn :stop-fn :run-selection-fn and :run-changed-fn
+  added."
+  [{:keys [active-tab cv ev* sel* status-label] :as w}]
+  (let [run-fn (fn [] (do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
+        stop-fn (fn [] (do-stop! ev* cv))
+        run-selection-fn (fn [] (do-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
+                                                    :status-label status-label}))
+        run-changed-fn (fn [] (do-run-changed! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
+                                                :status-label status-label}))]
+    (assoc w :run-fn run-fn :stop-fn stop-fn :run-selection-fn run-selection-fn :run-changed-fn run-changed-fn)))

@@ -1909,8 +1909,8 @@
             (doseq [adj [(g/gtk-scrollable-get-vadjustment (:view cv))
                          (g/gtk-scrollable-get-hadjustment (:view cv))]]
               (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT)))
-        run-fn (fn [] (win-run/do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
-        stop-fn (fn [] (win-run/do-stop! ev* cv))
+        {:keys [run-fn stop-fn run-selection-fn run-changed-fn]}
+        (win-run/build {:active-tab active-tab :cv cv :ev* ev* :sel* sel* :status-label status-label})
         open-fn (fn [] (win-files/do-open! cv win (fn [p] (open-file! @*tab-ctx p))))
         save-fn (fn [] (let [t (active-tab)] (win-files/do-save! (:ed t) cv win (:path t))))
         save-as-fn (fn [] (let [t (active-tab)] (win-files/do-save-as! (:ed t) cv win (:path t))))
@@ -1926,10 +1926,6 @@
                        (let [ts @tabs]
                          (when-let [i (tabs/index-for-digit (count ts) digit)]
                            (select-tab! @*tab-ctx (:id (nth ts i))))))
-        run-selection-fn (fn [] (win-run/do-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
-                                                    :status-label status-label}))
-        run-changed-fn (fn [] (win-run/do-run-changed! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
-                                                :status-label status-label}))
         ;; The inspector panel. h-paned is the horizontal split (editor+
         ;; console keep their vertical paned as its start child; the
         ;; pane's own :root becomes its end child, wired below once both
