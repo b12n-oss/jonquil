@@ -156,7 +156,10 @@
     jonquil.gtk.parts
     jonquil.gtk.window.status
     jonquil.gtk.window.alerts
+    jonquil.gtk.window.plugin-agent
     jonquil.gtk.window.files
+    jonquil.gtk.window.right-slot
+    jonquil.gtk.window.theme
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen

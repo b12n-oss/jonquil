@@ -1,0 +1,134 @@
+(ns jonquil.gtk.window.right-slot
+  "The window's right-hand slot: one box holding the inspector, the source panel, the plugin panels and the parts' panels, one showing at a time, and the fns that show, hide and name the one on screen. build makes activate!'s slot bindings. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; build holds activate!'s own bindings in their order."
+  (:require [jolt.ffi :as ffi]
+            [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.source-pane :as source-pane]
+            [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
+            [jonquil.gtk.window.status :as win-status]))
+
+(def ^:private PANEL-WIDTH
+  ;; estimate: matched against jonquil.gtk.inspector-pane/WIDTH-REQUEST
+  ;; (360) plus room for the paned's handle.
+  420)
+
+;; --- the right-hand slot: the inspector and the source panel -------------
+;; One slot, last wins: a vertical GtkBox
+;; holds both panels' roots, only one visible at a time, and the box itself
+;; is hidden when neither is. Each root keeps its own visibility, so "is the
+;; inspector showing?" is still (:root pane)'s own visible flag.
+;; jonquil.gtk.window's apply-selection! hides the slot on a runtime switch.
+
+(defn- right-roots
+  "{which root} for the panels right's slot holds, a part's among them; a
+  right without :review-root, :plugins-root or :history-root (a test's) has
+  fewer, and one without :part-panels* has no part panels."
+  [{:keys [inspector-root source-root review-root plugins-root history-root
+           part-panels*]}]
+  (cond-> (into {:inspector inspector-root :source source-root}
+                (map (fn [[id p]] [id (:root p)]))
+                (some-> part-panels* deref))
+    review-root (assoc :review review-root)
+    plugins-root (assoc :plugins plugins-root)
+    history-root (assoc :history history-root)))
+
+(defn show-right-panel!
+  "Shows which (:inspector, :source, :review, :plugins, :history,
+  :locations, :debugger, :trace or :messages) in
+  the slot and hides the others; any but :history clears
+  plugin-history-shown, and which moves to the front of right's
+  :recent-panels when it has one. When the slot was hidden, also sizes h-paned so
+  the panel claims about PANEL-WIDTH; while
+  it's showing, the split stays where the person put it. right is {:win
+  :h-paned :slot :inspector-root :source-root :review-root}. GTK-thread
+  only."
+  [{:keys [win h-paned slot] :as right} which]
+  (let [was-hidden? (zero? (g/gtk-widget-get-visible slot))
+        roots (right-roots right)]
+    (when (not= which :history) (reset! win-plugin-agent/plugin-history-shown nil))
+    (doseq [[k root] roots :when (not= k which)] (g/gtk-widget-set-visible root 0))
+    (g/gtk-widget-set-visible (get roots which) 1)
+    (g/gtk-widget-set-visible slot 1)
+    ;; the recent panels, most recently shown first (a test's right has none)
+    (when-let [r (:recent-panels right)]
+      (swap! r (fn [v] (into [which] (remove #{which}) v))))
+    (when was-hidden?
+      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
+
+(defn showing-panel
+  "The key of the right-hand panel on screen, or nil when the slot is
+  hidden."
+  [{:keys [slot] :as right}]
+  (when (pos? (g/gtk-widget-get-visible slot))
+    (some (fn [[k root]] (when (pos? (g/gtk-widget-get-visible root)) k)) (right-roots right))))
+
+(defn focus-within?
+  "True when keyboard focus is widget or inside it."
+  [widget]
+  (let [root (g/gtk-widget-get-root widget)]
+    (when-not (ffi/null? root)
+      (let [f (g/gtk-root-get-focus root)]
+        (and (not (ffi/null? f))
+             (or (= f widget) (pos? (g/gtk-widget-is-ancestor f widget))))))))
+
+(defn hide-right-panel!
+  "Hides which's root, and the slot once no root is showing. Hiding
+  :source also cancels any re-scroll settling still in flight for it
+  (source-pane/cancel-scroll-settle!), so the
+  shared settle timeout stops touching the view behind a hidden panel
+  instead of only finding out once the view is actually destroyed.
+  close-source-panel! reaches this same cancellation by calling through
+  here, not by calling cancel-scroll-settle! a second time."
+  [{:keys [slot source-pane] :as right} which]
+  (let [roots (right-roots right)]
+    (g/gtk-widget-set-visible (get roots which) 0)
+    (when (= which :history) (reset! win-plugin-agent/plugin-history-shown nil))
+    (when (= which :source)
+      (source-pane/cancel-scroll-settle! (:scroll-cancelled? source-pane)))
+    (when (every? #(zero? (g/gtk-widget-get-visible %)) (vals roots))
+      (g/gtk-widget-set-visible slot 0))))
+
+(defn build
+  "activate!'s right-hand slot bindings, in activate!'s order: the slot box, part-panels* (reset once the parts install), the right map every slot fn takes, and panel-focus-fn. w holds what they read: :win :h-paned :pane :sp :rp :lp :hp :settings-path* :status-label. Returns w with :slot :part-panels* :right and :panel-focus-fn added; activate! resets *right to the right map next."
+  [{:keys [win h-paned pane sp rp lp hp settings-path* status-label] :as w}]
+  (let [slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+        ;; {id {:root :focus! :open!}} of the parts' panels, reset once the
+        ;; parts install (after part-contribution): panel-focus-fn and
+        ;; right-roots are built first, like *tab-ctx.
+        part-panels* (atom {})
+        right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
+               :review-root (:root rp) :plugins-root (:root lp)
+               :history-root (:root hp) :source-pane sp
+               ;; the panels shown, most recent first: the palette's
+               ;; Switch to panel entries, and the panel keys' "open it"
+               :recent-panels (atom [])
+               :part-panels* part-panels*}
+        ;; The panel keys and the palette's Switch to panel: focus the panel
+        ;; when it shows. Frames, Trace and Plugins otherwise run their own
+        ;; command, which asks for what they show now (a hidden one would
+        ;; show the calls or the error from before). The inspector, source
+        ;; panel and locations list come back with their state when they
+        ;; showed before and it still holds (a dialect switch and a cleared
+        ;; list take them off the recent list); with nothing to show they
+        ;; say what fills them.
+        panel-focus-fn (fn [k]
+                         (let [focus! (fn []
+                                        (case k
+                                          :inspector (inspector-pane/focus! pane)
+                                          :source (source-pane/focus! sp)
+                                          :plugins (g/gtk-widget-grab-focus (:list lp))
+                                          (if-let [p (get @part-panels* k)]
+                                            ((:focus! p))
+                                            (throw (IllegalArgumentException. (str "No matching clause: " k))))))]
+                           (cond
+                             (= k (showing-panel right)) (focus!)
+                             (= k :plugins) (win-plugin-agent/plugin-step! {:settings-path @settings-path*
+                                                                            :step (fn [] []) :open-list? true})
+                             (contains? @part-panels* k) ((:open! (get @part-panels* k)))
+                             (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
+                             :else
+                             (win-status/set-status! status-label
+                                                     (case k
+                                                       :inspector "; Nothing inspected yet: inspect a form or a result first."
+                                                       :source "; The Source panel is empty: jump to a definition first.")))))]
+    (assoc w :slot slot :part-panels* part-panels* :right right :panel-focus-fn panel-focus-fn)))
