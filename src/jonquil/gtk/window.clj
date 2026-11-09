@@ -2533,7 +2533,6 @@
         (set-status! status-label (str "; key: " (ex-message e)))
         1)))))
 
-
 ;; --- context menus -------------------------------------------------------
 
 (defn- install-context-menu!
@@ -4062,8 +4061,6 @@
                         :else (do (say (str "; ! " doc))
                                   (try ((deref (:on-run (:palette (active-tab)))) run)
                                        (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
-        ;; named, so each tab's palette can build the same per-key ctx
-        ;; (window-key-ctx) a window chord gets
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)
@@ -4149,6 +4146,8 @@
                                (fn [msg] (set-status! status-label msg)))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
+        ;; named, so each tab's palette can build the same per-key ctx
+        ;; (window-key-ctx) a window chord gets
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
@@ -4977,7 +4976,6 @@
                  ;; for), Enable, Disable and Open on an id's row as the
                  ;; buttons do, and what the list shows now
                    :plugin-list-pane lp
-                   ;; the inspector's own Close
                    :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
                    :unread-label unread-label
@@ -4985,6 +4983,7 @@
                    ;; panel keys' and Switch to panel's fn
                    :recent-panels* (fn [] (:recent-panels right))
                    :panel-focus!* panel-focus-fn
+                   ;; the inspector's own Close
                    :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})
