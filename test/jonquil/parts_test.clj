@@ -15,6 +15,8 @@
             [jonquil.gtk.parts.live-results :as live-results-part]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.parts.messages :as messages-part]
+            [jonquil.gtk.parts.plugins :as plugins-part]
+            [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.parts.processes :as processes-part]
             [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.parts.replay :as replay-part]
@@ -74,8 +76,8 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :replay] (mapv :id parts/specs)))
-  (is (= #{:tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :replay] (mapv :id parts/specs)))
+  (is (= #{:plugins/review :plugins/list :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
             :panel/processes :processes/show
           :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
           :result/inspect :result/copy :result/define :result/jump
@@ -783,3 +785,79 @@
     (with-redefs [file-tree-pane/select-path! (fn [p path] (swap! recorded conj [p path]))]
       (hook {} {:path (atom "/p/a.clj")})
       (is (= [[tp "/p/a.clj"]] @recorded)))))
+
+;; Plugins: the review, list and history panels' behaviour.
+
+(defn- plugins-wctx
+  "A stub wctx for the plugins part; steps and step-nows record into calls."
+  [calls]
+  {:review-pane {:root :r :handlers (atom {})}
+   :plugin-list-pane {:root :l :handlers (atom {})}
+   :plugin-history-pane {:root :h :handlers (atom {})}
+   :plugin-step! (fn [o] (swap! calls conj o) nil)
+   :plugin-step-now! (fn [o] (swap! calls conj o) [])
+   :settings-path* (atom "/s/settings.edn")
+   :plugin-history-shown (atom "p1")
+   :plugins-on* (atom true)
+   :review-state (atom {:reviews [] :index 0})})
+
+(deftest plugins-part-owns-its-commands
+  (let [spec (some #(when (= :plugins (:id %)) %) parts/specs)]
+    (is (= {:plugins/review [:review-proposals-fn] :plugins/list [:plugins-list-fn]}
+           (update-vals (:commands spec) :call)))
+    (is (nil? (get @#'registry/core-window-commands :plugins/review)))
+    (is (nil? (get @#'registry/core-window-commands :plugins/list)))
+    (is (some? (get registry/window-commands :plugins/review)))
+    (is (some? (get registry/window-commands :plugins/list)))
+    (is (some? (get @#'registry/core-window-commands :plugins/reload)))))
+
+(deftest plugins-part-answers-its-ui-keys
+  (let [c ((deref #'plugins-part/install) (plugins-wctx (atom [])))]
+    (is (= #{:review-proposals!* :review-accept!* :review-reject!* :review-next!*
+             :plugins-list!* :plugin-enable!* :plugin-disable!* :plugin-open!*
+             :plugin-history!* :plugin-revert!* :plugin-history-back!*
+             :plugin-history-close!* :plugin-history-shown* :plugin-list-shown*
+             :review-shown*}
+           (set (keys (:ui c)))))))
+
+(deftest plugins-review-and-list-ask-for-a-step
+  (let [calls (atom [])
+        c ((deref #'plugins-part/install) (plugins-wctx calls))]
+    ((get-in c [:fns :review-proposals-fn]))
+    ((get-in c [:fns :plugins-list-fn]))
+    (is (= 2 (count @calls)))
+    (let [[a b] @calls]
+      (is (= "/s/settings.edn" (:settings-path a)))
+      (is (true? (:open? a)))
+      (is (= [] ((:step a))))
+      (is (= "/s/settings.edn" (:settings-path b)))
+      (is (true? (:open-list? b)))
+      (is (= [] ((:step b)))))))
+
+(deftest plugins-install-sets-the-pane-handlers
+  (let [w (plugins-wctx (atom []))]
+    ((deref #'plugins-part/install) w)
+    (is (= #{:on-accept :on-reject :on-next :on-close} (set (keys @(:handlers (:review-pane w))))))
+    (is (= #{:on-enable :on-disable :on-open :on-history :on-review :on-close}
+           (set (keys @(:handlers (:plugin-list-pane w))))))
+    (is (= #{:on-revert :on-back :on-close} (set (keys @(:handlers (:plugin-history-pane w))))))))
+
+(deftest plugins-toggle-without-a-row-says-so
+  (let [calls (atom [])
+        reports (atom [])
+        w (plugins-wctx calls)]
+    ((deref #'plugins-part/install) w)
+    (with-redefs [plugin-list-pane/selected-row (fn [_] nil)
+                  plugin-list-pane/report! (fn [p text] (swap! reports conj [p text]))]
+      ((:on-enable @(:handlers (:plugin-list-pane w)))))
+    (is (= [[(:plugin-list-pane w) "No plugin is selected."]] @reports))
+    (is (empty? @calls))))
+
+(deftest plugins-history-back-clears-the-shown-id
+  (let [calls (atom [])
+        w (plugins-wctx calls)]
+    ((deref #'plugins-part/install) w)
+    ((:on-back @(:handlers (:plugin-history-pane w))))
+    (is (nil? @(:plugin-history-shown w)))
+    (is (= 1 (count @calls)))
+    (is (true? (:open-list? (first @calls))))))

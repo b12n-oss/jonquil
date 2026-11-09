@@ -103,13 +103,7 @@
    ;; reload the plugin files that changed, appeared or went
    ;; away; no chord, the palette reaches it
    :plugins/reload {:doc "Reload the plugin files that changed." :scope :window
-                    :run (call :reload-plugins-fn)}
-   ;; open the review of the agents' pending proposals
-   :plugins/review {:doc "Review the plugin proposals agents made." :scope :window
-                    :run (call :review-proposals-fn)}
-   ;; the plugin list, to enable, disable or open one
-   :plugins/list {:doc "Show the plugins: enable, disable or open one." :scope :window
-                  :run (call :plugins-list-fn)}})
+                    :run (call :reload-plugins-fn)}})
 
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])

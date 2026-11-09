@@ -3753,102 +3753,6 @@
                :recent-panels (atom [])
                :part-panels* part-panels*}
         _ (reset! *right right)
-        ;; The plugin-step! opts for Accept or Reject of the
-        ;; proposal the panel shows (nil when none is), its lines put on
-        ;; the panel's footer and its last on the status bar once the
-        ;; window has changed. GTK-thread only: it reads the note.
-        review-step (fn [kind]
-                      (let [{:keys [reviews index swapped]} @review-state]
-                        (if (and (= :accept kind) swapped)
-                          ;; The shown proposal was replaced while shown, so
-                          ;; this click was aimed at the old one; refuse it
-                          ;; once and say so
-                          (let [[id from to] swapped]
-                            (swap! review-state dissoc :swapped)
-                            (review-pane/report! rp (str "plugin " id ": v" to " replaced v" from
-                                                         " while it was shown, so it wasn't accepted. Read v" to
-                                                         ", then press Accept again."))
-                            nil)
-                        (when-let [{:keys [id n]} (get reviews index)]
-                          (let [path @settings-path*
-                                note (review-pane/note-text rp)]
-                            {:settings-path path
-                             :step (case kind
-                                     :accept #(plugin-loader/accept-step!
-                                               plugin-registry/live
-                                               {:settings-path path :os (System/getProperty "os.name") :id id :n n
-                                                :plugins? @plugins-on*})
-                                     :reject #(plugin-loader/reject-step! {:settings-path path :id id :n n :note note}))
-                             :after (fn [lines]
-                                      ;; every line, since a refused Accept's
-                                      ;; reasons come before its last
-                                      (when-let [l (last lines)]
-                                        (when (pos? (g/gtk-widget-get-visible (:root rp)))
-                                          (review-pane/report! rp (str/join "\n" lines)))
-                                        (g/gtk-label-set-text status-label (str "; " l))))})))))
-        ;; the same, waited for, for the self-test hooks (off the GTK thread)
-        review-step-now (fn [kind]
-                          (let [p (promise)]
-                            (on-gui! #(deliver p (review-step kind)))
-                            (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
-        ;; The plugin-step! opts for Enable (enabled? true) or
-        ;; Disable of the list's selected plugin, its first line put on the
-        ;; list's footer and the status bar once the window has changed;
-        ;; nil, with the footer saying so, when no row is selected.
-        ;; GTK-thread only.
-        toggle-step (fn [enabled?]
-                      (let [row (plugin-list-pane/selected-row lp)]
-                        (cond
-                          (nil? row) (do (plugin-list-pane/report! lp "No plugin is selected.") nil)
-                          ;; whether it's already that way is the step's to
-                          ;; say, since the row shown may be a step behind
-                          :else
-                          (let [path @settings-path*]
-                            {:settings-path path
-                             :step #(plugin-loader/set-enabled-step!
-                                     plugin-registry/live
-                                     {:settings-path path :os (System/getProperty "os.name")
-                                      :id (:id row) :enabled? enabled? :plugins? @plugins-on*})
-                             :after (fn [lines]
-                                      (when-let [l (first lines)]
-                                        (plugin-list-pane/report! lp l)
-                                        (g/gtk-label-set-text status-label (str "; " l))))}))))
-        toggle-step-now (fn [id enabled?]
-                          (let [p (promise)]
-                            (on-gui! #(deliver p (when (plugin-list-pane/select-id! lp id) (toggle-step enabled?))))
-                            (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
-        ;; History on the list's selected plugin, Back and
-        ;; Revert on the history's selected version: plugin-step! opts, or
-        ;; nil with the footer saying why. Revert's lines go to the
-        ;; history's footer and its last to the status bar once the window
-        ;; has changed. GTK-thread only: they read the selection and reason.
-        history-step (fn []
-                       (if-let [{:keys [id]} (plugin-list-pane/selected-row lp)]
-                         (do (reset! plugin-history-shown id)
-                             (plugin-history-pane/set-reason! hp "")
-                             {:settings-path @settings-path* :step (fn [] []) :open-history? true})
-                         (do (plugin-list-pane/report! lp "No plugin is selected.") nil)))
-        history-back-step (fn []
-                            (reset! plugin-history-shown nil)
-                            {:settings-path @settings-path* :step (fn [] []) :open-list? true})
-        revert-step (fn []
-                      (let [id @plugin-history-shown
-                            row (plugin-history-pane/selected-row hp)]
-                        (if (or (nil? id) (nil? row))
-                          (do (plugin-history-pane/report! hp "No version is selected.") nil)
-                          ;; the reason is read here, at the click, never on
-                          ;; the agent
-                          (let [path @settings-path*
-                                reason (plugin-history-pane/reason-text hp)]
-                            {:settings-path path
-                             :step #(plugin-loader/revert-step!
-                                     plugin-registry/live
-                                     {:settings-path path :os (System/getProperty "os.name")
-                                      :id id :n (:n row) :reason reason :plugins? @plugins-on*})
-                             :after (fn [lines]
-                                      (when-let [l (last lines)]
-                                        (plugin-history-pane/report! hp (str/join "\n" lines))
-                                        (g/gtk-label-set-text status-label (str "; " l))))}))))
         ;; After a plugin step, each tab on a plugin file whose
         ;; file now holds other text than the tab last saved follows it: a
         ;; clean tab reloads as one undo step, keeping its caret's offset, and a dirty one
@@ -3884,17 +3788,6 @@
                                     nil))
                               (catch :default e
                                 (cview/append! cv :error (str "; keeping plugin tabs in step failed: " (or (ex-message e) (str e)) "\n"))))))
-        ;; Open shows the selected plugin's file in a tab, or
-        ;; says why it can't (no row, or no file now). GTK-thread only.
-        plugin-open-fn (fn []
-                         (if-let [{:keys [id]} (plugin-list-pane/selected-row lp)]
-                           (let [dir (plugin-loader/plugins-dir @settings-path*)
-                                 f (java.io.File. ^String dir (str id ".clj"))]
-                             (if (.isFile f)
-                               (when-let [err (:error (open-file! @*tab-ctx (str f)))]
-                                 (plugin-list-pane/report! lp (str "plugin " id ": " err)))
-                               (plugin-list-pane/report! lp (str "plugin " id " has no file in " dir "."))))
-                           (plugin-list-pane/report! lp "No plugin is selected.")))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
@@ -4057,6 +3950,14 @@
                                           :unread-label unread-label
                                           :register-status-log! (fn [log!] (register-status-log! status-label log!))
                                           :plugin-step! plugin-step!
+                                          :plugins-on* plugins-on* :review-pane rp
+                                          :plugin-list-pane lp :plugin-history-pane hp
+                                          :pending-label pending-label
+                                          :open-file! (fn [p] (open-file! @*tab-ctx p))
+                                          ;; Interim, until the load code joins the part
+                                          :review-state review-state
+                                          :plugin-step-now! plugin-step-now!
+                                          :plugin-history-shown plugin-history-shown
                                           :refresh-labels! (fn [] (refresh-labels! @*tab-ctx))
                                           :inspect! (fn [start]
                                                       (inspect-last! ev* right pane inspector-state inspecting?
@@ -4115,10 +4016,6 @@
                                       :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                       :digit-tab-fn digit-tab-fn
                                       :parinfer-fn parinfer-fn
-                                      :review-proposals-fn (fn [] (plugin-step! {:settings-path @settings-path*
-                                                                                 :step (fn [] []) :open? true}))
-                                      :plugins-list-fn (fn [] (plugin-step! {:settings-path @settings-path*
-                                                                             :step (fn [] []) :open-list? true}))
                                       :reload-plugins-fn (fn [] (plugin-load! {:settings-path @settings-path*
                                                                                :cv cv :plugins? @plugins-on*}))}
                          part-contribution)
@@ -4286,27 +4183,6 @@
     (editor/set-jump-fn! (:editor sp) source-jump-fn)
     (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
     (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
-    (review-pane/set-handlers!
-     rp {:on-accept (fn [] (some-> (review-step :accept) plugin-step!))
-         :on-reject (fn [] (some-> (review-step :reject) plugin-step!))
-         :on-next (fn [] (let [{:keys [reviews index]} @review-state
-                               n (count reviews)]
-                           (when (pos? n)
-                             (let [i (mod (inc index) n)]
-                               (swap! review-state #(-> % (assoc :index i) (dissoc :swapped)))
-                               (review-pane/show! rp (nth reviews i) i n)))))
-         :on-close (fn [] (hide-right-panel! right :review) (editor/focus! (:ed (active-tab))))})
-    (plugin-list-pane/set-handlers!
-     lp {:on-enable (fn [] (some-> (toggle-step true) plugin-step!))
-         :on-disable (fn [] (some-> (toggle-step false) plugin-step!))
-         :on-open plugin-open-fn
-         :on-history (fn [] (some-> (history-step) plugin-step!))
-         :on-review (fn [] (plugin-step! {:settings-path @settings-path* :step (fn [] []) :open? true}))
-         :on-close (fn [] (hide-right-panel! right :plugins) (editor/focus! (:ed (active-tab))))})
-    (plugin-history-pane/set-handlers!
-     hp {:on-revert (fn [] (some-> (revert-step) plugin-step!))
-         :on-back (fn [] (plugin-step! (history-back-step)))
-         :on-close (fn [] (hide-right-panel! right :history) (editor/focus! (:ed (active-tab))))})
     ;; Joins the SAME registry, so Escape closes the def prompt before it
     ;; can fall through to Stop.
     (register-popover-fn (:def-popover pane))
@@ -4859,15 +4735,6 @@
                  ;; and what the panel shows now
                    :review-pane rp
                    :pending-label pending-label
-                   :review-proposals!* (fn [] (plugin-step-now! {:settings-path @settings-path*
-                                                                 :step (fn [] []) :open? true})
-                                         nil)
-                   :review-accept!* (fn [] (review-step-now :accept))
-                   :review-reject!* (fn [] (review-step-now :reject))
-                   :review-next!* (fn [] (let [p (promise)]
-                                           (on-gui! #(do ((:on-next @(:handlers rp))) (deliver p true)))
-                                           (deref p 10000 nil)
-                                           []))
                  ;; The plugin list, what Plugins… does (waited
                  ;; for), Enable, Disable and Open on an id's row as the
                  ;; buttons do, and what the list shows now
@@ -4881,59 +4748,11 @@
                    :panel-focus!* panel-focus-fn
                    ;; the inspector's own Close
                    :close-inspector!* on-inspector-close
-                   :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
-                                                             :step (fn [] []) :open-list? true})
-                                     nil)
-                   :plugin-enable!* (fn [id] (toggle-step-now id true))
-                   :plugin-disable!* (fn [id] (toggle-step-now id false))
-                   :plugin-open!* (fn [id] (let [p (promise)]
-                                             (on-gui! #(deliver p (do (when (plugin-list-pane/select-id! lp id) (plugin-open-fn))
-                                                                      (plugin-list-pane/footer-text lp))))
-                                             (deref p 10000 nil)))
                  ;; History on an id's list row, Revert on
                  ;; version n (nil: whatever's selected) with a reason, Back,
                  ;; each as the button does and waited for, and what the
                  ;; history shows now
                    :plugin-history-pane hp
-                   :plugin-history!* (fn [id] (let [p (promise)]
-                                                (on-gui! #(deliver p (when (plugin-list-pane/select-id! lp id) (history-step))))
-                                                (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
-                   :plugin-revert!* (fn [n reason & [then]]
-                                      ;; then: run on the GTK thread after the
-                                      ;; click, before the step runs (a row
-                                      ;; edits the reason there)
-                                      (let [p (promise)]
-                                        (on-gui! #(deliver p (do (plugin-history-pane/set-reason! hp reason)
-                                                                 (let [o (if (or (nil? n) (plugin-history-pane/select-n! hp n))
-                                                                           (revert-step)
-                                                                           (do (plugin-history-pane/report! hp (str "no v" n " row")) nil))]
-                                                                   (when then (then))
-                                                                   o))))
-                                        (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
-                   :plugin-history-back!* (fn [] (plugin-step-now! (history-back-step)))
-                   :plugin-history-close!* (fn [] (let [p (promise)]
-                                                    (on-gui! #(deliver p (hide-right-panel! right :history)))
-                                                    (deref p 10000 nil)))
-                   :plugin-history-shown* (fn [] (let [p (promise)]
-                                                   (on-gui! #(deliver p {:visible (pos? (g/gtk-widget-get-visible (:root hp)))
-                                                                         :id @plugin-history-shown
-                                                                         :title (plugin-history-pane/title-text hp)
-                                                                         :rows (plugin-history-pane/row-texts hp)
-                                                                         :selected (:n (plugin-history-pane/selected-row hp))
-                                                                         :empty (plugin-history-pane/empty-text hp)
-                                                                         :reason (plugin-history-pane/reason-text hp)
-                                                                         :footer (plugin-history-pane/footer-text hp)}))
-                                                   (deref p 10000 nil)))
-                   :plugin-list-shown* (fn [] (let [p (promise)]
-                                                (on-gui! #(deliver p {:visible (pos? (g/gtk-widget-get-visible (:root lp)))
-                                                                      :rows (plugin-list-pane/row-texts lp)
-                                                                      :selected (:id (plugin-list-pane/selected-row lp))
-                                                                      :empty (plugin-list-pane/empty-text lp)
-                                                                      :footer (plugin-list-pane/footer-text lp)}))
-                                                (deref p 10000 nil)))
-                   :review-shown* (fn [] (let [{:keys [reviews index]} @review-state]
-                                           (when-let [r (get reviews index)]
-                                             {:id (:id r) :n (:n r) :index index :count (count reviews)})))
                    :source-jump!* source-jump-fn
                    :source-open!* source-open-fn
                    :source-back!* source-back-fn
