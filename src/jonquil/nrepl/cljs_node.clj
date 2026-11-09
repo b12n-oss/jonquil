@@ -175,43 +175,72 @@
         (Thread/sleep 20)
         (recur)))))
 
+(defn- child-usable?
+  "True when child is alive, its connection is open and its late setup has
+  not failed."
+  [{:keys [state hooks]} child]
+  (boolean (and child ((:alive? hooks) child) (prepl/open? (:conn @state))
+                (not= :failed (:setup-pending @state)))))
+
+(defn- discard-old-child!
+  "Kills the stored child (when there is one), saying so when its late setup
+  failed, and in a browser evaluator waits for the kill to settle."
+  [{:keys [state] :as ev} on-output child]
+  (let [failed? (= :failed (:setup-pending @state))]
+    (when failed?
+      (connection/say! on-output :system
+                       (str (:text (setup-failed "the session setup failed" child)) "\n")))
+    (when child (kill-child! ev {:keep-log? failed?}))
+    (when (browser? ev) (await-kills! ev))))
+
+(defn- store-started-child!
+  "Records a freshly launched child in state; a Stop that came during the
+  launch kills it."
+  [{:keys [state] :as ev} started port-changed?]
+  (swap! state
+         (fn [s]
+           (cond-> (assoc s :child started)
+             (browser? ev)
+             (assoc :await-page (cljs-node/page-url (:http-port s) (:page-token s))
+                    :announce (if (:opened? s) :reload :first)
+                    :port-changed? port-changed?))))
+  (when (stopping? ev) (kill-child! ev))
+  nil)
+
+(defn- launch-and-store!
+  "Launches the child with the ensured launcher: nil once stored, else the
+  result to finish the evaluation with."
+  [ev on-output clojure launcher]
+  (connection/say! on-output :system (str (cljs-node/starting-message clojure) "\n"))
+  (let [[started port-changed?] (launch-child! ev clojure launcher)]
+    (cond
+      (= :cancelled (:error started)) {:status :interrupted}
+      (= :http-port-taken (:error started)) {:status :notice :text port-twice-message}
+      (:error started) {:status :notice :text (cljs-node/start-failed-message (:error started))}
+      :else (store-started-child! ev started port-changed?))))
+
+(defn- start-new-child!
+  "nil once a new child is stored, else the result to finish the evaluation
+  with."
+  [{:keys [hooks] :as ev} on-output]
+  (if-let [clojure ((:find-clojure hooks))]
+    (let [launcher (try ((:ensure-launcher hooks)) (catch Throwable e e))]
+      (if (instance? Throwable launcher)
+        {:status :notice :text (cljs-node/start-failed-message (ex-message launcher))}
+        (launch-and-store! ev on-output clojure launcher)))
+    {:status :notice :text cljs-node/no-clojure-message}))
+
 (defn- ensure-child!
   "nil once a live child is stored in state, else the result to finish the
   evaluation with. A stored child that died, or lost its connection, is
   killed first, and so is one whose late setup failed (it would only report
   the failure again). A Stop during the launch kills what it produced."
-  [{:keys [state hooks] :as ev} on-output]
+  [{:keys [state] :as ev} on-output]
   (let [child (:child @state)]
-    (if (and child ((:alive? hooks) child) (prepl/open? (:conn @state))
-             (not= :failed (:setup-pending @state)))
+    (if (child-usable? ev child)
       nil
-      (let [failed? (= :failed (:setup-pending @state))]
-        (when failed?
-          (connection/say! on-output :system
-                           (str (:text (setup-failed "the session setup failed" child)) "\n")))
-        (when child (kill-child! ev {:keep-log? failed?}))
-        (when (browser? ev) (await-kills! ev))
-        (if-let [clojure ((:find-clojure hooks))]
-          (let [launcher (try ((:ensure-launcher hooks)) (catch Throwable e e))]
-            (if (instance? Throwable launcher)
-              {:status :notice :text (cljs-node/start-failed-message (ex-message launcher))}
-              (do
-                (connection/say! on-output :system (str (cljs-node/starting-message clojure) "\n"))
-                (let [[started port-changed?] (launch-child! ev clojure launcher)]
-                  (cond
-                    (= :cancelled (:error started)) {:status :interrupted}
-                    (= :http-port-taken (:error started)) {:status :notice :text port-twice-message}
-                    (:error started) {:status :notice :text (cljs-node/start-failed-message (:error started))}
-                    :else (do (swap! state
-                                     (fn [s]
-                                       (cond-> (assoc s :child started)
-                                         (browser? ev)
-                                         (assoc :await-page (cljs-node/page-url (:http-port s) (:page-token s))
-                                                :announce (if (:opened? s) :reload :first)
-                                                :port-changed? port-changed?))))
-                              (when (stopping? ev) (kill-child! ev))
-                              nil))))))
-          {:status :notice :text cljs-node/no-clojure-message})))))
+      (do (discard-old-child! ev on-output child)
+          (start-new-child! ev on-output)))))
 
 (defn- say-waiting!
   "Calls the running evaluation's :on-wait-input with waiting?, as the
@@ -249,6 +278,50 @@
     (when r
       (dispatch-reply! ev closed? r))))
 
+(defn- deliver-closed!
+  "The first :closed of a connection clears :drain and reaches the sink."
+  [{:keys [state]} closed? r]
+  (when (compare-and-set! closed? false true)
+    (swap! state assoc :drain nil)
+    (when-let [f (:sink @state)] (f r))))
+
+(defn- print-late-output!
+  "Nothing waiting: output node prints after an evaluation finished (a
+  setTimeout, a promise) goes to the last evaluation's on-output."
+  [{:keys [state]} r]
+  (when-let [f (:last-output @state)]
+    (when-let [[k t] (cljs-node/output-of r)]
+      (connection/say! f k t))))
+
+(defn- settle-reply-state
+  "The state after reply r (a ret of form) arrived: the setup's answer, then
+  the drain or the done-forms bookkeeping."
+  [s form r]
+  (let [s (if (and form (= form cljs-node/setup-form) (true? (:setup-pending s))
+                   (or (= form (:drain s)) (= form (:sink-form s))))
+            ;; The setup's answer is recorded here whether
+            ;; or not its exchange is still waiting.
+            (assoc s :setup-pending (if (:exception r) :failed nil)
+                   :ready? (not (:exception r)))
+            s)]
+    (cond
+      (and form (= form (:drain s))) (assoc s :drain nil)
+      (and form (= form (:sink-form s))) (update s :done-forms conj form)
+      :else s)))
+
+(defn- route-reply!
+  "Records the reply in state, then hands it to the sink unless a :drain was
+  pending."
+  [{:keys [state] :as ev} r]
+  (let [form (when (= :ret (:tag r)) (:form r))
+        [old _] (swap-vals! state settle-reply-state form r)]
+    (when (and form (= form (:drain old)) (= form cljs-node/setup-form)
+               (true? (:setup-pending old)) (not (:exception r)))
+      (connection/notify! ev true))
+    (cond
+      (:drain old) nil
+      (:sink old) ((:sink old) r))))
+
 (defn- dispatch-reply!
   "dispatch!'s routing, after the :err marker pass."
   [{:keys [state] :as ev} closed? r]
@@ -256,40 +329,17 @@
     (and (browser? ev) (cljs-node/waiting-line? r)) nil
 
     (= :closed (:tag r))
-    (when (compare-and-set! closed? false true)
-      (swap! state assoc :drain nil)
-      (when-let [f (:sink @state)] (f r)))
+    (deliver-closed! ev closed? r)
 
     @closed? nil
 
     ;; Nothing waiting: output node prints after an evaluation finished (a
     ;; setTimeout, a promise) goes to the last evaluation's on-output.
     (and (nil? (:sink @state)) (nil? (:drain @state)) (#{:out :err :tap} (:tag r)))
-    (when-let [f (:last-output @state)]
-      (when-let [[k t] (cljs-node/output-of r)]
-        (connection/say! f k t)))
+    (print-late-output! ev r)
 
     :else
-    (let [form (when (= :ret (:tag r)) (:form r))
-          [old _] (swap-vals! state
-                              (fn [s]
-                                (let [s (if (and form (= form cljs-node/setup-form) (true? (:setup-pending s))
-                                                 (or (= form (:drain s)) (= form (:sink-form s))))
-                                          ;; The setup's answer is recorded here whether
-                                          ;; or not its exchange is still waiting.
-                                          (assoc s :setup-pending (if (:exception r) :failed nil)
-                                                 :ready? (not (:exception r)))
-                                          s)]
-                                  (cond
-                                    (and form (= form (:drain s))) (assoc s :drain nil)
-                                    (and form (= form (:sink-form s))) (update s :done-forms conj form)
-                                    :else s))))]
-      (when (and form (= form (:drain old)) (= form cljs-node/setup-form)
-                 (true? (:setup-pending old)) (not (:exception r)))
-        (connection/notify! ev true))
-      (cond
-        (:drain old) nil
-        (:sink old) ((:sink old) r)))))
+    (route-reply! ev r)))
 
 (defn- exchange!
   "Sends text and collects the replies until (done? reply) or :closed or
