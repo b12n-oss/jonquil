@@ -97,6 +97,87 @@
   (let [n (try (some-> text str/trim parse-long) (catch Exception _ nil))]
     (when (and n (< 0 n 65536)) n)))
 
+(defn- close-interrupted
+  "Closes conn and returns the interrupted result."
+  [conn]
+  (client/close! conn)
+  {:status :interrupted})
+
+(defn- close-with-notice
+  "Closes conn and returns a :notice result with text."
+  [conn text]
+  (client/close! conn)
+  {:status :notice :text text})
+
+(defn- publish-connecting!
+  "Publishes conn as :connecting unless Stop has landed. True when it was
+  published."
+  [state conn]
+  (let [[_ new] (swap-vals! state (fn [s] (if (get-in s [:running :stop-requested?])
+                                            s
+                                            (assoc s :connecting conn))))]
+    (identical? conn (:connecting new))))
+
+(defn- clone-session
+  "A new session id from conn's clone reply when the describe op-set offers
+  eval and load-file, else nil."
+  [conn op-set timings]
+  (when (and (contains? op-set "eval") (contains? op-set "load-file"))
+    (let [c (client/request-sync conn {:op "clone"} (:clone-timeout-ms timings))]
+      (when (vector? c) (some :new-session c)))))
+
+(defn- publish-connected!
+  "Publishes conn as the live :conn unless Stop has landed, then watches it
+  for loss and notifies connected. nil once published, else the interrupted
+  result."
+  [{:keys [ev conn sid op-set d on-connect]}]
+  (let [state (:state ev)
+        [_ new] (swap-vals! state
+                            (fn [s] (if (get-in s [:running :stop-requested?])
+                                      s
+                                      (merge (assoc s :conn conn :session sid :ops op-set
+                                                    :nrepl-version (ops/nrepl-version d))
+                                             on-connect))))]
+    (if (identical? conn (:conn new))
+      (do (add-watch (:open? conn) ::connection
+                     (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
+          (notify! ev true)
+          nil)
+      (close-interrupted conn))))
+
+(defn- finish-handshake!
+  "Everything after describe answered d on conn: the ops, the clone, the
+  stop guard and the publish. nil once connected, else the result."
+  [{:keys [ev stop? messages port timings] :as ctx} conn d]
+  (let [op-set (if (vector? d) (ops/op-names d) #{})
+        sid (clone-session conn op-set timings)]
+    (cond
+      (stop? ev) (close-interrupted conn)
+      sid (publish-connected! (assoc (select-keys ctx [:ev :on-connect])
+                                     :conn conn :sid sid :op-set op-set :d d))
+      ;; describe answered disconnected: the app quit between
+      ;; the socket opening and the reply landing. That's a
+      ;; refused connection, not a non-matching server (the
+      ;; not-server sentence is only for one that answers
+      ;; describe for real, without eval and load-file).
+      (and (vector? d) (contains? (ops/statuses d) ops/disconnected))
+      (close-with-notice conn (message-text messages :refused port))
+      :else (close-with-notice conn (message-text messages :not-server port)))))
+
+(defn- attach!
+  "Opens a socket to ctx's host and port and runs the handshake on it. nil
+  once connected, else the result."
+  [{:keys [ev state on-output host stop? messages timings] :as ctx} port]
+  (say! on-output :system (str (message-text messages :connecting port) "\n"))
+  (if-let [conn (try (client/connect-to host port) (catch Exception _ nil))]
+    (if-not (publish-connecting! state conn)
+      (close-interrupted conn)
+      (let [d (client/request-sync conn {:op "describe"} (:describe-timeout-ms timings))]
+        (if (stop? ev)
+          (close-interrupted conn)
+          (finish-handshake! (assoc ctx :port port) conn d))))
+    {:status :notice :text (message-text messages :refused port)}))
+
 (defn connect!
   "The connect rules, run only when there's no live connection. nil once
   connected, else the result to finish the evaluation with (a :notice: a
@@ -129,55 +210,17 @@
   (let [stop? (or (:stop-requested? policy) stop-requested?)]
     (when-not (connected? ev)
       (let [ep (when-let [e (:endpoint policy)] (e ev))
-            host (or (:host ep) "127.0.0.1")
-            attach! (fn [port]
-                      (say! on-output :system (str (message-text messages :connecting port) "\n"))
-                      (if-let [conn (try (client/connect-to host port) (catch Exception _ nil))]
-                        (let [[_ new] (swap-vals! state (fn [s] (if (get-in s [:running :stop-requested?])
-                                                                  s
-                                                                  (assoc s :connecting conn))))]
-                          (if-not (identical? conn (:connecting new))
-                            (do (client/close! conn) {:status :interrupted})
-                            (let [d (client/request-sync conn {:op "describe"} (:describe-timeout-ms timings))]
-                              (if (stop? ev)
-                                (do (client/close! conn) {:status :interrupted})
-                                (let [op-set (if (vector? d) (ops/op-names d) #{})
-                                      sid (when (and (contains? op-set "eval") (contains? op-set "load-file"))
-                                            (let [c (client/request-sync conn {:op "clone"} (:clone-timeout-ms timings))]
-                                              (when (vector? c) (some :new-session c))))]
-                                  (cond
-                                    (stop? ev) (do (client/close! conn) {:status :interrupted})
-                                    sid (let [[_ new] (swap-vals! state
-                                                                  (fn [s] (if (get-in s [:running :stop-requested?])
-                                                                            s
-                                                                            (merge (assoc s :conn conn :session sid :ops op-set
-                                                                                          :nrepl-version (ops/nrepl-version d))
-                                                                                   on-connect))))]
-                                          (if (identical? conn (:conn new))
-                                            (do (add-watch (:open? conn) ::connection
-                                                           (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
-                                                (notify! ev true)
-                                                nil)
-                                            (do (client/close! conn) {:status :interrupted})))
-                            ;; describe answered disconnected: the app quit between
-                            ;; the socket opening and the reply landing. That's a
-                            ;; refused connection, not a non-matching server (the
-                            ;; not-server sentence is only for one that answers
-                            ;; describe for real, without eval and load-file).
-                                    (and (vector? d) (contains? (ops/statuses d) ops/disconnected))
-                                    (do (client/close! conn) {:status :notice :text (message-text messages :refused port)})
-                                    :else (do (client/close! conn)
-                                              {:status :notice :text (message-text messages :not-server port)})))))))
-                        {:status :notice :text (message-text messages :refused port)}))
+            ctx {:ev ev :state state :on-output on-output :host (or (:host ep) "127.0.0.1")
+                 :stop? stop? :messages messages :on-connect on-connect :timings timings}
             f (when-not (:port ep) (if-let [pf (:port-file policy)] (pf ev) (port-file ev)))]
         (cond
-          (:port ep) (attach! (:port ep))
+          (:port ep) (attach! ctx (:port ep))
           (nil? f) {:status :notice :text (message-text messages :no-project nil)}
           (not (.exists ^java.io.File f))
           {:status :notice :text (message-text messages :not-running (:project-dir (:selection ev)))}
           :else
           (if-let [port (parse-port (try (slurp f) (catch Exception _ nil)))]
-            (attach! port)
+            (attach! ctx port)
             {:status :notice :text (message-text messages :bad-port-file nil)}))))))
 
 (defn detach!
@@ -193,6 +236,22 @@
   (let [{:keys [conn connecting]} (first (swap-vals! state assoc :conn nil :session nil :connecting nil :fresh? false))]
     (client/close! conn)
     (client/close! connecting)))
+
+(defn- track-live-reply!
+  "The side effects of reply m while conn is still the live connection: the
+  session's namespace and the :out and :err text. Nothing otherwise."
+  [{:keys [state conn on-output]} m]
+  (when (identical? conn (:conn @state))
+    (when-let [n (:ns m)] (swap! state assoc :session-ns n))
+    (when-let [o (:out m)] (say! on-output :out o))
+    (when-let [e (:err m)] (say! on-output :err e))))
+
+(defn- say-still-waiting!
+  "Waits wait-ms for done and, when it hasn't been delivered and
+  still-waiting is set, says it once on :system."
+  [{:keys [done wait-ms on-output still-waiting]}]
+  (when (and still-waiting (= ::waiting (deref done wait-ms ::waiting)))
+    (say! on-output :system (str still-waiting "\n"))))
 
 (defn request!
   "Sends msg on the live session and waits for its done reply, with no
@@ -227,16 +286,14 @@
       [{:status ["done" ops/disconnected]}]
       (let [acc (atom [])
             done (promise)
+            side {:state state :conn conn :on-output on-output}
             id (client/request! conn (assoc msg :session session)
                                 (fn [m]
                                   (swap! acc conj m)
-                                  (when (identical? conn (:conn @state))
-                                    (when-let [n (:ns m)] (swap! state assoc :session-ns n))
-                                    (when-let [o (:out m)] (say! on-output :out o))
-                                    (when-let [e (:err m)] (say! on-output :err e)))
+                                  (track-live-reply! side m)
                                   (when on-message (on-message m))
                                   (when (client/done? m) (deliver done @acc))))]
         (when (:running @state) (swap! state assoc-in [:running :id] id))
-        (when (and still-waiting (= ::waiting (deref done (:still-waiting-ms timings) ::waiting)))
-          (say! on-output :system (str still-waiting "\n")))
+        (say-still-waiting! {:done done :wait-ms (:still-waiting-ms timings)
+                             :on-output on-output :still-waiting still-waiting})
         @done))))
