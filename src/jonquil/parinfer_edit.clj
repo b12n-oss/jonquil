@@ -329,41 +329,116 @@
                (recur (conj pieces (subs text pos s) (or fixed form))
                       e (next spans))))))))))
 
+(defn- caret-opts
+  "Parinfer's cursor options for the caret inside the region: its place in R
+  and, when the previous caret was in the region too, its place in P."
+  [{:keys [P R s e prev-caret]} caret]
+  (let [[cl cx] (line-col R (- caret s))]
+    (cond-> {:cursor-line cl :cursor-x cx}
+      (and prev-caret (<= s prev-caret e))
+      (merge (let [[pl px] (line-col P (- prev-caret s))]
+               {:prev-cursor-line pl :prev-cursor-x px})))))
+
+(defn- change-of
+  "The change run-mode is told about: the edit's line within R, its column,
+  and the old and new text."
+  [{:keys [prev text R s p old-end new-end]}]
+  (let [ls (line-start text p)]
+    {:line-no (first (line-col R (- ls s)))
+     :x (- p ls)
+     :old-text (subs prev p old-end)
+     :new-text (subs text p new-end)}))
+
+(defn- region-edit
+  "The {:edits :caret} that turns R into Parinfer's NR, mapping the caret
+  through it."
+  [{:keys [R s e']} result caret caret-in?]
+  (let [NR (:text result)
+        [q r-end n-end] (diff R NR)]
+    {:edits [[(+ s q) (+ s r-end) (subs NR q n-end)]]
+     :caret (cond
+              caret-in? (+ s (offset NR (:cursor-line result) (:cursor-x result)))
+              (> caret e') (+ caret (- (count NR) (count R)))
+              :else caret)}))
+
 (defn- adjust-region
-  "adjust once the region [s e] of prev is known; p, old-end and new-end
-  are diff's answer for prev and text."
-  [mode prev prev-caret text caret p old-end new-end s e prev-consistent?]
+  "adjust once the region [s e] of prev is known. ctx holds :prev, :prev-caret,
+  :text, :p, :old-end and :new-end (diff's answer for prev and text), :s, :e
+  and :prev-consistent?; the caret is passed apart."
+  [{:keys [mode prev text s e prev-consistent?] :as ctx} caret]
   (let [e' (max s (+ e (- (count text) (count prev))))
         P (subs prev s e)
         R (subs text s e')
-        ls (line-start text p)
-        change {:line-no (first (line-col R (- ls s)))
-                :x (- p ls)
-                :old-text (subs prev p old-end)
-                :new-text (subs text p new-end)}
+        ctx (assoc ctx :e' e' :P P :R R)
         caret-in? (<= s caret e')
-        opts (if caret-in?
-               (let [[cl cx] (line-col R (- caret s))]
-                 (cond-> {:cursor-line cl :cursor-x cx}
-                   (and prev-caret (<= s prev-caret e))
-                   (merge (let [[pl px] (line-col P (- prev-caret s))]
-                            {:prev-cursor-line pl :prev-cursor-x px}))))
-               {})
-        result (run-mode mode P R change (- caret s) opts prev-consistent?)
+        opts (if caret-in? (caret-opts ctx caret) {})
+        result (run-mode mode P R (change-of ctx) (- caret s) opts prev-consistent?)
         NR (:text result)]
     (cond
       (and (:success result) (string? NR) (not= NR R))
-      (let [[q r-end n-end] (diff R NR)]
-        {:edits [[(+ s q) (+ s r-end) (subs NR q n-end)]]
-         :caret (cond
-                  caret-in? (+ s (offset NR (:cursor-line result) (:cursor-x result)))
-                  (> caret e') (+ caret (- (count NR) (count R)))
-                  :else caret)})
+      (region-edit ctx result caret caret-in?)
       ;; "unhandled" is the engine catching a Throwable, a Jolt shim gap
       ;; the editor's error line (the status bar) should name; Parinfer's
       ;; own refusals stay nil.
       (and (not (:success result)) (= "unhandled" (:name (:error result))))
       {:engine-error (or (:message (:error result)) "unhandled")})))
+
+(defn- bounded-span
+  "[p old-end new-end] from the signals' [bp bq] bounds, trimmed the way diff
+  trims. The signals' span is sound but not minimal: a replacement sharing an
+  affix with what it replaced must be trimmed the way diff trims, since the
+  engine keys its change lookup on the span's end. Extending from the
+  seed costs the span's width, not the buffer's."
+  [^String prev ^String text caret [bp bq]]
+  (let [n (count prev) m (count text)
+        lim (min (min n m) (max 0 (- caret (max 0 (- m n)))))
+        p (loop [i (min bp lim)]
+            (if (and (< i lim)
+                     (= (.charAt prev i) (.charAt text i)))
+              (recur (inc i)) i))
+        qmax (- (min n m) p)
+        q (loop [i (min bq qmax)]
+            (if (and (< i qmax)
+                     (= (.charAt prev (- n 1 i))
+                        (.charAt text (- m 1 i))))
+              (recur (inc i)) i))]
+    [p (- n q) (- m q)]))
+
+(defn- edit-span
+  "[p old-end new-end]: the edit's span in prev and text, from the
+  signals' bounds when given, else from diff."
+  [prev text caret bounds]
+  (if bounds
+    (bounded-span prev text caret bounds)
+    (diff prev text (- caret (max 0 (- (count text) (count prev)))))))
+
+(defn- region-end-before-edit
+  "Whole lines removed: the line after them isn't part of the edit."
+  [prev p old-end]
+  (if (and (< p old-end) (= p (line-start prev p)) (= old-end (line-start prev old-end)))
+    (dec old-end)
+    old-end))
+
+(defn- region-start
+  "s, moved up to the form above when the edit indents a top-level line.
+  Indenting a top-level line is Parinfer's \"pull it into the
+  form above\": pure whitespace inserted at the
+  start of a line that was its own region joins the form above."
+  [{:keys [prev text p old-end new-end]} s]
+  (if (and (pos? s) (= s p) (= old-end p) (= s (line-start prev p))
+           (str/blank? (subs text p new-end)))
+    (prev-form-start prev s)
+    s))
+
+(defn- within-max-lines?
+  "Whether the region [s e] and its edited after-text fit in max-lines. The
+  cap counts the edited after-text too, or a long paste onto
+  a blank line would run Parinfer over all of it."
+  [{:keys [prev text]} s e max-lines]
+  (<= (inc (max (count (filter #(= \newline %) (subs prev s e)))
+                (count (filter #(= \newline %)
+                               (subs text s (max s (+ e (- (count text) (count prev)))))))))
+      max-lines))
 
 (defn adjust
   "What Parinfer wants after one edit, as jonquil.edit's {:edits [[s e r]]
@@ -386,44 +461,14 @@
   (let [prev (or prev-text "")
         text (or text "")]
     (when (not= prev text)
-      (let [[p old-end new-end]
-            (if-let [[bp bq] bounds]
-              ;; The signals' span is sound but not minimal: a replacement
-              ;; sharing an affix with what it replaced must be trimmed the
-              ;; way diff trims, since the engine keys its change lookup on
-              ;; the span's end. Extending from the
-              ;; seed costs the span's width, not the buffer's.
-              (let [n (count prev) m (count text)
-                    lim (min (min n m) (max 0 (- caret (max 0 (- m n)))))
-                    p (loop [i (min bp lim)]
-                        (if (and (< i lim)
-                                 (= (.charAt ^String prev i) (.charAt ^String text i)))
-                          (recur (inc i)) i))
-                    qmax (- (min n m) p)
-                    q (loop [i (min bq qmax)]
-                        (if (and (< i qmax)
-                                 (= (.charAt ^String prev (- n 1 i))
-                                    (.charAt ^String text (- m 1 i))))
-                          (recur (inc i)) i))]
-                [p (- n q) (- m q)])
-              (diff prev text (- caret (max 0 (- (count text) (count prev))))))
-            ;; Whole lines removed: the line after them isn't part of the edit.
-            b (if (and (< p old-end) (= p (line-start prev p)) (= old-end (line-start prev old-end)))
-                (dec old-end)
-                old-end)
+      (let [[p old-end new-end] (edit-span prev text caret bounds)
+            b (region-end-before-edit prev p old-end)
             [s e] (region prev p b)
-            ;; Indenting a top-level line is Parinfer's "pull it into the
-            ;; form above": pure whitespace inserted at the
-            ;; start of a line that was its own region joins the form above.
-            s (if (and (pos? s) (= s p) (= old-end p) (= s (line-start prev p))
-                       (str/blank? (subs text p new-end)))
-                (prev-form-start prev s)
-                s)]
-        ;; The cap counts the edited after-text too, or a long paste onto
-        ;; a blank line would run Parinfer over all of it.
-        (if (<= (inc (max (count (filter #(= \newline %) (subs prev s e)))
-                          (count (filter #(= \newline %)
-                                         (subs text s (max s (+ e (- (count text) (count prev)))))))))
-                max-lines)
-          (adjust-region mode prev prev-caret text caret p old-end new-end s e prev-consistent?)
+            ctx {:mode mode :prev prev :prev-caret prev-caret :text text
+                 :p p :old-end old-end :new-end new-end :e e
+                 :prev-consistent? prev-consistent?}
+            s (region-start ctx s)
+            ctx (assoc ctx :s s)]
+        (if (within-max-lines? ctx s e max-lines)
+          (adjust-region ctx caret)
           ::too-long)))))
