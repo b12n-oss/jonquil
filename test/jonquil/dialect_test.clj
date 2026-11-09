@@ -625,3 +625,25 @@
       (is (= "ClojureScript (node) (running)" (dialect/label node :attached))))
     (testing "Reset starts unticked, like node"
       (is (= (dialect/reset-toggle {} node true) (dialect/reset-toggle {} browser true))))))
+
+(deftest select-warning-edges-test
+  (let [project (fn [config] {:dir "/p" :markers #{} :config config :config-error nil})
+        warnings (fn [p path] (:warnings (dialect/select dialect/profiles p path nil)))]
+    (testing "several bad keys warn in a fixed order"
+      (is (= [".jonquil.edn :parinfer should be one of :off :smart :indent :paren, not :bad, so it is ignored"
+              ".jonquil.edn names :nope, which isn't a known dialect"
+              ".jonquil.edn asks for runtime :zzz, which ClojureScript doesn't offer here; using launch"
+              ".jonquil.edn :auto-require only applies to JVM Clojure and Jolt, not ClojureScript, so it is ignored"
+              ".jonquil.edn :nrepl only applies to the nREPL dialect, not ClojureScript, so it is ignored"
+              ".jonquil.edn :cljs :target should be :node or :browser, not :x; using :node"]
+             (warnings (project "{:dialect :nope :runtime :zzz :auto-require [a.b] :cljs {:target :x} :nrepl {:port 1} :parinfer :bad}")
+                       "/p/a.cljs"))))
+    (testing "an unreadable config"
+      (is (= [".jonquil.edn couldn't be read (denied), so it is ignored"]
+             (warnings {:dir "/p" :markers #{} :config nil :config-error "denied"} "/p/a.clj"))))
+    (testing "a runtime that isn't a keyword"
+      (is (= [".jonquil.edn :runtime should be a keyword, not 5"]
+             (warnings (project "{:runtime 5}") "/p/a.clj"))))
+    (testing "a runtime ClojureScript doesn't offer"
+      (is (= [".jonquil.edn asks for runtime :in-process, which ClojureScript doesn't offer here; using launch"]
+             (warnings (project "{:dialect :cljs :runtime :in-process}") "/p/a.cljs"))))))

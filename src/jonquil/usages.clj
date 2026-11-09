@@ -34,27 +34,54 @@
   [^String text i prefix]
   (str/ends-with? (str/trimr (subs text 0 i)) prefix))
 
+(defn- opener?
+  "Whether ch opens a list, vector or map."
+  [ch]
+  (contains? #{\( \[ \{} ch))
+
+(defn- top-level-or-reader-conditional?
+  "Whether a form opened with stack (the offsets of the openers around it)
+  is at the top level, or directly inside a reader conditional."
+  [text stack]
+  (or (empty? stack)
+      (and (= 1 (count stack))
+           (let [p (peek stack)]
+             (or (just-before? text p "#?") (just-before? text p "#?@"))))))
+
+(defn- ns-opener?
+  "Whether the ( at offset s, followed by token next, starts a live ns form."
+  [text stack s next-token]
+  (let [[nk ns' ne] next-token]
+    (and (contains? code-kinds nk) (= "ns" (subs text ns' ne))
+         (not (just-before? text s "#_"))
+         (top-level-or-reader-conditional? text stack))))
+
+(defn- bracket-step
+  "[stack spans] after the bracket token at the head of ts (at offset s, the
+  next token second in ts): an opener is pushed (and its ns form's span
+  recorded), a closer pops."
+  [{:keys [text matches]} [stack spans] ts]
+  (let [[_ s] (first ts)
+        next-token (second ts)]
+    (if (opener? (.charAt ^String text (int s)))
+      (let [close (when (and (= \( (.charAt ^String text (int s)))
+                             (ns-opener? text stack s next-token))
+                    (get matches s))]
+        [(conj stack s) (cond-> spans close (conj [s (inc close)]))])
+      [(if (seq stack) (pop stack) stack) spans])))
+
 (defn- ns-spans
   "[[start end] ...] of text's ns forms: a (ns ...) at the top level, or
   directly inside a reader conditional (#?(:clj (ns ...))), but never one
   in a (comment ...) block or after #_."
   [text tokens]
-  (let [{:keys [matches]} (syntax/compute-brackets text)]
+  (let [{:keys [matches]} (syntax/compute-brackets text)
+        ctx {:text text :matches matches}]
     (loop [ts (seq tokens) stack [] spans []]
-      (if-let [[kind s _] (first ts)]
+      (if-let [[kind] (first ts)]
         (if (= :bracket kind)
-          (let [ch (.charAt ^String text (int s))]
-            (if (contains? #{\( \[ \{} ch)
-              (let [[nk ns' ne] (second ts)
-                    ns? (and (= \( ch) (contains? code-kinds nk) (= "ns" (subs text ns' ne))
-                             (not (just-before? text s "#_"))
-                             (or (empty? stack)
-                                 (and (= 1 (count stack))
-                                      (let [p (peek stack)]
-                                        (or (just-before? text p "#?") (just-before? text p "#?@"))))))
-                    close (when ns? (get matches s))]
-                (recur (rest ts) (conj stack s) (cond-> spans close (conj [s (inc close)]))))
-              (recur (rest ts) (if (seq stack) (pop stack) stack) spans)))
+          (let [[stack' spans'] (bracket-step ctx [stack spans] ts)]
+            (recur (rest ts) stack' spans'))
           (recur (rest ts) stack spans))
         spans))))
 

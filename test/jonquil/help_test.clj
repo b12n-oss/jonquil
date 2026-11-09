@@ -251,3 +251,9 @@
     ;; outer y at 6; the :when use at 29 and the body use at 32
     (doseq [c [29 32]]
       (is (= {:kind :buffer :offset 6} (help/jump-target (snap text c) nil)) (str "caret " c)))))
+
+(deftest local-binding-edge-test
+  (let [lb @#'help/local-binding]
+    (is (nil? (lb "(let) x" 6 "x")) "a let with no bindings vector")
+    (is (nil? (lb "(fn) x" 5 "x")) "a fn with no params")
+    (is (= {:symbol "x" :start 6 :end 7} (lb "(let [x 1] (fn) x)" 16 "x")))))

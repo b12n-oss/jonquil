@@ -154,3 +154,39 @@
   (is (= "{:a 1" (inspect/root-label "{:a 1\n :b 2}")) "the first line only")
   (is (= (str (apply str (repeat 40 "x")) "…") (inspect/root-label (apply str (repeat 50 "x")))))
   (is (= "*1" (inspect/root-label "")) "nothing to show: the last value's name"))
+
+(deftest key-step-row-keys-characterization-test
+  (let [s (inspect/open (page-view 10 10 25))
+        leaf (inspect/open {:path "*1" :info "String" :header "" :leaf "\"x\""})
+        empty-coll (inspect/open (page-view 0 0 0))]
+    (testing "page-down asks for the next page and selects its first row"
+      (is (= {:state (assoc s :pending :first) :request [:page {:delta 1}]}
+             (inspect/key-step s :page-down))))
+    (testing "up with a selection above moves locally"
+      (let [s3 (assoc s :selected 3)]
+        (is (= {:state (assoc s3 :selected 2) :request nil} (inspect/key-step s3 :up)))))
+    (testing "up at the top of a later page asks for the previous page, landing on its last row"
+      (is (= {:state (assoc s :pending :last) :request [:page {:delta -1}]}
+             (inspect/key-step s :up))))
+    (testing "an unknown key is a no-op"
+      (is (= {:state s :request nil} (inspect/key-step s :bogus))))
+    (testing "row keys do nothing on a leaf or an empty collection"
+      (doseq [k [:down :up :page-down :page-up :in]]
+        (is (= {:state leaf :request nil} (inspect/key-step leaf k)))
+        (is (= {:state empty-coll :request nil} (inspect/key-step empty-coll k)))))
+    (testing "out, meta and table still work on a leaf"
+      (is (= [:out] (:request (inspect/key-step leaf :out))))
+      (is (= [:meta {:cursor 0}] (:request (inspect/key-step leaf :meta)))))
+    (testing "history keys with no :history in the view ask for the earlier/later object"
+      (is (= [:later] (:request (inspect/key-step s :later))))
+      (is (= [:earlier] (:request (inspect/key-step s :earlier)))))))
+
+(deftest key-step-no-request-at-the-ends-test
+  (let [s (inspect/open (page-view 20 5 25))
+        last-row (reduce (fn [st _] (:state (inspect/key-step st :down))) s (range 4))]
+    (is (= 4 (:selected last-row)))
+    (is (= {:state last-row :request nil} (inspect/key-step last-row :down))
+        "down on the last row of the last page"))
+  (let [s (inspect/open (page-view 0 10 25))]
+    (is (= {:state s :request nil} (inspect/key-step s :up))
+        "up on row 0 of the first page")))

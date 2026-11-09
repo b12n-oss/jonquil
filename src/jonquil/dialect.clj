@@ -225,6 +225,27 @@
 (defn- marker-names [profiles]
   (into #{config-name} (mapcat :project-markers) profiles))
 
+(defn- read-config
+  "[text-or-nil error-message-or-nil] for the .jonquil.edn in dir."
+  [dir]
+  (let [cfg (io/file dir config-name)]
+    (if (.exists cfg)
+      (try [(slurp cfg) nil]
+           (catch Exception e [nil (ex-message e)]))
+      [nil nil])))
+
+(defn- project-in
+  "find-project's map for dir when it holds .jonquil.edn or a marker named
+  in names, else nil."
+  [dir names]
+  (let [found (into #{} (filter (fn [n] (.exists (io/file dir n)))) names)]
+    (when (seq found)
+      (let [[text err] (read-config dir)]
+        {:dir (.getPath dir)
+         :markers (disj found config-name)
+         :config text
+         :config-error err}))))
+
 (defn find-project
   "The nearest directory at or above path's own directory holding
   .jonquil.edn or any profile's marker, as {:dir abs-path :markers #{name}
@@ -237,18 +258,8 @@
      (let [names (marker-names profiles)]
        (loop [dir (.getParentFile (io/file (.getCanonicalPath (io/file path))))]
          (when dir
-           (let [found (into #{} (filter (fn [n] (.exists (io/file dir n)))) names)]
-             (if (seq found)
-               (let [cfg (io/file dir config-name)
-                     [text err] (if (.exists cfg)
-                                  (try [(slurp cfg) nil]
-                                       (catch Exception e [nil (ex-message e)]))
-                                  [nil nil])]
-                 {:dir (.getPath dir)
-                  :markers (disj found config-name)
-                  :config text
-                  :config-error err})
-               (recur (.getParentFile dir))))))))))
+           (or (project-in dir names)
+               (recur (.getParentFile dir)))))))))
 
 (defn- auto-require-part
   "[symbols-or-nil warning-or-nil] for .jonquil.edn's :auto-require: a
@@ -286,6 +297,48 @@
                       :else [m (conj ws (str ".jonquil.edn :nrepl " msg ", so it is ignored"))]))
               [{} []] checks))))
 
+(defn- kw-or-warn
+  "[keyword-or-nil warning-or-nil] for key k of the config map m."
+  [m k]
+  (let [v (get m k)]
+    (cond (nil? v) [nil nil]
+          (keyword? v) [v nil]
+          :else [nil (str ".jonquil.edn " k " should be a keyword, not " (pr-str v))])))
+
+(defn- parinfer-warning [pi]
+  (when-not (or (nil? pi) (contains? parinfer-modes pi))
+    (str ".jonquil.edn :parinfer should be one of :off :smart :indent :paren, not "
+         (pr-str pi) ", so it is ignored")))
+
+(defn- format-style-warning [fs]
+  (when-not (or (nil? fs) (contains? format-styles fs))
+    (str ".jonquil.edn :format-style should be :paren-stable or :plain, not "
+         (pr-str fs) ", so it is ignored")))
+
+(defn- cljs-warning [cl]
+  (when-not (or (nil? cl) (map? cl))
+    ".jonquil.edn :cljs should be a map, like {:shadow-build :app}"))
+
+(defn- config-from-map
+  "parse-config's result for the config map m."
+  [m]
+  (let [[d dw] (kw-or-warn m :dialect)
+        [r rw] (kw-or-warn m :runtime)
+        [ar arw] (auto-require-part (get m :auto-require))
+        cl (get m :cljs)
+        clw (cljs-warning cl)
+        [nr nrw] (nrepl-part (get m :nrepl))
+        pi (get m :parinfer)
+        piw (parinfer-warning pi)
+        fs (get m :format-style)
+        fsw (format-style-warning fs)]
+    (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw fsw])) nrw)}
+      ar (assoc :auto-require ar)
+      (map? cl) (assoc :cljs cl)
+      nr (assoc :nrepl nr)
+      (contains? parinfer-modes pi) (assoc :parinfer pi)
+      (contains? format-styles fs) (assoc :format-style fs))))
+
 (defn parse-config
   "{:dialect k? :runtime k? :auto-require [sym]? :cljs map? :nrepl map?
   :warnings [str]}
@@ -305,33 +358,7 @@
           (= ::unreadable m) (bad "isn't valid EDN")
           (nil? m) {:warnings []}
           (not (map? m)) (bad "should hold a map, like {:dialect :jolt}")
-          :else
-          (let [kw-or-warn (fn [k]
-                             (let [v (get m k)]
-                               (cond (nil? v) [nil nil]
-                                     (keyword? v) [v nil]
-                                     :else [nil (str ".jonquil.edn " k " should be a keyword, not " (pr-str v))])))
-                [d dw] (kw-or-warn :dialect)
-                [r rw] (kw-or-warn :runtime)
-                [ar arw] (auto-require-part (get m :auto-require))
-                cl (get m :cljs)
-                clw (when-not (or (nil? cl) (map? cl))
-                      ".jonquil.edn :cljs should be a map, like {:shadow-build :app}")
-                [nr nrw] (nrepl-part (get m :nrepl))
-                pi (get m :parinfer)
-                piw (when-not (or (nil? pi) (contains? parinfer-modes pi))
-                      (str ".jonquil.edn :parinfer should be one of :off :smart :indent :paren, not "
-                           (pr-str pi) ", so it is ignored"))
-                fs (get m :format-style)
-                fsw (when-not (or (nil? fs) (contains? format-styles fs))
-                      (str ".jonquil.edn :format-style should be :paren-stable or :plain, not "
-                           (pr-str fs) ", so it is ignored"))]
-            (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw fsw])) nrw)}
-              ar (assoc :auto-require ar)
-              (map? cl) (assoc :cljs cl)
-              nr (assoc :nrepl nr)
-              (contains? parinfer-modes pi) (assoc :parinfer pi)
-              (contains? format-styles fs) (assoc :format-style fs))))))))
+          :else (config-from-map m))))))
 
 (defn extension
   "The file's extension, lower case, without the dot; nil for none."
@@ -346,29 +373,11 @@
   [k]
   (get {:in-process "in-process" :nrepl "nREPL"} k (name k)))
 
-(defn select
-  "Chooses the dialect and runtime for a window.
-
-  project is find-project's map or nil (a loose or unsaved file); path is
-  the file's path or nil; default is the settings :dialect or nil.
-  Returns {:profile p :runtime k :project-dir dir-or-nil :source k
-  :warnings [str]}, plus :auto-require [sym] when the project's config
-  names one and the dialect is :clj, plus :cljs {map} when it names one and
-  the dialect is :cljs, plus :cljs-target (:node or :browser, only for a
-  cljs selection that launches its own process), :source one of :config
-  :marker :extension :settings :fallback. A settings default naming a marker-less profile (in practice
-  :clj) only wins when there's no project; inside one, it's skipped and
-  selection falls through to :fallback."
-  [profiles project path default]
-  (let [{:keys [dialect runtime auto-require cljs nrepl parinfer format-style warnings]} (if project
-                                                                     (parse-config (:config project) (:config-error project))
-                                                                     {:warnings []})
-        by-config (when dialect (profile profiles dialect))
-        w1 (if (and dialect (not by-config))
-             [(str ".jonquil.edn names " dialect ", which isn't a known dialect")]
-             [])
-        markers (:markers project #{})
-        hits (filterv (fn [p] (some markers (:project-markers p))) profiles)
+(defn- choose-profile
+  "[profile source] for select: config, then a deciding marker, then the
+  extension, the settings default and the fallback."
+  [{:keys [profiles project path default by-config markers]}]
+  (let [hits (filterv (fn [p] (some markers (:project-markers p))) profiles)
         ext (extension path)
         marker-decides? (and (= 1 (count hits))
                              (let [only (first hits)]
@@ -386,39 +395,49 @@
         ;; marker-less default is ignored and selection falls through to
         ;; :fallback, same as if no default were set at all.
         by-default (when-let [d (when default (some (fn [p] (when (= default (:id p)) p)) pool))]
-                     (when (or (nil? project) (seq (:project-markers d))) d))
-        [p source] (cond by-config [by-config :config]
-                         marker-decides? [(first hits) :marker]
-                         by-ext [by-ext :extension]
-                         by-default [by-default :settings]
-                         :else [(first pool) :fallback])
-        rt-ok? (and runtime (contains? (:runtimes p) runtime))
-        default-rt (if (and (:project-evaluator p) (some markers (:project-markers p)))
-                     (:project-evaluator p)
-                     (:evaluator p))
-        w2 (if (and runtime (not rt-ok?))
-             [(str ".jonquil.edn asks for runtime " runtime ", which " (:name p)
-                   " doesn't offer here; using " (runtime-name default-rt))]
-             [])
-        ;; JVM Clojure and Jolt read :auto-require (once per connection,
+                     (when (or (nil? project) (seq (:project-markers d))) d))]
+    (cond by-config [by-config :config]
+          marker-decides? [(first hits) :marker]
+          by-ext [by-ext :extension]
+          by-default [by-default :settings]
+          :else [(first pool) :fallback])))
+
+(defn- default-runtime [p markers]
+  (if (and (:project-evaluator p) (some markers (:project-markers p)))
+    (:project-evaluator p)
+    (:evaluator p)))
+
+(defn- runtime-warnings [runtime rt-ok? p default-rt]
+  (if (and runtime (not rt-ok?))
+    [(str ".jonquil.edn asks for runtime " runtime ", which " (:name p)
+          " doesn't offer here; using " (runtime-name default-rt))]
+    []))
+
+(defn- scope-warnings
+  "Warnings for config keys that the chosen profile p ignores."
+  [p {:keys [auto-require cljs nrepl]}]
+  (let [;; JVM Clojure and Jolt read :auto-require (once per connection,
         ;; session or child start); elsewhere it's ignored.
         auto-require? (contains? #{:clj :jolt} (:id p))
-        w3 (if (and auto-require (not auto-require?))
-             [(str ".jonquil.edn :auto-require only applies to JVM Clojure and Jolt, not " (:name p) ", so it is ignored")]
-             [])
         ;; Only ClojureScript reads :cljs (the build choice); elsewhere it's
         ;; ignored.
         cljs? (= :cljs (:id p))
-        w4 (if (and cljs (not cljs?))
-             [(str ".jonquil.edn :cljs only applies to ClojureScript, not " (:name p) ", so it is ignored")]
-             [])
-        nrepl? (= :nrepl (:id p))
-        w5 (if (and nrepl (not nrepl?))
-             [(str ".jonquil.edn :nrepl only applies to the nREPL dialect, not " (:name p) ", so it is ignored")]
-             [])
+        nrepl? (= :nrepl (:id p))]
+    (cond-> []
+      (and auto-require (not auto-require?))
+      (conj (str ".jonquil.edn :auto-require only applies to JVM Clojure and Jolt, not " (:name p) ", so it is ignored"))
+      (and cljs (not cljs?))
+      (conj (str ".jonquil.edn :cljs only applies to ClojureScript, not " (:name p) ", so it is ignored"))
+      (and nrepl (not nrepl?))
+      (conj (str ".jonquil.edn :nrepl only applies to the nREPL dialect, not " (:name p) ", so it is ignored")))))
+
+(defn- cljs-launch
+  "{:cljs-target k? :cljs-console? b? :warnings [str]} for a ClojureScript
+  selection on runtime rt with the config's :cljs map."
+  [p rt cljs]
+  (let [cljs? (= :cljs (:id p))
         ;; :cljs :target picks node or the browser for ClojureScript that
         ;; Jonquil starts; shadow-cljs (attach) has its own targets.
-        rt (if rt-ok? runtime default-rt)
         target (when cljs? (get cljs :target))
         cljs-target (when (and cljs? (= :launch rt))
                       (if (= :browser target) :browser :node))
@@ -436,11 +455,51 @@
              (and cljs? (= :attach rt) (some? target))
              [".jonquil.edn :cljs :target applies only to ClojureScript that Jonquil starts, not shadow-cljs, so it is ignored"]
              :else [])]
+    {:cljs-target cljs-target
+     :cljs-console? cljs-console?
+     :warnings (into w6 w7)}))
+
+(defn select
+  "Chooses the dialect and runtime for a window.
+
+  project is find-project's map or nil (a loose or unsaved file); path is
+  the file's path or nil; default is the settings :dialect or nil.
+  Returns {:profile p :runtime k :project-dir dir-or-nil :source k
+  :warnings [str]}, plus :auto-require [sym] when the project's config
+  names one and the dialect is :clj, plus :cljs {map} when it names one and
+  the dialect is :cljs, plus :cljs-target (:node or :browser, only for a
+  cljs selection that launches its own process), :source one of :config
+  :marker :extension :settings :fallback. A settings default naming a marker-less profile (in practice
+  :clj) only wins when there's no project; inside one, it's skipped and
+  selection falls through to :fallback."
+  [profiles project path default]
+  (let [{:keys [dialect runtime auto-require cljs nrepl parinfer format-style warnings] :as config}
+        (if project
+          (parse-config (:config project) (:config-error project))
+          {:warnings []})
+        by-config (when dialect (profile profiles dialect))
+        w1 (if (and dialect (not by-config))
+             [(str ".jonquil.edn names " dialect ", which isn't a known dialect")]
+             [])
+        markers (:markers project #{})
+        [p source] (choose-profile {:profiles profiles :project project :path path
+                                    :default default :by-config by-config :markers markers})
+        rt-ok? (and runtime (contains? (:runtimes p) runtime))
+        default-rt (default-runtime p markers)
+        rt (if rt-ok? runtime default-rt)
+        {:keys [cljs-target cljs-console?] launch-warnings :warnings} (cljs-launch p rt cljs)
+        auto-require? (contains? #{:clj :jolt} (:id p))
+        cljs? (= :cljs (:id p))
+        nrepl? (= :nrepl (:id p))]
     (cond-> {:profile p
              :runtime rt
              :project-dir (:dir project)
              :source source
-             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4) (into w5) (into w6) (into w7))}
+             :warnings (-> (vec warnings)
+                           (into w1)
+                           (into (runtime-warnings runtime rt-ok? p default-rt))
+                           (into (scope-warnings p config))
+                           (into launch-warnings))}
       (and auto-require auto-require?) (assoc :auto-require auto-require)
       (and cljs cljs?) (assoc :cljs cljs)
       cljs-target (assoc :cljs-target cljs-target)

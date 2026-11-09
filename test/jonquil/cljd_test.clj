@@ -150,6 +150,33 @@
   (is (= {} (:refers (cljd/buffer-ns-refs "(ns a (:require [b.c :refer :all]))"))))
   (is (= {"m" "b.c"} (:aliases (cljd/buffer-ns-refs "(ns a (:require ^:keep [b.c :as m]))")))))
 
+(deftest buffer-ns-refs-edge-branches-test
+  ;; characterization of today's behaviour, one assertion per branch
+  (testing ":as-alias and string libs (quotes dropped)"
+    (is (= {:aliases {"io" "dart:io" "al" "x.y"} :refers {}}
+           (cljd/buffer-ns-refs "(ns a (:require [\"dart:io\" :as io] [x.y :as-alias al]))"))))
+  (testing ":refer skips non-symbol items and nested brackets stay inside the list"
+    (is (= {:aliases {} :refers {"a" "l" "b" "l"}}
+           (cljd/buffer-ns-refs "(ns a (:require [l :refer [a :kw 1 b]]))"))))
+  (testing "a nested vector inside :refer ends the list at its own ]"
+    (is (= {:aliases {} :refers {"a" "l" "b" "l"}}
+           (cljd/buffer-ns-refs "(ns a (:require [l :refer [a [b] c]]))"))))
+  (testing "a vector with no symbol first has no lib, so :as and :refer add nothing"
+    (is (= {:aliases {} :refers {}}
+           (cljd/buffer-ns-refs "(ns a (:require [:k :as m :refer [z]]))"))))
+  (testing ":as outside any vector adds nothing"
+    (is (= {:aliases {} :refers {}} (cljd/buffer-ns-refs "(ns a :as m)"))))
+  (testing ":as followed by a non-symbol adds nothing"
+    (is (= {:aliases {} :refers {}} (cljd/buffer-ns-refs "(ns a (:require [l :as 1]))"))))
+  (testing ":refer followed by a non-vector adds nothing"
+    (is (= {:aliases {} :refers {}} (cljd/buffer-ns-refs "(ns a (:require [l :refer foo]))"))))
+  (testing "the lib resets after the vector closes"
+    (is (= {:aliases {} :refers {}}
+           (cljd/buffer-ns-refs "(ns a (:require [l] :as q))"))))
+  (testing "metatags before the lib are skipped"
+    (is (= {:aliases {"m" "b.c"} :refers {}}
+           (cljd/buffer-ns-refs "(ns a (:require ^:a ^:b [b.c :as m]))")))))
+
 (deftest candidate-sort-key-test
   (is (= [0 0 "map" "map"] (cljd/candidate-sort-key "ma" {:symbol "map" :category :user})))
   (is (= [1 3 "mapcat" "mapcat"] (cljd/candidate-sort-key "x" {:symbol "mapcat" :category :core})))

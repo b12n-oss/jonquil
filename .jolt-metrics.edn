@@ -6,5 +6,6 @@
 ;; too: it follows DrClojure's source, so it is not ours to refactor.
 {:exclude ["target/**" "jonquil.build/**" ".clj-kondo/**" ".superpowers/**"
            ".cpcache/**" "dev/smoke/fixtures/**" "docs/**"
-           "src/jonquil/syntax.clj" "test/jonquil/upstream/**"]
+           "src/jonquil/syntax.clj" "src/jonquil/parinfer.clj"
+           "test/jonquil/upstream/**"]
  :test-paths ["test" "dev"]}
