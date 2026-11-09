@@ -16,7 +16,6 @@
 ;; One slot, last wins: a vertical GtkBox
 ;; holds both panels' roots, only one visible at a time, and the box itself
 ;; is hidden when neither is. Each root keeps its own visibility, so "is the
-;; inspector showing?" is still (:root pane)'s own visible flag. These sit
 ;; inspector showing?" is still (:root pane)'s own visible flag.
 ;; jonquil.gtk.window's apply-selection! hides the slot on a runtime switch.
 
@@ -54,8 +53,7 @@
     (when-let [r (:recent-panels right)]
       (swap! r (fn [v] (into [which] (remove #{which}) v))))
     (when was-hidden?
-      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))
-    ))
+      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
 
 (defn showing-panel
   "The key of the right-hand panel on screen, or nil when the slot is
@@ -125,12 +123,12 @@
                            (cond
                              (= k (showing-panel right)) (focus!)
                              (= k :plugins) (win-plugin-agent/plugin-step! {:settings-path @settings-path*
-                                                           :step (fn [] []) :open-list? true})
+                                                                            :step (fn [] []) :open-list? true})
                              (contains? @part-panels* k) ((:open! (get @part-panels* k)))
                              (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
                              :else
                              (win-status/set-status! status-label
-                                            (case k
-                                              :inspector "; Nothing inspected yet: inspect a form or a result first."
-                                              :source "; The Source panel is empty: jump to a definition first.")))))]
+                                                     (case k
+                                                       :inspector "; Nothing inspected yet: inspect a form or a result first."
+                                                       :source "; The Source panel is empty: jump to a definition first.")))))]
     (assoc w :slot slot :part-panels* part-panels* :right right :panel-focus-fn panel-focus-fn)))
