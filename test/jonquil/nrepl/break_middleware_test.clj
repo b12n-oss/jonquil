@@ -155,3 +155,30 @@
           (debugger/continue! (:break entry))
           (is (some? (:err (deref fut 3000 :blocked))) "evaluate still reports the error"))))
     (println "SKIP evaluate-pauses-through-the-hook-test: this Jolt has no jolt.nrepl/*eval-wrapper*")))
+
+(deftest check-without-a-break-test
+  (with-redefs [debugger/break-available? (constantly false)]
+    (let [{:keys [h]} (setup)]
+      (is (= [{"status" ["done"] "available" "false"}] (ask h {"op" "jonquil-break-check" "session" "s1"}))))))
+
+(deftest break-ops-without-a-session-or-a-pause-test
+  (with-redefs [debugger/*break-fn* fake-break]
+    (let [{:keys [h seen]} (setup)]
+      (is (= [{"status" ["done"] "error" "Not paused any more."}]
+             (ask h {"op" "jonquil-break-eval" "session" "nope" "frame" 0 "code" "n"})))
+      (is (= [{"status" ["done"] "error" "Not paused any more."}]
+             (ask h {"op" "jonquil-break-eval" "session" "s1" "frame" 0 "code" "n"})) "a known session that isn't paused")
+      (is (= [{"status" ["done"] "continued" "false"}]
+             (ask h {"op" "jonquil-break-continue" "session" "nope"})))
+      (h {"op" "interrupt" "session" "nope" :reply (fn [_])})
+      (is (= "interrupt" (last @seen)) "interrupt goes on without a session"))))
+
+(deftest close-forgets-the-session-test
+  (with-redefs [debugger/*break-fn* fake-break]
+    (let [{:keys [h sessions seen]} (setup)]
+      (is (contains? @sessions "s1"))
+      (h {"op" "close" "session" "s1" :reply (fn [_])})
+      (is (not (contains? @sessions "s1")))
+      (is (= "close" (last @seen)) "close goes on to the session middleware")
+      (h {"op" "describe" :reply (fn [_])})
+      (is (= "describe" (last @seen)) "any other op goes on"))))

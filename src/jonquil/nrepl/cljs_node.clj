@@ -175,43 +175,72 @@
         (Thread/sleep 20)
         (recur)))))
 
+(defn- child-usable?
+  "True when child is alive, its connection is open and its late setup has
+  not failed."
+  [{:keys [state hooks]} child]
+  (boolean (and child ((:alive? hooks) child) (prepl/open? (:conn @state))
+                (not= :failed (:setup-pending @state)))))
+
+(defn- discard-old-child!
+  "Kills the stored child (when there is one), saying so when its late setup
+  failed, and in a browser evaluator waits for the kill to settle."
+  [{:keys [state] :as ev} on-output child]
+  (let [failed? (= :failed (:setup-pending @state))]
+    (when failed?
+      (connection/say! on-output :system
+                       (str (:text (setup-failed "the session setup failed" child)) "\n")))
+    (when child (kill-child! ev {:keep-log? failed?}))
+    (when (browser? ev) (await-kills! ev))))
+
+(defn- store-started-child!
+  "Records a freshly launched child in state; a Stop that came during the
+  launch kills it."
+  [{:keys [state] :as ev} started port-changed?]
+  (swap! state
+         (fn [s]
+           (cond-> (assoc s :child started)
+             (browser? ev)
+             (assoc :await-page (cljs-node/page-url (:http-port s) (:page-token s))
+                    :announce (if (:opened? s) :reload :first)
+                    :port-changed? port-changed?))))
+  (when (stopping? ev) (kill-child! ev))
+  nil)
+
+(defn- launch-and-store!
+  "Launches the child with the ensured launcher: nil once stored, else the
+  result to finish the evaluation with."
+  [ev {:keys [on-output clojure launcher]}]
+  (connection/say! on-output :system (str (cljs-node/starting-message clojure) "\n"))
+  (let [[started port-changed?] (launch-child! ev clojure launcher)]
+    (cond
+      (= :cancelled (:error started)) {:status :interrupted}
+      (= :http-port-taken (:error started)) {:status :notice :text port-twice-message}
+      (:error started) {:status :notice :text (cljs-node/start-failed-message (:error started))}
+      :else (store-started-child! ev started port-changed?))))
+
+(defn- start-new-child!
+  "nil once a new child is stored, else the result to finish the evaluation
+  with."
+  [{:keys [hooks] :as ev} on-output]
+  (if-let [clojure ((:find-clojure hooks))]
+    (let [launcher (try ((:ensure-launcher hooks)) (catch Throwable e e))]
+      (if (instance? Throwable launcher)
+        {:status :notice :text (cljs-node/start-failed-message (ex-message launcher))}
+        (launch-and-store! ev {:on-output on-output :clojure clojure :launcher launcher})))
+    {:status :notice :text cljs-node/no-clojure-message}))
+
 (defn- ensure-child!
   "nil once a live child is stored in state, else the result to finish the
   evaluation with. A stored child that died, or lost its connection, is
   killed first, and so is one whose late setup failed (it would only report
   the failure again). A Stop during the launch kills what it produced."
-  [{:keys [state hooks] :as ev} on-output]
+  [{:keys [state] :as ev} on-output]
   (let [child (:child @state)]
-    (if (and child ((:alive? hooks) child) (prepl/open? (:conn @state))
-             (not= :failed (:setup-pending @state)))
+    (if (child-usable? ev child)
       nil
-      (let [failed? (= :failed (:setup-pending @state))]
-        (when failed?
-          (connection/say! on-output :system
-                           (str (:text (setup-failed "the session setup failed" child)) "\n")))
-        (when child (kill-child! ev {:keep-log? failed?}))
-        (when (browser? ev) (await-kills! ev))
-        (if-let [clojure ((:find-clojure hooks))]
-          (let [launcher (try ((:ensure-launcher hooks)) (catch Throwable e e))]
-            (if (instance? Throwable launcher)
-              {:status :notice :text (cljs-node/start-failed-message (ex-message launcher))}
-              (do
-                (connection/say! on-output :system (str (cljs-node/starting-message clojure) "\n"))
-                (let [[started port-changed?] (launch-child! ev clojure launcher)]
-                  (cond
-                    (= :cancelled (:error started)) {:status :interrupted}
-                    (= :http-port-taken (:error started)) {:status :notice :text port-twice-message}
-                    (:error started) {:status :notice :text (cljs-node/start-failed-message (:error started))}
-                    :else (do (swap! state
-                                     (fn [s]
-                                       (cond-> (assoc s :child started)
-                                         (browser? ev)
-                                         (assoc :await-page (cljs-node/page-url (:http-port s) (:page-token s))
-                                                :announce (if (:opened? s) :reload :first)
-                                                :port-changed? port-changed?))))
-                              (when (stopping? ev) (kill-child! ev))
-                              nil))))))
-          {:status :notice :text cljs-node/no-clojure-message})))))
+      (do (discard-old-child! ev on-output child)
+          (start-new-child! ev on-output)))))
 
 (defn- say-waiting!
   "Calls the running evaluation's :on-wait-input with waiting?, as the
@@ -249,6 +278,50 @@
     (when r
       (dispatch-reply! ev closed? r))))
 
+(defn- deliver-closed!
+  "The first :closed of a connection clears :drain and reaches the sink."
+  [{:keys [state]} closed? r]
+  (when (compare-and-set! closed? false true)
+    (swap! state assoc :drain nil)
+    (when-let [f (:sink @state)] (f r))))
+
+(defn- print-late-output!
+  "Nothing waiting: output node prints after an evaluation finished (a
+  setTimeout, a promise) goes to the last evaluation's on-output."
+  [{:keys [state]} r]
+  (when-let [f (:last-output @state)]
+    (when-let [[k t] (cljs-node/output-of r)]
+      (connection/say! f k t))))
+
+(defn- settle-reply-state
+  "The state after reply r (a ret of form) arrived: the setup's answer, then
+  the drain or the done-forms bookkeeping."
+  [s form r]
+  (let [s (if (and form (= form cljs-node/setup-form) (true? (:setup-pending s))
+                   (or (= form (:drain s)) (= form (:sink-form s))))
+            ;; The setup's answer is recorded here whether
+            ;; or not its exchange is still waiting.
+            (assoc s :setup-pending (if (:exception r) :failed nil)
+                   :ready? (not (:exception r)))
+            s)]
+    (cond
+      (and form (= form (:drain s))) (assoc s :drain nil)
+      (and form (= form (:sink-form s))) (update s :done-forms conj form)
+      :else s)))
+
+(defn- route-reply!
+  "Records the reply in state, then hands it to the sink unless a :drain was
+  pending."
+  [{:keys [state] :as ev} r]
+  (let [form (when (= :ret (:tag r)) (:form r))
+        [old _] (swap-vals! state settle-reply-state form r)]
+    (when (and form (= form (:drain old)) (= form cljs-node/setup-form)
+               (true? (:setup-pending old)) (not (:exception r)))
+      (connection/notify! ev true))
+    (cond
+      (:drain old) nil
+      (:sink old) ((:sink old) r))))
+
 (defn- dispatch-reply!
   "dispatch!'s routing, after the :err marker pass."
   [{:keys [state] :as ev} closed? r]
@@ -256,40 +329,17 @@
     (and (browser? ev) (cljs-node/waiting-line? r)) nil
 
     (= :closed (:tag r))
-    (when (compare-and-set! closed? false true)
-      (swap! state assoc :drain nil)
-      (when-let [f (:sink @state)] (f r)))
+    (deliver-closed! ev closed? r)
 
     @closed? nil
 
     ;; Nothing waiting: output node prints after an evaluation finished (a
     ;; setTimeout, a promise) goes to the last evaluation's on-output.
     (and (nil? (:sink @state)) (nil? (:drain @state)) (#{:out :err :tap} (:tag r)))
-    (when-let [f (:last-output @state)]
-      (when-let [[k t] (cljs-node/output-of r)]
-        (connection/say! f k t)))
+    (print-late-output! ev r)
 
     :else
-    (let [form (when (= :ret (:tag r)) (:form r))
-          [old _] (swap-vals! state
-                              (fn [s]
-                                (let [s (if (and form (= form cljs-node/setup-form) (true? (:setup-pending s))
-                                                 (or (= form (:drain s)) (= form (:sink-form s))))
-                                          ;; The setup's answer is recorded here whether
-                                          ;; or not its exchange is still waiting.
-                                          (assoc s :setup-pending (if (:exception r) :failed nil)
-                                                 :ready? (not (:exception r)))
-                                          s)]
-                                  (cond
-                                    (and form (= form (:drain s))) (assoc s :drain nil)
-                                    (and form (= form (:sink-form s))) (update s :done-forms conj form)
-                                    :else s))))]
-      (when (and form (= form (:drain old)) (= form cljs-node/setup-form)
-                 (true? (:setup-pending old)) (not (:exception r)))
-        (connection/notify! ev true))
-      (cond
-        (:drain old) nil
-        (:sink old) ((:sink old) r)))))
+    (route-reply! ev r)))
 
 (defn- exchange!
   "Sends text and collects the replies until (done? reply) or :closed or
@@ -401,22 +451,67 @@
                        (str read-line-unavailable-message "\n")))
     nil))
 
+(defn- open-connection
+  "A prepl connection to the child's port, whose replies go to dispatch! with
+  closed?, or the Throwable that stopped it."
+  [ev closed? port]
+  (let [connect (fn [] (prepl/connect! "127.0.0.1" port (fn [r] (dispatch! ev closed? r))))]
+    ;; A connect right after the previous connection closed was once
+    ;; reset (measured, transient): one retry.
+    (try (try (connect)
+              (catch Throwable e
+                (if (re-find #"(?i)reset|refused" (str (ex-message e)))
+                  (do (Thread/sleep 300) (connect))
+                  (throw e))))
+         (catch Throwable e e))))
+
+(defn- exchange-setup!
+  "Runs the setup form on the stored connection: [outcome replies]."
+  [{:keys [state timings] :as ev}]
+  (let [browser? (browser? ev)]
+    ;; The browser's setup blocks until a page connects, so the page is
+    ;; announced (and opened) first, and the wait is the page bound.
+    (when browser?
+      (announce-page! ev (:last-output @state))
+      ;; Before the exchange, so dispatch! records the setup's
+      ;; answer whichever side of the page bound it lands on.
+      (swap! state assoc :setup-pending true))
+    (exchange! ev cljs-node/setup-form ret?
+               (if browser?
+                 {:timeout-ms (:page-timeout-ms timings)
+                  :sentinel cljs-node/setup-form}
+                 {:timeout-ms (:setup-timeout-ms timings)}))))
+
+(defn- settle-setup!
+  "The result of the setup exchange: nil when ready, else the result to
+  finish with."
+  [{:keys [state] :as ev} {:keys [child outcome replies]}]
+  (let [browser? (browser? ev)]
+    (cond
+      (stopping? ev) {:status :interrupted}
+      (and browser? (true? (:setup-pending @state)) (= :timeout outcome))
+      ;; Keep the child: the setup ret is drained when it arrives and
+      ;; the next evaluation waits for it (await-setup!).
+      {:status :notice :text (cljs-node/no-page-message (:await-page @state))}
+      (and browser? (nil? (:setup-pending @state)) (#{:done :timeout} outcome))
+      (do (connection/notify! ev true)
+          nil)
+      (and (not browser?) (= :done outcome) (not-any? :exception replies))
+      (do (swap! state assoc :ready? true)
+          (setup-read-line! ev)
+          (connection/notify! ev true)
+          nil)
+      :else
+      (do (kill-child! ev {:keep-log? true})
+          (setup-failed (str "the session setup " (if (= :timeout outcome) "timed out" "failed"))
+                        child)))))
+
 (defn- connect!
   "Connects the prepl to the stored child and runs the setup form. nil when
   ready, else the result to finish with."
-  [{:keys [state timings] :as ev}]
+  [{:keys [state] :as ev}]
   (let [child (:child @state)
-        browser? (browser? ev)
-        closed? (atom false)
-        connect (fn [] (prepl/connect! "127.0.0.1" (:port child) (fn [r] (dispatch! ev closed? r))))
-        ;; A connect right after the previous connection closed was once
-        ;; reset (measured, transient): one retry.
-        conn (try (try (connect)
-                       (catch Throwable e
-                         (if (re-find #"(?i)reset|refused" (str (ex-message e)))
-                           (do (Thread/sleep 300) (connect))
-                           (throw e))))
-                  (catch Throwable e e))]
+        conn (open-connection ev (atom false) (:port child))]
     (if (instance? Throwable conn)
       (do (kill-child! ev {:keep-log? true})
           (setup-failed (str "couldn't connect to port " (:port child) ": " (ex-message conn)) child))
@@ -425,36 +520,8 @@
         (if (stopping? ev)
           (do (try (prepl/close! conn) (catch Throwable _ nil))
               {:status :interrupted})
-          ;; The browser's setup blocks until a page connects, so the page is
-          ;; announced (and opened) first, and the wait is the page bound.
-          (let [_ (when browser?
-                    (announce-page! ev (:last-output @state))
-                    ;; Before the exchange, so dispatch! records the setup's
-                    ;; answer whichever side of the page bound it lands on.
-                    (swap! state assoc :setup-pending true))
-                [outcome replies] (exchange! ev cljs-node/setup-form ret?
-                                             (if browser?
-                                               {:timeout-ms (:page-timeout-ms timings)
-                                                :sentinel cljs-node/setup-form}
-                                               {:timeout-ms (:setup-timeout-ms timings)}))]
-            (cond
-              (stopping? ev) {:status :interrupted}
-              (and browser? (true? (:setup-pending @state)) (= :timeout outcome))
-              ;; Keep the child: the setup ret is drained when it arrives and
-              ;; the next evaluation waits for it (await-setup!).
-              {:status :notice :text (cljs-node/no-page-message (:await-page @state))}
-              (and browser? (nil? (:setup-pending @state)) (#{:done :timeout} outcome))
-              (do (connection/notify! ev true)
-                  nil)
-              (and (not browser?) (= :done outcome) (not-any? :exception replies))
-              (do (swap! state assoc :ready? true)
-                  (setup-read-line! ev)
-                  (connection/notify! ev true)
-                  nil)
-              :else
-              (do (kill-child! ev {:keep-log? true})
-                  (setup-failed (str "the session setup " (if (= :timeout outcome) "timed out" "failed"))
-                                child)))))))))
+          (let [[outcome replies] (exchange-setup! ev)]
+            (settle-setup! ev {:child child :outcome outcome :replies replies})))))))
 
 (defn- await-setup!
   "A browser setup that timed out is still pending: wait for its ret, bounded
@@ -513,6 +580,39 @@
         (let [m (or (ex-message e) "")]
           (when (str/starts-with? m "EOF") (str "Error: " m)))))))
 
+(defn- claim-fetch!
+  "True when this call claimed the fetch: nothing ran or helped, so :helping
+  is now ours, and :analyzer-stale? is cleared."
+  [{:keys [state]}]
+  (let [[old _] (swap-vals! state (fn [s] (if (or (:running s) (:helping s)) s (assoc s :helping true))))]
+    (when-not (or (:running old) (:helping old))
+      (swap! state assoc :analyzer-stale? nil)
+      true)))
+
+(defn- apropos-symbols
+  "The symbol list the apropos form's ret carries in replies, or nil."
+  [form replies]
+  (some (fn [r]
+          (when (and (ret? r) (= form (:form r)) (not (:exception r)))
+            (cljs-node/parse-apropos (:val r))))
+        replies))
+
+(defn- fetch-apropos!
+  "Asks the child for the apropos form, bounded like a doc lookup, and stores
+  the symbols of a complete answer in :analyzer-syms."
+  [{:keys [state timings] :as ev}]
+  (let [sentinel-form (next-sentinel! ev)
+        form cljs-node/apropos-form
+        [outcome replies] (exchange! ev (str form "\n" sentinel-form)
+                                     (fn [r] (and (ret? r) (= sentinel-form (:form r))))
+                                     {:sentinel sentinel-form
+                                      :cancel-key :help-cancel
+                                      :on-output (:last-output @state)
+                                      :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
+    (when (= :done outcome)
+      (when-let [syms (apropos-symbols form replies)]
+        (swap! state assoc :analyzer-syms syms)))))
+
 (defn- fetch-syms!
   "Fetches the analyzer's full symbol list (cljs-node/apropos-form) into
   :analyzer-syms, bounded like a doc lookup; skipped while anything runs
@@ -523,29 +623,73 @@
   Never throws. It must never ride after an evaluation on its own: sent to
   a browser page that just left, it held up the closed-tab fail-fast (8 s
   measured, 2026-10-23) and made quick docs answer busy."
-  [{:keys [state timings] :as ev}]
-  (let [[old _] (swap-vals! state (fn [s] (if (or (:running s) (:helping s)) s (assoc s :helping true))))]
-    (when-not (or (:running old) (:helping old))
-      (swap! state assoc :analyzer-stale? nil)
-      (if-not (live? ev)
-        (swap! state assoc :helping false)
-        (try
-          (let [sentinel-form (next-sentinel! ev)
-                form cljs-node/apropos-form
-                [outcome replies] (exchange! ev (str form "\n" sentinel-form)
-                                             (fn [r] (and (ret? r) (= sentinel-form (:form r))))
-                                             {:sentinel sentinel-form
-                                              :cancel-key :help-cancel
-                                              :on-output (:last-output @state)
-                                              :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
-            (when (= :done outcome)
-              (when-let [syms (some (fn [r]
-                                      (when (and (ret? r) (= form (:form r)) (not (:exception r)))
-                                        (cljs-node/parse-apropos (:val r))))
-                                    replies)]
-                (swap! state assoc :analyzer-syms syms))))
-          (catch Throwable _ nil)
-          (finally (swap! state assoc :helping false)))))))
+  [{:keys [state] :as ev}]
+  (when (claim-fetch! ev)
+    (if-not (live? ev)
+      (swap! state assoc :helping false)
+      (try
+        (fetch-apropos! ev)
+        (catch Throwable _ nil)
+        (finally (swap! state assoc :helping false))))))
+
+(defn- reset-before-run!
+  "In reset mode, a Run after an evaluation starts from a fresh child."
+  [{:keys [state] :as ev} run? on-output]
+  (when (and run? (= :reset (:mode @state)) (:used? @state))
+    (kill-child! ev)
+    (connection/say! on-output :system (str cljs-node/reset-message "\n"))))
+
+(defn- ready-child!
+  "nil once the child is stored, connected and set up, else the result to
+  finish with."
+  [{:keys [state] :as ev} on-output]
+  (or (ensure-child! ev on-output)
+      (if (:setup-pending @state)
+        (await-setup! ev)
+        (when-not (live? ev)
+          (or (when (stopping? ev) {:status :interrupted})
+              (connect! ev))))))
+
+(defn- finish-problem!
+  "Finishes with the result that kept the child from being ready, killing
+  the child unless it is a browser still waiting for its page."
+  [{:keys [state] :as ev} opts problem]
+  (when (and (:child @state)
+             (not (and (= :notice (:status problem)) (true? (:setup-pending @state))
+                       (prepl/open? (:conn @state)))))
+    (kill-child! ev))
+  (finish! ev opts problem))
+
+(defn- finish-evaluation!
+  "Finishes with the exchange's outcome: the folded replies on :done, else
+  interrupted after a Stop, else the child is gone."
+  [{:keys [state] :as ev} opts {:keys [sentinel-form outcome replies]}]
+  (case outcome
+    :done (let [result (cljs-node/fold-replies replies sentinel-form)]
+            (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
+            ;; the analyzer may know new names now; the next
+            ;; completion's backstop fetches them. Marked
+            ;; before finish!, so a completion racing
+            ;; on-complete can't miss the mark
+            (swap! state assoc :analyzer-stale? true)
+            (finish! ev opts result))
+    (if (stopping? ev)
+      (finish! ev opts {:status :interrupted})
+      (do (kill-child! ev)
+          (finish! ev opts {:status :error :error-text exited-text})))))
+
+(defn- evaluate!
+  "Sends code with its sentinel to the ready child and finishes with the
+  outcome."
+  [{:keys [state] :as ev} code {:keys [on-output] :as opts}]
+  (wait-not-helping! ev)
+  (let [sentinel-form (next-sentinel! ev)
+        text (eval-text (:prompt-ns @state) opts code sentinel-form)
+        _ (swap! state assoc :used? true)
+        [outcome replies] (exchange! ev text
+                                     (fn [r] (and (ret? r) (= sentinel-form (:form r))))
+                                     {:on-output on-output :sentinel sentinel-form})]
+    (finish-evaluation! ev opts {:sentinel-form sentinel-form :outcome outcome :replies replies})))
 
 (defn- run-worker!
   [{:keys [state] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
@@ -554,44 +698,12 @@
     (when on-status-change (on-status-change :running))
     (if-let [problem (or (commands/pre-run-problem code) (incomplete-problem code))]
       (finish! ev opts {:status :error :error-text problem})
-      (let [_ (when (and run? (= :reset (:mode @state)) (:used? @state))
-                (kill-child! ev)
-                (connection/say! on-output :system (str cljs-node/reset-message "\n")))
-            problem (or (ensure-child! ev on-output)
-                        (if (:setup-pending @state)
-                          (await-setup! ev)
-                          (when-not (live? ev)
-                            (or (when (stopping? ev) {:status :interrupted})
-                                (connect! ev)))))]
+      (let [_ (reset-before-run! ev run? on-output)
+            problem (ready-child! ev on-output)]
         (cond
-          problem (do (when (and (:child @state)
-                                 (not (and (= :notice (:status problem)) (true? (:setup-pending @state))
-                                           (prepl/open? (:conn @state)))))
-                        (kill-child! ev))
-                      (finish! ev opts problem))
+          problem (finish-problem! ev opts problem)
           (stopping? ev) (finish! ev opts {:status :interrupted})
-          :else
-          (do
-            (wait-not-helping! ev)
-            (let [sentinel-form (next-sentinel! ev)
-                  text (eval-text (:prompt-ns @state) opts code sentinel-form)
-                  _ (swap! state assoc :used? true)
-                  [outcome replies] (exchange! ev text
-                                               (fn [r] (and (ret? r) (= sentinel-form (:form r))))
-                                               {:on-output on-output :sentinel sentinel-form})]
-              (case outcome
-                :done (let [result (cljs-node/fold-replies replies sentinel-form)]
-                        (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
-                        ;; the analyzer may know new names now; the next
-                        ;; completion's backstop fetches them. Marked
-                        ;; before finish!, so a completion racing
-                        ;; on-complete can't miss the mark
-                        (swap! state assoc :analyzer-stale? true)
-                        (finish! ev opts result))
-                (if (stopping? ev)
-                  (finish! ev opts {:status :interrupted})
-                  (do (kill-child! ev)
-                      (finish! ev opts {:status :error :error-text exited-text})))))))))
+          :else (evaluate! ev code opts))))
     (catch Throwable e
       (try (kill-child! ev) (catch Throwable _ nil))
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))

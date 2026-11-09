@@ -165,3 +165,49 @@
       (is (= {"status" ["done"]} (mw/handle (atom nil) {"op" "jonquil-frame-interrupt"})))
       (is (= "Stopped." (get (deref reply 5000 {}) "error")))
       (is (some #{"jonquil-frame-interrupt"} mw/ops)))))
+
+(defn- data-of [request]
+  (let [r (mw/handle (atom nil) request)]
+    (is (= ["done"] (get r "status")))
+    (cond-> r (get r "data") (update "data" edn/read-string))))
+
+(deftest line-counts-op-actions
+  (testing "an unknown action answers an error map as data"
+    (is (= {"status" ["done"] "data" {:error "jonquil-line-counts: no action \"nope\""}}
+           (data-of {"op" "jonquil-line-counts" "action" "nope"}))))
+  (is (some #{"jonquil-line-counts"} mw/ops)))
+
+(deftest keep-result-and-inspect-result-ops
+  (let [kept (binding [*1 [1 2 3]]
+               (get (data-of {"op" "jonquil-keep-result" "what" "value"}) "data"))
+        ek (binding [*e (ex-info "boom" {})]
+             (get (data-of {"op" "jonquil-keep-result" "what" "error"}) "data"))]
+    (is (= :value (:kind kept)))
+    (is (= :exception (:kind ek)))
+    (let [r (mw/handle (atom nil) {"op" "inspect-result" "result-id" (str (:id kept)) "result-epoch" (:epoch kept)
+                                   "rows" 10 "cols" 40})]
+      (is (= ["done"] (get r "status")))
+      (is (= 3 (:total (edn/read-string (get r "view"))))))
+    (is (= {"status" ["done"] "view" (pr-str {:error "That result is gone."})}
+           (mw/handle (atom nil) {"op" "inspect-result" "result-id" "999999999" "result-epoch" (:epoch kept)
+                                  "rows" 10 "cols" 40})))))
+
+(deftest inspect-trace-op-gone
+  (is (= {"status" ["done"] "view" (pr-str {:error "That call is gone."})}
+         (mw/handle (atom nil) {"op" "inspect-trace" "trace-id" "999999999" "part" "ret" "rows" 10 "cols" 40}))))
+
+(deftest trace-fibers-world-ops-answer-data-or-an-error
+  (testing "an unknown action is a done reply with an error and no data"
+    (doseq [op ["jonquil-trace" "jonquil-world"]]
+      (let [r (mw/handle (atom nil) {"op" op "action" "no-such-action"})]
+        (is (= ["done"] (get r "status")) op)
+        (is (string? (get r "error")) op)
+        (is (nil? (get r "data")) op))))
+  (testing "a trace log answers its entries as data"
+    (let [r (mw/handle (atom nil) {"op" "jonquil-trace" "action" "log" "since" "-1"})]
+      (is (= ["done"] (get r "status")))
+      (is (contains? (edn/read-string (get r "data")) :entries))))
+  (testing "fibers answer data or an error, always done"
+    (let [r (mw/handle (atom nil) {"op" "jonquil-fibers" "action" "no-such-action"})]
+      (is (= ["done"] (get r "status")))
+      (is (or (string? (get r "error")) (string? (get r "data")))))))

@@ -200,8 +200,87 @@
                    (not (stop-requested? ev)))
           (connection/say! on-output :system (str clj/auto-require-failed-message "\n")))))))
 
+(defn- request-fn
+  "The one-request sender for ev's user request: streams to on-output and
+  watches stdin through stdin-watch."
+  [{:keys [state] :as ev} {:keys [on-output on-wait-input]}]
+  (let [watch (stdin-watch state on-wait-input)]
+    (fn [msg] (connection/request! ev msg {:on-output on-output
+                                           :still-waiting nil
+                                           :on-message watch}))))
+
+(defn- say-stdin-notice!
+  "The nREPL dialect says once, before the request, that a server without a
+  stdin op can't answer a read."
+  [{:keys [state] :as ev} code on-output]
+  (when (and (generic? ev) (ops/reads-stdin? code)
+             (not (contains? (:ops @state) "stdin")))
+    (connection/say! on-output :system generic/stdin-notice)))
+
+(defn- run-load-file!
+  "Run: load-file, never told an :ns (the fixture's own ns form
+  decides what the server evaluates it in). A successful Run
+  moves the prompt namespace to the buffer's own."
+  [{:keys [state] :as ev} code {:keys [path] :as opts}]
+  (let [f (when path (io/file path))
+        ;; Run: load-file, never told an :ns (the fixture's own ns form
+        ;; decides what the server evaluates it in). A successful Run
+        ;; moves the prompt namespace to the buffer's own.
+        do-request! (request-fn ev opts)
+        msgs (do-request! {:op "load-file" :file code
+                           :file-path (if f (.getAbsolutePath f) "untitled.clj")
+                           :file-name (if f (.getName f) "untitled.clj")})
+        result (clj/eval-result msgs (stop-requested? ev))]
+    (when (= :ok (:status result))
+      (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
+    (finish! ev opts result)))
+
+(defn- run-eval!
+  "REPL line (no ns-source): eval in the prompt namespace, and a
+  successful reply's own :ns moves the prompt. Selection/Form
+  (ns-source present): eval in the buffer's own namespace, or
+  the prompt namespace when the buffer has none; the prompt
+  never moves for these (never the buffer's ns form
+  itself, only named as :ns)."
+  [{:keys [state] :as ev} code {:keys [ns-source] :as opts}]
+  (let [;; REPL line (no ns-source): eval in the prompt namespace, and a
+        ;; successful reply's own :ns moves the prompt. Selection/Form
+        ;; (ns-source present): eval in the buffer's own namespace, or
+        ;; the prompt namespace when the buffer has none; the prompt
+        ;; never moves for these (never the buffer's ns form
+        ;; itself, only named as :ns).
+        ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
+        do-request! (request-fn ev opts)
+        msgs (do-request! {:op "eval" :code code :ns ns})]
+    (if (clj/ns-not-found? msgs)
+      (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
+      (let [result (clj/eval-result msgs (stop-requested? ev))]
+        (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
+          (swap! state assoc :prompt-ns (:ns result)))
+        (finish! ev opts result)))))
+
+(defn- send-user-request!
+  [ev code {:keys [run? on-output] :as opts}]
+  (say-stdin-notice! ev code on-output)
+  (if run?
+    (run-load-file! ev code opts)
+    (run-eval! ev code opts)))
+
+(defn- run-after-connect!
+  "Connected and not stopped: the connect-time registration and the
+  auto-require, then the user's request."
+  [ev code {:keys [on-output] :as opts}]
+  (register-inspect! ev)
+  (when-not (stop-requested? ev) (auto-require! ev on-output))
+  ;; The registration and the auto-require are round trips of their
+  ;; own, so a Stop can land during either: check again before the
+  ;; user's request goes out.
+  (if (stop-requested? ev)
+    (finish! ev opts {:status :interrupted})
+    (send-user-request! ev code opts)))
+
 (defn- run-worker!
-  [{:keys [state] :as ev} code {:keys [run? path ns-source on-output on-wait-input on-status-change] :as opts}]
+  [ev code {:keys [on-output on-status-change] :as opts}]
   (try
     (when on-status-change (on-status-change :running))
     (if-let [problem (connection/connect! ev on-output (policy-for ev))]
@@ -212,49 +291,78 @@
         ;; own worker guard, and send nothing. The connection itself is
         ;; fine (connect! already succeeded), so this doesn't detach.
         (finish! ev opts {:status :interrupted})
-        (do
-          (register-inspect! ev)
-          (when-not (stop-requested? ev) (auto-require! ev on-output))
-          ;; The registration and the auto-require are round trips of their
-          ;; own, so a Stop can land during either: check again before the
-          ;; user's request goes out.
-          (if (stop-requested? ev)
-            (finish! ev opts {:status :interrupted})
-            (let [_ (when (and (generic? ev) (ops/reads-stdin? code)
-                               (not (contains? (:ops @state) "stdin")))
-                      (connection/say! on-output :system generic/stdin-notice))
-                  watch (stdin-watch state on-wait-input)
-                  do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
-                                                                     :still-waiting nil
-                                                                     :on-message watch}))]
-              (if run?
-              ;; Run: load-file, never told an :ns (the fixture's own ns form
-              ;; decides what the server evaluates it in). A successful Run
-              ;; moves the prompt namespace to the buffer's own.
-                (let [f (when path (io/file path))
-                      msgs (do-request! {:op "load-file" :file code
-                                         :file-path (if f (.getAbsolutePath f) "untitled.clj")
-                                         :file-name (if f (.getName f) "untitled.clj")})
-                      result (clj/eval-result msgs (stop-requested? ev))]
-                  (when (= :ok (:status result))
-                    (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
-                  (finish! ev opts result))
-              ;; REPL line (no ns-source): eval in the prompt namespace, and a
-              ;; successful reply's own :ns moves the prompt. Selection/Form
-              ;; (ns-source present): eval in the buffer's own namespace, or
-              ;; the prompt namespace when the buffer has none; the prompt
-              ;; never moves for these (never the buffer's ns form
-              ;; itself, only named as :ns).
-                (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
-                      msgs (do-request! {:op "eval" :code code :ns ns})]
-                  (if (clj/ns-not-found? msgs)
-                    (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
-                    (let [result (clj/eval-result msgs (stop-requested? ev))]
-                      (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
-                        (swap! state assoc :prompt-ns (:ns result)))
-                      (finish! ev opts result))))))))))
+        (run-after-connect! ev code opts)))
     (catch Throwable e
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
+
+(defn- mark-stop-requested!
+  "Flags the running evaluation, if any, as stop-requested; the atomic
+  [old new] pair from swap-vals!."
+  [state]
+  (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true)))))
+
+(defn- interrupt-fallback-wait!
+  "The fallback clock: polls every 20 ms until this evaluation ends (nil)
+  or :interrupt-timeout-ms passes, then says the interrupt failed and
+  detaches."
+  [{:keys [state timings] :as ev} token on-output]
+  (loop [n 0]
+    (cond
+      ;; This evaluation has ended, or a newer one
+      ;; has already taken :running: either way,
+      ;; this future is no longer relevant.
+      (not (identical? token (get-in @state [:running :token]))) nil
+      (>= (* n 20) (:interrupt-timeout-ms timings))
+      (do (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
+          (connection/detach! ev))
+      :else (do (Thread/sleep 20) (recur (inc n))))))
+
+(defn- interrupt-via-op!
+  "The send and the fallback clock are separate futures,
+  so a peer that stops reading (send! blocked on a full
+  buffer) still gets the interrupt-failed detach on
+  time. The send is skipped once this evaluation has
+  ended, since a nil :interrupt-id would interrupt
+  whatever runs next in the session."
+  [{:keys [state] :as ev} {:keys [token conn session id on-output]}]
+  ;; The send and the fallback clock are separate futures,
+  ;; so a peer that stops reading (send! blocked on a full
+  ;; buffer) still gets the interrupt-failed detach on
+  ;; time. The send is skipped once this evaluation has
+  ;; ended, since a nil :interrupt-id would interrupt
+  ;; whatever runs next in the session.
+  (future
+    (try
+      (when (identical? token (get-in @state [:running :token]))
+        (client/send! conn {:op "interrupt" :session session :interrupt-id id}))
+      (catch Throwable _ nil)))
+  (future
+    (try
+      (interrupt-fallback-wait! ev token on-output)
+      (catch Throwable _ nil))))
+
+(defn- interrupt-running!
+  "The first Stop for a running evaluation: detach at once when no live
+  connection is published, else interrupt (or say it can't)."
+  [{:keys [state] :as ev} running]
+  (let [on-output (:on-output (:opts running))
+        token (:token running)
+        conn (:conn @state)]
+    (if-not (client/open? conn)
+      ;; connect! hasn't published a live :conn yet (still
+      ;; connecting, or never got that far). :ops may be stale from
+      ;; an earlier connection and can't be trusted here, so this
+      ;; ignores it: detach! at once closes :connecting too, with
+      ;; no sentence and no interrupt op sent.
+      (connection/detach! ev)
+      (let [ops (:ops @state)
+            session (:session @state)
+            id (get-in @state [:running :id])]
+        (if (contains? ops "interrupt")
+          (interrupt-via-op! ev {:token token :conn conn :session session :id id :on-output on-output})
+          (do
+            (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
+            (connection/detach! ev)))))))
 
 (defn- ns-errored?
   "True when a lookup reply's own statuses carry lookup-error or error --
@@ -378,53 +486,12 @@
     ;; interrupt op itself) moves inside a future, and this only ever
     ;; reads/writes atoms, fires a future, or calls detach! (a socket
     ;; close plus the fail-pending handlers).
-    (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]
+    (let [[old _] (mark-stop-requested! state)]
       (when-let [running (:running old)]
         ;; A second Stop for the same evaluation does nothing --
         ;; the first Stop's future (or immediate detach) already owns it.
         (when-not (:stop-requested? running)
-          (let [on-output (:on-output (:opts running))
-                token (:token running)
-                conn (:conn @state)]
-            (if-not (client/open? conn)
-              ;; connect! hasn't published a live :conn yet (still
-              ;; connecting, or never got that far). :ops may be stale from
-              ;; an earlier connection and can't be trusted here, so this
-              ;; ignores it: detach! at once closes :connecting too, with
-              ;; no sentence and no interrupt op sent.
-              (connection/detach! this)
-              (let [ops (:ops @state)
-                    session (:session @state)
-                    id (get-in @state [:running :id])]
-                (if (contains? ops "interrupt")
-                  (do
-                    ;; The send and the fallback clock are separate futures,
-                    ;; so a peer that stops reading (send! blocked on a full
-                    ;; buffer) still gets the interrupt-failed detach on
-                    ;; time. The send is skipped once this evaluation has
-                    ;; ended, since a nil :interrupt-id would interrupt
-                    ;; whatever runs next in the session.
-                    (future
-                      (try
-                        (when (identical? token (get-in @state [:running :token]))
-                          (client/send! conn {:op "interrupt" :session session :interrupt-id id}))
-                        (catch Throwable _ nil)))
-                    (future
-                      (try
-                        (loop [n 0]
-                          (cond
-                            ;; This evaluation has ended, or a newer one
-                            ;; has already taken :running: either way,
-                            ;; this future is no longer relevant.
-                            (not (identical? token (get-in @state [:running :token]))) nil
-                            (>= (* n 20) (:interrupt-timeout-ms timings))
-                            (do (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
-                                (connection/detach! this))
-                            :else (do (Thread/sleep 20) (recur (inc n)))))
-                        (catch Throwable _ nil))))
-                  (do
-                    (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
-                    (connection/detach! this))))))))
+          (interrupt-running! this running)))
       nil))
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] (boolean (:waiting? @state)))

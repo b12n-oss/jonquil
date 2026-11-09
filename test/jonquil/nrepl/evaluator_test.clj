@@ -1119,3 +1119,43 @@
                 (is (= :counts (:mode r))))
               (is (= {:on? false} (call ev/toggle-line-counts!))))))
       (finally (ev/stop! e)))))
+
+(deftest stop-sends-a-frame-interrupt-test
+  ;; interrupt-frame-eval! runs in a future on every Stop, whether or not a
+  ;; frame eval is running, when the child offers the op.
+  (let [e (make (temp-project)) done (promise) sent (atom [])
+        real client/request-sync]
+    (try
+      (ev/start! e)
+      (ev/eval! e "(loop [] (recur))" {:run? false :on-complete (fn [r] (deliver done r))})
+      (wait-for-eval-id e)
+      (with-redefs [client/request-sync (fn [conn msg timeout]
+                                          (swap! sent conj (:op msg))
+                                          (real conn msg timeout))]
+        (ev/interrupt! e)
+        (is (wait-until (fn [] (some #{"jonquil-frame-interrupt"} @sent)) 5000)
+            "the frame interrupt request went out")
+        (is (= :interrupted (:status (deref done 10000 :timeout)))))
+      (finally (ev/stop! e)))))
+
+(deftest a-throwing-stop-request-is-reported-test
+  ;; interrupt-or-restart!'s catch: a throw from the interrupt request is
+  ;; said on the console as "Stop failed", never lost in the future.
+  (let [e (make (temp-project)) done (promise) out (atom [])
+        real client/request-sync]
+    (try
+      (ev/start! e)
+      (ev/eval! e "(loop [] (recur))" {:run? false
+                                       :on-output (fn [k s] (swap! out conj [k s]))
+                                       :on-complete (fn [r] (deliver done r))})
+      (wait-for-eval-id e)
+      (with-redefs [client/request-sync (fn [conn msg timeout]
+                                          (if (= "interrupt" (:op msg))
+                                            (throw (ex-info "kaboom" {}))
+                                            (real conn msg timeout)))]
+        (ev/interrupt! e)
+        (is (wait-until (fn [] (some (fn [[k s]] (and (= :error k) (= "; Stop failed: kaboom\n" s)))
+                                     @out))
+                        5000)
+            "the console shows the failed stop"))
+      (finally (ev/stop! e)))))
