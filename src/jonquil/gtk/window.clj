@@ -3419,10 +3419,10 @@
 
 (defonce ^:private plugin-reviews-changed
   ;; (fn [{:keys [reviews open? lines after done]}]) taking the
-  ;; pending proposals' reviews after every plugin step; the plugins part's
-  ;; :plugins-start! sets it to update the pending count and the review
-  ;; panel. done, when given, is
-  ;; a promise it delivers once the window has changed.
+  ;; pending proposals' reviews after every plugin step; the plugins
+  ;; part's :plugins-start! sets it to update the pending count and the
+  ;; review panel. done, when given, is a promise it delivers once the
+  ;; window has changed.
   (atom (fn [{:keys [done]}] (when done (deliver done true)))))
 
 (defn- plugin-step!

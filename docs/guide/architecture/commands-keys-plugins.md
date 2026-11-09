@@ -94,7 +94,7 @@ A refresh that swaps the shown proposal for a newer version of the same plugin a
 
 ### The plugin agent and threading
 
-Every step (load, Accept, Reject, Enable, Disable, Revert, opening a review) runs through `plugin-step!` on one agent that keeps going after a throw, so steps never interleave and none is lost. The agent builds the reviews and rows off the GTK thread; the callback then updates the pending count and any open panel. The isolated check runs off the agent, and `propose-step!` records its result on it.
+Every step (load, Accept, Reject, Enable, Disable, Revert, opening a review) runs through `plugin-step!` on one agent that keeps going after a throw, so steps never interleave and none is lost. The agent builds the reviews and rows off the GTK thread; the callback, which the plugins window part sets at startup, then updates the pending count and any open panel. The isolated check runs off the agent, and `propose-step!` records its result on it.
 
 ### Plugin MCP tools
 
