@@ -1121,7 +1121,7 @@
   (theme/choice-names: :light -> :dark), waits for the status text
   'Theme: dark' by OCR, then reads the saved settings.edn straight off
   disk and requires it to be exactly {:theme :dark} -- the save
-  (window.clj's do-cycle-theme!, settings/save-settings!) and the status
+  (jonquil.gtk.window.theme's do-cycle-theme!, settings/save-settings!) and the status
   label are two different code paths, so this checks the save directly
   rather than trusting the status text alone. Command+W then closes with
   no dirty buffer to prompt about (measured live: a blank,

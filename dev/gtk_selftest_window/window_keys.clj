@@ -147,7 +147,7 @@
                              {:threw-once @threw-once? :ran-second @ran-second?})))))
 
 (defn row-window-key-throw-contained
-  "Forces jonquil.gtk.window/do-cycle-theme! to throw for one Cmd+Shift+M,
+  "Forces jonquil.gtk.window.theme/do-cycle-theme! to throw for one Cmd+Shift+M,
   through on-window-key's own theme-cycle-fn call to it (with-redefs on
   that var reaches the call even though it's unqualified and intra-
   namespace, the same override row-completion-commit-throw-consumes-key
