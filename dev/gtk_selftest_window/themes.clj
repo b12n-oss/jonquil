@@ -228,7 +228,7 @@
   settings file at (:settings-path* ui) reads back {:theme :dark} through
   jonquil.settings/load-settings itself, not a raw slurp.
 
-  set-status! (window.clj) is on-gui!-scheduled, the same async-drain
+  set-status! (jonquil.gtk.window.status) is on-gui!-scheduled, the same async-drain
   lesson every console-text assertion in this file already respects
   -- a synchronous read right after :cycle-theme!* can race the queued
   update and see a PRIOR row's leftover status text, so status1 is polled

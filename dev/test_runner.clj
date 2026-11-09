@@ -111,6 +111,10 @@
     jonquil.nrepl.cljs-node-eval-test
     jonquil.gtk.appearance-test
     jonquil.gtk.trash-test
+    jonquil.gtk.window-layers-test
+    jonquil.gtk.window.status-test
+    jonquil.gtk.window.alerts-test
+    jonquil.gtk.window.files-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.gtk.processes-pane-test
