@@ -255,7 +255,7 @@ The design is in [Window parts](architecture/index.md#window-parts). In short:
 4. For a right-hand panel, declare it in the spec's `:panels` with a label, add a `:panel/<id>` command whose `:call` is `[:panel-focus-fn :<id>]`, and answer it under `:panels` from the install: `{:<id> {:root widget :focus! f :open! f}}`. Don't use `:review` or `:history`, which are core ids.
 5. For keys, a new feature's keys may go in the spec's `:bindings` (`{:window [...] :editor [...]}`, entries shaped like `keymap.edn`). Keys of existing features stay in `keymap.edn`. A binding with Alt needs `:physical? true` to fire on macOS. Spec bindings come after the shipped ones, so a shipped key wins, and the `unreachable-bindings` test fails if one is shadowed.
 6. Test the spec in `bb test`, and add a row to a window self-test for the install. `specs-and-installs-name-the-same-parts` fails if only one list has the part.
-7. For per-tab state, add `:on-tab-removed` and `:on-tab-wired` hooks to `:hooks`; each is called `(f ctx tab)`. Wire-time hooks run before the changed-form gutter's handler connects, and removal hooks run while the tab's buffer is still alive. A throwing hook is reported on the status line and the close or wiring goes on.
+7. For per-tab state, add `:on-tab-removed`, `:on-tab-wired` and `:on-switch` hooks to `:hooks`; each is called `(f ctx tab)`. Wire-time hooks run before the changed-form gutter's handler connects, and removal hooks run while the tab's buffer is still alive, and switch hooks run when a tab becomes the active one. A throwing hook is reported on the status line and the close or wiring goes on.
 8. Run `bb verify`.
 
 ## The macOS app: bundle, install, icon
