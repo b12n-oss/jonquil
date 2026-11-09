@@ -90,8 +90,8 @@
    :confirmed-close? (atom (boolean confirmed?)) :suppress-close? (atom (boolean suppress?))
    :closing? (atom false) :popovers (atom [])
    :ev* (atom #_{:clj-kondo/ignore [:missing-protocol-method]}
-              (reify ev/Evaluator
-                (stop! [_] (swap! log conj [:stop]) (when stop-throws? (throw (ex-info "dead" {}))))))
+         (reify ev/Evaluator
+           (stop! [_] (swap! log conj [:stop]) (when stop-throws? (throw (ex-info "dead" {}))))))
    :select! (fn [t] (swap! log conj [:select @(:path t)]))
    :save-session! save-session!})
 
