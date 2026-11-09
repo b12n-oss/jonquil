@@ -115,6 +115,69 @@
 
 (def ^:private binding-keys #{:key :keys :mods :not :exact :physical? :when :command :args :outcome})
 
+(defn- coll-of [b k]
+  (let [v (get b k)] (when (coll? v) v)))
+
+(defn- shape-problems [b]
+  (cond-> []
+    (and (contains? b :keys) (not (coll? (:keys b)))) (conj ":keys isn't a set of key names")
+    (and (contains? b :mods) (not (coll? (:mods b)))) (conj ":mods isn't a set")
+    (and (contains? b :not) (not (coll? (:not b)))) (conj ":not isn't a set")))
+
+(defn- key-problems [b]
+  (let [names (if (:key b) [(:key b)] (coll-of b :keys))]
+    (cond-> []
+      (and (nil? (:key b)) (nil? (:keys b))) (conj "has neither :key nor :keys")
+      (and (:key b) (:keys b)) (conj "has both :key and :keys")
+      (some #(nil? (key-value %)) names)
+      (conj (str "names an unknown key " (pr-str (remove key-value names)))))))
+
+(defn- modifier-problems [b]
+  (let [exact (when (set? (:exact b)) (:exact b))
+        mods (concat (coll-of b :mods) (coll-of b :not) exact)]
+    (cond-> []
+      (some (complement modifiers) mods)
+      (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
+      (and (contains? b :exact) (not (set? (:exact b))))
+      (conj ":exact isn't a set")
+      (and (some modifiers exact) (some (complement exact-modifiers) exact))
+      (conj (str ":exact names " (pr-str (remove exact-modifiers exact))
+                 ", only :shift :alt :ctrl :meta"))
+      (and (contains? b :exact) (or (contains? b :mods) (contains? b :not)))
+      (conj "has :exact alongside :mods or :not")
+      (and (contains? b :physical?) (not (boolean? (:physical? b))))
+      (conj ":physical? isn't true or false"))))
+
+(defn- command-problems [b command-ids]
+  (cond-> []
+    (and (contains? b :command) (contains? b :outcome))
+    (conj "has both :command and :outcome")
+    (and (not (contains? b :command)) (not (contains? b :outcome)))
+    (conj "has neither :command nor :outcome")
+    (and (contains? b :command) (not (contains? command-ids (:command b))))
+    (conj (str "names an unregistered command " (pr-str (:command b))))
+    (and (contains? b :outcome) (not (contains? outcomes (:outcome b))))
+    (conj (str "names an unknown outcome " (pr-str (:outcome b)) ", not :handled or :to-gtk"))))
+
+(defn- condition-problems [b condition-ids]
+  (cond-> []
+    (and (contains? b :when) (not (vector? (:when b))))
+    (conj ":when isn't a vector")
+    (and (vector? (:when b)) (some (complement condition-ids) (:when b)))
+    (conj (str "names an unregistered condition "
+               (pr-str (remove condition-ids (:when b)))))
+    (some (complement binding-keys) (keys b))
+    (conj (str "has unknown keys " (pr-str (remove binding-keys (keys b)))))))
+
+(defn- binding-problems
+  "Every problem with one binding, in rule order."
+  [b command-ids condition-ids]
+  (concat (shape-problems b)
+          (key-problems b)
+          (modifier-problems b)
+          (command-problems b command-ids)
+          (condition-problems b condition-ids)))
+
 (defn problems
   "What's wrong with bindings, one sentence each naming the binding's
   position, given the registered command and condition ids. Empty when all
@@ -123,44 +186,7 @@
   ([bindings command-ids condition-ids]
   (vec
    (for [[i b] (map-indexed vector bindings)
-         :let [coll-of (fn [k] (let [v (get b k)] (when (coll? v) v)))
-               names (if (:key b) [(:key b)] (coll-of :keys))
-               exact (when (set? (:exact b)) (:exact b))
-               mods (concat (coll-of :mods) (coll-of :not) exact)]
-         p (cond-> []
-             (and (contains? b :keys) (not (coll? (:keys b)))) (conj ":keys isn't a set of key names")
-             (and (contains? b :mods) (not (coll? (:mods b)))) (conj ":mods isn't a set")
-             (and (contains? b :not) (not (coll? (:not b)))) (conj ":not isn't a set")
-             (and (nil? (:key b)) (nil? (:keys b))) (conj "has neither :key nor :keys")
-             (and (:key b) (:keys b)) (conj "has both :key and :keys")
-             (some #(nil? (key-value %)) names)
-             (conj (str "names an unknown key " (pr-str (remove key-value names))))
-             (some (complement modifiers) mods)
-             (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
-             (and (contains? b :exact) (not (set? (:exact b))))
-             (conj ":exact isn't a set")
-             (and (some modifiers exact) (some (complement exact-modifiers) exact))
-             (conj (str ":exact names " (pr-str (remove exact-modifiers exact))
-                        ", only :shift :alt :ctrl :meta"))
-             (and (contains? b :exact) (or (contains? b :mods) (contains? b :not)))
-             (conj "has :exact alongside :mods or :not")
-             (and (contains? b :physical?) (not (boolean? (:physical? b))))
-             (conj ":physical? isn't true or false")
-             (and (contains? b :command) (contains? b :outcome))
-             (conj "has both :command and :outcome")
-             (and (not (contains? b :command)) (not (contains? b :outcome)))
-             (conj "has neither :command nor :outcome")
-             (and (contains? b :command) (not (contains? command-ids (:command b))))
-             (conj (str "names an unregistered command " (pr-str (:command b))))
-             (and (contains? b :outcome) (not (contains? outcomes (:outcome b))))
-             (conj (str "names an unknown outcome " (pr-str (:outcome b)) ", not :handled or :to-gtk"))
-             (and (contains? b :when) (not (vector? (:when b))))
-             (conj ":when isn't a vector")
-             (and (vector? (:when b)) (some (complement condition-ids) (:when b)))
-             (conj (str "names an unregistered condition "
-                        (pr-str (remove condition-ids (:when b)))))
-             (some (complement binding-keys) (keys b))
-             (conj (str "has unknown keys " (pr-str (remove binding-keys (keys b))))))]
+         p (binding-problems b command-ids condition-ids)]
      (str "binding " i " " p)))))
 
 (defmacro ^:private embedded-text

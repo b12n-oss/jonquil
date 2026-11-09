@@ -85,6 +85,43 @@
           (is (= 1 (count ps)) (str why ": " (pr-str ps)))
           (is (str/includes? (str (first ps)) "binding 1") (str why ": " (pr-str ps))))))))
 
+(deftest problems-wording-and-order-test
+  ;; characterization: the exact sentences, and their order, for bindings
+  ;; that break several rules at once
+  (is (= ["binding 0 :keys isn't a set of key names" "binding 0 :mods isn't a set"
+          "binding 0 :not isn't a set" "binding 0 :exact isn't a set"
+          "binding 0 has :exact alongside :mods or :not"
+          "binding 0 :physical? isn't true or false"
+          "binding 0 has both :command and :outcome"
+          "binding 0 names an unknown outcome :bogus, not :handled or :to-gtk"
+          "binding 0 :when isn't a vector" "binding 0 has unknown keys (:zzz)"]
+         (km/problems [{:keys :r :mods :cmd :not 5 :exact [:shift] :physical? "y"
+                        :command :x :outcome :bogus :when :c :zzz 1}]
+                      #{:x} #{:c})))
+  (is (= ["binding 0 has both :key and :keys" "binding 0 names an unknown modifier (:hyper)"
+          "binding 0 :exact names (:cmd), only :shift :alt :ctrl :meta"
+          "binding 0 has :exact alongside :mods or :not"
+          "binding 0 has both :command and :outcome"
+          "binding 0 names an unregistered command :y"
+          "binding 0 names an unknown outcome :bogus, not :handled or :to-gtk"
+          "binding 0 names an unregistered condition (:nope)"
+          "binding 0 has unknown keys (:extra)"]
+         (km/problems [{:key "r" :keys #{"s"} :mods #{:hyper} :exact #{:cmd :shift}
+                        :command :y :outcome :bogus :when [:nope] :extra 1}]
+                      #{:x} #{:c})))
+  (is (= ["binding 0 names an unknown key (\"nope\")"
+          "binding 0 :exact names (:cmd), only :shift :alt :ctrl :meta"
+          "binding 0 has :exact alongside :mods or :not"
+          "binding 0 has neither :command nor :outcome"
+          "binding 1 names an unknown key (\"nope\")"
+          "binding 1 names an unknown modifier (:hyper)"
+          "binding 1 has neither :command nor :outcome"]
+         (km/problems [{:key "nope" :exact #{:cmd} :not #{:alt}}
+                       {:keys #{"nope" "r"} :mods #{:hyper}}]
+                      #{:x} #{:c})))
+  (is (= ["binding 0 has neither :key nor :keys" "binding 0 has neither :command nor :outcome"]
+         (km/problems [{:mods #{:cmd}}] #{:x} #{:c}))))
+
 (deftest when-test
   (let [b {:key "o" :mods #{:cmd :shift} :when [:a :b] :command :x}
         st (bit-or ctrl shift)]
