@@ -94,7 +94,7 @@
 
 (defn- version-text
   "read-text's answer for one version of id."
-  [hdir entries id version]
+  [{:keys [hdir entries id version]}]
   (if-let [src (history/version-source hdir version)]
     (ok (str id " v" version ": "
              (if-let [s (history/version-status entries version)] (name s) "not in its history")
@@ -118,6 +118,7 @@
 (defn read-text
   "jonquil_plugin_read: id's live source and history, or with :version
   that version's status and source."
+  {:arglists '([{:keys [plugins-dir registry id version], :as state}])}
   [{:keys [id version] :as state}]
   (guarded
    "reading the plugin"
@@ -126,7 +127,7 @@
        state
        (fn [hdir entries]
          (if version
-           (version-text hdir entries id version)
+           (version-text {:hdir hdir :entries entries :id id :version version})
            (live-text state hdir entries)))))))
 
 (defn- status-follow-up

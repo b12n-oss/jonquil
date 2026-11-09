@@ -291,6 +291,8 @@
   the earlier plugins' editor bindings; then the built-in editor binding b
   takes over."
   [{:keys [win ed walk-of first-match]}]
+  ;; the window first, all of it; then the earlier plugins' editor
+  ;; bindings; then the built-in editor binding b takes over
   (let [w (walk-of win)
         ;; an earlier plugin's always-take can hide a built-in that would
         ;; always take it too; that's still this binding's problem, or it
@@ -310,6 +312,8 @@
   first; then b takes the key from the built-in window binding and from any
   editor one."
   [{:keys [win ed walk-of first-match]}]
+  ;; :window: the earlier plugins' window bindings first; then b takes
+  ;; the key from the built-in window binding and from any editor one
   (let [w (walk-of (filter earlier? win))]
     (into (before-findings w)
           (when-not (always-taken? w)

@@ -340,12 +340,13 @@
   the live registry, opts the folder options."
   [{:keys [opts live-reg id n src]}]
   (let [dir (:dir opts)
-        hdir (history/history-dir dir id)]
+        hdir (history/history-dir dir id)
+        changed (disk-changed dir live-reg id)]
     (cond
       (nil? src) (str "plugin " id " has no v" n " to revert to")
       (contains? (set (:disabled opts)) (keyword id)) (str "plugin " id " is disabled, so it wasn't reverted")
       (not (was-live? hdir n)) (str "plugin " id ": v" n " was never live, so it wasn't reverted")
-      (disk-changed dir live-reg id) (str "plugin " id " wasn't reverted: " (disk-changed dir live-reg id))
+      changed (str "plugin " id " wasn't reverted: " changed)
       ;; the file's there (disk-changed says it holds the live text), so
       ;; there's nothing to put back; a deleted one is written back
       (and (= src (get-in live-reg [:plugins (keyword id) :source])) (.isFile (io/file dir (str id ".clj"))))
@@ -356,6 +357,8 @@
   check loaded src into the plugin's namespace, so the live version goes
   back, as reload-one does on a fail."
   [{:keys [old id why]}]
+  ;; the check loaded src into the plugin's namespace: put the live version
+  ;; back, as reload-one does on a fail
   (let [restored (when-let [live-src (get-in old [:plugins (keyword id) :source])]
                    (:problems (protocol/load-candidate {:source live-src :file-id id})))]
     (into [(str "plugin " id " wasn't reverted: " why)]

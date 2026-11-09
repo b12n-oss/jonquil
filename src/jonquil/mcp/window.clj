@@ -321,11 +321,11 @@
 
 (defn- tool-tabs [{:keys [ui turn]} _]
   (turn (fn []
-          (let [active-id (:id ((:active-tab* ui)))]
+          (let [active (:id ((:active-tab* ui)))]
             {:text (str/join "\n"
                              (map (fn [t]
                                     (tab-line {:id (:id t)
-                                               :active? (= active-id (:id t))
+                                               :active? (= active (:id t))
                                                :dirty? (editor/dirty? (:ed t))
                                                :path @(:path t)}))
                                   ((:tabs* ui))))

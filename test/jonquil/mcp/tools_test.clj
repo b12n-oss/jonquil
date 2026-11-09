@@ -149,3 +149,14 @@
     (is (= "Unknown tool: jonquil_nope" (ex-message ex))))
   (is (= "Missing required argument: symbol"
          (ex-message (try ((:call (:t @env)) "jonquil_doc" nil) nil (catch Throwable e e))))))
+
+(deftest eval-path-picks-the-project
+  (let [d (temp-dirs/temp-dir! "jonquil-mcp-test-")
+        _ (spit (io/file d "deps.edn") "{}")
+        _ (spit (io/file d ".jonquil.edn") "{:runtime :in-process}")
+        _ (spit (io/file d "a.clj") "(ns a)")
+        tt (tools/make-tools {:dir (dir) :settings-path (str (io/file d "s.edn"))})
+        c (fn [args] ((:call tt) "jonquil_eval" args))]
+    (is (= {:text "=> 3" :error? false} (c {"code" "(+ 1 2)" "path" (str (io/file d "a.clj"))})) "a file picks its project")
+    (is (= {:text "=> 3" :error? false} (c {"code" "(+ 1 2)" "path" (str d)})) "a directory picks its project")
+    (is (= {:text "=> 3" :error? false} (c {"code" "(+ 1 2)" "path" "a.clj"})) "a relative path resolves against the server dir")))

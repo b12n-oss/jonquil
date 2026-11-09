@@ -308,6 +308,7 @@
   either side reaches EOF. Both pumps run on daemon threads and either end
   releases the wait, so the bridge cannot hang on one dead side; the socket
   is closed on the way out."
+  {:arglists '([{:keys [read-line write-line settings-path dir]}])}
   [{:keys [settings-path dir] :as io-fns}]
   (let [{:keys [entry error]} (try (discover settings-path dir)
                                    (catch Exception e {:error (str "cannot read the window registry: " (ex-message e))}))

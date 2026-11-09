@@ -467,3 +467,13 @@
             :warnings []}
            (earlier-at [[:window {:key "r" :mods #{:cmd} :when [:tree-focused] :command :tab/new}]]
                        [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])) "guarded over built-in")))
+
+(deftest non-map-binding-is-a-problem-not-a-throw
+  ;; the split cell-findings reports a non-map binding; main threw
+  ;; "Don't know how to create ISeq from: java.lang.Long" here
+  (let [req (pc/request-from-registry {:commands registry/commands
+                                       :conditions {:window [:evaluating] :editor 5}
+                                       :keymap km/shipped :os "Linux"})]
+    (is (= {:ok? false :problems ["binding 0 isn't a map"] :warnings []}
+           (pc/validate (assoc req :definitions [{:id :fz :doc "A." :effects #{} :bindings [5]}]
+                               :file-id "fz"))))))
