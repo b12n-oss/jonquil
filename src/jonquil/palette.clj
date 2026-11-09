@@ -71,8 +71,7 @@
   thing, so bringing one back would show a stale view. The core panels'
   labels merged with the specs' :panels; a clash throws at load."
   (parts/merge-panels
-   {:inspector "Inspector" :source "Source" :locations "Locations"
-    :debugger "Frames" :plugins "Plugins"}
+   {:inspector "Inspector" :source "Source" :plugins "Plugins"}
    parts/specs))
 
 (defn panel-entries

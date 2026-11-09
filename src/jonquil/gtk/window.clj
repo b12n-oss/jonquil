@@ -37,7 +37,6 @@
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
-            [jonquil.gtk.debugger-pane :as debugger-pane]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
@@ -45,12 +44,9 @@
             [jonquil.gtk.gutter :as gutter]
             [jonquil.hints :as hints]
             [jonquil.line-counts :as line-counts]
-            [jonquil.compare :as compare]
-            [jolt.process]
             [jonquil.layouts :as layouts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
-            [jonquil.gtk.locations-pane :as locations-pane]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -62,7 +58,6 @@
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
-            [jonquil.locations :as loc]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.parts :as parts]
             [jonquil.restarts :as restarts]
@@ -87,8 +82,7 @@
             [jonquil.settings :as settings]
             [jonquil.source :as source]
             [jonquil.tabs :as tabs]
-            [jonquil.theme :as theme]
-            [jonquil.usages :as usages]))
+            [jonquil.theme :as theme]))
 
 ;; --- title -------------------------------------------------------------
 
@@ -856,16 +850,14 @@
   "{which root} for the panels right's slot holds, a part's among them; a
   right without :review-root, :plugins-root or :history-root (a test's) has
   fewer, and one without :part-panels* has no part panels."
-  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root
+  [{:keys [inspector-root source-root review-root plugins-root history-root
            part-panels*]}]
   (cond-> (into {:inspector inspector-root :source source-root}
                 (map (fn [[id p]] [id (:root p)]))
                 (some-> part-panels* deref))
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
-    history-root (assoc :history history-root)
-    locations-root (assoc :locations locations-root)
-    debugger-root (assoc :debugger debugger-root)))
+    history-root (assoc :history history-root)))
 
 (defn- show-right-panel!
   "Shows which (:inspector, :source, :review, :plugins, :history,
@@ -1350,6 +1342,40 @@
                       :hook-source :selection :failure-kind :example :hook-tab (:id tab)
                       :changed nil
                       :record {:source :example :code code :path nil :ns "user"}}))))
+
+(defn- re-eval-failure!
+  "Sends failure f's code through the REPL again, in tab t, as it first went."
+  [{:keys [cv ev* status-label]} f t]
+  (let [code (:code f)
+        buffer? (#{:selection :form} (:kind f))]
+    (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
+    (do-repl-eval! (:ed t) cv ev* status-label code
+                   (cond-> {:hook-source (:kind f) :hook-tab (:id t)
+                            :record (if buffer?
+                                      (tab-record t ev* (:kind f) code (editor/editor-text (:ed t)))
+                                      {:source (:kind f) :code code :path nil
+                                       :ns (str (ev/prompt-ns @ev*))})}
+                     ;; as Run Selection and Run Form send them
+                     buffer? (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t))))))
+
+(defn- rerun-failure!
+  "Runs failure f again in tab t: the retry restart's dispatch by the
+  failure's kind. m is {:failure :tab :cv :ev* :sel* :status-label}. The run
+  fns are called through their vars."
+  [{f :failure t :tab :keys [cv ev* sel* status-label]}]
+  (let [ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label}
+        code (:code f)
+        buffer? (#{:selection :form} (:kind f))]
+    (cond
+      (= :run (:kind f)) (do-run! ctx)
+      ;; an example goes back through its own Run, in user
+      (= :example (:kind f)) (do-run-example! ctx code)
+      ;; the checks Run Selection and Run Form make first
+      (and buffer? (or (refuse-foreign! ctx)
+                       (and (not (ev/evaluating? @ev*))
+                            (before-run-stopped ctx (:kind f) t code))))
+      nil
+      :else (re-eval-failure! ctx f t))))
 
 (defn- do-copy-example!
   "Copy to Definitions: code goes into the tab's editor after the form at
@@ -2507,24 +2533,6 @@
         (set-status! status-label (str "; key: " (ex-message e)))
         1)))))
 
-;; --- the locations list ----------------------------------------------------
-
-(defn- create-location-marks
-  "Two anonymous marks per entry in buf, so the place follows edits: the
-  start's mark has right gravity and the end's left, so text typed at
-  either edge stays outside the place."
-  [buf entries]
-  (mapv (fn [{:keys [start end]}]
-          (g/with-iters* buf start end
-            (fn [a b] [(g/gtk-text-buffer-create-mark buf nil a 0)
-                       (g/gtk-text-buffer-create-mark buf nil b 1)])))
-        entries))
-
-(defn- delete-location-marks! [buf marks]
-  (doseq [[a b] marks]
-    (g/gtk-text-buffer-delete-mark buf a)
-    (g/gtk-text-buffer-delete-mark buf b)))
-
 ;; --- context menus -------------------------------------------------------
 
 (defn- install-context-menu!
@@ -2650,7 +2658,7 @@
           was-active? (= id @active-id)
           gone (set (tab/popovers t))]
       ;; while the buffer is alive, so the list's marks can be deleted
-      (when-let [f (:locations-tab-closed! ctx)] (f id))
+      (parts/run-tab-hooks! ctx :on-tab-removed t)
       (when-let [r (:recent-tabs ctx)] (swap! r (fn [v] (vec (remove #{id} v)))))
       (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
       (when was-active? (reset! active-id (:id neighbour)))
@@ -2733,58 +2741,13 @@
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
            active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
-           open-find-fn open-replace-fn window-key-args repl-complete-fn hint-label hints-on? line-counting?] :as ctx}
+           open-find-fn open-replace-fn window-key-args repl-complete-fn hint-label hints-on?] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion palette last-shown path discard-warned?] :as t}]
+  ;; LM4 (the debugger part's :on-tab-wired hook): the gutter's line counts,
+  ;; first, so its "changed" handler connects before LM3's
+  (parts/run-tab-hooks! ctx :on-tab-wired t)
   ;; LM3: the gutter's marks follow edits, 150 ms after the last change,
   ;; computed off the GTK thread and drawn only if the text is still the same
-  ;; LM4: after a run, the file's line counts in the gutter, while
-  ;; counting is on; drawn only for a saved, clean tab whose text is still
-  ;; what it was when the fetch started, and hidden at the first edit
-  (when-let [{:keys [counts-refresh counting? gutter]} (:changed ed)]
-    (reset! counting? (fn [] (boolean (and line-counting? @line-counting?))))
-    ;; the text the tab's last full Run ran: counts are drawn only while the
-    ;; buffer still holds it, so a Run Form or Run Selection never shows
-    ;; counts for lines that have moved since
-    (let [run-text (atom nil)]
-      (reset! counts-refresh
-              (fn [source code]
-                (on-gui! (fn []
-                           (when (= :run source) (reset! run-text code))
-                           (when (and line-counting? @line-counting? (not @(:destroyed? ed)))
-                             (let [e @ev* path @path]
-                               (cond
-                                 (not (satisfies? ev/LineCounts e)) nil
-                                 ;; on the console: the Run's own Ready lands on the
-                                 ;; status bar after this. Only for a Run: a Run Form
-                                 ;; on an edited tab is the usual case, not news
-                                 (or (nil? path) (editor/dirty? ed))
-                                 (when (= :run source)
-                                   (cview/append! cv :system "; Line counts show for a saved file.\n"))
-                                 :else
-                                 (let [text (editor/editor-text ed)]
-                                   (when (= text @run-text)
-                                     (ev/line-counts!
-                                      e path
-                                      (fn [r]
-                                        (on-gui! (fn []
-                                                   (cond
-                                                     (:error r) (cview/append! cv :system (str "; " (:error r) "\n"))
-                                                     ;; the runtime isn't counting: a restart, or a
-                                                     ;; toggle elsewhere
-                                                     (not= :counts (:mode r))
-                                                     (when @line-counting?
-                                                       (reset! line-counting? false)
-                                                       (gutter/set-counts! gutter {})
-                                                       (cview/append! cv :system "; Line counts went off (the runtime restarted).\n"))
-                                                     (and (not @(:destroyed? ed)) (= text (editor/editor-text ed)))
-                                                     (gutter/set-counts! gutter (into {} (for [[line hits] (:counts r) :when line]
-                                                                                           [(dec line) (line-counts/label hits)]))))))))))))))))))
-    (g/g-signal-connect-data (:buf ed) "changed"
-                             (callable (fn [_buf _data]
-                                         (when (seq @(:counts gutter)) (gutter/set-counts! gutter {}))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT))
   (when-let [{:keys [ran refresh gutter]} (:changed ed)]
     (let [pending (atom 0)
           ;; a closed tab's buffer and gutter are gone (:destroyed?), and a
@@ -3658,11 +3621,9 @@
         ;; The plugin list shares the slot too; its rows are rebuilt after
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
-        locp (locations-pane/make-pane)
         ;; The Messages panel's unread count (LM8), shown in the status
         ;; bar while it's above zero; the Messages part fills it
         unread-label (g/gtk-label-new "")
-        dbgp (debugger-pane/make-pane)
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
         *right (atom nil)
@@ -3796,8 +3757,7 @@
         ;; right-roots are built first, like *tab-ctx.
         part-panels* (atom {})
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
-               :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
-               :debugger-root (:root dbgp)
+               :review-root (:root rp) :plugins-root (:root lp)
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
                ;; Switch to panel entries, and the panel keys' "open it"
@@ -4101,461 +4061,6 @@
                         :else (do (say (str "; ! " doc))
                                   (try ((deref (:on-run (:palette (active-tab)))) run)
                                        (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
-        ;; named, so each tab's palette can build the same per-key ctx
-        ;; (window-key-ctx) a window chord gets
-        ;; The locations list, or nil. A buffer list is {:tab-id :list
-        ;; :marks}, its marks in that tab's buffer. A project list (:scope
-        ;; :project, Find Usages in Project) is {:list :anchors}: anchors
-        ;; maps an entry's :id to {:tab-id :marks}, made for a whole file
-        ;; the first time its tab is open, when the list is made or when one
-        ;; of its places is visited. A new list deletes the marks, and a
-        ;; closing tab takes its own with it. GTK thread only.
-        locations-state (atom nil)
-        ;; bumped by every new list, so a Find Usages still running lands
-        ;; only when nothing has replaced the list it was asked for
-        locations-gen (atom 0)
-        clear-locations! (fn []
-                           (when-let [{:keys [tab-id marks anchors]} @locations-state]
-                             (when-let [t (and tab-id (tab-by-id tabs tab-id))]
-                               (delete-location-marks! (:buf (:ed t)) marks))
-                             (doseq [[tid as] (group-by :tab-id (vals anchors))]
-                               (when-let [t (tab-by-id tabs tid)]
-                                 (delete-location-marks! (:buf (:ed t)) (map :marks as)))))
-                           (reset! locations-state nil)
-                           ;; an empty list is nothing to switch back to
-                           (swap! (:recent-panels right) (fn [v] (vec (remove #{:locations} v)))))
-        tab-for-path (fn [path]
-                       (some (fn [t] (when (and @(:path t) (source/same-path? @(:path t) path)) t)) @tabs))
-        anchor-file! (fn [t path]
-                       ;; every entry of path's file, filtered out or not, gets
-                       ;; its marks in t's buffer, but only while the buffer
-                       ;; holds the text the search read: otherwise the
-                       ;; offsets would land anywhere, so the file is stale
-                       (let [lst (:list @locations-state)]
-                         (if (= (get (:hashes lst) path) (hash (editor/editor-text (:ed t))))
-                           (let [es (filterv #(= path (:path %)) (:all lst))
-                                 ms (create-location-marks (:buf (:ed t)) es)]
-                             (swap! locations-state update :anchors into
-                                    (map (fn [e m] [(:id e) {:tab-id (:id t) :marks m}]) es ms)))
-                           (swap! locations-state update :stale (fnil conj #{}) path))))
-        make-locations! (fn [lst]
-                          (swap! locations-gen inc)
-                          (clear-locations!)
-                          (if (= :project (:scope lst))
-                            (do (reset! locations-state {:list lst :anchors {}})
-                                (doseq [path (distinct (map :path (:all lst)))]
-                                  (when-let [t (tab-for-path path)] (anchor-file! t path))))
-                            (let [t (active-tab)]
-                              (reset! locations-state {:tab-id (:id t) :list lst
-                                                       :marks (create-location-marks (:buf (:ed t)) (:entries lst))})))
-                          (locations-pane/show! locp lst)
-                          (show-right-panel! right :locations)
-                          (set-status! status-label (str "; " (:title lst) ": " (loc/position-text lst))))
-        place-of (fn [lst]
-                   ;; {:tab :marks :buffer-marks} for lst's current entry, a
-                   ;; project entry's file opened and anchored first when it
-                   ;; isn't yet; {:stale path} when that file's text has
-                   ;; changed since the search; nil when it can't be opened
-                   (let [{:keys [tab-id marks]} @locations-state
-                         i (:index lst)]
-                     (if (= :project (:scope lst))
-                       (let [e (nth (:entries lst) i)]
-                         (when-not (get (:anchors @locations-state) (:id e))
-                           (let [t (or (tab-for-path (:path e))
-                                       (when-not (:error (open-file! @*tab-ctx (:path e)))
-                                         (tab-for-path (:path e))))]
-                             (when t (anchor-file! t (:path e)))))
-                         (if-let [a (get (:anchors @locations-state) (:id e))]
-                           {:tab (tab-by-id tabs (:tab-id a)) :marks (:marks a)
-                            :buffer-marks (keep (fn [[_ b]] (when (= (:tab-id a) (:tab-id b)) (:marks b)))
-                                                (:anchors @locations-state))}
-                           (when (contains? (:stale @locations-state) (:path e))
-                             {:stale (:path e)})))
-                       {:tab (tab-by-id tabs tab-id) :marks (nth marks i) :buffer-marks marks})))
-        goto-location! (fn [lst]
-                         (swap! locations-state assoc :list lst)
-                         (locations-pane/select! locp lst)
-                         (if-let [{t :tab [ma mb] :marks bm :buffer-marks stale :stale} (place-of lst)]
-                           (if stale
-                             (set-status! status-label
-                                          (str "; " (file-name stale) " changed since the search, so its places may be off: search again."))
-                           (let [ed (:ed t)
-                                 buf (:buf ed)
-                                 s (g/mark-offset buf ma)
-                                 e (g/mark-offset buf mb)]
-                             (if (>= s e)
-                               ;; Every place collapsed at once is a whole-buffer
-                               ;; replace (Format All's one edit, a reload's
-                               ;; set-text!), not one deleted place
-                               (set-status! status-label
-                                            (if (every? (fn [[a b]] (>= (g/mark-offset buf a) (g/mark-offset buf b))) bm)
-                                              "; The buffer was replaced (Format All or a reload), so the list is out of date: list again."
-                                              "; That place is gone."))
-                               (do (select-tab! @*tab-ctx (:id t))
-                                   (place-caret-and-scroll! ed s)
-                                   (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
-                                   (set-status! status-label (str "; " (loc/position-text lst)))))))
-                           (set-status! status-label "; Couldn't open that file.")))
-        locations-step-fn (fn [delta]
-                            (if-let [lst (:list @locations-state)]
-                              (let [{l :list moved? :moved?} (loc/step lst delta)]
-                                (cond moved? (goto-location! l)
-                                      (empty? (:entries l)) (set-status! status-label "; No places.")
-                                      :else (set-status! status-label (if (pos? delta) "; End of the list." "; Start of the list."))))
-                              (set-status! status-label "; No locations list.")))
-        symbol-at-caret (fn []
-                          (let [snap (editor/snapshot (:ed (active-tab)))]
-                            [(:text snap) (:symbol (help/target snap))]))
-        locations-uses-fn (fn [] (let [[text sym] (symbol-at-caret)]
-                                   (if sym
-                                     (make-locations! (loc/uses text sym))
-                                     (set-status! status-label "; No symbol at the caret."))))
-        locations-definitions-fn (fn [] (let [[text sym] (symbol-at-caret)]
-                                          (if sym
-                                            (make-locations! (loc/definitions text sym))
-                                            (set-status! status-label "; No symbol at the caret."))))
-        ;; Find Usages in Project (LM2): jonquil.usages/scan on a future,
-        ;; open tabs' text in place of their files'; a newer search
-        ;; supersedes one still running
-        locations-project-usages-fn
-        (fn []
-          (let [[_ sym] (symbol-at-caret)
-                t (active-tab)
-                root (or (:root @(:state tree-pane))
-                         (some-> @(:path t) (java.io.File.) .getCanonicalFile .getParent))]
-            (cond
-              (nil? sym) (set-status! status-label "; No symbol at the caret.")
-              (nil? root) (set-status! status-label "; No project folder: open a folder, or save this file first.")
-              :else
-              (let [gen (swap! locations-gen inc)
-                    name (usages/search-name sym)
-                    texts (into {} (keep (fn [x] (when-let [p @(:path x)]
-                                                   [(.getCanonicalPath (java.io.File. ^String p))
-                                                    (editor/editor-text (:ed x))])))
-                                @tabs)]
-                (set-status! status-label (str "; Finding usages of " name "..."))
-                (future
-                  (let [r (try (usages/scan {:root root :name name :texts texts})
-                               (catch :default e {:error (or (ex-message e) (str e))}))]
-                    (on-gui! (fn []
-                               (when (= gen @locations-gen)
-                                 (try
-                                   (if-let [err (:error r)]
-                                     (set-status! status-label (str "; Find usages: " err))
-                                     (do (make-locations! (assoc (loc/project-uses r name) :root root))
-                                         (when (pos? (:unreadable r 0))
-                                           (set-status! status-label
-                                                        (str "; " (:unreadable r) " file(s) couldn't be read.")))))
-                                   (catch :default e
-                                     (set-status! status-label (str "; Find usages: " (or (ex-message e) (str e)))))))))))))))
-        locations-matches-fn (fn []
-                               (let [{:keys [ed fb]} (active-tab)
-                                     snap (editor/snapshot ed)
-                                     find-q (when (pos? (g/gtk-widget-get-visible (:box fb)))
-                                              (g/editable-text (:query fb)))
-                                     ;; the find query when the bar has one, else the selection
-                                     q (if (str/blank? find-q)
-                                         (subs (:text snap) (:sel-start snap) (:sel-end snap))
-                                         find-q)]
-                                 (if (str/blank? q)
-                                   (set-status! status-label "; Nothing to list: open Find, or select some text.")
-                                   (make-locations! (loc/matches (:text snap) q)))))
-        ;; LM3: the tab against another version of its file, its differences
-        ;; in the Locations list. compare-state is {:tab-id :label :other}
-        ;; for Take, which works out the difference at the caret afresh.
-        compare-state (atom nil)
-        compare-list! (fn [t label other]
-                        (let [l (compare/location-list label other (editor/editor-text (:ed t)))]
-                          (if (seq (:entries l))
-                            (do (reset! compare-state {:tab-id (:id t) :label label :other other})
-                                (make-locations! l))
-                            (do (reset! compare-state nil)
-                                ;; a list of differences that are gone goes too
-                                (when (some-> @locations-state :list :title (str/starts-with? "Differences from "))
-                                  (clear-locations!)
-                                  (locations-pane/show! locp {:title "" :entries [] :index nil})
-                                  (hide-right-panel! right :locations))
-                                (set-status! status-label (str "; No differences from " label "."))))))
-        read-disk (fn [path]
-                    (let [f (java.io.File. ^String path)]
-                      (if-not (.exists f)
-                        {:error "The file isn't on disk any more."}
-                        (try {:text (slurp path)}
-                             (catch :default e {:error (str "Couldn't read the file: " (or (ex-message e) (str e)))})))))
-        compare-with! (fn [label read-other]
-                        (let [t (active-tab)
-                              path @(:path t)]
-                          (if-not path
-                            (set-status! status-label "; Compare needs a saved file.")
-                            (let [{:keys [text error]} (read-other path)]
-                              (if error
-                                (set-status! status-label (str "; " error))
-                                (compare-list! t label text))))))
-        compare-disk-fn (fn [] (compare-with! "disk" read-disk))
-        compare-head-fn (fn [] (compare-with! "HEAD"
-                                              (fn [path]
-                                                (let [f (java.io.File. ^String path)
-                                                      r (try (jolt.process/sh {:dir (.getParent f)} "git" "show" (str "HEAD:./" (.getName f)))
-                                                             (catch :default e {:exit -1 :err (ex-message e)}))]
-                                                  (if (= 0 (:exit r))
-                                                    {:text (:out r)}
-                                                    {:error (str "git: " (or (not-empty (first (str/split-lines (str (:err r)))))
-                                                                             (str "exited " (:exit r))))})))))
-        compare-take-fn (fn []
-                          (let [t (active-tab)
-                                {:keys [tab-id label]} @compare-state
-                                ;; the disk as it is now, not as it was at the compare
-                                other (if (= "disk" label)
-                                        (or (:text (some-> @(:path t) read-disk)) (:other @compare-state))
-                                        (:other @compare-state))]
-                            (if (not= tab-id (:id t))
-                              (set-status! status-label "; Compare this tab first: Compare with the file on disk, or with git HEAD.")
-                              (let [ed (:ed t)
-                                    buffer (editor/editor-text ed)
-                                    line (first (g/cursor-line-col (:buf ed)))]
-                                (if-let [h (compare/hunk-at (compare/hunks other buffer) line buffer)]
-                                  (let [[s e r] (compare/take-edit buffer h)]
-                                    ;; one undo step, exactly the other version's lines
-                                    (editor/apply-op-plain! ed {:edits [[s e r]] :caret s})
-                                    (compare-list! t label other)
-                                    (when (seq (:entries (:list @locations-state)))
-                                      (set-status! status-label (str "; Took " (if (= "disk" label) "the disk's" (str label "'s"))
-                                                                     " version of line " (inc (:line h)) "."))))
-                                  (set-status! status-label "; No difference at the caret: F8 steps to the next one."))))))
-        _ (locations-pane/set-handlers!
-           locp {:on-activate (fn [i] (when-let [lst (:list @locations-state)]
-                                        (goto-location! (assoc lst :index i))))
-                 :on-close (fn [] (hide-right-panel! right :locations))
-                 :on-hows (fn [shown]
-                            (when-let [lst (:list @locations-state)]
-                              (let [l (loc/set-hows lst shown)]
-                                (swap! locations-state assoc :list l)
-                                (locations-pane/show! locp l)
-                                (set-status! status-label (str "; " (:title l) ": " (loc/position-text l))))))})
-        locations-tab-closed! (fn [id]
-                                (let [{:keys [tab-id anchors]} @locations-state]
-                                  (cond
-                                    (= id tab-id) (do (clear-locations!)
-                                                      (hide-right-panel! right :locations))
-                                    ;; a project list keeps its other files;
-                                    ;; this one's marks went with its buffer
-                                    (some #(= id (:tab-id %)) (vals anchors))
-                                    (swap! locations-state update :anchors
-                                           (fn [as] (into {} (remove (fn [[_ a]] (= id (:tab-id a)))) as))))))
-        ;; The Frames panel's data (jonquil.debugger). GTK thread only. Debug
-        ;; mode has no flag here: the toggle reads the runtime's own mode.
-        frames-state (atom nil)
-        frames-ev (fn [] (let [e @ev*] (when (satisfies? ev/Frames e) e)))
-        ;; LM4: whether Jolt is counting lines, from each toggle's answer
-        line-counting? (atom false)
-        show-frames-fn (fn []
-                         (if-let [e (frames-ev)]
-                           (ev/error-frames! e (fn [d]
-                                                 (on-gui! (fn []
-                                                            (if-let [err (:error d)]
-                                                              (if-let [f @(:failure* cv)]
-                                                                ;; no frames, but the restarts still apply
-                                                                (let [d {:note err}]
-                                                                  (reset! frames-state d)
-                                                                  (debugger-pane/show! dbgp d)
-                                                                  (debugger-pane/show-restarts! dbgp (restarts/options f))
-                                                                  (show-right-panel! right :debugger))
-                                                                (set-status! status-label (str "; " err)))
-                                                              (do (reset! frames-state d)
-                                                                  (debugger-pane/show! dbgp d)
-                                                                  (debugger-pane/show-restarts! dbgp (restarts/options @(:failure* cv)))
-                                                                  (show-right-panel! right :debugger)
-                                                                  (debugger-pane/focus! dbgp)))))))
-                           ;; no frames here, but the restarts work in every dialect
-                           (if-let [f @(:failure* cv)]
-                             (let [d {:note "Frames need Jolt or JVM Clojure; the restarts above work here."}]
-                               (reset! frames-state d)
-                               (debugger-pane/show! dbgp d)
-                               (debugger-pane/show-restarts! dbgp (restarts/options f))
-                               (show-right-panel! right :debugger))
-                             (set-status! status-label "; The debugger needs Jolt."))))
-        hide-line-counts! (fn [] (doseq [t @tabs] (some-> t :ed :changed :gutter (gutter/set-counts! {}))))
-        line-counts-fn (fn []
-                         (let [e @ev*]
-                           (if (satisfies? ev/LineCounts e)
-                             (ev/toggle-line-counts!
-                              e (fn [r]
-                                  (on-gui! (fn []
-                                             (when-not (:error r) (reset! line-counting? (boolean (:on? r))))
-                                             (when (and (not (:error r)) (not (:on? r))) (hide-line-counts!))
-                                             (set-status! status-label
-                                                          (cond (:error r) (str "; " (:error r))
-                                                                (:was-debug? r) "; Line counts on, so debug mode is off: Run your file to count its lines."
-                                                                (:on? r) "; Line counts on: Run your file to count its lines."
-                                                                :else "; Line counts off."))))))
-                             (set-status! status-label "; Line counts need Jolt."))))
-        clear-line-counts-fn (fn []
-                               (let [e @ev*]
-                                 (if (satisfies? ev/LineCounts e)
-                                   (ev/clear-line-counts!
-                                    e (fn [r]
-                                        (on-gui! (fn []
-                                                   (hide-line-counts!)
-                                                   (set-status! status-label (if (:error r) (str "; " (:error r)) "; Line counts cleared."))))))
-                                   (set-status! status-label "; Line counts need Jolt."))))
-        locals-mode-fn (fn []
-                         (if-let [e (frames-ev)]
-                           (ev/toggle-debug-mode! e (fn [r]
-                                                      (on-gui! (fn []
-                                                                 ;; Jolt has one mode: debug on ends counting
-                                                                 (let [was-counting? @line-counting?]
-                                                                   (when (:on? r) (reset! line-counting? false) (hide-line-counts!))
-                                                                 (set-status! status-label
-                                                                              (cond (:error r) (str "; " (:error r))
-                                                                                    (and (:on? r) was-counting?) "; Debug mode on: code you load from now on keeps its locals. Line counts are off."
-                                                                                    (:on? r) "; Debug mode on: code you load from now on keeps its locals."
-                                                                                    :else "; Debug mode off.")))))))
-                           (set-status! status-label "; The debugger needs Jolt.")))
-        _ (debugger-pane/set-handlers!
-           dbgp {:on-frame (fn [i]
-                             (let [{f :fn :keys [file line]} (get (:frames @frames-state) i)
-                                   loc (when file (source/location {:file file :line line}
-                                                                   {:project-dir (:project-dir @sel*)}))]
-                               (cond
-                                 (nil? file) (set-status! status-label "; This frame has no file.")
-                                 (nil? loc) (set-status! status-label (str "; Can't open " file "."))
-                                 (:editable? loc) (open-in-tab! (source-ctx (active-tab)) f loc)
-                                 :else (show-source! (source-ctx (active-tab)) loc))))
-                 :on-local (fn [i local-name]
-                             (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
-                                            on-view status-label
-                                            [:start-local {:frame i :local local-name :label local-name
-                                                           :error-id (:error-id @frames-state)}]))
-                 :on-eval (fn [i code]
-                            (let [e (frames-ev)
-                                  label (:fn (get (:frames @frames-state) i))]
-                              (cond
-                                (or (nil? i) (nil? label)) (set-status! status-label "; Select a frame first.")
-                                (nil? e) (set-status! status-label "; The debugger needs Jolt.")
-                                :else
-                                ;; the code at once, so a slow form shows it's running
-                                ;; (Stop stops it), then what it printed and its value;
-                                ;; while paused, on the paused thread (Break on error)
-                                (do (cview/append! cv :system (str "; in " label ": " code "\n"))
-                                    ((if (and (:paused? @frames-state) (satisfies? ev/Break e))
-                                       (fn [on-result] (ev/break-eval! e i code on-result))
-                                       (fn [on-result] (ev/eval-in-frame! e i code (:error-id @frames-state) on-result)))
-                                     (fn [r]
-                                       (on-gui!
-                                        (fn []
-                                          (if-let [err (:error r)]
-                                            (cview/append! cv :error (str "; in " label ": " err "\n"))
-                                            (do (when (seq (:out r)) (cview/append! cv :out (:out r)))
-                                                (cview/append! cv :result (str "=> " (:text r) "\n"))))))))))))
-                 :on-close (fn [] (hide-right-panel! right :debugger))})
-        ;; The restarts (jonquil.restarts) for cv's last failure
-        nothing-failed "; Nothing has failed since the last success."
-        edit-the-file "; Edit the file and Run it again."
-        retry-fn (fn []
-                   (if-let [f @(:failure* cv)]
-                     ;; a REPL entry doesn't belong to its tab: any tab will do
-                     (if-let [t (or (tab-by-id tabs (:tab-id f)) (when (= :repl (:kind f)) (active-tab)))]
-                       (let [ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label}
-                             code (:code f)
-                             buffer? (#{:selection :form} (:kind f))]
-                         (cond
-                           (= :run (:kind f)) (do-run! ctx)
-                           ;; an example goes back through its own Run, in user
-                           (= :example (:kind f)) (do-run-example! ctx code)
-                           ;; the checks Run Selection and Run Form make first
-                           (and buffer? (or (refuse-foreign! ctx)
-                                            (and (not (ev/evaluating? @ev*))
-                                                 (before-run-stopped ctx (:kind f) t code))))
-                           nil
-                           :else
-                           (do (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
-                               (do-repl-eval! (:ed t) cv ev* status-label code
-                                              (cond-> {:hook-source (:kind f) :hook-tab (:id t)
-                                                       :record (if buffer?
-                                                                 (tab-record t ev* (:kind f) code (editor/editor-text (:ed t)))
-                                                                 {:source (:kind f) :code code :path nil
-                                                                  :ns (str (ev/prompt-ns @ev*))})}
-                                                ;; as Run Selection and Run Form send them
-                                                buffer? (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t)))))))
-                       (set-status! status-label "; The tab that failed is closed."))
-                     (set-status! status-label nothing-failed)))
-        edit-retry-fn (fn []
-                        (let [f @(:failure* cv)]
-                          (cond (nil? f) (set-status! status-label nothing-failed)
-                                (= :run (:kind f)) (set-status! status-label edit-the-file)
-                                :else (cview/set-input! cv (:code f) (count (:code f))))))
-        define-retry-fn (fn []
-                          (let [f @(:failure* cv)
-                                n (some-> f :error-text restarts/missing-name)]
-                            (cond (nil? f) (set-status! status-label nothing-failed)
-                                  (= :run (:kind f)) (set-status! status-label edit-the-file)
-                                  (nil? n) (set-status! status-label "; The last error wasn't an unresolved name.")
-                                  :else (let [{:keys [text caret]} (restarts/define-input n (:code f))]
-                                          (cview/set-input! cv text caret)))))
-        ;; Break on error (jonquil.debugger's break). The pause comes from the
-        ;; worker; the panel shows it with Continue in the restart bar. After
-        ;; Continue the error is recorded as a failure, and that refreshes
-        ;; the panel with its frames. break-resumed holds the id of the
-        ;; evaluation that was continued, and ends with that evaluation
-        ;; (:on-eval-end): Inspect Form and Time Form record no failure, and
-        ;; a later, unrelated one mustn't open the panel. An id, not a flag,
-        ;; because the evaluators go idle before on-complete, so the next
-        ;; evaluation can start before this one's failure is recorded.
-        current-eval (atom nil)
-        break-resumed (atom nil)
-        show-paused! (fn [d]
-                       (let [shown (assoc d :title (str "Paused: " (:title d)))]
-                         (reset! frames-state (assoc shown :paused? true))
-                         (debugger-pane/show! dbgp shown)
-                         (debugger-pane/show-restarts! dbgp [{:id :continue :label "Continue"}])
-                         (show-right-panel! right :debugger)
-                         (debugger-pane/focus! dbgp)
-                         (cview/append! cv :system (str "; Paused at " (:title d) ".\n"))
-                         (set-status! status-label (str "; Paused: " (:title d) ". Continue or Stop."))))
-        end-paused! (fn [{:keys [continued?]}]
-                      (when (:paused? @frames-state)
-                        (let [d {:note (if continued? "Continued: the error unwinds." "Stopped while paused.")}]
-                          (reset! frames-state d)
-                          (debugger-pane/show! dbgp d)
-                          (debugger-pane/show-restarts! dbgp []))))
-        register-break! (fn [e]
-                          (when (and e (satisfies? ev/Break e))
-                            (ev/set-break-handlers! e {:on-pause (fn [d] (on-gui! (fn [] (show-paused! d))))
-                                                       ;; the flag on the worker, before the error
-                                                       ;; it lets through is recorded as the failure
-                                                       :on-resume (fn [how]
-                                                                    (reset! break-resumed (when (:continued? how) @current-eval))
-                                                                    (on-gui! (fn [] (end-paused! how))))
-                                                       :on-eval-start (fn [id] (reset! current-eval id))
-                                                       :on-eval-end (fn [id] (compare-and-set! break-resumed id nil))})))
-        _ (register-break! @ev*)
-        _ (add-watch ev* ::break (fn [_ _ old new] (when-not (identical? old new) (register-break! new))))
-        _ (add-watch (:failure* cv) ::break-refresh
-                     (fn [_ _ _ new]
-                       (let [r @break-resumed]
-                         (when (and r (compare-and-set! break-resumed r nil))
-                           (when new (on-gui! show-frames-fn))))))
-        break-fn (fn []
-                   (let [e @ev*]
-                     (if (and e (satisfies? ev/Break e))
-                       (ev/toggle-break! e (fn [r]
-                                             (on-gui! (fn []
-                                                        (set-status! status-label
-                                                                     (cond (:error r) (str "; " (:error r))
-                                                                           (:on? r) "; Break on error on: an error pauses where it was thrown."
-                                                                           :else "; Break on error off."))))))
-                       (set-status! status-label "; Break on error needs Jolt."))))
-        continue-fn (fn []
-                      (let [e @ev*]
-                        (when-not (and e (satisfies? ev/Break e) (ev/continue-break! e))
-                          (set-status! status-label "; Nothing is paused."))))
-        _ (debugger-pane/set-restart-handler!
-           dbgp (fn [id]
-                  (case id
-                    :retry (retry-fn)
-                    :edit (edit-retry-fn)
-                    :define (define-retry-fn)
-                    :continue (continue-fn))))
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)
@@ -4578,8 +4083,6 @@
                                         (case k
                                           :inspector (inspector-pane/focus! pane)
                                           :source (source-pane/focus! sp)
-                                          :debugger (debugger-pane/focus! dbgp)
-                                          :locations (g/gtk-widget-grab-focus (:list locp))
                                           :plugins (g/gtk-widget-grab-focus (:list lp))
                                           (if-let [p (get @part-panels* k)]
                                             ((:focus! p))
@@ -4588,15 +4091,13 @@
                              (= k (showing-panel right)) (focus!)
                              (= k :plugins) (plugin-step! {:settings-path @settings-path*
                                                            :step (fn [] []) :open-list? true})
-                             (= k :debugger) (show-frames-fn)
                              (contains? @part-panels* k) ((:open! (get @part-panels* k)))
                              (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
                              :else
                              (set-status! status-label
                                             (case k
                                               :inspector "; Nothing inspected yet: inspect a form or a result first."
-                                              :source "; The Source panel is empty: jump to a definition first."
-                                              :locations "; No locations yet: list a symbol's uses or definitions, or the find matches.")))))
+                                              :source "; The Source panel is empty: jump to a definition first.")))))
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         ;; Window parts (jonquil.gtk.parts): each install fn reads the core
         ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
@@ -4623,7 +4124,12 @@
                                                       (inspect-last! ev* right pane inspector-state inspecting?
                                                                      inspector-last-args on-view status-label start))
                                           :ask-lookup! ask-lookup! :jump-to! jump-to!
-                                          :source-ctx source-ctx}
+                                          :source-ctx source-ctx
+                                          :place-caret-and-scroll! place-caret-and-scroll! :file-name file-name
+                                          :open-in-tab! open-in-tab! :show-source! show-source!
+                                          :rerun-failure! (fn [f t]
+                                                            (rerun-failure! {:failure f :tab t :cv cv :ev* ev* :sel* sel*
+                                                                             :status-label status-label}))}
                                          part-error!
                                          {:specs parts/specs})
         _ (reset! part-panels* (:panels part-contribution))
@@ -4640,6 +4146,8 @@
                                (fn [msg] (set-status! status-label msg)))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
+        ;; named, so each tab's palette can build the same per-key ctx
+        ;; (window-key-ctx) a window chord gets
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
@@ -4649,20 +4157,13 @@
                          :key-bindings-fn (fn [] (print-lines! (describe/binding-lines
                                                                 (assoc (live-keys) :os (System/getProperty "os.name")))))
                          :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
-                         :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
-                         :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
-                         :locations-project-usages-fn locations-project-usages-fn
-                         :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
-                         :line-counts-fn line-counts-fn :clear-line-counts-fn clear-line-counts-fn
                          :hints-toggle-fn (fn []
                                             (let [on? (swap! hints-on? not)]
                                               (when-not on? (g/gtk-widget-set-visible hint-label 0))
                                               (set-status! status-label (if on?
                                                                           "; Key hints on: the status bar names the keys for the symbol at the caret."
                                                                           "; Key hints off."))))
-                         :compare-disk-fn compare-disk-fn :compare-head-fn compare-head-fn :compare-take-fn compare-take-fn
-                         :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
-                         :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
+                         :run-changed-fn run-changed-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
@@ -4747,10 +4248,6 @@
     (g/gtk-box-append slot (:root lp))
     (g/gtk-widget-set-vexpand (:root hp) 1)
     (g/gtk-box-append slot (:root hp))
-    (g/gtk-widget-set-vexpand (:root locp) 1)
-    (g/gtk-box-append slot (:root locp))
-    (g/gtk-widget-set-vexpand (:root dbgp) 1)
-    (g/gtk-box-append slot (:root dbgp))
     (doseq [[_ p] @part-panels*]
       (g/gtk-widget-set-vexpand (:root p) 1)
       (g/gtk-box-append slot (:root p)))
@@ -4761,8 +4258,6 @@
     (g/gtk-widget-set-visible (:root sp) 0)
     (g/gtk-widget-set-visible (:root rp) 0)
     (g/gtk-widget-set-visible (:root lp) 0)
-    (g/gtk-widget-set-visible (:root locp) 0)
-    (g/gtk-widget-set-visible (:root dbgp) 0)
     (doseq [[_ p] @part-panels*]
       (g/gtk-widget-set-visible (:root p) 0))
     (g/gtk-widget-set-visible (:root hp) 0)
@@ -4937,9 +4432,9 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!
-                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs
-                   :hint-label hint-label :hints-on? hints-on?
-                   :line-counting? line-counting?}
+                   :part-contribution part-contribution :part-error! part-error!
+                   :recent-tabs recent-tabs
+                   :hint-label hint-label :hints-on? hints-on?}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
@@ -5481,9 +4976,6 @@
                  ;; for), Enable, Disable and Open on an id's row as the
                  ;; buttons do, and what the list shows now
                    :plugin-list-pane lp
-                   :locations-pane locp
-                   ;; the Frames panel and the inspector's own Close
-                   :debugger-pane dbgp
                    :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
                    :unread-label unread-label
@@ -5491,6 +4983,7 @@
                    ;; panel keys' and Switch to panel's fn
                    :recent-panels* (fn [] (:recent-panels right))
                    :panel-focus!* panel-focus-fn
+                   ;; the inspector's own Close
                    :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})

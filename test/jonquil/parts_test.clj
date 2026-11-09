@@ -5,7 +5,9 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.parts.debugger :as debugger-part]
             [jonquil.gtk.parts.disk-poll :as disk-poll-part]
+            [jonquil.gtk.debugger-pane :as debugger-pane]
             [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.live-results :as live-results-part]
             [jonquil.gtk.console-view :as cview]
@@ -69,11 +71,16 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :replay] (mapv :id parts/specs)))
   (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
             :panel/processes :processes/show
           :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
-          :result/inspect :result/copy :result/define :result/jump}
+          :result/inspect :result/copy :result/define :result/jump
+          :panel/locations :locations/uses :locations/definitions :locations/matches
+          :locations/usages-in-project :locations/next :locations/previous
+          :compare/disk :compare/head :compare/take
+          :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
+          :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -545,3 +552,133 @@
           ((get-in c [:fns k]))
           (is (= ["; No result here."] @statuses) (str k)))
         (is (= #{:result-click!* :result-release!* :console-right-press!*} (set (keys (:ui c)))))))))
+
+(deftest run-tab-hooks-calls-each-part
+  (let [seen (atom [])
+        ctx {:part-contribution {:hooks {:on-tab-removed [(fn [c t] (swap! seen conj [:a c t]))
+                                                          (fn [c t] (swap! seen conj [:b c t]))]}
+                                 :owners {:hooks {:on-tab-removed [:a :b]}}}
+             :part-error! (fn [& _] (throw (ex-info "no error expected" {})))}]
+    (is (nil? (parts/run-tab-hooks! ctx :on-tab-removed {:id 7})))
+    (is (= [[:a ctx {:id 7}] [:b ctx {:id 7}]] @seen))))
+
+(deftest run-tab-hooks-reports-a-throw
+  (let [seen (atom []) errors (atom [])
+        ctx {:part-contribution {:hooks {:on-tab-removed [(fn [_ _] (throw (ex-info "boom" {})))
+                                                          (fn [_ t] (swap! seen conj (:id t)))]}
+                                 :owners {:hooks {:on-tab-removed [:a :b]}}}
+             :part-error! (fn [id ex] (swap! errors conj [id (ex-message ex)]))}]
+    (is (nil? (parts/run-tab-hooks! ctx :on-tab-removed {:id 3})))
+    (is (= [[:a "boom"]] @errors))
+    (is (= [3] @seen))))
+
+(deftest run-tab-hooks-without-a-contribution
+  (is (nil? (parts/run-tab-hooks! {} :on-tab-removed {:id 1})))
+  (is (nil? (parts/run-tab-hooks! {:part-error! (fn [& _])} :on-tab-removed {:id 1}))))
+
+(deftest tab-hook-kinds-are-accepted
+  (let [errors (atom [])
+        removed (install-fn :removed (fn [_] {:hooks {:on-tab-removed (fn [_ _])}}))
+        wired (install-fn :wired (fn [_] {:hooks {:on-tab-wired (fn [_ _])}}))
+        other (install-fn :other (fn [_] {:hooks {:on-tab-sideways (fn [_ _])}}))
+        c (parts/install [removed wired other] {} (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+    (is (= #{:on-tab-removed :on-tab-wired} (set (keys (:hooks c)))))
+    (is (= [[:other "part :other: unknown hook :on-tab-sideways"]] @errors))))
+
+(deftest locations-part-owns-its-commands-and-panel
+  (let [spec (some #(when (= :locations (:id %)) %) parts/specs)]
+    (is (= {:panel/locations [:panel-focus-fn :locations]
+            :locations/uses [:locations-uses-fn] :locations/definitions [:locations-definitions-fn]
+            :locations/matches [:locations-matches-fn]
+            :locations/usages-in-project [:locations-project-usages-fn]
+            :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
+            :compare/disk [:compare-disk-fn] :compare/head [:compare-head-fn]
+            :compare/take [:compare-take-fn]}
+           (update-vals (:commands spec) :call)))
+    (is (= [{:id :locations :label "Locations"}] (:panels spec)))
+    (is (= "Locations" (:locations palette/PANEL-LABELS)))))
+
+(deftest debugger-part-owns-its-commands-and-panel
+  (let [spec (some #(when (= :debugger (:id %)) %) parts/specs)]
+    (is (= {:panel/frames [:panel-focus-fn :debugger]
+            :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn]
+            :run/line-counts [:line-counts-fn] :run/clear-line-counts [:clear-line-counts-fn]
+            :debug/break-on-error [:break-fn] :debug/continue [:continue-fn]
+            :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn]
+            :restart/define [:define-retry-fn]}
+           (update-vals (:commands spec) :call)))
+    (is (= [{:id :debugger :label "Frames"}] (:panels spec)))
+    (is (= "Frames" (:debugger palette/PANEL-LABELS)))))
+
+(defn- debugger-wctx [ev* failure* statuses rerun]
+  {:ev* ev* :cv {:failure* failure*} :sel* (atom nil)
+   :set-status! #(swap! statuses conj %) :status-label :lbl
+   :tabs (atom [{:id 4}]) :tab-by-id (fn [tabs id] (some #(when (= id (:id %)) %) @tabs))
+   :active-tab (fn [] {:id 4}) :right {:slot :slot :recent-panels (atom [])}
+   :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
+   :rerun-failure! rerun :inspect! (fn [_]) :open-in-tab! (fn [& _]) :show-source! (fn [& _])
+   :source-ctx (fn [_] {})})
+
+(def ^:private stub-break
+  (fn [handlers*]
+    (reify ev/Break
+      (set-break-handlers! [_ h] (swap! handlers* conj h))
+      (toggle-break! [_ _] nil)
+      (break-eval! [_ _ _ _] nil)
+      (continue-break! [_] false))))
+
+;; Review focus 4: a dialect switch swaps the evaluator in ev*, and Break on
+;; error must register its handlers on the new one.
+(deftest debugger-registers-break-on-a-new-evaluator
+  (let [seen (atom [])
+        ev* (atom {:not :break})
+        wctx (debugger-wctx ev* (atom nil) (atom []) (fn [& _]))]
+    (with-redefs [debugger-pane/make-pane (fn [] {:root :root})
+                  debugger-pane/set-handlers! (fn [& _])
+                  debugger-pane/set-restart-handler! (fn [& _])]
+      ((deref #'debugger-part/install) wctx)
+      (is (= [] @seen))
+      (reset! ev* (stub-break seen))
+      (is (= 1 (count @seen)))
+      (is (= #{:on-pause :on-resume :on-eval-start :on-eval-end} (set (keys (first @seen))))))))
+
+(deftest retry-says-when-nothing-failed
+  (let [statuses (atom []) reruns (atom [])
+        wctx (debugger-wctx (atom nil) (atom nil) statuses (fn [f t] (swap! reruns conj [f t])))]
+    (with-redefs [debugger-pane/make-pane (fn [] {:root :root})
+                  debugger-pane/set-handlers! (fn [& _])
+                  debugger-pane/set-restart-handler! (fn [& _])]
+      (let [c ((deref #'debugger-part/install) wctx)]
+        ((get-in c [:fns :retry-fn]))
+        (is (= ["; Nothing has failed since the last success."] @statuses))
+        (is (= [] @reruns))))))
+
+(deftest retry-hands-the-failure-to-the-core
+  (let [statuses (atom []) reruns (atom [])
+        f {:kind :run :tab-id 4 :code "x"}
+        wctx (debugger-wctx (atom nil) (atom f) statuses (fn [f t] (swap! reruns conj [f t])))]
+    (with-redefs [debugger-pane/make-pane (fn [] {:root :root})
+                  debugger-pane/set-handlers! (fn [& _])
+                  debugger-pane/set-restart-handler! (fn [& _])]
+      (let [c ((deref #'debugger-part/install) wctx)]
+        ((get-in c [:fns :retry-fn]))
+        (is (= [[f {:id 4}]] @reruns))
+        (is (= [] @statuses))))))
+
+;; Review focus 3: the hook runs for every tab, the first and later ones.
+(deftest tab-wired-hook-sets-counting
+  (let [counting? (atom nil) counts-refresh (atom nil)
+        connects (atom [])
+        tab {:ed {:buf :buf :destroyed? (atom false)
+                  :changed {:counting? counting? :counts-refresh counts-refresh :gutter {:counts (atom {})}}}}
+        wctx (debugger-wctx (atom nil) (atom nil) (atom []) (fn [& _]))]
+    (with-redefs [debugger-pane/make-pane (fn [] {:root :root})
+                  debugger-pane/set-handlers! (fn [& _])
+                  debugger-pane/set-restart-handler! (fn [& _])
+                  g/g-signal-connect-data (fn [& args] (swap! connects conj args) 1)]
+      (let [c ((deref #'debugger-part/install) wctx)]
+        ((get-in c [:hooks :on-tab-wired]) {} tab)
+        (is (fn? @counting?))
+        (is (false? (@counting?)))
+        (is (fn? @counts-refresh))
+        (is (= [[:buf "changed"]] (mapv (fn [a] [(first a) (second a)]) @connects)))))))

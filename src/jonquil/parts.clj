@@ -4,8 +4,10 @@
   public tables. A spec command names its context fn as :call data
   ([ctx-key & args]), never a :run fn, so a spec namespace needs nothing
   from the registry (which requires this namespace)."
-  (:require [jonquil.parts.extra :as extra]
+  (:require [jonquil.parts.debugger :as debugger]
+            [jonquil.parts.extra :as extra]
             [jonquil.parts.layouts :as layouts]
+            [jonquil.parts.locations :as locations]
             [jonquil.parts.disk-poll :as disk-poll]
             [jonquil.parts.messages :as messages]
             [jonquil.parts.processes :as processes]
@@ -20,7 +22,7 @@
   :panels [{:id kw :label s}] :bindings {:window [binding ...] :editor [binding ...]}};
   :panels and :bindings are optional, a binding has keymap.edn's shape. The
   real parts, then any registered in jonquil.parts.extra."
-  (into [messages/spec disk-poll/spec layouts/spec worlds/spec time-form/spec processes/spec trace/spec live-results/spec replay/spec] @extra/specs*))
+  (into [messages/spec disk-poll/spec layouts/spec worlds/spec time-form/spec processes/spec trace/spec live-results/spec locations/spec debugger/spec replay/spec] @extra/specs*))
 
 (defn- claim
   "owners with id's owner added, or throws when id is already owned."
@@ -131,7 +133,7 @@
 
 (def ^:private merged-kinds [:fns :ui :exports :panels])
 (def ^:private contribution-keys #{:fns :ui :hooks :exports :panels})
-(def ^:private hook-kinds #{:on-start :on-reroot :on-quit})
+(def ^:private hook-kinds #{:on-start :on-reroot :on-quit :on-tab-removed :on-tab-wired})
 
 (defn- check-keys
   [id contribution]
@@ -240,6 +242,14 @@
     (try (apply f args)
          (catch :default ex (on-error id ex))))
   nil)
+
+(defn run-tab-hooks!
+  "Runs every part's hook of kind for tab, each called (f ctx tab), in part
+  order, when ctx holds :part-contribution; a throw is reported through
+  ctx's :part-error!, as run-hooks! does. Answers nil."
+  [ctx kind tab]
+  (when-let [contribution (:part-contribution ctx)]
+    (run-hooks! contribution kind [ctx tab] (:part-error! ctx))))
 
 (defn missing-calls
   "The :call keys that commands (id -> spec command) name and ctx-keys lacks."
