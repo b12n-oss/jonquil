@@ -218,6 +218,18 @@
       (is (= :ok (:status (:result (run e "(+ 1 1)" {:run? false})))))
       (is (= 2 @(:launches j))))))
 
+(deftest selection-lookup-disconnect-test
+  ;; The find-ns request loses its connection (child died): the result is
+  ;; the settled disconnect, not a "not loaded" notice, and the child dies.
+  (with-jank [j {:slow {"some?" 5000}} {} srv]
+    (let [e (:ev j) done (promise)]
+      (ev/eval! e "(f)" {:run? false :ns-source "(ns demo.other)"
+                         :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+      (wait-until! #(some (fn [m] (= (jank/find-ns-code "demo.other") (get m "code"))) (fake/requests srv)))
+      (fake/drop-connections! srv)
+      (is (= {:status :error :error-text jank/lost-connection} (deref done 5000 :timeout)))
+      (is (= 1 @(:kills j))))))
+
 (deftest no-binary-test
   (with-jank [j {} {:find-binary (fn [] nil)} srv]
     (is (= {:status :notice :text jank/no-binary-message}

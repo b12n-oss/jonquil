@@ -139,22 +139,72 @@
       (kill-child! ev))
     result))
 
+(defn- request-used!
+  "Sends msg on the connection and marks the child as having run something."
+  [{:keys [state] :as ev} on-output msg]
+  (swap! state assoc :used? true)
+  (connection/request! ev msg {:on-output on-output :still-waiting nil}))
+
+(defn- reset-used-child!
+  "Reset: a child that already ran something is replaced, so the Run starts
+  from a clean jank."
+  [{:keys [state] :as ev} {:keys [run? on-output]}]
+  (when (and run? (= :reset (:mode @state)) (:used? @state))
+    (kill-child! ev)
+    (connection/say! on-output :system (str jank/reset-message "\n"))))
+
+(defn- start-and-connect!
+  "nil once the child runs and the connection is open, else the result to
+  finish the evaluation with."
+  [{:keys [state] :as ev} code {:keys [run? path on-output]}]
+  (or (ensure-child! ev on-output (when run? path) (when run? (clj/buffer-ns code)))
+      (if (stopping? ev)
+        {:status :interrupted}
+        (connection/connect! ev on-output (connect-policy (:child @state) ev)))))
+
+(defn- run-file!
+  "Run: loads the buffer as a file, and a successful load moves the prompt
+  to the namespace it ends in."
+  [{:keys [state] :as ev} code {:keys [path on-output] :as opts}]
+  (let [f (when path (io/file path))
+        msgs (request-used! ev on-output
+                            {:op "load-file" :file code
+                             :file-path (if f (.getAbsolutePath f) "untitled.jank")
+                             :file-name (if f (.getName f) "untitled.jank")})
+        result (settle ev msgs)]
+    (when (= :ok (:status result))
+      (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
+    (finish! ev opts result)))
+
+(defn- finish-unloaded!
+  "A selection's namespace isn't loaded: a lost connection settles as the
+  dead child, anything else is the not-loaded notice."
+  [ev {:keys [buffer-ns asked]} opts]
+  (if ((ops/statuses asked) ops/disconnected)
+    (finish! ev opts (settle ev asked))
+    (finish! ev opts {:status :notice :text (jank/not-loaded-message buffer-ns)})))
+
+(defn- eval-in-repl!
+  "A REPL line or selection: asks first whether the selection's namespace
+  is loaded, then evaluates in it (the prompt's namespace otherwise)."
+  [{:keys [state] :as ev} code {:keys [ns-source on-output] :as opts}]
+  (let [buffer-ns (when ns-source (clj/buffer-ns ns-source))
+        ns (or buffer-ns (str (:prompt-ns @state)))
+        asked (when buffer-ns
+                (request-used! ev on-output {:op "eval" :code (jank/find-ns-code buffer-ns) :ns "user"}))]
+    (if (and asked (not (jank/loaded? asked)))
+      (finish-unloaded! ev {:buffer-ns buffer-ns :asked asked} opts)
+      (let [result (settle ev (request-used! ev on-output {:op "eval" :code code :ns ns}))]
+        (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
+          (swap! state assoc :prompt-ns (:ns result)))
+        (finish! ev opts result)))))
+
 (defn- run-worker!
-  [{:keys [state] :as ev} code {:keys [run? path ns-source on-output on-status-change] :as opts}]
+  [{:keys [state] :as ev} code {:keys [run? on-status-change] :as opts}]
   (try
     (when on-status-change (on-status-change :running))
-    (let [request! (fn [msg]
-                     (swap! state assoc :used? true)
-                     (connection/request! ev msg {:on-output on-output :still-waiting nil}))
-          ;; Reset: a child that already ran something is replaced, so the
-          ;; Run starts from a clean jank.
-          _ (when (and run? (= :reset (:mode @state)) (:used? @state))
-              (kill-child! ev)
-              (connection/say! on-output :system (str jank/reset-message "\n")))
-          problem (or (ensure-child! ev on-output (when run? path) (when run? (clj/buffer-ns code)))
-                      (if (stopping? ev)
-                        {:status :interrupted}
-                        (connection/connect! ev on-output (connect-policy (:child @state) ev))))]
+    (reset-used-child! ev opts)
+    (let [problem (start-and-connect! ev code opts)]
       (cond
         ;; A notice after a launch (refused, not a server, bad port file):
         ;; the child is no use, and keeping it would fail the same way on
@@ -162,30 +212,8 @@
         problem (do (when (:child @state) (kill-child! ev))
                     (finish! ev opts problem))
         (stopping? ev) (finish! ev opts {:status :interrupted})
-        run?
-        (let [f (when path (io/file path))
-              msgs (request! {:op "load-file" :file code
-                              :file-path (if f (.getAbsolutePath f) "untitled.jank")
-                              :file-name (if f (.getName f) "untitled.jank")})
-              result (settle ev msgs)]
-          (when (= :ok (:status result))
-            (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
-          (finish! ev opts result))
-        :else
-        (let [buffer-ns (when ns-source (clj/buffer-ns ns-source))
-              ns (or buffer-ns (str (:prompt-ns @state)))
-              asked (when buffer-ns
-                      (request! {:op "eval" :code (jank/find-ns-code buffer-ns) :ns "user"}))]
-          (cond
-            (and asked (not (jank/loaded? asked)))
-            (if ((ops/statuses asked) ops/disconnected)
-              (finish! ev opts (settle ev asked))
-              (finish! ev opts {:status :notice :text (jank/not-loaded-message buffer-ns)}))
-            :else
-            (let [result (settle ev (request! {:op "eval" :code code :ns ns}))]
-              (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
-                (swap! state assoc :prompt-ns (:ns result)))
-              (finish! ev opts result))))))
+        run? (run-file! ev code opts)
+        :else (eval-in-repl! ev code opts)))
     (catch Throwable e
       (try (kill-child! ev) (catch Throwable _ nil))
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
