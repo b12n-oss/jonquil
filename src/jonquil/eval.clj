@@ -28,6 +28,15 @@
          (on-chunk (String. ^chars x (int off) (int len)))
          (on-chunk (subs (str x) (int off) (+ (int off) (int len)))))))))
 
+(defn- await-stdin-item
+  "Blocks for the next queued stdin item, telling on-wait-input around the
+   wait. An interrupt reads as EOF."
+  [queue on-wait-input]
+  (when on-wait-input (on-wait-input true))
+  (let [item (try (.take queue) (catch InterruptedException _ ::eof))]
+    (when on-wait-input (on-wait-input false))
+    item))
+
 (defn create-stdin-reader
   "Upstream's queue-fed Reader, unchanged."
   [queue current-rdr-atom closed-atom on-wait-input]
@@ -46,14 +55,11 @@
          (loop []
            (let [n (.read ^StringReader @current-rdr-atom cbuf off len)]
              (if (neg? n)
-               (do
-                 (when on-wait-input (on-wait-input true))
-                 (let [item (try (.take queue) (catch InterruptedException _ ::eof))]
-                   (when on-wait-input (on-wait-input false))
-                   (if (or (identical? item ::eof) (nil? item) @closed-atom)
-                     (do (reset! closed-atom true) -1)
-                     (do (reset! current-rdr-atom (StringReader. (str item)))
-                         (recur)))))
+               (let [item (await-stdin-item queue on-wait-input)]
+                 (if (or (identical? item ::eof) (nil? item) @closed-atom)
+                   (do (reset! closed-atom true) -1)
+                   (do (reset! current-rdr-atom (StringReader. (str item)))
+                       (recur))))
                n))))))))
 
 (defn find-root-cause [^Throwable t]
@@ -216,6 +222,217 @@
       (println (str "jonquil.eval: " who " threw: " (ex-message e))))
     (catch :default _ nil)))
 
+(defn- stdin-wait-callback
+  "The stdin reader's on-wait-input: records the wait on the context and
+   tells the caller's callbacks."
+  [{:keys [waiting-input?]} {:keys [on-wait-input on-status-change]}]
+  (fn [waiting?]
+    (reset! waiting-input? waiting?)
+    (when on-wait-input (on-wait-input waiting?))
+    (when on-status-change
+      (on-status-change (if waiting? :waiting-input :running)))))
+
+(defn- reset-run-input!
+  "Clears the queue and stdin state for a new run. Called under the lock."
+  [{:keys [queue current-rdr closed? waiting-input?]}]
+  ;; Clearing the queue under the same lock as stop-eval!'s EOF offer
+  ;; means the two can never interleave, so a Stop meant for the
+  ;; previous run can't land in this run's freshly cleared queue.
+  (.clear queue)
+  (reset! current-rdr (StringReader. ""))
+  (reset! closed? false)
+  (reset! waiting-input? false))
+
+(defn- register-worker!
+  "Records the worker thread in the running state, self-interrupts when a
+   Stop already arrived, and reports :running, all under the lock."
+  [{:keys [running-state lock]} {:keys [token stop-requested opts]}]
+  ;; Registration happens under the lock: either
+  ;; stop-eval! already ran and set stop-requested, in
+  ;; which case we self-interrupt right here before doing
+  ;; any work, or it hasn't, in which case it will see our
+  ;; :thread once it acquires the lock and interrupt us
+  ;; directly. The :running notification is folded into
+  ;; this same critical section so it can never fire
+  ;; before a still-draining previous run's :idle
+  ;; notification finishes: both use this lock,
+  ;; so whichever finishes its section first is fully
+  ;; visible before the other's section can begin.
+  (locking lock
+    (swap! running-state
+           (fn [s] (if (identical? (:token s) token)
+                     (assoc s :thread (Thread/currentThread))
+                     s)))
+    (when @stop-requested
+      (try (.interrupt (Thread/currentThread)) (catch :default _ nil)))
+    (when (:on-status-change opts) ((:on-status-change opts) :running))))
+
+(defn- run-before-eval!
+  "Runs the caller's :before-eval. A throw is reported, except Jolt's
+   interrupt signal, which propagates."
+  [before-eval]
+  (when before-eval
+    (try (before-eval)
+         ;; A Stop during it stops the
+         ;; evaluation.
+         (catch :default e
+           (if (interrupted? e)
+             (throw e)
+             (report-callback-exception! "before-eval" e))))))
+
+(defn- refer-repl-helpers!
+  "Refers the clojure.repl and clojure.pprint helpers into the bound *ns*."
+  []
+  ;; Unconditional (an ns-resolve guard would
+  ;; always be false on Jolt). Refer the
+  ;; clojure.repl helpers that
+  ;; actually exist here (doc, find-doc,
+  ;; apropos, dir -- source and pst do not),
+  ;; so (doc ...) etc. work at the prompt like
+  ;; upstream's DrClojure.eval. pprint too,
+  ;; now that it honours the bound *out*
+  ;; (jolt-lang/jolt#1355, Jolt v0.8.22),
+  ;; and pp, which prints *1 since
+  ;; jolt-lang/jolt#1389 (Jolt v0.8.23).
+  (refer-clojure)
+  (require 'clojure.repl 'clojure.pprint)
+  (refer 'clojure.repl :only '[doc find-doc apropos dir])
+  (refer 'clojure.pprint :only '[pprint pp]))
+
+(defn- eval-and-print
+  "Evaluates code under run-interruptible and answers {:status :ok :value
+   :printed}."
+  [token code {:keys [wrap-eval source-path]}]
+  (let [{:keys [value printed]}
+        (jolt.host/run-interruptible
+         token (fn []
+                ((or wrap-eval (fn [thunk] (thunk)))
+                 (fn []
+                   ;; Printed inside the same
+                   ;; interruptible thunk, under
+                   ;; the same binding, as the
+                   ;; evaluation itself -- so
+                   ;; realizing a lazy value's
+                   ;; side effects go to
+                   ;; on-output, not the
+                   ;; caller's console, and Stop
+                   ;; during that realization
+                   ;; yields :interrupted like
+                   ;; any other Stop.
+                   (let [v (eval-string (str code "\n") source-path)]
+                     {:value v
+                      :printed (binding [*print-length* 1000]
+                                 (pr-str v))})))))]
+    {:status :ok :value value :printed printed}))
+
+(defn- evaluate-code
+  "The evaluation itself, inside the worker's bindings: before-eval, the
+   stop check, the helper refers, then the value. Answers the raw result map
+   (:ok, :interrupted or :error)."
+  [{:keys [token stop-requested opts]} code]
+  (try
+    (run-before-eval! (:before-eval opts))
+    (when @stop-requested
+      (throw (ex-info "stopped" {:jolt/interrupted true})))
+    (refer-repl-helpers!)
+    (eval-and-print token code opts)
+    (catch :default e
+      (if (interrupted? e)
+        {:status :interrupted}
+        {:status :error :error e}))))
+
+(defn- finalize-result
+  "Adds the bound *ns*'s name and applies a Stop that was requested."
+  [r stop-requested]
+  (cond-> (assoc r :ns (ns-name *ns*))
+    ;; Stop was pressed: whatever the thread interrupt
+    ;; surfaced as (InterruptedException, EOF on stdin, a
+    ;; normal return), the user asked for a stop.
+    @stop-requested (-> (assoc :status :interrupted)
+                        (dissoc :value :error :printed))))
+
+(defn- record-repl-vars!
+  "Shifts *1 *2 *3 or sets *e from the result, unless the run was :quiet."
+  [{:keys [repl-vars]} opts r]
+  ;; a :quiet eval leaves *1 *2 *3 *e alone
+  (case (when-not (:quiet opts) (:status r))
+    :ok (swap! repl-vars (fn [{v1 :1 v2 :2 :as m}] (assoc m :1 (:value r) :2 v1 :3 v2)))
+    :error (swap! repl-vars assoc :e (:error r))
+    nil))
+
+(defn- run-evaluation
+  "Registers the worker, binds the evaluation's dynamic vars and runs the
+   code. Answers the result map; anything thrown becomes an :error result."
+  [{:keys [queue current-rdr closed? repl-vars] :as ctx}
+   {:keys [stop-requested ns-sym opts] :as run}
+   code]
+  (try
+    (register-worker! ctx run)
+    (let [target (or (find-ns ns-sym) (create-ns ns-sym))
+          in-rdr (LineNumberingPushbackReader.
+                  (create-stdin-reader queue current-rdr closed? (stdin-wait-callback ctx opts)))]
+      (binding [*out* (:out-w run) *err* (:err-w run) *in* in-rdr *ns* target
+                *1 (:1 @repl-vars) *2 (:2 @repl-vars) *3 (:3 @repl-vars) *e (:e @repl-vars)]
+        (let [r (finalize-result (evaluate-code run code) stop-requested)]
+          (record-repl-vars! ctx opts r)
+          r)))
+    (catch :default e
+      {:status :error :error e :ns ns-sym})))
+
+(defn- mark-finishing!
+  "Flags the run as finishing under the lock, so Stop leaves it alone."
+  [{:keys [running-state lock]} token]
+  (locking lock
+    (swap! running-state
+           (fn [s] (if (identical? (:token s) token)
+                     (assoc s :finishing true)
+                     s)))))
+
+(defn- go-idle!
+  "Resets the context to idle and reports :idle, as one locked unit."
+  [{:keys [waiting-input? running-state lock]} on-status-change]
+  ;; Reset-to-idle and its notification are one locked
+  ;; unit, so a new eval-async's own registration (locked, above)
+  ;; can never squeeze its :running notification in before this
+  ;; :idle notification finishes.
+  (locking lock
+    (reset! waiting-input? false)
+    (reset! running-state idle-state)
+    ;; on-status-change is isolated in its own try so a
+    ;; throwing caller can never prevent the deliver/on-complete
+    ;; below from running. The exception is reported, not
+    ;; silently dropped.
+    (try
+      (when on-status-change (on-status-change :idle))
+      (catch :default e (report-callback-exception! "on-status-change" e)))))
+
+(defn- finish-run!
+  "The worker's tail: finishing flag, interrupt clear, before-idle, idle,
+   then deliver and on-complete. Answers the result."
+  [ctx {:keys [token done opts]} result]
+  (mark-finishing! ctx token)
+  ;; Clear any pending Java interrupt before the tail. A
+  ;; busy loop stopped via the token can leave this thread's
+  ;; interrupt flag set (nothing inside it made a blocking call
+  ;; to consume it), and a blocking call inside
+  ;; on-status-change/on-complete -- a GUI's .put onto a queue,
+  ;; say -- would otherwise throw InterruptedException
+  ;; immediately, silently losing the completion.
+  (Thread/interrupted)
+  ;; Still this evaluation's turn: a new eval-async can't start
+  ;; until the reset to idle below.
+  (try
+    (when-let [before-idle (:before-idle opts)] (before-idle result))
+    (catch :default e (report-callback-exception! "before-idle" e)))
+  (go-idle! ctx (:on-status-change opts))
+  ;; Every exit path reaches here exactly once, whatever
+  ;; on-status-change did above.
+  (deliver done result)
+  (try
+    (when-let [on-complete (:on-complete opts)] (on-complete result))
+    (catch :default e (report-callback-exception! "on-complete" e)))
+  result)
+
 (defn eval-async
   "Evaluates code on a worker. Options:
      :on-output (fn [kind s])  kind is :out or :err
@@ -259,10 +476,12 @@
    waiting on another thread that may itself call eval-async or
    stop-eval! on this context, or the two threads deadlock -- a GUI
    should enqueue that work for later and return, not invoke-and-wait."
-  [{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
-   code
-   {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle wrap-eval source-path] :as opts}]
-  (let [ns-sym (or (:ns-name opts) 'user)]
+  {:arglists '([{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
+                code
+                {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle wrap-eval source-path] :as opts}])}
+  [{:keys [lock running-state] :as ctx} code opts]
+  (let [{:keys [on-output]} opts
+        ns-sym (or (:ns-name opts) 'user)]
     (locking lock
       (if (evaluating? ctx)
         "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n"
@@ -270,152 +489,14 @@
               done (promise)
               stop-requested (atom false)
               emit (fn [kind] (fn [chunk] (when on-output (on-output kind chunk))))
-              out-w (create-writer (emit :out))
-              err-w (create-writer (emit :err))
-              in-callback (fn [waiting?]
-                            (reset! waiting-input? waiting?)
-                            (when on-wait-input (on-wait-input waiting?))
-                            (when on-status-change
-                              (on-status-change (if waiting? :waiting-input :running))))
-              in-rdr (LineNumberingPushbackReader.
-                      (create-stdin-reader queue current-rdr closed? in-callback))]
-          ;; Clearing the queue under the same lock as stop-eval!'s EOF offer
-          ;; means the two can never interleave, so a Stop meant for the
-          ;; previous run can't land in this run's freshly cleared queue.
-          (.clear queue)
-          (reset! current-rdr (StringReader. ""))
-          (reset! closed? false)
-          (reset! waiting-input? false)
+              run {:token token :done done :stop-requested stop-requested
+                   :ns-sym ns-sym :opts opts
+                   :out-w (create-writer (emit :out))
+                   :err-w (create-writer (emit :err))}]
+          (reset-run-input! ctx)
           ;; :running is set before the worker exists, so a fast worker's own
           ;; reset to idle can never be overwritten by this thread.
           (reset! running-state {:status :running :token token :done done :stop-requested stop-requested})
           (future
-            (let [result
-                  (try
-                    ;; Registration happens under the lock: either
-                    ;; stop-eval! already ran and set stop-requested, in
-                    ;; which case we self-interrupt right here before doing
-                    ;; any work, or it hasn't, in which case it will see our
-                    ;; :thread once it acquires the lock and interrupt us
-                    ;; directly. The :running notification is folded into
-                    ;; this same critical section so it can never fire
-                    ;; before a still-draining previous run's :idle
-                    ;; notification finishes: both use this lock,
-                    ;; so whichever finishes its section first is fully
-                    ;; visible before the other's section can begin.
-                    (locking lock
-                      (swap! running-state
-                             (fn [s] (if (identical? (:token s) token)
-                                       (assoc s :thread (Thread/currentThread))
-                                       s)))
-                      (when @stop-requested
-                        (try (.interrupt (Thread/currentThread)) (catch :default _ nil)))
-                      (when on-status-change (on-status-change :running)))
-                    (let [target (or (find-ns ns-sym) (create-ns ns-sym))]
-                      (binding [*out* out-w *err* err-w *in* in-rdr *ns* target
-                                *1 (:1 @repl-vars) *2 (:2 @repl-vars) *3 (:3 @repl-vars) *e (:e @repl-vars)]
-                        (let [r (try
-                                  (when before-eval
-                                    (try (before-eval)
-                                         ;; A Stop during it stops the
-                                         ;; evaluation.
-                                         (catch :default e
-                                           (if (interrupted? e)
-                                             (throw e)
-                                             (report-callback-exception! "before-eval" e)))))
-                                  (when @stop-requested
-                                    (throw (ex-info "stopped" {:jolt/interrupted true})))
-                                  ;; Unconditional (an ns-resolve guard would
-                                  ;; always be false on Jolt). Refer the
-                                  ;; clojure.repl helpers that
-                                  ;; actually exist here (doc, find-doc,
-                                  ;; apropos, dir -- source and pst do not),
-                                  ;; so (doc ...) etc. work at the prompt like
-                                  ;; upstream's DrClojure.eval. pprint too,
-                                  ;; now that it honours the bound *out*
-                                  ;; (jolt-lang/jolt#1355, Jolt v0.8.22),
-                                  ;; and pp, which prints *1 since
-                                  ;; jolt-lang/jolt#1389 (Jolt v0.8.23).
-                                  (refer-clojure)
-                                  (require 'clojure.repl 'clojure.pprint)
-                                  (refer 'clojure.repl :only '[doc find-doc apropos dir])
-                                  (refer 'clojure.pprint :only '[pprint pp])
-                                  (let [{:keys [value printed]}
-                                        (jolt.host/run-interruptible
-                                         token (fn []
-                                                ((or wrap-eval (fn [thunk] (thunk)))
-                                                 (fn []
-                                                 ;; Printed inside the same
-                                                 ;; interruptible thunk, under
-                                                 ;; the same binding, as the
-                                                 ;; evaluation itself -- so
-                                                 ;; realizing a lazy value's
-                                                 ;; side effects go to
-                                                 ;; on-output, not the
-                                                 ;; caller's console, and Stop
-                                                 ;; during that realization
-                                                 ;; yields :interrupted like
-                                                 ;; any other Stop.
-                                                 (let [v (eval-string (str code "\n") source-path)]
-                                                   {:value v
-                                                    :printed (binding [*print-length* 1000]
-                                                               (pr-str v))})))))]
-                                    {:status :ok :value value :printed printed})
-                                  (catch :default e
-                                    (if (interrupted? e)
-                                      {:status :interrupted}
-                                      {:status :error :error e})))
-                              r (cond-> (assoc r :ns (ns-name *ns*))
-                                  ;; Stop was pressed: whatever the thread interrupt
-                                  ;; surfaced as (InterruptedException, EOF on stdin, a
-                                  ;; normal return), the user asked for a stop.
-                                  @stop-requested (-> (assoc :status :interrupted)
-                                                      (dissoc :value :error :printed)))]
-                          ;; a :quiet eval leaves *1 *2 *3 *e alone
-                          (case (when-not (:quiet opts) (:status r))
-                            :ok (swap! repl-vars (fn [{v1 :1 v2 :2 :as m}] (assoc m :1 (:value r) :2 v1 :3 v2)))
-                            :error (swap! repl-vars assoc :e (:error r))
-                            nil)
-                          r)))
-                    (catch :default e
-                      {:status :error :error e :ns ns-sym}))]
-              ;; Clear any pending Java interrupt before the tail. A
-              ;; busy loop stopped via the token can leave this thread's
-              ;; interrupt flag set (nothing inside it made a blocking call
-              ;; to consume it), and a blocking call inside
-              ;; on-status-change/on-complete -- a GUI's .put onto a queue,
-              ;; say -- would otherwise throw InterruptedException
-              ;; immediately, silently losing the completion.
-              (locking lock
-                (swap! running-state
-                       (fn [s] (if (identical? (:token s) token)
-                                 (assoc s :finishing true)
-                                 s))))
-              (Thread/interrupted)
-              ;; Still this evaluation's turn: a new eval-async can't start
-              ;; until the reset to idle below.
-              (try
-                (when before-idle (before-idle result))
-                (catch :default e (report-callback-exception! "before-idle" e)))
-              ;; Reset-to-idle and its notification are one locked
-              ;; unit, so a new eval-async's own registration (locked, above)
-              ;; can never squeeze its :running notification in before this
-              ;; :idle notification finishes.
-              (locking lock
-                (reset! waiting-input? false)
-                (reset! running-state idle-state)
-                ;; on-status-change is isolated in its own try so a
-                ;; throwing caller can never prevent the deliver/on-complete
-                ;; below from running. The exception is reported, not
-                ;; silently dropped.
-                (try
-                  (when on-status-change (on-status-change :idle))
-                  (catch :default e (report-callback-exception! "on-status-change" e))))
-              ;; Every exit path reaches here exactly once, whatever
-              ;; on-status-change did above.
-              (deliver done result)
-              (try
-                (when on-complete (on-complete result))
-                (catch :default e (report-callback-exception! "on-complete" e)))
-              result))
+            (finish-run! ctx run (run-evaluation ctx run code)))
           nil)))))

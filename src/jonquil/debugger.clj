@@ -371,6 +371,36 @@
             (try (reply r) (catch Throwable _ nil))))
         (recur)))))
 
+(defn- serve-pause
+  "Runs a published pause: (on-pause d), then serves the paused thread until
+  continue!, and whatever way that ends clears the pause, drains the queue
+  and calls (on-resume {:continued? b}). The callbacks' own throws are dropped."
+  [{:keys [brk callbacks t frames d]}]
+  (let [{:keys [queue paused]} brk
+        {:keys [on-pause on-resume]} callbacks
+        continued? (volatile! false)]
+    (try
+      (try (when on-pause (on-pause d)) (catch Throwable _ nil))
+      (serve! queue t frames)
+      (vreset! continued? true)
+      (finally
+        (reset! paused nil)
+        (drain! queue)
+        (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil))))))
+
+(defn- pause-on-error
+  "The break handler's body, on the throwing thread: publishes the pause for
+  error t and serves it. A Stop's InterruptedException is never paused on."
+  [{:keys [brk callbacks t frames]}]
+  ;; a Stop is never an error to pause on: a body blocked in a
+  ;; sleep, a deref or a .take throws InterruptedException
+  (when-not (interrupted? t)
+    (let [{:keys [queue paused]} brk
+          d (frames-data t {:frames-fn (fn [_] frames) :resolve-file (:resolve-file callbacks)})]
+      (drain! queue)
+      (reset! paused {:error t :frames frames :data d :continued (atom false)})
+      (serve-pause {:brk brk :callbacks callbacks :t t :frames frames :d d}))))
+
 (defn break-wrapper
   "A fn of a thunk that runs it under jolt.debug's break handler. A throw
   escaping the thunk pauses on the throwing thread before anything unwinds:
@@ -380,25 +410,11 @@
   InterruptedException goes on in its place). On a Jolt without jolt.debug the thunk
   just runs. The callbacks' own throws are dropped: they must not replace
   the error."
-  [{:keys [queue paused]} {:keys [on-pause on-resume resolve-file]}]
+  {:arglists '([{:keys [queue paused]} {:keys [on-pause on-resume resolve-file]}])}
+  [brk callbacks]
   (fn [thunk]
     (if-let [call (break-fn)]
-      (call (fn [t frames]
-              ;; a Stop is never an error to pause on: a body blocked in a
-              ;; sleep, a deref or a .take throws InterruptedException
-              (when-not (interrupted? t)
-                (let [d (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})]
-                  (drain! queue)
-                  (reset! paused {:error t :frames frames :data d :continued (atom false)})
-                  (let [continued? (volatile! false)]
-                    (try
-                      (try (when on-pause (on-pause d)) (catch Throwable _ nil))
-                      (serve! queue t frames)
-                      (vreset! continued? true)
-                      (finally
-                        (reset! paused nil)
-                        (drain! queue)
-                        (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil))))))))
+      (call (fn [t frames] (pause-on-error {:brk brk :callbacks callbacks :t t :frames frames}))
             thunk)
       (thunk))))
 

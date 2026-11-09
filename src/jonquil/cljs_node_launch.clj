@@ -186,6 +186,54 @@
   Run pressed right after a reload finds the reloaded page."
   2000)
 
+(defn- exit-unless-arglists!
+  "Exits 2 when var v (named sym, which v is nil for when it doesn't resolve)
+  doesn't have the expected arglists."
+  [sym v expected]
+  (when-not (= expected (:arglists (meta v)))
+    (binding [*out* *err*]
+      (println (str "jonquil: " sym " has arglists " (:arglists (meta v))
+                    ", not " (pr-str expected) "; this ClojureScript version isn't supported")))
+    (System/exit 2)))
+
+(defn- poll-live-connection!
+  "Takes queued connections until one whose page is still there. Closes the
+  dead ones it passes. Returns [conn dropped?]: conn is nil when none was
+  live, dropped? is true when any was closed."
+  [^java.util.LinkedList connq]
+  (loop [dropped? false]
+    (if-let [c (.poll connq)]
+      (if (peer-gone? c)
+        (do (try (.close ^java.net.Socket c) (catch Throwable _ nil))
+            (recur true))
+        [c dropped?])
+      [nil dropped?])))
+
+(defn- claim-connection!
+  "Under the server's lock: delivers a live connection to promise p, or
+  queues p for the next page. Returns true when an evaluation should wait
+  out reload-grace-ms because the page is known to be gone."
+  [{:keys [lock connq promiseq]} p]
+  (locking lock
+    (let [[conn dropped?] (poll-live-connection! connq)]
+      (if conn
+        (do (reset! page-gone? false) (deliver p conn) false)
+        (do (.offer ^java.util.LinkedList promiseq p)
+            (when dropped? (reset! page-gone? true))
+            @page-gone?)))))
+
+(defn- wait-for-page!
+  "Waits reload-grace-ms for promise p to be delivered a connection, then
+  takes it back off the queue and throws the gone message, unless a page
+  delivered to it in between."
+  [{:keys [lock promiseq]} p]
+  (when (and (= ::none (deref p reload-grace-ms ::none))
+             ;; Still queued: take it back, unless a page delivered
+             ;; to it in between.
+             (locking lock (.remove ^java.util.LinkedList promiseq p) (not (realized? p))))
+    (throw (ex-info (gone-message)
+                    {}))))
+
 (defn- live-connection!
   "Replaces cljs.repl.server/connection, which hands an evaluation the
   connection a page holds open for it, or waits for one. Its own check is
@@ -198,39 +246,17 @@
   against."
   []
   (let [v (resolve 'cljs.repl.server/connection)
-        lock @(resolve 'cljs.repl.server/lock)
-        ^java.util.LinkedList connq @(resolve 'cljs.repl.server/connq)
-        ^java.util.LinkedList promiseq @(resolve 'cljs.repl.server/promiseq)]
-    (when-not (= '([]) (:arglists (meta v)))
-      (binding [*out* *err*]
-        (println (str "jonquil: cljs.repl.server/connection has arglists " (:arglists (meta v))
-                      ", not ([]); this ClojureScript version isn't supported")))
-      (System/exit 2))
+        queues {:lock @(resolve 'cljs.repl.server/lock)
+                :connq @(resolve 'cljs.repl.server/connq)
+                :promiseq @(resolve 'cljs.repl.server/promiseq)}]
+    (exit-unless-arglists! 'cljs.repl.server/connection v '([]))
     (alter-var-root
      v
      (fn [_]
        (fn []
          (let [p (promise)
-               gone? (locking lock
-                       (let [[conn dropped?] (loop [dropped? false]
-                                               (if-let [c (.poll connq)]
-                                                 (if (peer-gone? c)
-                                                   (do (try (.close ^java.net.Socket c) (catch Throwable _ nil))
-                                                       (recur true))
-                                                   [c dropped?])
-                                                 [nil dropped?]))]
-                         (if conn
-                           (do (reset! page-gone? false) (deliver p conn) false)
-                           (do (.offer promiseq p)
-                               (when dropped? (reset! page-gone? true))
-                               @page-gone?))))]
-           (when (and gone?
-                      (= ::none (deref p reload-grace-ms ::none))
-                      ;; Still queued: take it back, unless a page delivered
-                      ;; to it in between.
-                      (locking lock (.remove promiseq p) (not (realized? p))))
-             (throw (ex-info (gone-message)
-                             {})))
+               gone? (claim-connection! queues p)]
+           (when gone? (wait-for-page! queues p))
            (when (and gone? (realized? p)) (reset! page-gone? false))
            p))))))
 

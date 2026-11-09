@@ -9,7 +9,7 @@
   Every test stops its evaluator in a finally, so no child outlives it."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jolt.process :as p]
             [jonquil.cljs-node :as cljs-node-msg]
             [jonquil.dialect :as dialect]
@@ -757,3 +757,52 @@
             (is (< (- (System/currentTimeMillis) t0) 10000) "failed fast"))
           (finally (ev/stop! e))))
       (println "skip: set JONQUIL_BROWSER_LIVE=1 to run the real-browser test (it opens a browser tab)"))))
+
+;; --- the launcher's live-connection! against fake server vars -------------------
+
+(defn- launcher-script
+  "Runs cljs_launch_connection.clj under the clojure CLI in mode, against the
+  launcher source in the repo: {:exit n :out text :err text}."
+  [mode]
+  (let [r @(p/process {:out :string :err :string}
+                      (cljs-child/find-clojure) "-M"
+                      (.getCanonicalPath (io/file "dev/cljs_launch_connection.clj"))
+                      (.getCanonicalPath (io/file "src/jonquil/cljs_node_launch.clj"))
+                      mode)]
+    {:exit (:exit r) :out (str (:out r)) :err (str (:err r))}))
+
+(def ^:private gone-text
+  "the page is gone (its tab closed or left the page): reload http://127.0.0.1: and evaluate again")
+
+(deftest launcher-live-connection-scenarios-test
+  (let [{:keys [exit out err]} (launcher-script "scenarios")
+        by (into {} (map (fn [line] (let [m (read-string line)] [(:scenario m) m])))
+                 (remove str/blank? (str/split-lines out)))]
+    (is (zero? exit) err)
+    (is (= 6 (count by)) out)
+    (testing "nothing queued yet: the promise waits for a page, no gone state"
+      (is (= {:realized? false :queues [0 1] :gone? false} (dissoc (by :empty) :scenario))))
+    (testing "a live connection is delivered at once"
+      (is (= {:realized? true :same? true :queues [0 0] :gone? false} (dissoc (by :live) :scenario))))
+    (testing "a dead connection is closed and, after the grace period, throws"
+      (is (= {:message gone-text :queues [0 0] :closed? true :gone? true :waited-grace? true}
+             (dissoc (by :dead) :scenario))))
+    (testing "a page arriving within the grace period gets the evaluation, and the gone state clears"
+      (is (= {:realized? true :same? true :queues [0 0] :gone? false} (dissoc (by :late-page) :scenario))))
+    (testing "gone and no page: throws the gone message and leaves nothing queued"
+      (is (= {:message gone-text :queues [0 0]} (dissoc (by :gone) :scenario))))
+    (testing "a dead connection ahead of a live one is dropped and the live one delivered"
+      (is (= {:realized? true :same? true :dead-closed? true :queues [0 0] :gone? false}
+             (dissoc (by :dead-then-live) :scenario))))))
+
+(deftest launcher-live-connection-arglists-mismatch-test
+  (testing "the stock fn has other arglists: it is named, with both, and the launcher exits 2"
+    (let [{:keys [exit err]} (launcher-script "mismatch")]
+      (is (= 2 exit))
+      (is (= "jonquil: cljs.repl.server/connection has arglists ([x]), not ([]); this ClojureScript version isn't supported"
+             (str/trim err)))))
+  (testing "the stock fn is missing: the message still names it"
+    (let [{:keys [exit err]} (launcher-script "missing")]
+      (is (= 2 exit))
+      (is (= "jonquil: cljs.repl.server/connection has arglists , not ([]); this ClojureScript version isn't supported"
+             (str/trim err))))))
