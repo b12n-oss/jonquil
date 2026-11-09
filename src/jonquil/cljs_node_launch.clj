@@ -187,11 +187,12 @@
   2000)
 
 (defn- exit-unless-arglists!
-  "Exits 2 when var v's arglists aren't expected."
-  [v expected]
+  "Exits 2 when var v (named sym, which v is nil for when it doesn't resolve)
+  doesn't have the expected arglists."
+  [sym v expected]
   (when-not (= expected (:arglists (meta v)))
     (binding [*out* *err*]
-      (println (str "jonquil: " (:ns (meta v)) "/" (:name (meta v)) " has arglists " (:arglists (meta v))
+      (println (str "jonquil: " sym " has arglists " (:arglists (meta v))
                     ", not " (pr-str expected) "; this ClojureScript version isn't supported")))
     (System/exit 2)))
 
@@ -217,7 +218,7 @@
     (let [[conn dropped?] (poll-live-connection! connq)]
       (if conn
         (do (reset! page-gone? false) (deliver p conn) false)
-        (do (.offer promiseq p)
+        (do (.offer ^java.util.LinkedList promiseq p)
             (when dropped? (reset! page-gone? true))
             @page-gone?)))))
 
@@ -248,7 +249,7 @@
         queues {:lock @(resolve 'cljs.repl.server/lock)
                 :connq @(resolve 'cljs.repl.server/connq)
                 :promiseq @(resolve 'cljs.repl.server/promiseq)}]
-    (exit-unless-arglists! v '([]))
+    (exit-unless-arglists! 'cljs.repl.server/connection v '([]))
     (alter-var-root
      v
      (fn [_]

@@ -62,7 +62,7 @@
 
 (defn- inspect-request
   "[op args] to hand to the view, the value filled in for the :start ops."
-  [state op args {:keys [local traced]}]
+  [{:keys [state op args local traced]}]
   (case op
     :start [:start (assoc args :value (:last-value @state))]
     :start-local [:start (assoc args :value local)]
@@ -73,7 +73,7 @@
 
 (defn- inspect-view
   "What the panel shows: an error map for a missing value, else the view's."
-  [state op op' args' local]
+  [{:keys [state op op' args' local]}]
   (case local
     ::debugger/missing {:error "That local is gone."}
     ::stale {:error debugger/STALE}
@@ -85,15 +85,15 @@
   "The body of InProcess inspect!, on its future: resolves the value, runs the
   view op and hands the result to on-view; a failure goes to on-view as an
   error map, and a failing on-view is ignored."
-  [state op args on-view]
+  [{:keys [state op args on-view]}]
   (try
     (let [local (inspect-local-value state op args)
           traced (inspect-traced-value op args)
           local (cond (= traced ::trace-rt/gone) ::gone
                       (= traced ::trace-rt/lazy) ::lazy
                       :else local)
-          [op' args'] (inspect-request state op args {:local local :traced traced})]
-      (try (on-view (inspect-view state op op' args' local))
+          [op' args'] (inspect-request {:state state :op op :args args :local local :traced traced})]
+      (try (on-view (inspect-view {:state state :op op :op' op' :args' args' :local local}))
            (catch Throwable _)))
     (catch Throwable e
       (try (on-view {:error (or (ex-message e) (str (class e)))})
@@ -137,7 +137,7 @@
   (quiet-eval? [_] true)
   ev/Inspector
   (inspect! [_ op args on-view]
-    (future (inspect-run! state op args on-view))
+    (future (inspect-run! {:state state :op op :args args :on-view on-view}))
     nil)
   (inspectable? [_] true)
   ev/Frames
@@ -303,7 +303,8 @@
               (try (f eval-id) (catch Throwable _ nil))))))
 
 (defn- eval-auto-require!
-  [ctx state dir opts]
+  "Runs auto-require! for this evaluation; a quiet one's lines go to its output."
+  [{:keys [ctx state dir opts]}]
   (if (and (:quiet opts) (:on-output opts))
     ;; a quiet eval's *out* is the plugin's:
     ;; the auto-require lines are the person's
@@ -318,15 +319,22 @@
   the worker: a first resolve can fetch dependencies, which mustn't freeze
   the window."
   [{:keys [ctx state tell dir opts]}]
+  ;; The break handlers hear a person's evaluation
+  ;; start. Then the project's :paths and :deps as
+  ;; Jolt's roots, resolved on the worker: a first
+  ;; resolve can fetch dependencies, which mustn't
+  ;; freeze the window.
   (fn []
     (tell :on-eval-start)
     (when dir
       (roots/use-project-deps! dir)
-      (eval-auto-require! ctx state dir opts))))
+      (eval-auto-require! {:ctx ctx :state state :dir dir :opts opts}))))
 
 (defn- eval-wrapper
   "Break on error; a quiet eval (completion, help, a plugin's) never pauses"
   [state opts]
+  ;; Break on error; a quiet eval (completion,
+  ;; help, a plugin's) never pauses
   (when (and (:break-on? @state) (not (:quiet opts)))
     (debugger/break-wrapper
      (:break @state)
@@ -341,6 +349,8 @@
          (catch Throwable _ nil))))
 
 (defn- record-result!
+  "Records a finished evaluation in the session state: the namespaces it
+  created, the prompt ns, and the last value or error."
   [{:keys [state opts before result]}]
   (swap! state
          (fn [s]
@@ -356,6 +366,8 @@
              (assoc :last-error (:error result))))))
 
 (defn- eval-complete-fn
+  "The :on-complete step: ends a stale pause, keeps and records the result,
+  then calls the caller's on-complete."
   [{:keys [state opts tell user-complete] :as step}]
   (fn [result]
     ;; the backstop for a pause whose cleanup a Stop skipped

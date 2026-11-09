@@ -300,3 +300,23 @@
     (testing "nothing paused: nothing happens"
       (debugger/end-stale-pause! brk {:on-resume (fn [how] (swap! resumed conj how))})
       (is (= 1 (count @resumed))))))
+
+(deftest break-throwing-callbacks-test
+  (doseq [[label cbs] [[:on-pause {:on-pause (fn [_] (throw (ex-info "op" {})))}]
+                       [:on-resume {:on-resume (fn [_] (throw (ex-info "or" {})))}]
+                       [:both {:on-pause (fn [_] (throw (ex-info "op" {})))
+                               :on-resume (fn [_] (throw (ex-info "or" {})))}]]]
+    (testing (str "throwing " (name label))
+      (let [brk (debugger/make-break)
+            boom (ex-info "boom" {})
+            resumed (atom [])
+            cbs (update cbs :on-resume (fn [f] (fn [how] (swap! resumed conj how) (when f (f how)))))
+            wrap (debugger/break-wrapper brk cbs)
+            fut (future (binding [debugger/*break-fn* fake-break]
+                          (try (wrap (fn [] (throw boom))) (catch Throwable t t))))]
+        (loop [i 0] (when (and (< i 300) (nil? @(:paused brk))) (Thread/sleep 10) (recur (inc i))))
+        (is (some? @(:paused brk)) "the pause is published")
+        (is (true? (debugger/continue! brk)))
+        (is (identical? boom (deref fut 3000 :blocked)) "the original throw comes out")
+        (is (= [{:continued? true}] @resumed))
+        (is (nil? @(:paused brk)))))))

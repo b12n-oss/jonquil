@@ -476,6 +476,9 @@
    waiting on another thread that may itself call eval-async or
    stop-eval! on this context, or the two threads deadlock -- a GUI
    should enqueue that work for later and return, not invoke-and-wait."
+  {:arglists '([{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
+                code
+                {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle wrap-eval source-path] :as opts}])}
   [{:keys [lock running-state] :as ctx} code opts]
   (let [{:keys [on-output]} opts
         ns-sym (or (:ns-name opts) 'user)]

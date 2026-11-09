@@ -341,3 +341,17 @@
     (is (= [7 7] (pe/region t 7)) "the blank line"))
   (is (= 5 (pe/remap-offset "😀(a\nb\nc)" "😀(a)\nb\nc" 4)) "start of b")
   (is (= 2 (pe/remap-offset "😀b\ncd" "😀b" 5)) "a vanished line clamps to the end"))
+
+(deftest adjust-caret-outside-the-region-test
+  (let [prev "(x)\n(foo\n  bar)"
+        adj (fn [m] (pe/adjust (merge {:mode :indent} m)))]
+    (is (= {:edits [[14 14 ")"]] :caret 0}
+           (adj {:prev-text prev :prev-caret 0 :text "(x)\n(foo\n  bar" :caret 0})))
+    (is (= {:edits [[8 13 ")\nbar"]] :caret 1}
+           (adj {:prev-text prev :prev-caret 0 :text "(x)\n(foo\nbar)" :caret 1})))
+    (is (= {:edits [[10 10 ")"]] :caret 15}
+           (adj {:prev-text "(foo\n  bar)\n(x)" :prev-caret 0 :text "(foo\n  bar\n(x)" :caret 14})))
+    (testing "the previous caret outside the region, or nil"
+      (doseq [pc [2 nil]]
+        (is (= {:edits [[10 10 ")"]] :caret 9}
+               (adj {:prev-text prev :prev-caret pc :text "(x)\n(foo (\n  bar)" :caret 9})))))))

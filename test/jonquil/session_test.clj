@@ -511,5 +511,31 @@
       (is (= {:error "That call is gone."}
              (inspect-sync s :start-trace {:id -1 :part :ret :rows 10 :cols 40}))))
     (testing "an op the view cannot run reports the failure through on-view"
-      (let [r (inspect-sync s :no-such-op {:rows 10 :cols 40})]
-        (is (map? r))))))
+      (is (= {:path "" :info "nil" :meta-action nil :header "" :leaf "nil"
+              :note "No matching clause: :no-such-op"}
+             (inspect-sync s :no-such-op {:rows 10 :cols 40}))))))
+
+(deftest inspect-lazy-trace-value-test
+  (let [s (session/make-session)]
+    (try
+      (repl-sync s "(defn fz-lz [] (map inc [1 2]))")
+      (trace-sync s :trace {:sym "fz-lz" :ns "user"})
+      (is (= "(2 3)" (:printed (repl-sync s "(fz-lz)"))))
+      (let [id (:id (first (:entries (trace-sync s :log {:since -1}))))]
+        (is (= {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
+               (inspect-sync s :start-trace {:id id :part :ret :rows 10 :cols 40}))))
+      (finally (trace-sync s :untrace-all {}) (trace-sync s :clear {})))))
+
+(deftest inspect-def-into-a-missing-ns-test
+  (let [s (session/make-session)]
+    (swap! (:state s) assoc :prompt-ns 'fz.no-such-ns)
+    (is (= {:error "No namespace: fz.no-such-ns found"}
+           (inspect-sync s :def {:name "v"})))))
+
+(deftest inspect-throwing-on-view-test
+  (let [s (session/make-session) calls (atom 0) p (promise)]
+    (ev/inspect! s :start {:rows 10 :cols 40}
+                 (fn [r] (swap! calls inc) (deliver p r) (throw (ex-info "ov" {}))))
+    (deref p 2000 nil)
+    (Thread/sleep 200)
+    (is (= 1 @calls) "called once; the throw is swallowed and nothing else is sent")))
