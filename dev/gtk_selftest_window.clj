@@ -277,6 +277,7 @@
    palette-rows/row-time-form-alert-pending
    palette-rows/row-time-form-clears-status
    locations-rows/row-locations-pane-shows
+   locations-rows/row-locations-pane-wiring
    locations-rows/row-locations-uses-step
    locations-rows/row-locations-survive-edit
    locations-rows/row-locations-gone
@@ -460,6 +461,7 @@
    gutter-rows/row-line-counts-went-off
    gutter-rows/row-key-hints-follow-the-caret
    debugger-rows/row-debugger-pane-shows
+   debugger-rows/row-debugger-pane-wiring
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default
    debugger-rows/row-break-flag-ends-with-its-eval
