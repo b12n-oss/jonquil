@@ -9,11 +9,11 @@
 (def ^:private layers
   "In load order: a namespace may require only those of earlier layers."
   '[[jonquil.gtk.window.status jonquil.gtk.window.alerts jonquil.gtk.window.plugin-agent jonquil.gtk.window.session]
-    [jonquil.gtk.window.files jonquil.gtk.window.right-slot jonquil.gtk.window.theme jonquil.gtk.window.keys]
+    [jonquil.gtk.window.files jonquil.gtk.window.right-slot jonquil.gtk.window.theme jonquil.gtk.window.keys jonquil.gtk.window.status-bar]
     [jonquil.gtk.window.runtime jonquil.gtk.window.quit]
     [jonquil.gtk.window.run]
     [jonquil.gtk.window.inspector jonquil.gtk.window.help]
-    [jonquil.gtk.window.tabs]
+    [jonquil.gtk.window.tabs jonquil.gtk.window.console]
     [jonquil.gtk.window.reopen jonquil.gtk.window.tree-ops]])
 
 (defn- ns-file [sym]

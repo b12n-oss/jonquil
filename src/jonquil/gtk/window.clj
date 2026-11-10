@@ -18,12 +18,9 @@
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.command-registry :as cmd-registry]
-            [jonquil.commands :as commands]
-            [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
-            [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -33,10 +30,10 @@
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
-            [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
+            [jonquil.gtk.window.console :as win-console]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.inspector :as win-inspector]
@@ -49,6 +46,7 @@
             [jonquil.gtk.window.runtime :as win-runtime]
             [jonquil.gtk.window.session :as win-session]
             [jonquil.gtk.window.status :as win-status]
+            [jonquil.gtk.window.status-bar :as win-status-bar]
             [jonquil.gtk.window.tabs :as win-tabs]
             [jonquil.gtk.window.theme :as win-theme]
             [jonquil.gtk.window.tree-ops :as win-tree-ops]
@@ -64,11 +62,6 @@
             [jonquil.settings :as settings]
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
-
-(def ^:private STATUS-MARGIN
-  ;; px at each end of the status bar: GNOME's usual 6-12 px gutter, the
-  ;; status box's own child spacing (6) plus a little.
-  8)
 
 ;; --- construction ------------------------------------------------------
 
@@ -186,49 +179,15 @@
         ;; front, remove-tab! drops it): Genera's Select order
         recent-tabs (atom [])
         win (g/gtk-application-window-new app)
-        status-label (g/gtk-label-new "Ready")
-        line-col-label (g/gtk-label-new "Ln 1, Col 1")
-        ;; LM6: what keys do at the caret, dim, hidden while there's nothing
-        hint-label (doto (g/gtk-label-new "")
-                     (g/gtk-widget-add-css-class "dim-label")
-                     ;; never wider than this, so the status bar doesn't jump
-                     (g/gtk-label-set-ellipsize g/PANGO-ELLIPSIZE-END)
-                     (g/gtk-label-set-max-width-chars 44))
-        hints-on? (atom true)
-        parinfer-label (g/gtk-label-new "")
-        ;; How many agent proposals are pending, hidden at zero
-        pending-label (g/gtk-label-new "")
-        ;; The window's dialect (and runtime, when it isn't the
-        ;; dialect's default), between the status text and Ln/Col.
-        dialect-label (g/gtk-label-new (dialect/label @sel*))
+        {:keys [status-label line-col-label hint-label hints-on? parinfer-label pending-label dialect-label
+                unread-label hints-toggle-fn]}
+        (win-status-bar/build {:sel* sel*})
         confirmed-close? (atom false)
         ;; Self-test hooks only -- see close-request-fn's docstring.
         suppress-close? (atom false)
         closing? (atom false)
-        *cv (atom nil)
-        ;; LM1's ! commands at the prompt, installed once the palette's
-        ;; pieces exist (the command-palette part resets it at install)
-        bang* (atom (fn [_text]))
-        ;; :failure*, the last failed evaluation, for the restarts
-        cv (assoc
-            (cview/make-console-view {:on-submit (win-run/make-on-submit active-tab *cv ev* status-label bang*)
-                                     :history-prev (win-run/history-prev-fn ev*)
-                                     :history-next (win-run/history-next-fn ev*)
-                                     ;; The console reads busy/waiting state
-                                     ;; straight from the engine, never a mirror.
-                                     :evaluating? evaluating-fn
-                                     :waiting? (fn [] (ev/waiting-for-input? @ev*))})
-            :failure* (atom nil)
-            ;; a fn the window runs after every evaluation (the Trace panel's refresh)
-            :after-eval* (atom nil)
-            ;; LM7: the fn (record result) that files a finished evaluation
-            ;; in the project's record, and the replay tab as {:id :root},
-            ;; the root it was opened for (or nil)
-            :recorder* (atom nil)
-            ;; a fn returning the tree's root, read as an evaluation starts
-            :replay-root* (atom nil)
-            :replay-tab* (atom nil))
-        _ (reset! *cv cv)
+        {:keys [bang* cv]}
+        (win-console/build {:active-tab active-tab :ev* ev* :status-label status-label :evaluating-fn evaluating-fn})
         {:keys [provider theme-name theme-choice system-dark-fn* poll-armed? arm-count
                 zoom-fn theme-ctx set-theme-fn cycle-theme-fn]}
         (win-theme/build {:tabs tabs :cv cv :settings-path* settings-path* :status-label status-label
@@ -242,50 +201,15 @@
         ;; The plugin list shares the slot too; its rows are rebuilt after
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
-        ;; The Messages panel's unread count (LM8), shown in the status
-        ;; bar while it's above zero; the Messages part fills it
-        unread-label (g/gtk-label-new "")
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
         *right (atom nil)
         {:keys [popovers close-popovers-fn register-popover-fn source-ctx server-ev completion-ns-fn completion-opts]}
         (win-help/build {:ev* ev* :status-label status-label :sp sp :sel* sel* :active? active? :active-tab active-tab
                          :open-file! win-tabs/open-file! :tab-ctx* *tab-ctx :right* *right})
-        ;; A second jonquil.gtk.completion instance, on the console's own
-        ;; input region -- :position :top (above the input line, vs. the
-        ;; editor's own :bottom), :snapshot-fn/:apply-op! overridden to
-        ;; cview/input-snapshot and cview/apply-input-op! so refine!/
-        ;; commit! read and write the input region instead of :ed's whole
-        ;; buffer (see jonquil.gtk.completion's ns docstring).
-        ;; close-others!/on-error are the SAME registry-wide fns the
-        ;; editor's instance uses, so opening either instance still closes
-        ;; any other open popover.
-        repl-completion (completion/make-completion
-                         (:view cv)
-                         ;; No :ed -- :snapshot-fn/:apply-op! below replace
-                         ;; every use the default closures would have made
-                         ;; of it, so there's no editor for this instance
-                         ;; to name.
-                         {:ns-fn completion-ns-fn
-                          :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
-                          :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
-                          :server-ev server-ev
-                          :close-others! close-popovers-fn
-                          :on-error (fn [msg] (win-status/set-status! status-label msg))
-                          :position :top
-                          :snapshot-fn (fn [] (cview/input-snapshot cv))
-                          :apply-op! (fn [result] (cview/apply-input-op! cv result))})
-        repl-complete-fn (fn [] (win-help/do-repl-complete! cv ev* repl-completion status-label))
-        ;; the console's completion is caret-anchored too: scrolling the
-        ;; Interactions pane follows or hides it, as a tab's editor does
-        ;; for its popovers (wire-tab!)
-        _ (let [follow (callable (fn [_adj _data]
-                                   (popover/follow-caret! repl-completion)
-                                   nil)
-                                 [:pointer :pointer] :void)]
-            (doseq [adj [(g/gtk-scrollable-get-vadjustment (:view cv))
-                         (g/gtk-scrollable-get-hadjustment (:view cv))]]
-              (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT)))
+        {:keys [repl-completion repl-complete-fn]}
+        (win-console/build-completion {:cv cv :ev* ev* :status-label status-label :completion-ns-fn completion-ns-fn
+                                       :server-ev server-ev :close-popovers-fn close-popovers-fn})
         {:keys [run-fn stop-fn run-selection-fn run-changed-fn]}
         (win-run/build {:active-tab active-tab :cv cv :ev* ev* :sel* sel* :status-label status-label})
         open-fn (fn [] (win-files/do-open! cv win (fn [p] (win-tabs/open-file! @*tab-ctx p))))
@@ -314,56 +238,9 @@
         toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv))
         clear-console-fn (fn [] (win-keys/do-clear-console! cv))
         clear-last-fn (fn [] (win-keys/do-clear-last-output! cv))
-        ;; Parinfer: the window's one mode, read by every tab's editor
-        ;; hook; :off unless settings.edn set one.
-        parinfer-mode* (atom (or (:parinfer (settings/load-settings @settings-path*)) :off))
-        ;; The active tab's project may override the global either way
-        ;; (.jonquil.edn :parinfer), so the label follows the ACTIVE tab's
-        ;; effective mode and says (project) when the override decides.
-        active-parinfer-override (fn []
-                                   (when-let [t (active-tab)]
-                                     (:parinfer (some-> (:project t) deref))))
-        update-parinfer-label! (fn []
-                                 (let [ov (active-parinfer-override)]
-                                   (if-let [t (commands/parinfer-status-text
-                                               (commands/parinfer-effective ov @parinfer-mode*)
-                                               (some? ov)
-                                               @parinfer-mode*)]
-                                     (do (g/gtk-label-set-text parinfer-label t)
-                                         (g/gtk-widget-set-visible parinfer-label 1))
-                                     (g/gtk-widget-set-visible parinfer-label 0))))
-        ;; The hook's one status line: a skipped long form names itself,
-        ;; and the next adjusted edit clears it back to Ready.
-        parinfer-skip-shown* (atom false)
-        parinfer-status-fn (fn [msg]
-                             (if msg
-                               (do (reset! parinfer-skip-shown* true)
-                                   (when-not (evaluating-fn)
-                                     (win-status/set-status! status-label
-                                                  (str (or (commands/parinfer-label-text @parinfer-mode*)
-                                                           "Parinfer")
-                                                       " (" msg ")"))))
-                               (when (and (compare-and-set! parinfer-skip-shown* true false)
-                                          (not (evaluating-fn)))
-                                 (win-status/set-status! status-label "Ready"))))
-        parinfer-fn (fn [choice]
-                      (let [k (commands/parinfer-step @parinfer-mode* choice)]
-                        (reset! parinfer-mode* k)
-                        ;; A cleared skip note mustn't later stomp a newer
-                        ;; status.
-                        (reset! parinfer-skip-shown* false)
-                        (update-parinfer-label!)
-                        (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
-                          (cview/append! cv :system (str "; settings: " err "\n")))
-                        ;; same restraint as the theme: a live Running…
-                        ;; status isn't overwritten. A pinned active tab
-                        ;; names its project's choice, since the command
-                        ;; changed only the global.
-                        (when-not (evaluating-fn)
-                          (win-status/set-status! status-label
-                                       (str "Parinfer: " (commands/parinfer-mode-word k)
-                                            (commands/parinfer-pinned-note
-                                             k (active-parinfer-override)))))))
+        {:keys [parinfer-mode* update-parinfer-label! parinfer-status-fn parinfer-fn]}
+        (win-status-bar/build-parinfer {:settings-path* settings-path* :active-tab active-tab :parinfer-label parinfer-label
+                                        :evaluating-fn evaluating-fn :status-label status-label :cv cv})
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
         open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; The editor's and the console's own context menus -- each item
@@ -443,12 +320,7 @@
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn
-                         :hints-toggle-fn (fn []
-                                            (let [on? (swap! hints-on? not)]
-                                              (when-not on? (g/gtk-widget-set-visible hint-label 0))
-                                              (win-status/set-status! status-label (if on?
-                                                                          "; Key hints on: the status bar names the keys for the symbol at the caret."
-                                                                          "; Key hints off."))))
+                         :hints-toggle-fn hints-toggle-fn
                          :run-changed-fn run-changed-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (win-tabs/tab-by-id tabs id) (win-tabs/select-tab! @*tab-ctx id)))
@@ -479,10 +351,6 @@
         reset-chk (g/gtk-check-button-new-with-label "Reset on Run")
         ;; The tick an attach runtime took down (dialect/reset-toggle).
         reset-state (atom {})
-        ;; The status bar is a horizontal box: the status label on the
-        ;; left (hexpand, so it claims the box's spare width) and the
-        ;; Ln/Col label on the right.
-        status-box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
     (g/gtk-box-append toolbar files-btn)
@@ -541,23 +409,9 @@
     (g/gtk-paned-set-shrink-start-child tree-paned 0)
     (g/gtk-widget-set-vexpand tree-paned 1)
     (g/gtk-box-append vbox tree-paned)
-    (g/gtk-widget-set-hexpand status-label 1)
-    (g/gtk-box-append status-box status-label)
-    (g/gtk-box-append status-box hint-label)
-    (g/gtk-widget-set-visible hint-label 0)
-    (g/gtk-box-append status-box pending-label)
-    (g/gtk-widget-set-visible pending-label 0)
-    (g/gtk-box-append status-box unread-label)
-    (g/gtk-widget-set-visible unread-label 0)
-    (g/gtk-box-append status-box dialect-label)
-    (g/gtk-box-append status-box parinfer-label)
-    (update-parinfer-label!)
-    (g/gtk-box-append status-box line-col-label)
-    ;; Room at both ends, so "Ln N, Col N" doesn't touch the window's right
-    ;; edge and the left matches it.
-    (g/gtk-widget-set-margin-start status-box STATUS-MARGIN)
-    (g/gtk-widget-set-margin-end status-box STATUS-MARGIN)
-    (g/gtk-box-append vbox status-box)
+    (win-status-bar/place! {:vbox vbox :status-label status-label :hint-label hint-label :pending-label pending-label
+                            :unread-label unread-label :dialect-label dialect-label :parinfer-label parinfer-label
+                            :line-col-label line-col-label :update-parinfer-label! update-parinfer-label!})
     (g/gtk-window-set-child win vbox)
     (g/gtk-window-set-default-size win 900 700)
     ;; One shared GtkCssProvider for the display, added once; both views
