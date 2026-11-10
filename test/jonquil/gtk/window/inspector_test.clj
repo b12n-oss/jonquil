@@ -272,6 +272,21 @@
     (is (= '([{:keys [tab cv ev* status-label inspecting? inspect-queued inspect-last-fn] :as ctx}])
            (:arglists (meta #'win-inspector/inspect-form!))))))
 
+(deftest inspect-form-refuses-a-non-inspector-evaluator-test
+  (let [log (atom [])
+        plain #_{:clj-kondo/ignore [:missing-protocol-method]}
+        (reify
+          ev/Evaluator
+          (evaluating? [_] (swap! log conj :evaluating?) false)
+          (eval! [_ code _] (swap! log conj [:eval code]) nil))]
+    (with-redefs [win-run/refuse-foreign! (fn [_] nil)
+                  editor/snapshot (fn [_] {:text "(+ 1 2)" :caret 3})
+                  win-run/make-eval-opts (fn [& _] (swap! log conj :opts) {})
+                  win-status/set-status! (fn [l t] (swap! log conj [l t]))
+                  jonquil.gtk.callbacks/on-gui! (fn [g] (swap! log conj :gui) (g))]
+      (win-inspector/inspect-form! (form-ctx log (atom plain) (fn [] nil)))
+      (is (= [[::l inspect/unavailable-message]] @log)))))
+
 (deftest inspect-form-evaluates-like-run-form-test
   (let [log (atom [])
         sent (atom nil)

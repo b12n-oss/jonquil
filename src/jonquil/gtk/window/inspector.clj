@@ -1,12 +1,13 @@
 (ns jonquil.gtk.window.inspector
-  "The window's inspector panel: showing and closing it, the one-request-at-a-time
-  guard (try-inspect!), folding each reply into the pane's state, and Inspect
-  Last Result and Inspect Form, which open it on the last value or on the form
-  at the caret. build makes activate!'s inspector pane and its closures.
-  Internal to the window, as jonquil.gtk.window.status is. Moved
-  out of jonquil.gtk.window unchanged, then inspect-last! took one map and
-  inspect-form!'s evaluation split into named steps;
-  the lock caller rule in its docstring applies here."
+  "The window's inspector panel: showing and closing it, the
+  one-request-at-a-time guard (try-inspect!), folding each reply into the
+  pane's state, and Inspect Last Result and Inspect Form, which open it on
+  the last value or on the form at the caret. build makes activate!'s
+  inspector pane and its closures. Internal to the window, as
+  jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged,
+  then inspect-last! took one map and inspect-form!'s evaluation split into
+  named steps; the lock caller rule in jonquil.gtk.window's docstring
+  applies here."
   (:require [jonquil.commands :as commands]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [on-gui!]]
