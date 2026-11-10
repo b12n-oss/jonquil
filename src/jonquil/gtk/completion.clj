@@ -296,7 +296,8 @@
 (defn close!
   "Hides c's popover (idempotent, same as jonquil.gtk.popover/hide!) and
   clears its own :state -- the ui's own :complete!*/handle-key!/refine!
-  and window.clj's on-focus-lost! registration all call this."
+  and jonquil.gtk.window.tabs's on-focus-lost! registration all call
+  this."
   [c]
   (when (popover/open? c) (popover/hide! c))
   (reset! (:state c) nil)
@@ -445,10 +446,10 @@
         1))))
 
 (defn refine!
-  "Called on every editor/on-cursor-moved! tick (window.clj's own wiring,
-  not a new editor.clj hook -- see the ns docstring): a no-op unless c is
-  actually open. c's own :snapshot-fn is the only source of the current
-  snapshot (editor/snapshot on :ed by default; nil is a valid answer --
+  "Called on every editor/on-cursor-moved! tick (jonquil.gtk.window.tabs's
+  own wiring, not a new editor.clj hook -- see the ns docstring): a no-op
+  unless c is actually open. c's own :snapshot-fn is the only source of the
+  current snapshot (editor/snapshot on :ed by default; nil is a valid answer --
   the console's own input-snapshot returns nil once the caret has left the
   input region entirely, and help/prefix-at on a nil snapshot is itself
   nil, so that closes exactly like any other out-of-word caret move, with

@@ -1002,7 +1002,7 @@
 
 ;; --- Parinfer rows --------------------------------------------
 ;; Each row turns the mode on through editor/set-parinfer-fns! (what
-;; jonquil.gtk.window wires per tab) and makes the edit the way GTK's own
+;; jonquil.gtk.window.tabs wires per tab) and makes the edit the way GTK's own
 ;; commit does: one begin/end-user-action around an insert or delete, so
 ;; the end-user-action hook runs. The last step of every row turns
 ;; Parinfer back off, so the other rows are untouched.

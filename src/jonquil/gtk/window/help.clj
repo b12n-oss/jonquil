@@ -524,7 +524,7 @@
   (on-focus-lost! (fn [] (completion/close! completion))))
 
 (defn build
-  "activate!'s popover registry, source-ctx and completion bindings, in activate!'s order: the popovers atom with its close and register fns, jump-back* and source-ctx (the map quick doc, jump and the source panel take for a tab), and the evaluator fns and the opts every tab's completion is built with. w holds what they read: :ev* :status-label :sp :sel* :active? :active-tab, :open-file! (jonquil.gtk.window's open-file!, called with @*tab-ctx), and :tab-ctx* and :right* (activate!'s *tab-ctx and *right, read when source-ctx and its :open-file! run). Returns w with :popovers :close-popovers-fn :register-popover-fn :source-ctx :server-ev :completion-ns-fn and :completion-opts added."
+  "activate!'s popover registry, source-ctx and completion bindings, in activate!'s order: the popovers atom with its close and register fns, jump-back* and source-ctx (the map quick doc, jump and the source panel take for a tab), and the evaluator fns and the opts every tab's completion is built with. w holds what they read: :ev* :status-label :sp :sel* :active? :active-tab, :open-file! (jonquil.gtk.window.tabs's open-file!, called with @*tab-ctx), and :tab-ctx* and :right* (activate!'s *tab-ctx and *right, read when source-ctx and its :open-file! run). Returns w with :popovers :close-popovers-fn :register-popover-fn :source-ctx :server-ev :completion-ns-fn and :completion-opts added."
   [{:keys [ev* status-label sp sel* active? active-tab open-file!] *tab-ctx :tab-ctx* *right :right* :as w}]
   (let [;; This window's own registry of popovers (completion, quick doc,
         ;; rename register theirs via register-popover-fn as they're
@@ -563,7 +563,7 @@
            :source-ctx source-ctx :server-ev server-ev :completion-ns-fn completion-ns-fn :completion-opts completion-opts)))
 
 (defn build-source-keys
-  "activate!'s source panel keys, in activate!'s order: the panel's F12, Close, Back and Open in window fns, jump-back-fn (Cmd/Ctrl+[ after a jump), and source-keys, the map the window keys read while the panel has focus. w holds what they read: :source-ctx :active-tab :right :sp :win :tabs, :open-file! :select-tab! and :tab-by-id (jonquil.gtk.window's own fns, as the parts' wctx passes them), and :tab-ctx* (activate!'s *tab-ctx, read when one of them runs). Returns w with :source-jump-fn :source-close-fn :source-back-fn :source-open-fn :jump-back-fn and :source-keys added."
+  "activate!'s source panel keys, in activate!'s order: the panel's F12, Close, Back and Open in window fns, jump-back-fn (Cmd/Ctrl+[ after a jump), and source-keys, the map the window keys read while the panel has focus. w holds what they read: :source-ctx :active-tab :right :sp :win :tabs, :open-file! :select-tab! and :tab-by-id (jonquil.gtk.window.tabs's fns, as the parts' wctx passes them), and :tab-ctx* (activate!'s *tab-ctx, read when one of them runs). Returns w with :source-jump-fn :source-close-fn :source-back-fn :source-open-fn :jump-back-fn and :source-keys added."
   [{:keys [source-ctx active-tab right sp win tabs open-file! select-tab! tab-by-id] *tab-ctx :tab-ctx* :as w}]
   (let [source-jump-fn (fn [] (do-source-jump! (source-ctx (active-tab))))
         source-close-fn (fn [] (close-source-panel! right (:ed (active-tab))))

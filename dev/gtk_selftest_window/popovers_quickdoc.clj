@@ -283,8 +283,8 @@
   on it: this window is never the OS's key window, so
   has_focus stays false throughout and a real focus transfer can't be
   observed here the way gtk_root_get_focus's own focus-WITHIN tracking
-  can). A regression that drops window.clj's hide-on-focus-lost closure
-  would leave the popover open here."
+  can). A regression that drops jonquil.gtk.window.tabs's
+  hide-on-focus-lost closure would leave the popover open here."
   [ui]
   (go-row :quick-doc-closes-on-focus-loss support/check
     (on-gtk (let [ed (:editor ui) hp (:help-popover ui)]
