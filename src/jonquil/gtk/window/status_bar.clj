@@ -1,8 +1,11 @@
 (ns jonquil.gtk.window.status-bar
-  "The window's status bar: the status text, the key hints and their toggle, the agent's pending count, the Messages unread count, the dialect, the Parinfer label and Ln/Col, in one row under the window's panes. build makes activate!'s status bar labels and place! fills the row. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
-  (:require [jonquil.dialect :as dialect]
+  "The window's status bar: the status text, the key hints and their toggle, the agent's pending count, the Messages unread count, the dialect, the Parinfer label and Ln/Col, in one row under the window's panes. build makes activate!'s status bar labels and place! fills the row. build-parinfer makes the window's Parinfer mode, the label's update, the hook's status line and the Parinfer command. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
+  (:require [jonquil.commands :as commands]
+            [jonquil.dialect :as dialect]
+            [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.window.status :as win-status]))
+            [jonquil.gtk.window.status :as win-status]
+            [jonquil.settings :as settings]))
 
 (def ^:private STATUS-MARGIN
   ;; px at each end of the status bar: GNOME's usual 6-12 px gutter, the
@@ -45,6 +48,67 @@
     (assoc w :status-label status-label :line-col-label line-col-label :hint-label hint-label
            :hints-on? hints-on? :parinfer-label parinfer-label :pending-label pending-label
            :dialect-label dialect-label :unread-label unread-label :hints-toggle-fn hints-toggle-fn)))
+
+(defn build-parinfer
+  "activate!'s Parinfer bindings, in activate!'s order: the window's one
+  mode (from settings.edn, else :off), the label that follows the active
+  tab's effective mode, the hook's one status line and the command's fn.
+  w holds what they read: :settings-path* :active-tab :parinfer-label
+  :evaluating-fn :status-label and :cv. Returns w with :parinfer-mode*
+  :update-parinfer-label! :parinfer-status-fn and :parinfer-fn added."
+  [{:keys [settings-path* active-tab parinfer-label evaluating-fn status-label cv] :as w}]
+  (let [;; Parinfer: the window's one mode, read by every tab's editor
+        ;; hook; :off unless settings.edn set one.
+        parinfer-mode* (atom (or (:parinfer (settings/load-settings @settings-path*)) :off))
+        ;; The active tab's project may override the global either way
+        ;; (.jonquil.edn :parinfer), so the label follows the ACTIVE tab's
+        ;; effective mode and says (project) when the override decides.
+        active-parinfer-override (fn []
+                                   (when-let [t (active-tab)]
+                                     (:parinfer (some-> (:project t) deref))))
+        update-parinfer-label! (fn []
+                                 (let [ov (active-parinfer-override)]
+                                   (if-let [t (commands/parinfer-status-text
+                                               (commands/parinfer-effective ov @parinfer-mode*)
+                                               (some? ov)
+                                               @parinfer-mode*)]
+                                     (do (g/gtk-label-set-text parinfer-label t)
+                                         (g/gtk-widget-set-visible parinfer-label 1))
+                                     (g/gtk-widget-set-visible parinfer-label 0))))
+        ;; The hook's one status line: a skipped long form names itself,
+        ;; and the next adjusted edit clears it back to Ready.
+        parinfer-skip-shown* (atom false)
+        parinfer-status-fn (fn [msg]
+                             (if msg
+                               (do (reset! parinfer-skip-shown* true)
+                                   (when-not (evaluating-fn)
+                                     (win-status/set-status! status-label
+                                                             (str (or (commands/parinfer-label-text @parinfer-mode*)
+                                                                      "Parinfer")
+                                                                  " (" msg ")"))))
+                               (when (and (compare-and-set! parinfer-skip-shown* true false)
+                                          (not (evaluating-fn)))
+                                 (win-status/set-status! status-label "Ready"))))
+        parinfer-fn (fn [choice]
+                      (let [k (commands/parinfer-step @parinfer-mode* choice)]
+                        (reset! parinfer-mode* k)
+                        ;; A cleared skip note mustn't later stomp a newer
+                        ;; status.
+                        (reset! parinfer-skip-shown* false)
+                        (update-parinfer-label!)
+                        (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
+                          (cview/append! cv :system (str "; settings: " err "\n")))
+                        ;; same restraint as the theme: a live Running…
+                        ;; status isn't overwritten. A pinned active tab
+                        ;; names its project's choice, since the command
+                        ;; changed only the global.
+                        (when-not (evaluating-fn)
+                          (win-status/set-status! status-label
+                                                  (str "Parinfer: " (commands/parinfer-mode-word k)
+                                                       (commands/parinfer-pinned-note
+                                                        k (active-parinfer-override)))))))]
+    (assoc w :parinfer-mode* parinfer-mode* :update-parinfer-label! update-parinfer-label!
+           :parinfer-status-fn parinfer-status-fn :parinfer-fn parinfer-fn)))
 
 (defn place!
   "activate!'s status bar placement, in activate!'s order: the labels in

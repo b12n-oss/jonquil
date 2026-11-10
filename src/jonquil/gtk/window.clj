@@ -18,7 +18,6 @@
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.command-registry :as cmd-registry]
-            [jonquil.commands :as commands]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
@@ -294,56 +293,9 @@
         toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv))
         clear-console-fn (fn [] (win-keys/do-clear-console! cv))
         clear-last-fn (fn [] (win-keys/do-clear-last-output! cv))
-        ;; Parinfer: the window's one mode, read by every tab's editor
-        ;; hook; :off unless settings.edn set one.
-        parinfer-mode* (atom (or (:parinfer (settings/load-settings @settings-path*)) :off))
-        ;; The active tab's project may override the global either way
-        ;; (.jonquil.edn :parinfer), so the label follows the ACTIVE tab's
-        ;; effective mode and says (project) when the override decides.
-        active-parinfer-override (fn []
-                                   (when-let [t (active-tab)]
-                                     (:parinfer (some-> (:project t) deref))))
-        update-parinfer-label! (fn []
-                                 (let [ov (active-parinfer-override)]
-                                   (if-let [t (commands/parinfer-status-text
-                                               (commands/parinfer-effective ov @parinfer-mode*)
-                                               (some? ov)
-                                               @parinfer-mode*)]
-                                     (do (g/gtk-label-set-text parinfer-label t)
-                                         (g/gtk-widget-set-visible parinfer-label 1))
-                                     (g/gtk-widget-set-visible parinfer-label 0))))
-        ;; The hook's one status line: a skipped long form names itself,
-        ;; and the next adjusted edit clears it back to Ready.
-        parinfer-skip-shown* (atom false)
-        parinfer-status-fn (fn [msg]
-                             (if msg
-                               (do (reset! parinfer-skip-shown* true)
-                                   (when-not (evaluating-fn)
-                                     (win-status/set-status! status-label
-                                                  (str (or (commands/parinfer-label-text @parinfer-mode*)
-                                                           "Parinfer")
-                                                       " (" msg ")"))))
-                               (when (and (compare-and-set! parinfer-skip-shown* true false)
-                                          (not (evaluating-fn)))
-                                 (win-status/set-status! status-label "Ready"))))
-        parinfer-fn (fn [choice]
-                      (let [k (commands/parinfer-step @parinfer-mode* choice)]
-                        (reset! parinfer-mode* k)
-                        ;; A cleared skip note mustn't later stomp a newer
-                        ;; status.
-                        (reset! parinfer-skip-shown* false)
-                        (update-parinfer-label!)
-                        (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
-                          (cview/append! cv :system (str "; settings: " err "\n")))
-                        ;; same restraint as the theme: a live Running…
-                        ;; status isn't overwritten. A pinned active tab
-                        ;; names its project's choice, since the command
-                        ;; changed only the global.
-                        (when-not (evaluating-fn)
-                          (win-status/set-status! status-label
-                                       (str "Parinfer: " (commands/parinfer-mode-word k)
-                                            (commands/parinfer-pinned-note
-                                             k (active-parinfer-override)))))))
+        {:keys [parinfer-mode* update-parinfer-label! parinfer-status-fn parinfer-fn]}
+        (win-status-bar/build-parinfer {:settings-path* settings-path* :active-tab active-tab :parinfer-label parinfer-label
+                                        :evaluating-fn evaluating-fn :status-label status-label :cv cv})
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
         open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; The editor's and the console's own context menus -- each item

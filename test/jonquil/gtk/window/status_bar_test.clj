@@ -1,9 +1,11 @@
 (ns jonquil.gtk.window.status-bar-test
   (:require [clojure.test :refer [deftest is]]
             [jonquil.dialect :as dialect]
+            [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.status :as win-status]
-            [jonquil.gtk.window.status-bar :as win-status-bar]))
+            [jonquil.gtk.window.status-bar :as win-status-bar]
+            [jonquil.settings :as settings]))
 
 (deftest build-makes-the-labels-and-the-hints-toggle-test
   (let [log (atom []) l (fn [x] (swap! log conj x)) n (atom 0)
@@ -54,3 +56,66 @@
             [:append ::box ::dialect] [:append ::box ::parinfer] :parinfer-update [:append ::box ::line-col]
             [:margin-start ::box 8] [:margin-end ::box 8] [:append ::vbox ::box]]
            @log))))
+
+(deftest build-parinfer-mode-label-status-and-command-test
+  (let [log (atom []) l (fn [x] (swap! log conj x))
+        busy (atom false) save-err (atom nil)
+        tab (atom {:project (atom {:parinfer :paren})})
+        in {:settings-path* (atom "/cfg/settings.edn") :active-tab (fn [] @tab) :parinfer-label ::pl
+            :evaluating-fn (fn [] @busy) :status-label ::sl :cv ::cv :x 1}
+        w (with-redefs [settings/load-settings (fn [p] (l [:load p]) {:parinfer :smart})]
+            (win-status-bar/build-parinfer in))]
+    (is (= (into (set (keys in)) #{:parinfer-mode* :update-parinfer-label! :parinfer-status-fn :parinfer-fn})
+           (set (keys w))))
+    (is (= :smart @(:parinfer-mode* w)))
+    (is (= [[:load "/cfg/settings.edn"]] @log))
+    (reset! log [])
+    (with-redefs [g/gtk-label-set-text (fn [o t] (l [:text o t]))
+                  g/gtk-widget-set-visible (fn [o v] (l [:visible o v]))
+                  win-status/set-status! (fn [o s] (l [:status o s]))
+                  settings/save-settings! (fn [p m] (l [:save p m]) @save-err)
+                  cview/append! (fn [c k s] (l [:append c k s]))]
+      ((:update-parinfer-label! w))
+      (reset! tab nil)
+      ((:update-parinfer-label! w))
+      (reset! (:parinfer-mode* w) :off)
+      ((:update-parinfer-label! w))
+      (reset! (:parinfer-mode* w) :smart)
+      (is (= [[:text ::pl "Parinfer: Paren (project)"] [:visible ::pl 1]
+              [:text ::pl "Parinfer: Smart"] [:visible ::pl 1]
+              [:visible ::pl 0]]
+             @log))
+      (reset! log [])
+      ((:parinfer-status-fn w) "form too long")
+      ((:parinfer-status-fn w) nil)
+      ((:parinfer-status-fn w) nil)
+      (reset! busy true)
+      ((:parinfer-status-fn w) "x")
+      ((:parinfer-status-fn w) nil)
+      (reset! busy false)
+      ((:parinfer-status-fn w) nil)
+      (is (= [[:status ::sl "Parinfer: Smart (form too long)"] [:status ::sl "Ready"]] @log))
+      (reset! log [])
+      (reset! tab {:project (atom {:parinfer :paren})})
+      ((:parinfer-status-fn w) "y")
+      ((:parinfer-fn w) :indent)
+      ((:parinfer-status-fn w) nil)
+      (is (= :indent @(:parinfer-mode* w)))
+      (reset! save-err "disk full")
+      (reset! busy true)
+      ((:parinfer-fn w) :next)
+      (reset! busy false)
+      (reset! tab nil)
+      ((:parinfer-fn w) :off)
+      (is (= [[:status ::sl "Parinfer: Smart (y)"]
+              [:text ::pl "Parinfer: Paren (project)"] [:visible ::pl 1]
+              [:save "/cfg/settings.edn" {:parinfer :indent}]
+              [:status ::sl "Parinfer: Indent (this project says Paren)"]
+              [:text ::pl "Parinfer: Paren (project)"] [:visible ::pl 1]
+              [:save "/cfg/settings.edn" {:parinfer :paren}]
+              [:append ::cv :system "; settings: disk full\n"]
+              [:visible ::pl 0]
+              [:save "/cfg/settings.edn" {:parinfer :off}]
+              [:append ::cv :system "; settings: disk full\n"]
+              [:status ::sl "Parinfer: off"]]
+             @log)))))
