@@ -25,7 +25,6 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
-            [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -34,6 +33,7 @@
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.console :as win-console]
+            [jonquil.gtk.window.context :as win-context]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.inspector :as win-inspector]
@@ -212,9 +212,6 @@
                                        :server-ev server-ev :close-popovers-fn close-popovers-fn})
         {:keys [run-fn stop-fn run-selection-fn run-changed-fn]}
         (win-run/build {:active-tab active-tab :cv cv :ev* ev* :sel* sel* :status-label status-label})
-        open-fn (fn [] (win-files/do-open! cv win (fn [p] (win-tabs/open-file! @*tab-ctx p))))
-        save-fn (fn [] (let [t (active-tab)] (win-files/do-save! (:ed t) cv win (:path t))))
-        save-as-fn (fn [] (let [t (active-tab)] (win-files/do-save-as! (:ed t) cv win (:path t))))
         {:keys [close-fn new-tab-fn step-tab-fn digit-tab-fn]}
         (win-tabs/build {:tabs tabs :active-id active-id :active-tab active-tab :tab-ctx* *tab-ctx})
         {:keys [h-paned inspector-state inspecting? inspect-queued inspector-last-args on-view on-inspector-close pane]}
@@ -223,26 +220,19 @@
         (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
                                :settings-path* settings-path* :status-label status-label})
         _ (reset! *right right)
-        inspect-last-ctx {:ev* ev* :right right :pane pane :inspector-state inspector-state
-                          :inspecting? inspecting? :inspector-last-args inspector-last-args
-                          :on-view on-view :status-label status-label :start [:start {}]}
-        inspect-last-fn (fn [] (win-inspector/inspect-last! inspect-last-ctx))
-        inspect-form-fn (fn [] (win-inspector/inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
-                                               :inspecting? inspecting? :inspect-queued inspect-queued
-                                               :inspect-last-fn inspect-last-fn}))
         {:keys [source-jump-fn source-close-fn source-back-fn source-open-fn jump-back-fn source-keys]}
         (win-help/build-source-keys {:source-ctx source-ctx :active-tab active-tab :right right :sp sp :win win :tabs tabs
                                      :open-file! win-tabs/open-file! :select-tab! win-tabs/select-tab! :tab-by-id win-tabs/tab-by-id
                                      :tab-ctx* *tab-ctx})
-        close-inspector-fn (fn [] (win-inspector/close-inspector-panel! right (:ed (active-tab))))
-        toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv))
-        clear-console-fn (fn [] (win-keys/do-clear-console! cv))
-        clear-last-fn (fn [] (win-keys/do-clear-last-output! cv))
         {:keys [parinfer-mode* update-parinfer-label! parinfer-status-fn parinfer-fn]}
         (win-status-bar/build-parinfer {:settings-path* settings-path* :active-tab active-tab :parinfer-label parinfer-label
                                         :evaluating-fn evaluating-fn :status-label status-label :cv cv})
-        open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
-        open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
+        {:keys [open-fn save-fn save-as-fn inspect-last-ctx inspect-last-fn inspect-form-fn close-inspector-fn
+                toggle-focus-fn clear-console-fn clear-last-fn open-find-fn open-replace-fn]}
+        (win-context/build-key-fns {:cv cv :win win :active-tab active-tab :ev* ev* :sel* sel* :status-label status-label
+                                    :right right :pane pane :inspector-state inspector-state :inspecting? inspecting?
+                                    :inspect-queued inspect-queued :inspector-last-args inspector-last-args
+                                    :on-view on-view :tab-ctx* *tab-ctx})
         ;; The editor's and the console's own context menus -- each item
         ;; calls the EXACT SAME fn its key does, through its command in
         ;; jonquil.command-registry. install-context-menu! returns the GSimpleActionGroup, so :activate-
