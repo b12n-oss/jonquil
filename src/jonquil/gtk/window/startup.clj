@@ -1,7 +1,8 @@
 (ns jonquil.gtk.window.startup
-  "The window's start. connect-quit! makes activate!'s close-request connect and quit action with the closures that read activate!'s forward atoms, and startup! builds the tabs' context and the first tab, then starts the tree, the notebook, the runtime and the reopen, and runs the plugins part's start. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window's activate! unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
+  "The window's start. build makes activate!'s first bindings (the settings path, the dialect selection and the evaluator, the tab list, the notebook and the window), connect-quit! makes activate!'s close-request connect and quit action with the closures that read activate!'s forward atoms, and startup! builds the tabs' context and the first tab, then starts the tree, the notebook, the runtime and the reopen, and runs the plugins part's start. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window's activate! unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
@@ -18,8 +19,59 @@
             [jonquil.gtk.window.theme :as win-theme]
             [jonquil.login-path :as login-path]
             [jonquil.parts :as parts]
+            [jonquil.runtime-registry :as registry]
             [jonquil.settings :as settings]
             [jonquil.tabs :as tabs]))
+
+(defn build
+  "activate!'s first bindings, in activate!'s order: the settings path, whether the window runs plugins, the dialect selection, the evaluator and the session it starts with, evaluating-fn, the tab list with the active id, the next id, active-tab and active?, the notebook, *tab-ctx, the recent tab ids and the window. w holds activate!'s app and the options they read: :app :file :dir :settings-path :plugins?. Returns w with :settings-path* :plugins-on* :sel* :ev* :session :evaluating-fn :tabs :active-id :next-id :active-tab :active? :notebook :tab-ctx* (the *tab-ctx atom) :recent-tabs and :win added."
+  [{:keys [app file dir settings-path plugins?] :as w}]
+  (let [;; An atom, not a plain value: :settings-path!* (self-test hook
+        ;; only) repoints it at an impossible path so a save can be forced
+        ;; to fail. Defaults to the real settings file; every harness
+        ;; (dev/gtk_selftest_window.clj, dev/demo_shots.clj,
+        ;; dev/smoke/binary_smoke.clj's XDG_CONFIG_HOME) is responsible for
+        ;; passing its own isolated :settings-path instead. Named
+        ;; settings-path* so it doesn't shadow the destructured
+        ;; :settings-path option.
+        settings-path* (atom (or settings-path (settings/settings-path)))
+        ;; Whether this window runs plugins (false under --no-plugins); an
+        ;; atom only so :plugins-on!* (self-test hook) can turn it off in a
+        ;; window that started with them
+        plugins-on* (atom (not (false? plugins?)))
+        ;; The window's dialect and runtime (jonquil.dialect/select), and
+        ;; its one evaluator. ev* is an atom because it is swapped when a
+        ;; file from another runtime opens; every reader derefs it at call
+        ;; time. session stays the evaluator the window started with, for
+        ;; the ui map's :session. Joins jonquil.runtime-registry right away,
+        ;; same as every later evaluator apply-selection! makes.
+        ;; A directory launch resolves the directory's own project;
+        ;; find-project starts at a path's parent, so it's given a child
+        ;; of dir (measured 2026-10-09).
+        sel* (atom (if (and dir (not file))
+                     (ft/project-selection dir (:dialect (settings/load-settings @settings-path*)))
+                     (win-runtime/select-for file @settings-path*)))
+        ev* (atom (doto (ev/make @sel*) registry/register!))
+        session @ev*
+        evaluating-fn (fn [] (ev/evaluating? @ev*))
+        ;; The window's tabs, in order, and the active
+        ;; one's id; every window-level action resolves the active tab when
+        ;; it runs (active-tab), never one captured at build time.
+        tabs (atom [])
+        active-id (atom nil)
+        next-id (atom 0)
+        active-tab (fn [] (some (fn [t] (when (= @active-id (:id t)) t)) @tabs))
+        active? (fn [t] (= @active-id (:id t)))
+        notebook (g/gtk-notebook-new)
+        ;; The tab operations' context (tab-ctx), set once the tabs' wiring
+        ;; context exists in the body below -- the same forward-reference
+        ;; idiom *cv and *right use.
+        *tab-ctx (atom nil)
+        ;; Tab ids, most recently shown first (on-switch! moves one to the
+        ;; front, remove-tab! drops it): Genera's Select order
+        recent-tabs (atom [])
+        win (g/gtk-application-window-new app)]
+    (assoc w :settings-path* settings-path* :plugins-on* plugins-on* :sel* sel* :ev* ev* :session session :evaluating-fn evaluating-fn :tabs tabs :active-id active-id :next-id next-id :active-tab active-tab :active? active? :notebook notebook :tab-ctx* *tab-ctx :recent-tabs recent-tabs :win win)))
 
 (defn connect-quit!
   "activate!'s close-request connect and quit action, through jonquil.gtk.window.quit's connect!, with close-request-fn's map built as activate! built it: :select! and :save-session! read *tab-ctx when they run, and :save-session! runs the parts' :on-quit hooks first. Called once per window; activate! reads nothing it returns. m holds :tabs :cv :win :app :confirmed-close? :suppress-close? :closing? :popovers :ev* :part-contribution :part-error! and :tab-ctx* (the *tab-ctx atom)."

@@ -1,8 +1,11 @@
 (ns jonquil.gtk.window.right-slot
-  "The window's right-hand slot: one box holding the inspector, the source panel, the plugin panels and the parts' panels, one showing at a time, and the fns that show, hide and name the one on screen. build makes activate!'s slot bindings. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; build holds activate!'s own bindings in their order."
+  "The window's right-hand slot: one box holding the inspector, the source panel, the plugin panels and the parts' panels, one showing at a time, and the fns that show, hide and name the one on screen. build makes activate!'s slot bindings, build-panels makes the four panels and publish resets *right. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; build holds activate!'s own bindings in their order."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
+            [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
+            [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.status :as win-status]))
@@ -133,3 +136,26 @@
                                                        :inspector "; Nothing inspected yet: inspect a form or a result first."
                                                        :source "; The Source panel is empty: jump to a definition first.")))))]
     (assoc w :slot slot :part-panels* part-panels* :right right :panel-focus-fn panel-focus-fn)))
+
+(defn build-panels
+  "activate!'s right-hand slot panels, in activate!'s order: the source panel, the review panel, the plugin list and the plugin history, then *right, the right map's forward atom. Reads nothing from w. Returns w with :sp :rp :lp :hp and :right* (the *right atom) added."
+  [w]
+  (let [;; The source panel is built before the tabs, whose
+        ;; jump opens it; its root joins the right-hand slot once the
+        ;; inspector exists (*right, reset below).
+        sp (source-pane/make-pane)
+        ;; The review panel shares the slot
+        rp (review-pane/make-pane)
+        ;; The plugin list shares the slot too; its rows are rebuilt after
+        ;; every plugin step, like the reviews
+        lp (plugin-list-pane/make-pane)
+        ;; And the history of the plugin selected in it
+        hp (plugin-history-pane/make-pane)
+        *right (atom nil)]
+    (assoc w :sp sp :rp rp :lp lp :hp hp :right* *right)))
+
+(defn publish
+  "activate!'s *right reset, in its place right after build: from here on every fn that reads *right finds the right map. w holds :right and :right* (the *right atom). Returns w unchanged."
+  [{:keys [right] *right :right* :as w}]
+  (let [_ (reset! *right right)]
+    w))

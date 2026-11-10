@@ -1,5 +1,6 @@
 (ns jonquil.gtk.window.startup-test
   (:require [clojure.test :refer [deftest is]]
+            [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
@@ -16,6 +17,7 @@
             [jonquil.gtk.window.theme :as win-theme]
             [jonquil.login-path :as login-path]
             [jonquil.parts :as parts]
+            [jonquil.runtime-registry :as registry]
             [jonquil.settings :as settings]
             [jonquil.tabs :as tabs]))
 
@@ -161,3 +163,41 @@
                   [:show-model [:model dir]] [:apply [:selection dir :clj]] [:hooks :on-reroot [{:path dir}]]
                   [:toggle ::files 1] [:open ::ctx "/a.clj"] [:open ::ctx "/bad.clj"] [:status "Couldn't open bad.clj: no"]]
                  @log)))))))
+
+(deftest build-makes-the-first-bindings-test
+  (let [log (atom []) l (fn [x] (swap! log conj x)) n (atom 0)
+        mk (fn [& args] (let [k (keyword (str "w" (swap! n inc)))] (l (into [k] args)) k))
+        in {:app ::app :file "/f.clj" :dir nil :settings-path "/s.edn" :plugins? nil :x 1}
+        w (with-redefs [win-runtime/select-for (fn [f p] (l [:select-for f p]) ::sel)
+                        ev/make (fn [sel] (l [:make sel]) ::ev)
+                        registry/register! (fn [e] (l [:register e]))
+                        ev/evaluating? (fn [e] (l [:evaluating? e]) false)
+                        g/gtk-notebook-new (fn [] (mk :notebook))
+                        g/gtk-application-window-new (fn [app] (mk :window app))]
+            (win-startup/build in))]
+    (is (= (into (set (keys in)) #{:settings-path* :plugins-on* :sel* :ev* :session :evaluating-fn :tabs :active-id
+                                   :next-id :active-tab :active? :notebook :tab-ctx* :recent-tabs :win})
+           (set (keys w))))
+    (is (= ["/s.edn" true ::sel ::ev] (map (comp deref w) [:settings-path* :plugins-on* :sel* :ev*])))
+    (is (= [[] nil 0 nil []] (map (comp deref w) [:tabs :active-id :next-id :tab-ctx* :recent-tabs])))
+    (is (= [[:select-for "/f.clj" "/s.edn"] [:make ::sel] [:register ::ev] [:w1 :notebook] [:w2 :window ::app]] @log))
+    (is (= [::ev :w1 :w2] [(:session w) (:notebook w) (:win w)]))
+    (reset! (:tabs w) [{:id 1} {:id 2}])
+    (reset! (:active-id w) 2)
+    (is (= {:id 2} ((:active-tab w))))
+    (is (true? ((:active? w) {:id 2})))
+    (with-redefs [ev/evaluating? (fn [e] [:evaluating? e])]
+      (is (= [:evaluating? ::ev] ((:evaluating-fn w)))))))
+
+(deftest build-reads-a-directory-launch-and-no-plugins-test
+  (let [w (with-redefs [settings/settings-path (fn [] "/default.edn")
+                        settings/load-settings (fn [p] {:dialect [:from p]})
+                        ft/project-selection (fn [d dialect] [:project d dialect])
+                        ev/make (fn [sel] [:ev sel])
+                        registry/register! (fn [_])
+                        g/gtk-notebook-new (fn [] ::notebook)
+                        g/gtk-application-window-new (fn [_] ::win)]
+            (win-startup/build {:app ::app :dir "/d" :plugins? false}))]
+    (is (= "/default.edn" @(:settings-path* w)))
+    (is (false? @(:plugins-on* w)))
+    (is (= [:project "/d" [:from "/default.edn"]] @(:sel* w)))))

@@ -16,22 +16,16 @@
   dirty-changed callback, the self-test's direct calls) already runs on the
   GTK thread, so it calls GTK directly."
   (:require [jolt.ffi :as ffi]
-            [jonquil.evaluator :as ev]
-            [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
-            [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
-            [jonquil.gtk.review-pane :as review-pane]
-            [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.window.console :as win-console]
             [jonquil.gtk.window.context :as win-context]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.inspector :as win-inspector]
             [jonquil.gtk.window.layout :as win-layout]
+            [jonquil.gtk.window.quit :as win-quit]
             [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.run :as win-run]
-            [jonquil.gtk.window.runtime :as win-runtime]
             [jonquil.gtk.window.startup :as win-startup]
             [jonquil.gtk.window.status-bar :as win-status-bar]
             [jonquil.gtk.window.tabs :as win-tabs]
@@ -43,9 +37,7 @@
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
-            [jonquil.runtime-registry :as registry]
-            [jonquil.session]
-            [jonquil.settings :as settings]))
+            [jonquil.session]))
 
 ;; --- construction ------------------------------------------------------
 
@@ -118,76 +110,21 @@
            (catch :default _ nil)))))
 
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
-  (let [;; An atom, not a plain value: :settings-path!* (self-test hook
-        ;; only) repoints it at an impossible path so a save can be forced
-        ;; to fail. Defaults to the real settings file; every harness
-        ;; (dev/gtk_selftest_window.clj, dev/demo_shots.clj,
-        ;; dev/smoke/binary_smoke.clj's XDG_CONFIG_HOME) is responsible for
-        ;; passing its own isolated :settings-path instead. Named
-        ;; settings-path* so it doesn't shadow the destructured
-        ;; :settings-path option.
-        settings-path* (atom (or settings-path (settings/settings-path)))
-        ;; Whether this window runs plugins (false under --no-plugins); an
-        ;; atom only so :plugins-on!* (self-test hook) can turn it off in a
-        ;; window that started with them
-        plugins-on* (atom (not (false? plugins?)))
-        ;; The window's dialect and runtime (jonquil.dialect/select), and
-        ;; its one evaluator. ev* is an atom because it is swapped when a
-        ;; file from another runtime opens; every reader derefs it at call
-        ;; time. session stays the evaluator the window started with, for
-        ;; the ui map's :session. Joins jonquil.runtime-registry right away,
-        ;; same as every later evaluator apply-selection! makes.
-        ;; A directory launch resolves the directory's own project;
-        ;; find-project starts at a path's parent, so it's given a child
-        ;; of dir (measured 2026-10-09).
-        sel* (atom (if (and dir (not file))
-                     (ft/project-selection dir (:dialect (settings/load-settings @settings-path*)))
-                     (win-runtime/select-for file @settings-path*)))
-        ev* (atom (doto (ev/make @sel*) registry/register!))
-        session @ev*
-        evaluating-fn (fn [] (ev/evaluating? @ev*))
-        ;; The window's tabs, in order, and the active
-        ;; one's id; every window-level action resolves the active tab when
-        ;; it runs (active-tab), never one captured at build time.
-        tabs (atom [])
-        active-id (atom nil)
-        next-id (atom 0)
-        active-tab (fn [] (some (fn [t] (when (= @active-id (:id t)) t)) @tabs))
-        active? (fn [t] (= @active-id (:id t)))
-        notebook (g/gtk-notebook-new)
-        ;; The tab operations' context (tab-ctx), set once the tabs' wiring
-        ;; context exists in the body below -- the same forward-reference
-        ;; idiom *cv and *right use.
-        *tab-ctx (atom nil)
-        ;; Tab ids, most recently shown first (on-switch! moves one to the
-        ;; front, remove-tab! drops it): Genera's Select order
-        recent-tabs (atom [])
-        win (g/gtk-application-window-new app)
+  (let [{:keys [settings-path* plugins-on* sel* ev* session evaluating-fn tabs active-id next-id active-tab active? notebook recent-tabs win] *tab-ctx :tab-ctx*}
+        (win-startup/build {:app app :file file :dir dir :settings-path settings-path :plugins? plugins?})
         {:keys [status-label line-col-label hint-label hints-on? parinfer-label pending-label dialect-label
                 unread-label hints-toggle-fn]}
         (win-status-bar/build {:sel* sel*})
-        confirmed-close? (atom false)
-        ;; Self-test hooks only -- see close-request-fn's docstring.
-        suppress-close? (atom false)
-        closing? (atom false)
+        {:keys [confirmed-close? suppress-close? closing?]}
+        (win-quit/build {})
         {:keys [bang* cv]}
         (win-console/build {:active-tab active-tab :ev* ev* :status-label status-label :evaluating-fn evaluating-fn})
         {:keys [provider theme-name theme-choice system-dark-fn* poll-armed? arm-count
                 zoom-fn theme-ctx set-theme-fn cycle-theme-fn]}
         (win-theme/build {:tabs tabs :cv cv :settings-path* settings-path* :status-label status-label
                           :evaluating-fn evaluating-fn :closing? closing?})
-        ;; The source panel is built before the tabs, whose
-        ;; jump opens it; its root joins the right-hand slot once the
-        ;; inspector exists (*right, reset below).
-        sp (source-pane/make-pane)
-        ;; The review panel shares the slot
-        rp (review-pane/make-pane)
-        ;; The plugin list shares the slot too; its rows are rebuilt after
-        ;; every plugin step, like the reviews
-        lp (plugin-list-pane/make-pane)
-        ;; And the history of the plugin selected in it
-        hp (plugin-history-pane/make-pane)
-        *right (atom nil)
+        {:keys [sp rp lp hp] *right :right*}
+        (win-right-slot/build-panels {})
         {:keys [popovers close-popovers-fn register-popover-fn source-ctx server-ev completion-ns-fn completion-opts]}
         (win-help/build {:ev* ev* :status-label status-label :sp sp :sel* sel* :active? active? :active-tab active-tab
                          :open-file! win-tabs/open-file! :tab-ctx* *tab-ctx :right* *right})
@@ -203,7 +140,7 @@
         {:keys [slot part-panels* right panel-focus-fn]}
         (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
                                :settings-path* settings-path* :status-label status-label})
-        _ (reset! *right right)
+        _ (win-right-slot/publish {:right right :right* *right})
         {:keys [source-jump-fn source-close-fn source-back-fn source-open-fn jump-back-fn source-keys]}
         (win-help/build-source-keys {:source-ctx source-ctx :active-tab active-tab :right right :sp sp :win win :tabs tabs
                                      :open-file! win-tabs/open-file! :select-tab! win-tabs/select-tab! :tab-by-id win-tabs/tab-by-id
