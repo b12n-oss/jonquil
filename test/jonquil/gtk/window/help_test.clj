@@ -314,6 +314,23 @@
         ((:on-error opts) "m"))
       (is (= [[::l "m"]] @log)))))
 
+(deftest build-server-ev-answers-a-server-evaluator-test
+  (let [server #_{:clj-kondo/ignore [:missing-protocol-method]}
+        (reify
+          ev/Evaluator
+          ev/ServerHelp)
+        ev* (atom server)
+        w (win-help/build {:ev* ev* :status-label ::l :sp ::sp :sel* ::sel
+                           :active? identity :active-tab ::at
+                           :open-file! (fn [_ _] nil)
+                           :tab-ctx* (atom nil) :right* (atom nil)})]
+    (is (identical? server ((:server-ev w))))
+    (is (identical? server ((:server-ev (:completion-opts w)))))
+    (reset! ev* (plain-evaluator))
+    (is (nil? ((:server-ev w))))
+    (reset! ev* server)
+    (is (identical? server ((:server-ev w))))))
+
 (deftest build-source-keys-wires-its-fns-test
   (let [log (atom [])
         lg (fn [e] (swap! log conj e))
