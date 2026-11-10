@@ -1,16 +1,28 @@
 (ns jonquil.gtk.window.tabs-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
+            [jonquil.command-registry :as cmd-registry]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.callbacks]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.gutter :as gutter]
+            [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.popover :as popover]
             [jonquil.gtk.tab :as tab]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.help :as win-help]
+            [jonquil.gtk.window.keys :as win-keys]
+            [jonquil.gtk.window.run :as win-run]
             [jonquil.gtk.window.runtime :as win-runtime]
             [jonquil.gtk.window.session :as win-session]
+            [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.tabs :as win-tabs]
             [jonquil.parts :as parts]
+            [jonquil.plugin-registry :as plugin-registry]
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
 
@@ -328,3 +340,253 @@
         ((:digit-tab-fn w) 5)
         (is (= [[:close ::tc2 2] [:new ::tc2 {}] [:select ::tc2 3] [:select ::tc2 1] [:select ::tc2 1] [:select ::tc2 3]]
                @log))))))
+
+;; --- wire-tab! ---------------------------------------------------------------
+
+(defn- wire-ctx
+  "A wire-tab! ctx whose callbacks log into log; over overrides keys."
+  [log over]
+  (merge {:win ::win :cv ::cv :ev* (atom ::ev) :status-label ::l :line-col-label ::lc
+          :close-popovers-fn (fn [& _] (swap! log conj :close-popovers))
+          :register-popover-fn (fn [p] (swap! log conj [:register p]))
+          :active? (fn [_] true) :source-ctx (fn [t] {:src (:id t)})
+          :sel-ctx ::sel-ctx :sel* (atom ::sel) :tabs (atom []) :settings-path* (atom "/s.edn")
+          :inspect-last-fn ::ilf :inspect-form-fn ::iff
+          :tree-saved! (fn [t] (swap! log conj [:tree (:id t)]))
+          :open-find-fn ::of :open-replace-fn ::or :window-key-args {} :repl-complete-fn ::rc
+          :hint-label ::hint :hints-on? (atom true)
+          :parinfer-mode-read (fn [] :indent) :parinfer-status-fn ::ps}
+         over))
+
+(defn- wire-t
+  "A tab map for wire-tab!, its editor's :changed set to changed."
+  [changed]
+  {:id 7
+   :ed {:buf ::buf :view ::view :destroyed? (atom false) :changed changed}
+   :fb ::fb :help-pop ::hp :full-doc-pop ::fdp :rename-pop {:entry ::entry}
+   :completion ::c :palette ::pal :last-shown (atom nil) :path (atom "/a.clj")
+   :discard-warned? (atom true) :close-btn ::close :project (atom nil)})
+
+(defn- wire-env
+  "Runs f with every editor, find bar, palette and GTK call wire-tab! makes
+  redefined to log into log and keep the fns it is handed in caps."
+  [log caps f]
+  (let [l (fn [x] (swap! log conj x))
+        keep-fn (fn [k] (fn [_ x] (swap! caps assoc k x) (l k)))
+        append (fn [k tag] (fn [_ x] (swap! caps update k (fnil conj []) x) (l tag)))]
+    (with-redefs [parts/run-tab-hooks! (fn [_ k t] (l [:hooks k (:id t)]))
+                  win-run/make-flash-fn (fn [_] {:flash! ::flash :cancel! ::cancel})
+                  cmd-registry/menu-items (fn [_ ctx] (swap! caps assoc :menu-ctx ctx) [:items])
+                  win-keys/install-context-menu! (fn [v _ on-err]
+                                                   (swap! caps assoc :menu-error on-err)
+                                                   (l [:menu v])
+                                                   ::group)
+                  editor/set-error-fn! (keep-fn :error-fn)
+                  editor/set-parinfer-fns! (fn [_ a b] (swap! caps assoc :parinfer-fns [a b]) (l :parinfer-fns))
+                  editor/set-format-style-fn! (keep-fn :format-style-fn)
+                  find-bar/set-error-fn! (fn [fb f] (swap! caps assoc :fb-error f) (l [:fb-error-fn fb]))
+                  editor/on-dirty-changed! (append :dirty :on-dirty)
+                  editor/on-cursor-moved! (append :moved :on-moved)
+                  editor/on-focus-lost! (append :lost :on-focus-lost)
+                  g/g-signal-connect-data (fn [o s & _] (l [:connect o s]) 1)
+                  win-status/contain-click (fn [label where f]
+                                             (swap! caps assoc :close-btn [label where f])
+                                             (fn [& _]))
+                  g/gtk-scrollable-get-vadjustment (constantly ::vadj)
+                  g/gtk-scrollable-get-hadjustment (constantly ::hadj)
+                  editor/set-quick-doc-fn! (keep-fn :quick-doc-fn)
+                  editor/set-jump-fn! (keep-fn :jump-fn)
+                  palette/set-handlers! (fn [p m] (swap! caps assoc :pal m) (l [:palette-handlers p]))
+                  editor/set-rename-fn! (keep-fn :rename-fn)
+                  editor/set-run-form-fn! (keep-fn :run-form-fn)
+                  editor/set-flash-cancel-fn! (fn [_ f] (l [:flash-cancel f]))
+                  win-help/wire-completion! (fn [c & _] (l [:completion c]))]
+      (f))))
+
+(def ^:private wired-in-order
+  [[:hooks :on-tab-wired 7] [:menu ::view] :error-fn :parinfer-fns :format-style-fn [:fb-error-fn ::fb]
+   :on-dirty [:connect ::close "clicked"] :on-dirty :on-moved [:register ::hp] [:register ::fdp]
+   [:connect ::vadj "value-changed"] [:connect ::hadj "value-changed"] :quick-doc-fn :jump-fn
+   :on-moved :on-moved :on-focus-lost :on-moved :on-focus-lost [:register {:entry ::entry}]
+   [:register ::pal] [:palette-handlers ::pal] :rename-fn :run-form-fn [:flash-cancel ::cancel]
+   [:connect ::entry "activate"] [:completion ::c]])
+
+(defn- wire-log
+  "The log of wiring (wire-t changed) under ctx-over."
+  [changed ctx-over]
+  (let [log (atom []) caps (atom {})]
+    (wire-env log caps #(#'win-tabs/wire-tab! (wire-ctx log ctx-over) (wire-t changed)))
+    @log))
+
+(deftest wire-tab-wires-in-order-test
+  (is (= wired-in-order (wire-log nil {})))
+  (testing "no hint label: LM6's cursor handler is gone"
+    (is (= (let [[a b] (split-at 17 wired-in-order)] (vec (concat a (rest b))))
+           (wire-log nil {:hint-label nil}))))
+  (testing "no parinfer-mode-read: no :parinfer-fns"
+    (is (= (vec (remove #{:parinfer-fns} wired-in-order))
+           (wire-log nil {:parinfer-mode-read nil}))))
+  (testing "a gutter: the buffer's changed handler connects second, refresh is set"
+    (let [changed {:ran (atom nil) :refresh (atom nil) :gutter ::gutter}]
+      (is (= (into [(first wired-in-order) [:connect ::buf "changed"]] (rest wired-in-order))
+             (wire-log changed {})))
+      (is (fn? @(:refresh changed))))))
+
+(deftest wire-tab-returns-its-actions-test
+  (let [log (atom []) caps (atom {}) quick (atom nil) run (atom nil)
+        ctx (wire-ctx log {})
+        t (wire-t nil)
+        r (with-redefs [win-help/do-quick-doc! (fn [m] (reset! quick m))
+                        win-help/do-jump! (fn [c] (swap! log conj [:jump c]))
+                        win-help/do-rename! (fn [& args] (swap! log conj (into [:rename] args)))
+                        win-help/do-rename-to! (fn [& args] (swap! log conj (into [:rename-to] args)))
+                        win-help/do-complete! (fn [& args] (swap! log conj (into [:complete] args)))
+                        win-run/do-run-form! (fn [m] (reset! run m))]
+            (let [r (wire-env log caps (fn [] (#'win-tabs/wire-tab! ctx t)))
+                  a (:actions r)]
+              (reset! log [])
+              ((:quick-doc! a))
+              ((:jump! a))
+              ((:rename! a))
+              ((:rename-to! a) "n")
+              ((:complete! a))
+              ((:run-form! a))
+              r))
+        a (:actions r)
+        mc (:menu-ctx @caps)
+        ed (:ed t)]
+    (is (= (assoc t :flash-fns {:flash! ::flash :cancel! ::cancel} :menu-group ::group :actions a) r))
+    (is (= #{:quick-doc! :jump! :rename! :rename-to! :complete! :run-form!} (set (keys a))))
+    (is (= #{:run-form! :jump! :rename! :quick-doc! :inspect-last-fn :inspect-form-fn :complete!
+             :toggle-comment! :format-all! :format-selection! :indent! :unindent! :open-find-fn :open-replace-fn}
+           (set (keys mc))))
+    (doseq [k [:jump! :rename! :quick-doc! :complete! :run-form!]]
+      (is (identical? (k a) (k mc)) (str k)))
+    (is (= ::ilf (:inspect-last-fn mc)))
+    (is (= ::iff (:inspect-form-fn mc)))
+    (is (= ::of (:open-find-fn mc)))
+    (is (= ::or (:open-replace-fn mc)))
+    (is (= [[:jump {:src 7}]
+            [:rename ed {:entry ::entry} ::l (:close-popovers-fn ctx)]
+            [:rename-to ed {:entry ::entry} "n" ::l]
+            [:complete ed ::c ::l]]
+           @log))
+    (is (= #{:ed :ev* :status-label :help-pop :full-doc-pop :last-shown :example-ctx :close-popovers-fn :win :active?}
+           (set (keys @quick))))
+    (is (= #{:tab :cv :ev* :sel* :status-label :flash-fns} (set (keys @run))))
+    (is (= {:flash! ::flash :cancel! ::cancel} (:flash-fns @run)))))
+
+(deftest wire-tab-handlers-test
+  (let [log (atom []) caps (atom {}) l (fn [x] (swap! log conj x))
+        active (atom true)
+        ctx (wire-ctx log {:active? (fn [_] @active)})
+        t (wire-t nil)
+        ed (:ed t)]
+    (with-redefs [win-tabs/refresh-labels! (fn [_] (l [:labels]))
+                  win-files/update-title! (fn [e w p] (l [:title e w p]))
+                  win-tabs/close-tab! (fn [_ id] (l [:close-tab id]))
+                  g/gtk-label-set-text (fn [lab s] (l [:text lab s]))
+                  popover/open? (constantly true)
+                  popover/hide! (fn [p] (l [:hide p]))
+                  help-popover/hide-unless-focused! (fn [p] (l [:hide-unless p]))
+                  win-status/set-status! (fn [lab s] (l [:status lab s]))
+                  g/g-timeout-add (fn [ms _ _] (l [:timeout ms]) 1)]
+      (wire-env log caps #(#'win-tabs/wire-tab! ctx t))
+      (let [[d1 d2] (:dirty @caps)
+            [m1 m2 m3 m4] (:moved @caps)
+            [f1 f2] (:lost @caps)
+            path (:path t)
+            fresh (fn [thunk] (reset! log []) (thunk) @log)]
+        (is (= 2 (count (:dirty @caps))))
+        (is (= 4 (count (:moved @caps))))
+        (is (= 2 (count (:lost @caps))))
+        (is (= [[:labels] [:title ed ::win path] [:tree 7]] (fresh #(d1 false))))
+        (is (= [[:labels] [:title ed ::win path]] (fresh #(d1 true))))
+        (reset! (:discard-warned? t) true)
+        (d2 true)
+        (is (true? @(:discard-warned? t)))
+        (d2 false)
+        (is (false? @(:discard-warned? t)))
+        (is (= [[:close-tab 7]] (fresh #((nth (:close-btn @caps) 2) nil))))
+        (is (= [::l "close tab"] (vec (take 2 (:close-btn @caps)))))
+        (is (= [[:text ::lc "Ln 3, Col 4"]] (fresh #(m1 [2 3]))))
+        (is (= [[:hide ::hp]] (fresh #(m2 [2 3]))))
+        (is (= [[:timeout 200]] (fresh #(m3 [2 3]))))
+        (is (= [[:hide ::fdp]] (fresh #(m4 [2 3]))))
+        (reset! active false)
+        (is (= [] (fresh #(m1 [2 3]))))
+        (reset! active true)
+        (is (= [[:hide ::hp]] (fresh f1)))
+        (is (= [[:hide-unless ::fdp]] (fresh f2)))
+        (is (= [[:status ::l "m"]] (fresh #((:error-fn @caps) "m"))))
+        (is (= [[:status ::l "m"]] (fresh #((:fb-error @caps) "m"))))
+        (is (= [[:status ::l "m"]] (fresh #((:menu-error @caps) "m"))))))))
+
+(deftest wire-tab-palette-test
+  (let [log (atom []) caps (atom {}) l (fn [x] (swap! log conj x))
+        ctx (wire-ctx log {:window-key-args {:switch-tab-fn (fn [x] (l [:tab x]))
+                                             :panel-focus-fn (fn [x] (l [:panel x]))
+                                             :layout-use-fn (fn [x] (l [:layout x]))
+                                             :world-restore-from-fn (fn [_] (throw (ex-info "boom" {})))}})]
+    (with-redefs [win-keys/window-key-ctx (fn [_ a b] [:wkc a b])
+                  editor/key-ctx (constantly [:kc])
+                  plugin-registry/all-commands (constantly ::cmds)
+                  cmd-registry/run-command-in (fn [cs id m] (l [:cmd cs id m]))
+                  win-status/set-status! (fn [lab s] (l [:status lab s]))]
+      (wire-env log caps #(#'win-tabs/wire-tab! ctx (wire-t nil)))
+      (reset! log [])
+      (let [{:keys [on-run on-error]} (:pal @caps)]
+        (on-run [:tab/switch 3])
+        (on-run [:panel/switch :trace])
+        (on-run [:layout/use "a"])
+        (on-run [:world/restore-from "/w"])
+        (on-run :edit/comment)
+        (on-error "m")
+        (is (= [[:tab 3] [:panel :trace] [:layout "a"] [:status ::l "; palette: boom"]
+                [:cmd ::cmds :edit/comment {:window [:wkc 0 0] :editor [:kc] :console {:complete! ::rc}}]
+                [:status ::l "m"]]
+               @log))))))
+
+(deftest wire-tab-path-watch-test
+  (let [run (fn [{:keys [two? keeps throw? same?]}]
+              (let [log (atom []) caps (atom {}) l (fn [x] (swap! log conj x))
+                    t (wire-t nil)
+                    ctx (wire-ctx log {:parinfer-label-update! (fn [] (l :pl))
+                                       :tabs (atom (if two? [t {:id 8}] [t]))})]
+                (with-redefs [win-runtime/select-for (fn [p _] {:profile [:p p]})
+                              tabs/keeps-window-jolt? (fn [& _] keeps)
+                              win-runtime/apply-selection! (fn [sc s]
+                                                             (l [:apply sc s])
+                                                             (when throw? (throw (ex-info "boom" {}))))
+                              editor/set-profile! (fn [_ p] (l [:profile p]))
+                              win-tabs/refresh-labels! (fn [_] (l [:labels]))
+                              cview/append! (fn [_ kind text] (l [:append kind text]))]
+                  (wire-env log caps #(#'win-tabs/wire-tab! ctx t))
+                  (reset! log [])
+                  (reset! (:path t) (if same? "/a.clj" "/b.clj"))
+                  [@log @(:project t)])))]
+    (let [[log project] (run {})]
+      (is (= {:profile [:p "/b.clj"]} project))
+      (is (= [[:apply ::sel-ctx {:profile [:p "/b.clj"]}] [:profile [:p "/b.clj"]] [:labels] :pl [:tree 7]] log)))
+    (is (= [] (first (run {:same? true}))))
+    (is (= [[:profile [:p "/b.clj"]] [:labels] :pl [:tree 7]] (first (run {:two? true}))))
+    (is (= [[:profile [:p "/b.clj"]] [:labels] :pl [:tree 7]] (first (run {:keeps true}))))
+    (is (= [[:apply ::sel-ctx {:profile [:p "/b.clj"]}]]
+           (take 1 (first (run {:throw? true})))))
+    (is (= [[:append :error "; project: boom\n"] [:profile [:p "/b.clj"]] [:labels] :pl [:tree 7]]
+           (rest (first (run {:throw? true})))))))
+
+(deftest wire-tab-changed-marks-test
+  (let [run (fn [destroyed?]
+              (let [log (atom []) caps (atom {})
+                    changed {:ran (atom nil) :refresh (atom nil) :gutter ::gutter}
+                    t (wire-t changed)]
+                (with-redefs [jonquil.gtk.callbacks/on-gui! (fn [f] (f))
+                              gutter/set-ranges! (fn [g rs] (swap! log conj [:ranges g rs]))]
+                  (wire-env log caps #(#'win-tabs/wire-tab! (wire-ctx log {}) t))
+                  (reset! log [])
+                  (reset! (:destroyed? (:ed t)) destroyed?)
+                  (@(:refresh changed))
+                  @log)))]
+    (is (= [[:ranges ::gutter []]] (run false)))
+    (is (= [] (run true)))))
