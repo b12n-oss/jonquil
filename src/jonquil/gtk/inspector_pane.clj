@@ -95,7 +95,7 @@
 (defn- arm-note-clear!
   "Pushes pane's own note-clear deadline NOTE-CLEAR-MS out from now, and
   arms its single repeating note-clear-cb (built once in make-pane, per
-  jonquil.gtk.window/make-flash-fn's own pattern -- jonquil.gtk.callbacks
+  jonquil.gtk.window.run/make-flash-fn's own pattern -- jonquil.gtk.callbacks
   retains every callable for the process's life, so a fresh one per note
   would leak) if it isn't already running. The callback itself (below)
   polls the shared deadline, so a LATER note/def pushing it out can't

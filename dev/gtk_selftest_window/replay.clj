@@ -614,7 +614,7 @@
   the prompt's ns for any other evaluator."
   [ui]
   (go-row :replay-run-ns support/check
-    (on-gtk (let [f (resolve 'jonquil.gtk.window/run-record-ns)
+    (on-gtk (let [f (resolve 'jonquil.gtk.window.run/run-record-ns)
                   other (fake-evaluator 'zz.other)
                   got (when f [(f (:session ui)) (f other)])]
               (support/check :replay-run-ns (= ["user" "zz.other"] got) {:got got})))))

@@ -397,10 +397,11 @@
   same real Stop path) to still stop the program.
 
   Waits for the settled terminal status 'Stopped', never 'Ready': measured
-  against make-eval-opts' :on-complete (window.clj), an INTERRUPTED run's
-  terminal status is 'Stopped', never 'Ready' -- :on-status-change sets
-  'Ready' first (the :idle notification), then :on-complete immediately
-  overwrites it with 'Stopped' since (:status result) is :interrupted here.
+  against make-eval-opts' :on-complete (jonquil.gtk.window.run), an
+  INTERRUPTED run's terminal status is 'Stopped', never 'Ready' --
+  :on-status-change sets 'Ready' first (the :idle notification), then
+  :on-complete immediately overwrites it with 'Stopped' since (:status
+  result) is :interrupted here.
   'Ready' is only ever the terminal text for a run that finishes on its
   own (row-run-output's own case), which a poll for 'Ready' would never
   see after an Escape-stop."

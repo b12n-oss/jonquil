@@ -15,8 +15,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
-            [jonquil.gtk.window :as window]
-            [jonquil.gtk.window.files :as win-files]))
+            [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.run :as win-run]))
 
 (defn- boom [msg] (fn [& _] (throw (ex-info msg {}))))
 
@@ -56,13 +56,13 @@
 (defn row-run-button-throw-contained [ui]
   (status-row ui {:row-id :run-button-throw-contained :where "run" :msg "forced run failure"
                   :fire! (fn [msg]
-                           (with-redefs [window/do-run! (boom msg)]
+                           (with-redefs [win-run/do-run! (boom msg)]
                              (g/g-signal-emit-by-name (:run (:toolbar ui)) "clicked")))}))
 
 (defn row-stop-button-throw-contained [ui]
   (status-row ui {:row-id :stop-button-throw-contained :where "stop" :msg "forced stop failure"
                   :fire! (fn [msg]
-                           (with-redefs [window/do-stop! (boom msg)]
+                           (with-redefs [win-run/do-stop! (boom msg)]
                              (g/g-signal-emit-by-name (:stop (:toolbar ui)) "clicked")))}))
 
 (defn row-open-button-throw-contained [ui]
