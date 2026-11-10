@@ -268,67 +268,13 @@
                                  :source-keys source-keys :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                  :digit-tab-fn digit-tab-fn :parinfer-fn parinfer-fn
                                  :part-contribution part-contribution :tab-ctx* *tab-ctx})]
-    (g/gtk-box-append toolbar files-btn)
-    (g/gtk-box-append toolbar run-btn)
-    (g/gtk-box-append toolbar stop-btn)
-    (g/gtk-box-append toolbar open-btn)
-    (g/gtk-box-append toolbar save-btn)
-    (g/gtk-box-append toolbar reset-chk)
-    (g/gtk-check-button-set-active reset-chk 1)
-    (g/gtk-widget-set-vexpand paned 1)
-    ;; A notebook of tabs is the paned's start child; each page is a tab's
-    ;; own find bar over its editor (jonquil.gtk.tab). The strip stays
-    ;; hidden while there's one tab.
-    (g/gtk-notebook-set-show-tabs notebook 0)
-    (g/gtk-notebook-set-show-border notebook 0)
-    (g/gtk-notebook-set-scrollable notebook 1)
-    (g/gtk-widget-set-vexpand notebook 1)
-    (g/gtk-paned-set-start-child paned notebook)
-    (g/gtk-paned-set-end-child paned (:scroll cv))
-    (g/gtk-paned-set-position paned 430)
-    ;; The editor/console paned is h-paned's start child; the
-    ;; inspector panel is its end child, hidden until the first open
-    ;; (show-inspector-panel!), and kept at a fixed width when the window
-    ;; resizes (never grows/shrinks with it, never squeezed below its own
-    ;; WIDTH-REQUEST).
-    (g/gtk-widget-set-vexpand h-paned 1)
-    (g/gtk-paned-set-start-child h-paned paned)
-    (g/gtk-widget-set-vexpand (:root pane) 1)
-    (g/gtk-widget-set-vexpand (:root sp) 1)
-    (g/gtk-box-append slot (:root pane))
-    (g/gtk-box-append slot (:root sp))
-    (g/gtk-widget-set-vexpand (:root rp) 1)
-    (g/gtk-box-append slot (:root rp))
-    (g/gtk-widget-set-vexpand (:root lp) 1)
-    (g/gtk-box-append slot (:root lp))
-    (g/gtk-widget-set-vexpand (:root hp) 1)
-    (g/gtk-box-append slot (:root hp))
-    (doseq [[_ p] @part-panels*]
-      (g/gtk-widget-set-vexpand (:root p) 1)
-      (g/gtk-box-append slot (:root p)))
-    (g/gtk-paned-set-end-child h-paned slot)
-    (g/gtk-paned-set-resize-end-child h-paned 0)
-    (g/gtk-paned-set-shrink-end-child h-paned 0)
-    (g/gtk-widget-set-visible (:root pane) 0)
-    (g/gtk-widget-set-visible (:root sp) 0)
-    (g/gtk-widget-set-visible (:root rp) 0)
-    (g/gtk-widget-set-visible (:root lp) 0)
-    (doseq [[_ p] @part-panels*]
-      (g/gtk-widget-set-visible (:root p) 0))
-    (g/gtk-widget-set-visible (:root hp) 0)
-    (g/gtk-widget-set-visible slot 0)
-    (g/gtk-box-append vbox toolbar)
-    (g/gtk-paned-set-start-child tree-paned (:root tree-pane))
-    (g/gtk-paned-set-end-child tree-paned h-paned)
-    (g/gtk-paned-set-resize-start-child tree-paned 0)
-    (g/gtk-paned-set-shrink-start-child tree-paned 0)
-    (g/gtk-widget-set-vexpand tree-paned 1)
-    (g/gtk-box-append vbox tree-paned)
-    (win-status-bar/place! {:vbox vbox :status-label status-label :hint-label hint-label :pending-label pending-label
-                            :unread-label unread-label :dialect-label dialect-label :parinfer-label parinfer-label
-                            :line-col-label line-col-label :update-parinfer-label! update-parinfer-label!})
-    (g/gtk-window-set-child win vbox)
-    (g/gtk-window-set-default-size win 900 700)
+    (win-layout/place! {:toolbar toolbar :files-btn files-btn :run-btn run-btn :stop-btn stop-btn :open-btn open-btn
+                        :save-btn save-btn :reset-chk reset-chk :paned paned :notebook notebook :cv cv
+                        :h-paned h-paned :pane pane :sp sp :slot slot :rp rp :lp lp :hp hp :part-panels* part-panels*
+                        :vbox vbox :tree-paned tree-paned :tree-pane tree-pane :win win :status-label status-label
+                        :hint-label hint-label :pending-label pending-label :unread-label unread-label
+                        :dialect-label dialect-label :parinfer-label parinfer-label :line-col-label line-col-label
+                        :update-parinfer-label! update-parinfer-label!})
     ;; One shared GtkCssProvider for the display, added once; both views
     ;; get the jonquil-code CSS class so a single reload resizes both live.
     ;; Each tab's view gets the class in jonquil.gtk.tab/make-tab!.
