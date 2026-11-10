@@ -124,6 +124,7 @@
     jonquil.gtk.window.run-test
     jonquil.gtk.window.inspector-test
     jonquil.gtk.window.keys-test
+    jonquil.gtk.window.help-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.gtk.processes-pane-test
