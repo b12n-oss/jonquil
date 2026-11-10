@@ -84,6 +84,63 @@
       KEY-PAGE-DOWN (do (move! pal PAGE-STEP) 1)
       0)))
 
+(defn- pack-palette!
+  [{:keys [entry list-box scroll box pp]}]
+  (g/gtk-widget-set-size-request entry WIDTH -1)
+  (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
+  (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
+  (g/gtk-scrolled-window-set-propagate-natural-height scroll 1)
+  (g/gtk-scrolled-window-set-max-content-height scroll MAX-HEIGHT)
+  (g/gtk-scrolled-window-set-child scroll list-box)
+  (g/gtk-box-append box entry)
+  (g/gtk-box-append box scroll)
+  (popover/set-child! pp box))
+
+(defn- connect-entry!
+  [pal entry]
+  (g/g-signal-connect-data entry "changed"
+                           (callable (fn [_ _] (try (refilter! pal) (catch :default e (report! pal "palette" e))) nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data entry "activate"
+                           (callable (fn [_ _] (try (run-selected! pal) (catch :default e (report! pal "palette" e))) nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-list-box!
+  [pal list-box]
+  (g/g-signal-connect-data list-box "row-activated"
+                           (callable (fn [_ row _]
+                                       (try
+                                         (swap! (:state pal) assoc :index (g/gtk-list-box-row-get-index row))
+                                         (run-selected! pal)
+                                         (catch :default e (report! pal "palette" e)))
+                                       nil)
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-keys!
+  [pal entry keyctl]
+  (g/g-signal-connect-data keyctl "key-pressed"
+                           (callable (fn [_ctl keyval _keycode _state _data]
+                                       (try (handle-key! pal keyval)
+                                            (catch :default e (report! pal "palette" e) 1)))
+                                     [:pointer :uint :uint :uint :pointer] :int)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  ;; the entry delegates its GtkEditable to an inner GtkText, and that
+  ;; delegate carries "preedit-changed" (as find_bar.clj's entries)
+  (g/g-signal-connect-data (g/gtk-editable-get-delegate entry) "preedit-changed"
+                           (callable (fn [_ preedit _]
+                                       (try (reset! (:preedit-active? pal) (not (empty? preedit)))
+                                            (catch :default e (report! pal "palette" e)))
+                                       nil)
+                                     [:pointer :string :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  ;; capture, as find_bar's own controller: the entry's inner GtkText (its
+  ;; input method, its own bindings) sees keys first in the bubble phase
+  (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
+  (g/gtk-widget-add-controller entry keyctl))
+
 (defn make-palette
   "Builds the palette on view (an editor's GtkTextView): the
   jonquil.gtk.popover map (autohide, below the caret) plus :entry,
@@ -101,51 +158,10 @@
         pal (assoc pp :entry entry :list-box list-box
                    :state (atom {:all [] :shown [] :index 0})
                    :on-run (atom nil) :on-error (atom nil) :preedit-active? (atom false))]
-    (g/gtk-widget-set-size-request entry WIDTH -1)
-    (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
-    (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
-    (g/gtk-scrolled-window-set-propagate-natural-height scroll 1)
-    (g/gtk-scrolled-window-set-max-content-height scroll MAX-HEIGHT)
-    (g/gtk-scrolled-window-set-child scroll list-box)
-    (g/gtk-box-append box entry)
-    (g/gtk-box-append box scroll)
-    (popover/set-child! pp box)
-    (g/g-signal-connect-data entry "changed"
-                             (callable (fn [_ _] (try (refilter! pal) (catch :default e (report! pal "palette" e))) nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data entry "activate"
-                             (callable (fn [_ _] (try (run-selected! pal) (catch :default e (report! pal "palette" e))) nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data list-box "row-activated"
-                             (callable (fn [_ row _]
-                                         (try
-                                           (swap! (:state pal) assoc :index (g/gtk-list-box-row-get-index row))
-                                           (run-selected! pal)
-                                           (catch :default e (report! pal "palette" e)))
-                                         nil)
-                                       [:pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (fn [_ctl keyval _keycode _state _data]
-                                         (try (handle-key! pal keyval)
-                                              (catch :default e (report! pal "palette" e) 1)))
-                                       [:pointer :uint :uint :uint :pointer] :int)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; the entry delegates its GtkEditable to an inner GtkText, and that
-    ;; delegate carries "preedit-changed" (as find_bar.clj's entries)
-    (g/g-signal-connect-data (g/gtk-editable-get-delegate entry) "preedit-changed"
-                             (callable (fn [_ preedit _]
-                                         (try (reset! (:preedit-active? pal) (not (empty? preedit)))
-                                              (catch :default e (report! pal "palette" e)))
-                                         nil)
-                                       [:pointer :string :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; capture, as find_bar's own controller: the entry's inner GtkText (its
-    ;; input method, its own bindings) sees keys first in the bubble phase
-    (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
-    (g/gtk-widget-add-controller entry keyctl)
+    (pack-palette! {:entry entry :list-box list-box :scroll scroll :box box :pp pp})
+    (connect-entry! pal entry)
+    (connect-list-box! pal list-box)
+    (connect-keys! pal entry keyctl)
     ;; every close path gives the editor focus back, once GTK has finished
     ;; closing (see jonquil.gtk.popover/refocus-view-on-close!)
     (popover/refocus-view-on-close! pp)

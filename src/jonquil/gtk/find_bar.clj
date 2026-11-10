@@ -430,6 +430,78 @@
              (binding [*out* *err*] (println msg))))
          fallback)))
 
+(defn- style-match-tag!
+  [tag table]
+  (let [default-t (theme/theme theme/default-theme)]
+    (g/set-string-property! tag "background" (:find-highlight default-t))
+    (g/set-string-property! tag "foreground" (:text default-t)))
+  (g/gtk-text-tag-table-add table tag)
+  ;; Measured, not assumed: the editor's own syntax
+  ;; tags are added to this SAME tag table before make-find-bar ever
+  ;; runs (activate! builds ed, then fb), and GTK's priority is add
+  ;; order, so search-match already outranks them. theme-keeps-find-
+  ;; highlight's own row reads both tags' gtk_text_tag_get_priority and
+  ;; measured search-match at 18 against :special-form's 6 -- search-
+  ;; match wins already, so no explicit gtk_text_tag_set_priority call
+  ;; is needed (it stays bound in ffi.clj in case a future tag order
+  ;; change ever needs it).
+  )
+
+(defn- pack-bar!
+  [{:keys [box query replacement replace-btn replace-all-btn count-label] :as fb}]
+  (g/gtk-box-append box query)
+  (g/gtk-box-append box replacement)
+  (g/gtk-box-append box replace-btn)
+  (g/gtk-box-append box replace-all-btn)
+  (g/gtk-box-append box count-label)
+  (g/gtk-widget-set-visible box 0)
+  (doseq [w (:replace-widgets fb)] (g/gtk-widget-set-visible w 0)))
+
+(defn- connect-edits!
+  [{:keys [query ed] :as fb}]
+  (g/g-signal-connect-data query "changed"
+                           (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(recompute-matches! fb))) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data (:buf ed) "changed"
+                           (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(on-buffer-changed fb))) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data (:buf ed) "mark-set"
+                           (callable (fn [_buf _iter mark _data]
+                                       (contained {:fb fb :where "find" :fallback nil} #(on-selection-set fb mark)))
+                                     [:pointer :pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-replace-btns!
+  [{:keys [replace-btn replace-all-btn] :as fb}]
+  (g/g-signal-connect-data replace-btn "clicked"
+                           (callable (fn [_ _] (contained {:fb fb :where "replace" :fallback nil} #(replace-one! fb))) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data replace-all-btn "clicked"
+                           (callable (fn [_ _] (contained {:fb fb :where "replace all" :fallback nil} #(replace-all! fb))) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-preedit-and-keys!
+  [{:keys [query replacement box] :as fb} keyctl]
+  ;; Both entries delegate their GtkEditable
+  ;; implementation to an internal GtkText (gtk_editable_get_delegate),
+  ;; and it's THAT delegate, not the entry itself, that carries the real
+  ;; "preedit-changed" signal -- verified empirically, see the binding's
+  ;; own citation in ffi.clj.
+  (doseq [entry [query replacement]]
+    (g/g-signal-connect-data
+     (g/gtk-editable-get-delegate entry) "preedit-changed"
+     (callable (fn [_ preedit _]
+                 (contained {:fb fb :where "find" :fallback nil} #(reset! (:preedit-active? fb) (not (empty? preedit)))))
+               [:pointer :string :pointer] :void)
+     ffi/null ffi/null g/CONNECT-DEFAULT))
+  (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
+  (g/g-signal-connect-data keyctl "key-pressed"
+                           (callable (fn [_ctl keyval _keycode state _data]
+                                       (contained {:fb fb :where "find" :fallback 0} #(handle-key! fb keyval state)))
+                                     [:pointer :uint :uint :uint :pointer] :int)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller box keyctl))
+
 (defn make-find-bar
   "Builds the find-and-replace bar over ed (a jonquil.gtk.editor map).
   Returns {:box :query :replacement :replace-btn :replace-all-btn
@@ -457,60 +529,9 @@
             :preedit-active? (atom false)
             :replacing? (atom false)
             :on-error-fn (atom nil)}]
-    (let [default-t (theme/theme theme/default-theme)]
-      (g/set-string-property! tag "background" (:find-highlight default-t))
-      (g/set-string-property! tag "foreground" (:text default-t)))
-    (g/gtk-text-tag-table-add table tag)
-    ;; Measured, not assumed: the editor's own syntax
-    ;; tags are added to this SAME tag table before make-find-bar ever
-    ;; runs (activate! builds ed, then fb), and GTK's priority is add
-    ;; order, so search-match already outranks them. theme-keeps-find-
-    ;; highlight's own row reads both tags' gtk_text_tag_get_priority and
-    ;; measured search-match at 18 against :special-form's 6 -- search-
-    ;; match wins already, so no explicit gtk_text_tag_set_priority call
-    ;; is needed (it stays bound in ffi.clj in case a future tag order
-    ;; change ever needs it).
-    (g/gtk-box-append box query)
-    (g/gtk-box-append box replacement)
-    (g/gtk-box-append box replace-btn)
-    (g/gtk-box-append box replace-all-btn)
-    (g/gtk-box-append box count-label)
-    (g/gtk-widget-set-visible box 0)
-    (doseq [w (:replace-widgets fb)] (g/gtk-widget-set-visible w 0))
-    (g/g-signal-connect-data query "changed"
-                             (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(recompute-matches! fb))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data (:buf ed) "changed"
-                             (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(on-buffer-changed fb))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data (:buf ed) "mark-set"
-                             (callable (fn [_buf _iter mark _data]
-                                         (contained {:fb fb :where "find" :fallback nil} #(on-selection-set fb mark)))
-                                       [:pointer :pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data replace-btn "clicked"
-                             (callable (fn [_ _] (contained {:fb fb :where "replace" :fallback nil} #(replace-one! fb))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data replace-all-btn "clicked"
-                             (callable (fn [_ _] (contained {:fb fb :where "replace all" :fallback nil} #(replace-all! fb))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; Both entries delegate their GtkEditable
-    ;; implementation to an internal GtkText (gtk_editable_get_delegate),
-    ;; and it's THAT delegate, not the entry itself, that carries the real
-    ;; "preedit-changed" signal -- verified empirically, see the binding's
-    ;; own citation in ffi.clj.
-    (doseq [entry [query replacement]]
-      (g/g-signal-connect-data
-       (g/gtk-editable-get-delegate entry) "preedit-changed"
-       (callable (fn [_ preedit _]
-                   (contained {:fb fb :where "find" :fallback nil} #(reset! (:preedit-active? fb) (not (empty? preedit)))))
-                 [:pointer :string :pointer] :void)
-       ffi/null ffi/null g/CONNECT-DEFAULT))
-    (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
-    (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (fn [_ctl keyval _keycode state _data]
-                                         (contained {:fb fb :where "find" :fallback 0} #(handle-key! fb keyval state)))
-                                       [:pointer :uint :uint :uint :pointer] :int)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller box keyctl)
+    (style-match-tag! tag table)
+    (pack-bar! fb)
+    (connect-edits! fb)
+    (connect-replace-btns! fb)
+    (connect-preedit-and-keys! fb keyctl)
     fb))
