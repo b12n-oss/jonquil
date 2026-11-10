@@ -374,6 +374,131 @@
   (let [f (g/gtk-root-get-focus win)]
     (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:root pane)))))))
 
+(defn- guard-fn
+  "(guard what f): f wrapped so a throw goes to on-error as \"; what: msg\"."
+  [on-error]
+  (fn [what f] (fn [& args]
+                 (try (apply f args)
+                      (catch :default e (on-error (str "; " what ": " (ex-message e))))))))
+
+(defn- lay-out-header!
+  "Styles the header and the list and packs the widgets into the root."
+  [{:keys [root header-label refresh-btn open-folder-btn list scroll body-label]} header]
+  (g/gtk-label-set-xalign header-label 0.0)
+  (g/gtk-widget-set-hexpand header-label 1)
+  (g/gtk-box-append header header-label)
+  (g/gtk-box-append header refresh-btn)
+  (g/gtk-box-append header open-folder-btn)
+  (g/gtk-widget-add-css-class header "jonquil-code")
+  (g/gtk-widget-add-css-class list "jonquil-code")
+  (g/gtk-scrolled-window-set-child scroll list)
+  (g/gtk-widget-set-vexpand scroll 1)
+  (g/gtk-widget-set-visible body-label 0)
+  (g/gtk-box-append root header)
+  (g/gtk-box-append root body-label)
+  (g/gtk-box-append root scroll))
+
+(defn- connect-list!
+  "The list's row-activated and key handlers."
+  [{:keys [list guard on-error] :as pane} keyctl]
+  (g/g-signal-connect-data list "row-activated"
+                             ;; The rebuild removes every row, the activated one
+                             ;; included, so it runs on the next main-loop turn,
+                             ;; never inside the row's own signal emission.
+                           (callable (guard "tree" (fn [_box row _data]
+                                                                                                              ;; The row's path is read now, so a rebuild landing
+                                                       ;; before the deferred run can't redirect it to
+                                                       ;; another row.
+                                                     (when-let [{:keys [path]} (get (visible-rows pane) (g/gtk-list-box-row-get-index row))]
+                                                       (on-gui! (guard "tree" (fn [] (activate-path! pane path)))))
+                                                     nil))
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data keyctl "key-pressed"
+                           (callable (fn [_ctl keyval _kc state _data]
+                                         ;; Decided now, run next turn (same reason as
+                                         ;; row-activated above).
+                                       (try (handle-key! pane keyval state)
+                                            (catch :default e (on-error (str "; tree: " (ex-message e))) 1)))
+                                     [:pointer :uint :uint :uint :pointer] :int)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller list keyctl))
+
+(defn- build-name-menu!
+  "Builds the name menu's popover: the item buttons, the name entry and the
+  problem label."
+  [{:keys [root popover buttons items-box name-box heading-label entry problem-label guard] :as pane}]
+    ;; The name menu. Parented to root (see the ns docstring), built once.
+  (g/gtk-widget-set-parent popover root)
+  (g/gtk-widget-add-css-class popover "jonquil-popover")
+  (g/gtk-widget-set-halign popover g/ALIGN-START)
+  (g/gtk-popover-set-autohide popover 1)
+  (g/gtk-popover-set-position popover g/POPOVER-POS-BOTTOM)
+  (doseq [[label btn] buttons]
+    (g/gtk-button-set-has-frame btn 0)
+    (g/gtk-box-append items-box btn)
+    (g/g-signal-connect-data btn "clicked"
+                             (callable (guard "menu" (fn [_ _] (press-item! pane label) nil))
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT))
+  (g/gtk-widget-add-css-class heading-label "jonquil-doc")
+  (g/gtk-label-set-xalign heading-label 0.0)
+  (g/gtk-widget-add-css-class problem-label "jonquil-doc")
+  (g/gtk-label-set-xalign problem-label 0.0)
+  (g/gtk-widget-set-visible problem-label 0)
+  (g/gtk-widget-set-size-request entry NAME-WIDTH -1)
+  (g/gtk-box-append name-box heading-label)
+  (g/gtk-box-append name-box entry)
+  (g/gtk-box-append name-box problem-label)
+  (let [content (g/gtk-box-new g/ORIENTATION-VERTICAL 0)]
+    (g/gtk-box-append content items-box)
+    (g/gtk-box-append content name-box)
+    (g/gtk-popover-set-child popover content))
+  (g/gtk-widget-set-visible name-box 0))
+
+(defn- connect-name-menu!
+  "The popover's closed, the entry's activate and the list's right click."
+  [{:keys [popover entry list guard] :as pane} click]
+  (g/g-signal-connect-data popover "closed"
+                           (callable (guard "menu"
+                                            (fn [_pop _data]
+                                              (swap! (:menu pane) assoc :open? false :mode nil)
+                                                ;; every close path (Escape, click outside,
+                                                ;; submit) returns focus to the list
+                                              (g/gtk-widget-grab-focus list)
+                                              nil))
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data entry "activate"
+                           (callable (guard "name" (fn [e _] (submit-name! pane (g/editable-text e)) nil))
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-gesture-single-set-button click 3)
+  (g/g-signal-connect-data click "pressed"
+                           (callable (guard "menu"
+                                            (fn [_g _n x y _data]
+                                              (let [row (g/gtk-list-box-get-row-at-y list (int y))
+                                                    pt [x y]]
+                                                (if (ffi/null? row)
+                                                  (open-menu! pane nil pt)
+                                                  (let [path (listed (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
+                                                    (g/gtk-list-box-select-row list row)
+                                                    (open-menu! pane path pt)))
+                                                nil)))
+                                     [:pointer :int :double :double :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller list click))
+
+(defn- connect-header-btns!
+  "Refresh and Open Folder."
+  [{:keys [refresh-btn open-folder-btn guard] :as pane} on-open-folder]
+  (g/g-signal-connect-data refresh-btn "clicked"
+                           (callable (guard "refresh" (fn [_ _] (refresh! pane) nil)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data open-folder-btn "clicked"
+                           (callable (guard "open folder" (fn [_ _] (on-open-folder) nil)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
 (defn make-pane
   "Builds the pane, empty (show-model! fills it). opts is {:on-open (fn
   [path]) :on-open-folder (fn []) :on-error (fn [msg]) and, optionally,
@@ -399,9 +524,7 @@
         entry (g/gtk-entry-new)
         problem-label (g/gtk-label-new "")
         buttons (mapv (fn [label] [label (g/gtk-button-new-with-label label)]) ITEMS)
-        guard (fn [what f] (fn [& args]
-                             (try (apply f args)
-                                  (catch :default e (on-error (str "; " what ": " (ex-message e)))))))
+        guard (guard-fn on-error)
         pane {:root root :header-label header-label :refresh-btn refresh-btn
               :open-folder-btn open-folder-btn :list list :body-label body-label
               :state (atom (ft/load-model nil)) :rows (atom []) :row-widgets (atom [])
@@ -410,101 +533,9 @@
               :scroll scroll :popover popover :items-box items-box :name-box name-box :heading-label heading-label
               :entry entry :problem-label problem-label :buttons buttons
               :menu (atom {:open? false :mode nil :items [] :target nil})}]
-    (g/gtk-label-set-xalign header-label 0.0)
-    (g/gtk-widget-set-hexpand header-label 1)
-    (g/gtk-box-append header header-label)
-    (g/gtk-box-append header refresh-btn)
-    (g/gtk-box-append header open-folder-btn)
-    (g/gtk-widget-add-css-class header "jonquil-code")
-    (g/gtk-widget-add-css-class list "jonquil-code")
-    (g/gtk-scrolled-window-set-child scroll list)
-    (g/gtk-widget-set-vexpand scroll 1)
-    (g/gtk-widget-set-visible body-label 0)
-    (g/gtk-box-append root header)
-    (g/gtk-box-append root body-label)
-    (g/gtk-box-append root scroll)
-    (g/g-signal-connect-data list "row-activated"
-                             ;; The rebuild removes every row, the activated one
-                             ;; included, so it runs on the next main-loop turn,
-                             ;; never inside the row's own signal emission.
-                             (callable (guard "tree" (fn [_box row _data]
-                                                                                                              ;; The row's path is read now, so a rebuild landing
-                                                       ;; before the deferred run can't redirect it to
-                                                       ;; another row.
-                                                       (when-let [{:keys [path]} (get (visible-rows pane) (g/gtk-list-box-row-get-index row))]
-                                                         (on-gui! (guard "tree" (fn [] (activate-path! pane path)))))
-                                                       nil))
-                                       [:pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (fn [_ctl keyval _kc state _data]
-                                         ;; Decided now, run next turn (same reason as
-                                         ;; row-activated above).
-                                         (try (handle-key! pane keyval state)
-                                              (catch :default e (on-error (str "; tree: " (ex-message e))) 1)))
-                                       [:pointer :uint :uint :uint :pointer] :int)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller list keyctl)
-    ;; The name menu. Parented to root (see the ns docstring), built once.
-    (g/gtk-widget-set-parent popover root)
-    (g/gtk-widget-add-css-class popover "jonquil-popover")
-    (g/gtk-widget-set-halign popover g/ALIGN-START)
-    (g/gtk-popover-set-autohide popover 1)
-    (g/gtk-popover-set-position popover g/POPOVER-POS-BOTTOM)
-    (doseq [[label btn] buttons]
-      (g/gtk-button-set-has-frame btn 0)
-      (g/gtk-box-append items-box btn)
-      (g/g-signal-connect-data btn "clicked"
-                               (callable (guard "menu" (fn [_ _] (press-item! pane label) nil))
-                                         [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT))
-    (g/gtk-widget-add-css-class heading-label "jonquil-doc")
-    (g/gtk-label-set-xalign heading-label 0.0)
-    (g/gtk-widget-add-css-class problem-label "jonquil-doc")
-    (g/gtk-label-set-xalign problem-label 0.0)
-    (g/gtk-widget-set-visible problem-label 0)
-    (g/gtk-widget-set-size-request entry NAME-WIDTH -1)
-    (g/gtk-box-append name-box heading-label)
-    (g/gtk-box-append name-box entry)
-    (g/gtk-box-append name-box problem-label)
-    (let [content (g/gtk-box-new g/ORIENTATION-VERTICAL 0)]
-      (g/gtk-box-append content items-box)
-      (g/gtk-box-append content name-box)
-      (g/gtk-popover-set-child popover content))
-    (g/gtk-widget-set-visible name-box 0)
-    (g/g-signal-connect-data popover "closed"
-                             (callable (guard "menu"
-                                              (fn [_pop _data]
-                                                (swap! (:menu pane) assoc :open? false :mode nil)
-                                                ;; every close path (Escape, click outside,
-                                                ;; submit) returns focus to the list
-                                                (g/gtk-widget-grab-focus list)
-                                                nil))
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data entry "activate"
-                             (callable (guard "name" (fn [e _] (submit-name! pane (g/editable-text e)) nil))
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-gesture-single-set-button click 3)
-    (g/g-signal-connect-data click "pressed"
-                             (callable (guard "menu"
-                                              (fn [_g _n x y _data]
-                                                (let [row (g/gtk-list-box-get-row-at-y list (int y))
-                                                      pt [x y]]
-                                                  (if (ffi/null? row)
-                                                    (open-menu! pane nil pt)
-                                                    (let [path (listed (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
-                                                      (g/gtk-list-box-select-row list row)
-                                                      (open-menu! pane path pt)))
-                                                  nil)))
-                                       [:pointer :int :double :double :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller list click)
-    (g/g-signal-connect-data refresh-btn "clicked"
-                             (callable (guard "refresh" (fn [_ _] (refresh! pane) nil)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data open-folder-btn "clicked"
-                             (callable (guard "open folder" (fn [_ _] (on-open-folder) nil)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (lay-out-header! pane header)
+    (connect-list! pane keyctl)
+    (build-name-menu! pane)
+    (connect-name-menu! pane click)
+    (connect-header-btns! pane on-open-folder)
     pane))
