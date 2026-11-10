@@ -544,18 +544,8 @@
         open-fn (fn [] (win-files/do-open! cv win (fn [p] (win-tabs/open-file! @*tab-ctx p))))
         save-fn (fn [] (let [t (active-tab)] (win-files/do-save! (:ed t) cv win (:path t))))
         save-as-fn (fn [] (let [t (active-tab)] (win-files/do-save-as! (:ed t) cv win (:path t))))
-        ;; Cmd/Ctrl+W closes the active tab; on the last one close-tab!
-        ;; closes the window.
-        close-fn (fn [] (win-tabs/close-tab! @*tab-ctx (:id (active-tab))))
-        new-tab-fn (fn [] (win-tabs/new-tab! @*tab-ctx {}))
-        step-tab-fn (fn [delta]
-                      (let [ts @tabs
-                            i (.indexOf ^java.util.List (mapv :id ts) @active-id)]
-                        (win-tabs/select-tab! @*tab-ctx (:id (nth ts (tabs/cycle-index (count ts) i delta))))))
-        digit-tab-fn (fn [digit]
-                       (let [ts @tabs]
-                         (when-let [i (tabs/index-for-digit (count ts) digit)]
-                           (win-tabs/select-tab! @*tab-ctx (:id (nth ts i))))))
+        {:keys [close-fn new-tab-fn step-tab-fn digit-tab-fn]}
+        (win-tabs/build {:tabs tabs :active-id active-id :active-tab active-tab :tab-ctx* *tab-ctx})
         {:keys [h-paned inspector-state inspecting? inspect-queued inspector-last-args on-view on-inspector-close pane]}
         (win-inspector/build {:active-tab active-tab :cv cv :ev* ev* :status-label status-label :right* *right})
         {:keys [slot part-panels* right panel-focus-fn]}

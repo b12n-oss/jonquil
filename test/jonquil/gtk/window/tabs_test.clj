@@ -306,3 +306,25 @@
           (is (nil? (#'win-tabs/new-tab! ctx {:path "/n.clj"})))
           (is (= [[:append :error "; new tab: boom\n"]] @log))
           (is (= [1 2] (mapv :id @(:tabs ctx)))))))))
+
+(deftest build-adds-the-tab-fns-test
+  (let [log (atom [])
+        tc (atom ::tc1)
+        active-id (atom 2)
+        ts (atom [{:id 1} {:id 2} {:id 3}])]
+    (with-redefs [win-tabs/close-tab! (fn [c id] (swap! log conj [:close c id]))
+                  win-tabs/new-tab! (fn [c m] (swap! log conj [:new c m]))
+                  win-tabs/select-tab! (fn [c id] (swap! log conj [:select c id]))]
+      (let [w (win-tabs/build {:tabs ts :active-id active-id :active-tab (fn [] {:id 2}) :tab-ctx* tc :x 1})]
+        (reset! tc ::tc2)
+        (is (= #{:tabs :active-id :active-tab :tab-ctx* :x :close-fn :new-tab-fn :step-tab-fn :digit-tab-fn}
+               (set (keys w))))
+        ((:close-fn w))
+        ((:new-tab-fn w))
+        ((:step-tab-fn w) 1)
+        ((:step-tab-fn w) -1)
+        ((:digit-tab-fn w) 1)
+        ((:digit-tab-fn w) 9)
+        ((:digit-tab-fn w) 5)
+        (is (= [[:close ::tc2 2] [:new ::tc2 {}] [:select ::tc2 3] [:select ::tc2 1] [:select ::tc2 1] [:select ::tc2 3]]
+               @log))))))

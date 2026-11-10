@@ -1,5 +1,5 @@
 (ns jonquil.gtk.window.tabs
-  "The window's tabs: finding, selecting and switching them, their labels, closing one (asking first when it is dirty), a new tab, opening a file into the right tab (open-file!, read-for-tab), and wire-tab!, which connects one tab's editor, find bar, popovers, menu and palette to the window. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
+  "The window's tabs: finding, selecting and switching them, their labels, closing one (asking first when it is dirty), a new tab, opening a file into the right tab (open-file!, read-for-tab), and wire-tab!, which connects one tab's editor, find bar, popovers, menu and palette to the window. build makes activate!'s close, new, step and digit tab fns. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.changed :as changed]
@@ -492,3 +492,20 @@
           (if error
             {:error error}
             (do (new-tab! ctx {:path path :text text}) nil)))))))
+
+(defn build
+  "activate!'s tab fns, in activate!'s order: Cmd/Ctrl+W's close, Cmd/Ctrl+T's new tab, and the step and digit fns that select a tab by its place. w holds what they read: :tabs :active-id :active-tab, and :tab-ctx* (activate!'s *tab-ctx, read when one of them runs). Returns w with :close-fn :new-tab-fn :step-tab-fn and :digit-tab-fn added."
+  [{:keys [tabs active-id active-tab] *tab-ctx :tab-ctx* :as w}]
+  (let [;; Cmd/Ctrl+W closes the active tab; on the last one close-tab!
+        ;; closes the window.
+        close-fn (fn [] (close-tab! @*tab-ctx (:id (active-tab))))
+        new-tab-fn (fn [] (new-tab! @*tab-ctx {}))
+        step-tab-fn (fn [delta]
+                      (let [ts @tabs
+                            i (.indexOf ^java.util.List (mapv :id ts) @active-id)]
+                        (select-tab! @*tab-ctx (:id (nth ts (tabs/cycle-index (count ts) i delta))))))
+        digit-tab-fn (fn [digit]
+                       (let [ts @tabs]
+                         (when-let [i (tabs/index-for-digit (count ts) digit)]
+                           (select-tab! @*tab-ctx (:id (nth ts i))))))]
+    (assoc w :close-fn close-fn :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn :digit-tab-fn digit-tab-fn)))
