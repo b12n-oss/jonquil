@@ -174,6 +174,7 @@
     jonquil.gtk.window.reopen
     jonquil.gtk.window.tree-ops
     jonquil.gtk.window.context
+    jonquil.gtk.window.startup
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen

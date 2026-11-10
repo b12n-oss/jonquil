@@ -24,7 +24,6 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
-            [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
@@ -42,6 +41,7 @@
             [jonquil.gtk.window.run :as win-run]
             [jonquil.gtk.window.runtime :as win-runtime]
             [jonquil.gtk.window.session :as win-session]
+            [jonquil.gtk.window.startup :as win-startup]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.status-bar :as win-status-bar]
             [jonquil.gtk.window.tabs :as win-tabs]
@@ -57,8 +57,7 @@
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]
-            [jonquil.tabs :as tabs]
-            [jonquil.theme :as theme]))
+            [jonquil.tabs :as tabs]))
 
 ;; --- construction ------------------------------------------------------
 
@@ -277,46 +276,12 @@
                         :hint-label hint-label :pending-label pending-label :unread-label unread-label
                         :dialect-label dialect-label :parinfer-label parinfer-label :line-col-label line-col-label
                         :update-parinfer-label! update-parinfer-label!})
-    ;; One shared GtkCssProvider for the display, added once; both views
-    ;; get the jonquil-code CSS class so a single reload resizes both live.
-    ;; Each tab's view gets the class in jonquil.gtk.tab/make-tab!.
-    (g/gtk-widget-add-css-class (:view cv) "jonquil-code")
-    (g/gtk-style-context-add-provider-for-display
-     (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
-    (source-pane/apply-theme! sp (theme/theme @theme-name))
-    (add-watch theme-name ::source-pane (fn [_ _ _ k] (source-pane/apply-theme! sp (theme/theme k))))
-    (inspector-pane/apply-theme! pane (theme/theme @theme-name))
-    (add-watch theme-name ::inspector-pane (fn [_ _ _ k] (inspector-pane/apply-theme! pane (theme/theme k))))
+    (win-theme/connect! {:cv cv :provider provider :theme-name theme-name :sp sp :pane pane})
     (win-layout/connect! {:run-btn run-btn :stop-btn stop-btn :open-btn open-btn :save-btn save-btn :reset-chk reset-chk
                           :keyctl keyctl :win win :status-label status-label :run-fn run-fn :stop-fn stop-fn
                           :open-fn open-fn :save-fn save-fn :ev* ev* :window-key-fn window-key-fn})
-    (win-quit/connect! {:tabs tabs :select! (fn [t] (win-tabs/select-tab! @*tab-ctx (:id t)))
-                        :cv cv :win win :app app
-                        :confirmed-close? confirmed-close?
-                        :suppress-close? suppress-close? :closing? closing?
-                        :popovers popovers :ev* ev*
-                        ;; Live saving stops first: nothing after the
-                        ;; quit's own save may write a shorter list.
-                        ;; A quit before startup's reopen is done
-                        ;; stops it and saves nothing, since the
-                        ;; tabs open are only part of the list.
-                        :save-session! (fn [] (let [c @*tab-ctx
-                                                    restoring? (some-> c :session-restoring? deref)]
-                                                (parts/run-hooks! part-contribution :on-quit [] part-error!)
-                                                (some-> c :session-live? (reset! false))
-                                                (some-> c :session-restoring? (reset! false))
-                                                (when-not restoring? (win-session/save-session! c))))})
-    (cview/set-error-fn! cv (fn [msg] (win-status/set-status! status-label msg)))
-    (editor/set-jump-fn! (:editor sp) source-jump-fn)
-    (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
-    (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
-    ;; Joins the SAME registry, so Escape closes the def prompt before it
-    ;; can fall through to Stop.
-    (register-popover-fn (:def-popover pane))
-    (win-help/wire-completion! repl-completion repl-complete-fn status-label register-popover-fn
-                      (fn [fns] (cview/set-completion-fns! cv fns))
-                      (fn [f] (cview/on-input-changed! cv f))
-                      (fn [f] (cview/on-focus-lost! cv f)))
+    (win-startup/connect-quit! {:tabs tabs :cv cv :win win :app app :confirmed-close? confirmed-close? :suppress-close? suppress-close? :closing? closing? :popovers popovers :ev* ev* :part-contribution part-contribution :part-error! part-error! :tab-ctx* *tab-ctx})
+    (win-help/connect! {:cv cv :status-label status-label :sp sp :source-jump-fn source-jump-fn :source-open-fn source-open-fn :source-close-fn source-close-fn :register-popover-fn register-popover-fn :pane pane :repl-completion repl-completion :repl-complete-fn repl-complete-fn})
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
                    :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
                    :active-ed (fn [] (:ed (active-tab)))

@@ -3,7 +3,8 @@
   full docs, jump to definition and the source panel with its way back,
   rename, and completion in the editor and the console. build and
   build-source-keys make activate!'s popover, source-ctx, completion and
-  source panel key bindings. Internal to the window, as
+  source panel key bindings, and connect! wires the console's errors and
+  completion and the source panel's handlers. Internal to the window, as
   jonquil.gtk.window.status is. Moved out of jonquil.gtk.window
   unchanged; the lock caller rule in jonquil.gtk.window's docstring applies
   here."
@@ -577,3 +578,18 @@
                      :back! source-back-fn :open! source-open-fn :jump-back! jump-back-fn}]
     (assoc w :source-jump-fn source-jump-fn :source-close-fn source-close-fn :source-back-fn source-back-fn
            :source-open-fn source-open-fn :jump-back-fn jump-back-fn :source-keys source-keys)))
+
+(defn connect!
+  "activate!'s help wiring, in activate!'s order: the console's errors to the status line, the source panel's jump, errors, Open and Close, the inspector's def prompt in the popover registry, and the console's completion. Called once per window; activate! reads nothing it returns. m holds :cv :status-label :sp :source-jump-fn :source-open-fn :source-close-fn :register-popover-fn :pane :repl-completion and :repl-complete-fn."
+  [{:keys [cv status-label sp source-jump-fn source-open-fn source-close-fn register-popover-fn pane repl-completion repl-complete-fn]}]
+  (cview/set-error-fn! cv (fn [msg] (win-status/set-status! status-label msg)))
+  (editor/set-jump-fn! (:editor sp) source-jump-fn)
+  (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
+  (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
+  ;; Joins the SAME registry, so Escape closes the def prompt before it
+  ;; can fall through to Stop.
+  (register-popover-fn (:def-popover pane))
+  (wire-completion! repl-completion repl-complete-fn status-label register-popover-fn
+                    (fn [fns] (cview/set-completion-fns! cv fns))
+                    (fn [f] (cview/on-input-changed! cv f))
+                    (fn [f] (cview/on-focus-lost! cv f))))
