@@ -178,7 +178,7 @@
   (Control here) plus W closes the window, which already quits the
   app -- gtk_window_close fires the SAME close-request path a real
   close-button click or OS window-close would. Calls the exact fn the
-  key-pressed signal calls (window.clj's :handle-window-key!), never a
+  key-pressed signal calls (the ui map's :handle-window-key!), never a
   synthesized OS keystroke, same pattern as row-escape-yields-when-idle
   and row-command-chord-capslock above.
 

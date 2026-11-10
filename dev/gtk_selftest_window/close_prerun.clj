@@ -68,8 +68,9 @@
 
 (defn row-close-clean
   "Clean editor: close-request-fn's own else branch (would quit) fires
-  immediately, no dialog. Driven with suppress-close? set (window.clj's
-  close-request-fn docstring): the window is never really destroyed here,
+  immediately, no dialog. Driven with suppress-close? set
+  (jonquil.gtk.window.quit's close-request-fn docstring): the window is
+  never really destroyed here,
   so later rows keep a live window -- row-command-chord-close (still the
   suite's sole deliberately-last row) is what actually exercises a real
   close ending the process. closing? becoming true is this row's stand-in

@@ -19,7 +19,7 @@
   The real close row (row-nrepl-close-kills-child, deliberately last in
   row-fns) and after-close-checks! at the end of the run: the close row
   itself fires the app's own
-  \"quit\" action -- window.clj's :activate-quit-action!*, the same path a
+  \"quit\" action -- the ui map's :activate-quit-action!*, the same path a
   Quit AppleEvent takes -- so finish (below) is a close-forced
   FALLBACK only, the same shape as the window group's own finish
   (dev/gtk_selftest_window.clj): it polls window-destroyed? (a \"destroy\"

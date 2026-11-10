@@ -94,7 +94,8 @@
   so a caller that doesn't hold a console in view (do-source-open!) can
   still tell whether the open actually landed. Doesn't touch the title --
   callers hold the window, this doesn't, so update-title! is theirs to
-  call afterward (do-open!, and the ui map's :open-path! in jonquil.gtk.window).
+  call afterward (do-open!, and the ui map's :open-path! in
+  jonquil.gtk.window.ui).
 
   Jolt's slurp maps bad bytes to U+FFFD without throwing, so a
   non-UTF-8 file loads silently and Save would then write EF BF BD in

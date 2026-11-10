@@ -1,13 +1,14 @@
 (ns jonquil.gtk.help-popover
   "The quick-doc popover: a jonquil.gtk.popover carrying a symbol's
   documentation in a scrollable, monospace label. Built once per editor by
-  jonquil.gtk.window's activate! and reused for the rest of the session --
+  jonquil.gtk.tab and reused for the rest of the session --
   show-doc! just replaces the label text and pops it up again; the popover
   itself is never rebuilt.
 
   This namespace also holds the rename popover: autohide ON (modal: GTK grabs the keyboard and closes the popover itself on
   Escape or a click outside, unlike the quick-doc popover above, which is
-  autohide OFF and closed only by window.clj's own registry). Built once
+  autohide OFF and closed only by jonquil.gtk.window.help's registry). Built
+  once
   per editor the same way; show-rename!/show-rename-problem! replace its
   entry text/problem label and (for show-rename!) pop it up again, never
   rebuilding it. The entry takes keyboard focus while

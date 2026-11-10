@@ -32,7 +32,7 @@
   registry of every popover it has created. Completion, quick doc and
   rename each register their own popover once, at construction -- created
   once, shown/hidden repeatedly, the same lifecycle :close-popovers!*
-  in jonquil.gtk.window's ui map assumes."
+  in jonquil.gtk.window.ui's ui map assumes."
   [popovers p]
   (swap! popovers conj p)
   nil)
