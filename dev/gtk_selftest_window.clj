@@ -163,6 +163,7 @@
    find-replace/row-find-editor-next-then-replace
    find-replace/row-window-find-keys-editor-focused
    find-replace/row-find-preedit-ends-at-close
+   find-replace/row-find-bar-buttons
    close-prerun/row-line-col-typing
    close-prerun/row-close-dismissed
    close-prerun/row-close-save-failed
@@ -267,6 +268,7 @@
    palette-rows/row-palette-arrow-keys
    palette-rows/row-palette-closes-its-own-tab
    palette-rows/row-palette-entry-keeps-window-keys
+   palette-rows/row-palette-entry-signals
    palette-rows/row-describe-key-consumes
    palette-rows/row-describe-key-skips-modifier
    palette-rows/row-key-bindings-lists
