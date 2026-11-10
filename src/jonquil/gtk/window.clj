@@ -17,7 +17,6 @@
   GTK thread, so it calls GTK directly."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
-            [jonquil.command-registry :as cmd-registry]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
@@ -30,17 +29,14 @@
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.source-pane :as source-pane]
-            [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.console :as win-console]
             [jonquil.gtk.window.context :as win-context]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.inspector :as win-inspector]
-            [jonquil.gtk.window.keys :as win-keys]
             [jonquil.gtk.window.quit :as win-quit]
             [jonquil.gtk.window.reopen :as win-reopen]
-            [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.run :as win-run]
             [jonquil.gtk.window.runtime :as win-runtime]
@@ -248,91 +244,30 @@
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
-        ;; Window parts (jonquil.gtk.parts): each install fn reads the core
-        ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
-        ;; :exports. A part's error is said on the status line, not thrown.
-        part-error! (fn [id ex]
-                      (win-status/set-status! status-label (str "; part " id ": " (or (ex-message ex) (str ex)))))
-        part-contribution (parts/install gtk-parts/installs
-                                         {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
-                                          :tabs tabs :active-tab active-tab :settings-path* settings-path*
-                                          :tab-ctx* *tab-ctx
-                                          :tab-by-id win-tabs/tab-by-id :select-tab! win-tabs/select-tab! :new-tab! win-tabs/new-tab!
-                                          :bang* bang* :recent-tabs recent-tabs
-                                          :contain-click (fn [where f] (win-status/contain-click status-label where f))
-                                          :set-status! (fn [text] (win-status/set-status! status-label text))
-                                          :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
-                                          :files-btn files-btn :panel-focus-fn panel-focus-fn
-                                          :showing-panel win-right-slot/showing-panel :show-right-panel! win-right-slot/show-right-panel!
-                                          :hide-right-panel! win-right-slot/hide-right-panel!
-                                          :alert-pending? win-alerts/alert-pending? :show-alert! win-alerts/show-alert!
-                                          :make-eval-opts win-run/make-eval-opts :refuse-foreign! win-run/refuse-foreign!
-                                          :unread-label unread-label
-                                          :register-status-log! (fn [log!] (win-status/register-status-log! status-label log!))
-                                          :plugin-step! win-plugin-agent/plugin-step!
-                                          :plugins-on* plugins-on* :review-pane rp
-                                          :plugin-list-pane lp :plugin-history-pane hp
-                                          :pending-label pending-label
-                                          :open-file! (fn [p] (win-tabs/open-file! @*tab-ctx p))
-                                          :plugin-history-shown win-plugin-agent/plugin-history-shown
-                                          :plugin-reviews-changed win-plugin-agent/plugin-reviews-changed
-                                          :plugin-console win-plugin-agent/plugin-console
-                                          :on-saved win-files/on-saved
-                                          :mcp-eval! win-run/mcp-eval!
-                                          :refresh-labels! (fn [] (win-tabs/refresh-labels! @*tab-ctx))
-                                          :inspect! (fn [start]
-                                                      (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
-                                          :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to!
-                                          :source-ctx source-ctx
-                                          :place-caret-and-scroll! win-help/place-caret-and-scroll! :file-name win-files/file-name
-                                          :open-in-tab! win-help/open-in-tab! :show-source! win-help/show-source!
-                                          :rerun-failure! (fn [f t]
-                                                            (win-run/rerun-failure! {:failure f :tab t :cv cv :ev* ev* :sel* sel*
-                                                                             :status-label status-label}))}
-                                         part-error!
-                                         {:specs parts/specs})
-        _ (reset! part-panels* (:panels part-contribution))
-        ;; The console's context menu is built here, after the parts, because
-        ;; the live-results part answers the four result fns its items call;
-        ;; built earlier those keys were nil.
-        console-menu-group
-        (win-keys/install-context-menu! (:view cv)
-                               (cmd-registry/menu-items cmd-registry/console-menu
-                                                        (merge {:complete! repl-complete-fn :clear-last-fn clear-last-fn}
-                                                               (select-keys (:fns part-contribution)
-                                                                            [:result-inspect-fn :result-copy-fn
-                                                                             :result-define-fn :result-jump-fn])))
-                               (fn [msg] (win-status/set-status! status-label msg)))
-        repl-activate-menu-action-fn
-        (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
-        ;; named, so each tab's palette can build the same per-key ctx
-        ;; (window-key-ctx) a window chord gets
-        window-key-args (parts/merge-with-core
-                         :fns
-                         {:panel-focus-fn panel-focus-fn
-                         :hints-toggle-fn hints-toggle-fn
-                         :run-changed-fn run-changed-fn
-                         ;; switching tabs: a palette tab entry, and Go back
-                         :switch-tab-fn (fn [id] (when (win-tabs/tab-by-id tabs id) (win-tabs/select-tab! @*tab-ctx id)))
-                         :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
-                                               (win-tabs/select-tab! @*tab-ctx id)
-                                               (win-status/set-status! status-label "; Only one tab is open.")))
-                         :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
-                                      :save-as-fn save-as-fn :close-fn close-fn
-                                      :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
-                                      :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn
-                                      :zoom-fn zoom-fn :evaluating? evaluating-fn
-                                      :win win :active-tab active-tab :open-find-fn open-find-fn
-                                      :open-replace-fn open-replace-fn :theme-cycle-fn cycle-theme-fn
-                                      :close-popovers-fn close-popovers-fn
-                                      :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn
-                                      :pane pane :close-inspector-fn close-inspector-fn
-                                      :status-label status-label :source-keys source-keys
-                                      :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
-                                      :digit-tab-fn digit-tab-fn
-                                      :parinfer-fn parinfer-fn}
-                         part-contribution)
-        window-key-fn (win-keys/on-window-key window-key-args)
+        {:keys [part-error! part-contribution]}
+        (win-context/build-parts {:win win :status-label status-label :cv cv :ev* ev* :sel* sel* :tabs tabs
+                                  :active-tab active-tab :settings-path* settings-path* :bang* bang*
+                                  :recent-tabs recent-tabs :right right :tree-pane tree-pane :tree-paned tree-paned
+                                  :paned paned :files-btn files-btn :panel-focus-fn panel-focus-fn
+                                  :unread-label unread-label :plugins-on* plugins-on* :rp rp :lp lp :hp hp
+                                  :pending-label pending-label :inspect-last-ctx inspect-last-ctx
+                                  :source-ctx source-ctx :part-panels* part-panels* :tab-ctx* *tab-ctx})
+        {:keys [repl-activate-menu-action-fn]}
+        (win-context/build-console-menu {:cv cv :repl-complete-fn repl-complete-fn :clear-last-fn clear-last-fn
+                                         :part-contribution part-contribution :status-label status-label})
+        {:keys [window-key-args window-key-fn]}
+        (win-context/build-keys {:panel-focus-fn panel-focus-fn :hints-toggle-fn hints-toggle-fn :run-changed-fn run-changed-fn
+                                 :tabs tabs :recent-tabs recent-tabs :status-label status-label :run-fn run-fn
+                                 :stop-fn stop-fn :open-fn open-fn :save-fn save-fn :save-as-fn save-as-fn
+                                 :close-fn close-fn :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
+                                 :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn :zoom-fn zoom-fn
+                                 :evaluating-fn evaluating-fn :win win :active-tab active-tab :open-find-fn open-find-fn
+                                 :open-replace-fn open-replace-fn :cycle-theme-fn cycle-theme-fn
+                                 :close-popovers-fn close-popovers-fn :inspect-last-fn inspect-last-fn
+                                 :inspect-form-fn inspect-form-fn :pane pane :close-inspector-fn close-inspector-fn
+                                 :source-keys source-keys :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
+                                 :digit-tab-fn digit-tab-fn :parinfer-fn parinfer-fn
+                                 :part-contribution part-contribution :tab-ctx* *tab-ctx})
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
