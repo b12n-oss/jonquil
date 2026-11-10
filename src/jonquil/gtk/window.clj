@@ -109,98 +109,41 @@
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
 
-(defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
-  (let [{:keys [settings-path* plugins-on* sel* ev* session evaluating-fn tabs active-id next-id active-tab active? notebook recent-tabs win] *tab-ctx :tab-ctx*}
-        (win-startup/build {:app app :file file :dir dir :settings-path settings-path :plugins? plugins?})
-        {:keys [status-label line-col-label hint-label hints-on? parinfer-label pending-label dialect-label
-                unread-label hints-toggle-fn]}
-        (win-status-bar/build {:sel* sel*})
-        {:keys [confirmed-close? suppress-close? closing?]}
-        (win-quit/build {})
-        {:keys [bang* cv]}
-        (win-console/build {:active-tab active-tab :ev* ev* :status-label status-label :evaluating-fn evaluating-fn})
-        {:keys [provider theme-name theme-choice system-dark-fn* poll-armed? arm-count
-                zoom-fn theme-ctx set-theme-fn cycle-theme-fn]}
-        (win-theme/build {:tabs tabs :cv cv :settings-path* settings-path* :status-label status-label
-                          :evaluating-fn evaluating-fn :closing? closing?})
-        {:keys [sp rp lp hp] *right :right*}
-        (win-right-slot/build-panels {})
-        {:keys [popovers close-popovers-fn register-popover-fn source-ctx server-ev completion-ns-fn completion-opts]}
-        (win-help/build {:ev* ev* :status-label status-label :sp sp :sel* sel* :active? active? :active-tab active-tab
-                         :open-file! win-tabs/open-file! :tab-ctx* *tab-ctx :right* *right})
-        {:keys [repl-completion repl-complete-fn]}
-        (win-console/build-completion {:cv cv :ev* ev* :status-label status-label :completion-ns-fn completion-ns-fn
-                                       :server-ev server-ev :close-popovers-fn close-popovers-fn})
-        {:keys [run-fn stop-fn run-selection-fn run-changed-fn]}
-        (win-run/build {:active-tab active-tab :cv cv :ev* ev* :sel* sel* :status-label status-label})
-        {:keys [close-fn new-tab-fn step-tab-fn digit-tab-fn]}
-        (win-tabs/build {:tabs tabs :active-id active-id :active-tab active-tab :tab-ctx* *tab-ctx})
-        {:keys [h-paned inspector-state inspecting? inspect-queued inspector-last-args on-view on-inspector-close pane]}
-        (win-inspector/build {:active-tab active-tab :cv cv :ev* ev* :status-label status-label :right* *right})
-        {:keys [slot part-panels* right panel-focus-fn]}
-        (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
-                               :settings-path* settings-path* :status-label status-label})
-        _ (win-right-slot/publish {:right right :right* *right})
-        {:keys [source-jump-fn source-close-fn source-back-fn source-open-fn jump-back-fn source-keys]}
-        (win-help/build-source-keys {:source-ctx source-ctx :active-tab active-tab :right right :sp sp :win win :tabs tabs
-                                     :open-file! win-tabs/open-file! :select-tab! win-tabs/select-tab! :tab-by-id win-tabs/tab-by-id
-                                     :tab-ctx* *tab-ctx})
-        {:keys [parinfer-mode* update-parinfer-label! parinfer-status-fn parinfer-fn]}
-        (win-status-bar/build-parinfer {:settings-path* settings-path* :active-tab active-tab :parinfer-label parinfer-label
-                                        :evaluating-fn evaluating-fn :status-label status-label :cv cv})
-        {:keys [open-fn save-fn save-as-fn inspect-last-ctx inspect-last-fn inspect-form-fn close-inspector-fn
-                toggle-focus-fn clear-console-fn clear-last-fn open-find-fn open-replace-fn]}
-        (win-context/build-key-fns {:cv cv :win win :active-tab active-tab :ev* ev* :sel* sel* :status-label status-label
-                                    :right right :pane pane :inspector-state inspector-state :inspecting? inspecting?
-                                    :inspect-queued inspect-queued :inspector-last-args inspector-last-args
-                                    :on-view on-view :tab-ctx* *tab-ctx})
-        ;; win-tree-ops/build makes the tree's pane, and win-layout/build the
-        ;; Files toggle, the tree's outer paned, the editor and console
-        ;; paned, the toolbar and its buttons, the column and the key
-        ;; controller.
-        {:keys [tree-pane] *open-folder :open-folder* *folder-result :folder-result*}
-        (win-tree-ops/build {:status-label status-label :tab-ctx* *tab-ctx})
-        {:keys [files-btn tree-paned paned toolbar run-btn stop-btn open-btn save-btn reset-chk reset-state vbox keyctl]}
-        (win-layout/build {})
-        {:keys [part-error! part-contribution]}
-        (win-context/build-parts {:win win :status-label status-label :cv cv :ev* ev* :sel* sel* :tabs tabs
-                                  :active-tab active-tab :settings-path* settings-path* :bang* bang*
-                                  :recent-tabs recent-tabs :right right :tree-pane tree-pane :tree-paned tree-paned
-                                  :paned paned :files-btn files-btn :panel-focus-fn panel-focus-fn
-                                  :unread-label unread-label :plugins-on* plugins-on* :rp rp :lp lp :hp hp
-                                  :pending-label pending-label :inspect-last-ctx inspect-last-ctx
-                                  :source-ctx source-ctx :part-panels* part-panels* :tab-ctx* *tab-ctx})
-        {:keys [repl-activate-menu-action-fn]}
-        (win-context/build-console-menu {:cv cv :repl-complete-fn repl-complete-fn :clear-last-fn clear-last-fn
-                                         :part-contribution part-contribution :status-label status-label})
-        {:keys [window-key-args window-key-fn]}
-        (win-context/build-keys {:panel-focus-fn panel-focus-fn :hints-toggle-fn hints-toggle-fn :run-changed-fn run-changed-fn
-                                 :tabs tabs :recent-tabs recent-tabs :status-label status-label :run-fn run-fn
-                                 :stop-fn stop-fn :open-fn open-fn :save-fn save-fn :save-as-fn save-as-fn
-                                 :close-fn close-fn :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
-                                 :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn :zoom-fn zoom-fn
-                                 :evaluating-fn evaluating-fn :win win :active-tab active-tab :open-find-fn open-find-fn
-                                 :open-replace-fn open-replace-fn :cycle-theme-fn cycle-theme-fn
-                                 :close-popovers-fn close-popovers-fn :inspect-last-fn inspect-last-fn
-                                 :inspect-form-fn inspect-form-fn :pane pane :close-inspector-fn close-inspector-fn
-                                 :source-keys source-keys :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
-                                 :digit-tab-fn digit-tab-fn :parinfer-fn parinfer-fn
-                                 :part-contribution part-contribution :tab-ctx* *tab-ctx})]
-    (win-layout/place! {:toolbar toolbar :files-btn files-btn :run-btn run-btn :stop-btn stop-btn :open-btn open-btn
-                        :save-btn save-btn :reset-chk reset-chk :paned paned :notebook notebook :cv cv
-                        :h-paned h-paned :pane pane :sp sp :slot slot :rp rp :lp lp :hp hp :part-panels* part-panels*
-                        :vbox vbox :tree-paned tree-paned :tree-pane tree-pane :win win :status-label status-label
-                        :hint-label hint-label :pending-label pending-label :unread-label unread-label
-                        :dialect-label dialect-label :parinfer-label parinfer-label :line-col-label line-col-label
-                        :update-parinfer-label! update-parinfer-label!})
-    (win-theme/connect! {:cv cv :provider provider :theme-name theme-name :sp sp :pane pane})
-    (win-layout/connect! {:run-btn run-btn :stop-btn stop-btn :open-btn open-btn :save-btn save-btn :reset-chk reset-chk
-                          :keyctl keyctl :win win :status-label status-label :run-fn run-fn :stop-fn stop-fn
-                          :open-fn open-fn :save-fn save-fn :ev* ev* :window-key-fn window-key-fn})
-    (win-startup/connect-quit! {:tabs tabs :cv cv :win win :app app :confirmed-close? confirmed-close? :suppress-close? suppress-close? :closing? closing? :popovers popovers :ev* ev* :part-contribution part-contribution :part-error! part-error! :tab-ctx* *tab-ctx})
-    (win-help/connect! {:cv cv :status-label status-label :sp sp :source-jump-fn source-jump-fn :source-open-fn source-open-fn :source-close-fn source-close-fn :register-popover-fn register-popover-fn :pane pane :repl-completion repl-completion :repl-complete-fn repl-complete-fn})
-    (win-startup/startup! {:part-contribution part-contribution :cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev* :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state :active-tab active-tab :file file :tree-pane tree-pane :active? active? :win win :line-col-label line-col-label :close-popovers-fn close-popovers-fn :register-popover-fn register-popover-fn :source-ctx source-ctx :settings-path* settings-path* :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn :open-find-fn open-find-fn :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook :theme-name theme-name :completion-opts completion-opts :active-id active-id :popovers popovers :window-key-args window-key-args :repl-complete-fn repl-complete-fn :parinfer-mode* parinfer-mode* :parinfer-status-fn parinfer-status-fn :update-parinfer-label! update-parinfer-label! :part-error! part-error! :recent-tabs recent-tabs :hint-label hint-label :hints-on? hints-on? :files-btn files-btn :dir dir :cwd cwd :theme-ctx theme-ctx :current-report current-report :current-open-paths current-open-paths :folder-result* *folder-result :tab-ctx* *tab-ctx :open-folder* *open-folder})
-    (when on-ready (on-ready (win-ui/ui-map {:tabs tabs :part-contribution part-contribution :cv cv :session session :status-label status-label :win win :notebook notebook :app app :active-tab active-tab :parinfer-label parinfer-label :parinfer-fn parinfer-fn :line-col-label line-col-label :ev* ev* :sel* sel* :dialect-label dialect-label :reset-chk reset-chk :window-key-args window-key-args :hint-label hint-label :unread-label unread-label :window-key-fn window-key-fn :run-btn run-btn :stop-btn stop-btn :open-btn open-btn :save-btn save-btn :tree-pane tree-pane :files-btn files-btn :tree-paned tree-paned :h-paned h-paned :current-open-paths current-open-paths :run-fn run-fn :stop-fn stop-fn :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn :zoom-fn zoom-fn :set-theme-fn set-theme-fn :theme-name theme-name :theme-choice theme-choice :system-dark-fn* system-dark-fn* :theme-ctx theme-ctx :arm-count arm-count :poll-armed? poll-armed? :provider provider :cycle-theme-fn cycle-theme-fn :settings-path* settings-path* :close-popovers-fn close-popovers-fn :register-popover-fn register-popover-fn :repl-activate-menu-action-fn repl-activate-menu-action-fn :repl-complete-fn repl-complete-fn :repl-completion repl-completion :pane pane :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn :inspector-state inspector-state :inspector-last-args inspector-last-args :sp sp :slot slot :rp rp :pending-label pending-label :lp lp :right right :panel-focus-fn panel-focus-fn :on-inspector-close on-inspector-close :hp hp :source-jump-fn source-jump-fn :source-open-fn source-open-fn :source-back-fn source-back-fn :jump-back-fn jump-back-fn :source-close-fn source-close-fn :confirmed-close? confirmed-close? :closing? closing? :suppress-close? suppress-close? :folder-result* *folder-result :tab-ctx* *tab-ctx})))))
+(defn- activate! [app {:keys [on-ready] :as opts}]
+  (let [w (-> (assoc opts :app app :current-report current-report :current-open-paths current-open-paths)
+              win-startup/build
+              win-status-bar/build
+              win-quit/build
+              win-console/build
+              win-theme/build
+              win-right-slot/build-panels
+              (assoc :open-file! win-tabs/open-file! :select-tab! win-tabs/select-tab! :tab-by-id win-tabs/tab-by-id)
+              win-help/build
+              win-console/build-completion
+              win-run/build
+              win-tabs/build
+              win-inspector/build
+              win-right-slot/build
+              win-right-slot/publish
+              win-help/build-source-keys
+              win-status-bar/build-parinfer
+              win-context/build-key-fns
+              ;; win-tree-ops/build makes the tree's pane, and win-layout/build the
+              ;; Files toggle, the tree's outer paned, the editor and console
+              ;; paned, the toolbar and its buttons, the column and the key
+              ;; controller.
+              win-tree-ops/build
+              win-layout/build
+              win-context/build-parts
+              win-context/build-console-menu
+              win-context/build-keys)]
+    (win-layout/place! w)
+    (win-theme/connect! w)
+    (win-layout/connect! w)
+    (win-startup/connect-quit! w)
+    (win-help/connect! w)
+    (win-startup/startup! w)
+    (when on-ready (on-ready (win-ui/ui-map w)))))
 
 (defn- run-application!
   "Runs the application's main loop. With an argv of more than the program
