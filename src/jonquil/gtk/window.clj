@@ -238,8 +238,10 @@
         ;; The ui's editor-menu hook fires the FIRST tab's menu
         ;; (tabs are built after this let), as the other per-tab ui keys do.
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action (:menu-group (first @tabs)) name ffi/null))
-        ;; The tree on the left, its toggle first in the toolbar, and the
-        ;; outer paned that holds it beside h-paned.
+        ;; win-tree-ops/build makes the tree's pane, and win-layout/build the
+        ;; Files toggle, the tree's outer paned, the editor and console
+        ;; paned, the toolbar and its buttons, the column and the key
+        ;; controller.
         {:keys [tree-pane] *open-folder :open-folder* *folder-result :folder-result*}
         (win-tree-ops/build {:status-label status-label :tab-ctx* *tab-ctx})
         {:keys [files-btn tree-paned paned toolbar run-btn stop-btn open-btn save-btn reset-chk reset-state vbox keyctl]}

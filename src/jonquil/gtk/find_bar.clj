@@ -338,8 +338,8 @@
   "True when keyboard focus is in the replacement entry.
   gtk_root_get_focus returns the entry's internal GtkText delegate, never
   the GtkEntry itself (measured), so this asks
-  gtk_widget_is_ancestor(focus, replacement), the same test window.clj's
-  find-bar-focused? uses against the whole bar."
+  gtk_widget_is_ancestor(focus, replacement), the same test
+  jonquil.gtk.window.keys's find-bar-focused? uses against the whole bar."
   [fb]
   (let [f (focused-widget fb)]
     (and (not (ffi/null? f))
