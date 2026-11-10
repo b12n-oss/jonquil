@@ -455,6 +455,134 @@
        (= \" (nth text (dec caret)))
        (= \" (nth text caret))))
 
+(defn- post-action-text
+  "The buffer's text after the action, for parinfer-after-action!."
+  [buf prev span]
+  ;; On a cache hit with an armed span, the post-action text is
+  ;; the cached head, the changed middle read from the buffer,
+  ;; and the cached tail: three exact pieces (the span's head
+  ;; and tail are untouched by construction), 0.12 ms against
+  ;; the 10.8 ms full read. The length guard
+  ;; only catches a ranged read disagreeing with GTK's char
+  ;; count (embedded objects, hidden text); a wrong span is
+  ;; invisible to it, which is why the span must stay sound.
+  ;; A miss's prev is a fresh read of the begin-time buffer,
+  ;; ground truth by construction, so the splice doesn't need
+  ;; the cache.
+  (or (when span
+        (let [pt ^String (:text prev)
+              n (count pt)
+              m (g/gtk-text-buffer-get-char-count buf)
+              p (min (:prefix span) n m)
+              q (min (:suffix span) (- n p) (- m p))
+              spliced (str (subs pt 0 p)
+                           (g/buffer-text-range buf p (- m q))
+                           (subs pt (- n q)))]
+          (when (= (count spliced) m) spliced)))
+      (g/buffer-text buf)))
+
+(defn- prev-consistent?
+  "Whether the last action's form, by its edit start, contains this
+  edit's start, for pe/adjust's :prev-consistent?."
+  [prev span]
+  (boolean
+   (and (:cached? prev) span (some? (:edit-at prev))
+        ;; one region call, on the prev text the
+        ;; painter's tick has already bracketed:
+        ;; the last action's form, by its edit
+        ;; start, must contain this edit's start
+        (let [pt (:text prev)
+              n (count pt)
+              [ls le] (pe/region pt (min (:edit-at prev) n))]
+          (<= ls (:prefix span) le)))))
+
+(defn- apply-fix-keeping-selection!
+  "Applies the fix r inside a nested user action and selects [sa sb]
+  mapped through it."
+  [{:keys [buf text r sa sb]}]
+  (let [fixed (edit/apply-edits text (:edits r))
+        remap (fn [x] (pe/remap-offset text fixed x))]
+    (g/gtk-text-buffer-begin-user-action buf)
+    (try
+      (doseq [[s e rep'] (rseq (vec (:edits r)))]
+        (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+        (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a rep' -1))))
+      (g/with-iters* buf (remap sa) (remap sb)
+        (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (finally (g/gtk-text-buffer-end-user-action buf)))))
+
+(defn- apply-fix!
+  "Applies an adjusted result r with the hook's own apply guarded by
+  :parinfer-busy?."
+  [ed {:keys [buf text r]}]
+  (when (map? r)
+    (reset! (:parinfer-busy? ed) true)
+    (try
+      (let [[sa sb] (g/selection-offsets buf)]
+        (if (and sa sb (< sa sb))
+          ;; The op selected a range (indent, toggle-comment
+          ;; on lines): the selection survives the fix, each
+          ;; end mapped through the fix's one edit. A delete would swallow the marks, so
+          ;; following GTK's own mark motion isn't enough.
+          (apply-fix-keeping-selection! {:buf buf :text text :r r :sa sa :sb sb})
+          (apply-op! ed r)))
+      (finally (reset! (:parinfer-busy? ed) false)))))
+
+(defn- use-result!
+  "Says a too-long form or an engine error, or applies r and clears the
+  status."
+  [ed {:keys [buf text r status]}]
+  (cond
+    (= ::pe/too-long r)
+    (when status
+      (status (str "over " pe/default-max-lines " lines here, not adjusted")))
+
+    ;; A Jolt shim gap the engine caught (parinfer-edit): name it
+    ;; once; the buffer stays as typed.
+    (:engine-error r)
+    (when-let [f @(:on-error-fn ed)]
+      (f (str "; parinfer: " (:engine-error r))))
+
+    :else
+    (do (apply-fix! ed {:buf buf :text text :r r})
+        (when status (status nil)))))
+
+(defn- prime-next-action!
+  "Primes the next action's prev from the final text and arms the
+  outside span."
+  [ed {:keys [text r prev span]}]
+  ;; prime the next action's prev: the final text without another
+  ;; buffer copy, with the gen read after our own apply bumped it
+  (let [fixed? (and (map? r) (:edits r))
+        final (if fixed? (edit/apply-edits text (:edits r)) text)]
+    (reset! (:parinfer-prev-cache ed)
+            {:text final :gen @(:edit-gen ed)
+             ;; Where this action edited, in final coordinates, and
+             ;; only when Parinfer really probed a changed form:
+             ;; the fix can move text before the offset, so it's
+             ;; carried across by line and column, and
+             ;; a no-op action, a too-long skip or an engine error
+             ;; probed nothing, so nothing is marked consistent.
+             :edit-at (when (and span
+                                 (not= text (:text prev))
+                                 (or (nil? r) fixed?))
+                        (if fixed?
+                          (pe/remap-offset text final (:prefix span))
+                          (:prefix span)))})
+    ;; after the prime, in this same step: the fix's own signals
+    ;; have fired, so everything narrowing it from here on really
+    ;; is outside the hook's sight
+    (arm-outside-span! ed (count final))))
+
+(defn- parinfer-failed!
+  "A throw in the hook: drops the cache and the outside span, and names
+  the error."
+  [ed e]
+  (reset! (:parinfer-prev-cache ed) nil)
+  (arm-outside-span! ed nil)
+  (when-let [f @(:on-error-fn ed)]
+    (f (str "; parinfer: " (ex-message e)))))
+
 (defn- parinfer-after-action!
   "The Parinfer hook at end-user-action: parinfer-edit/adjust from the
   begin-user-action snapshot, applied inside a nested user action, which
@@ -469,116 +597,28 @@
     (let [span @(:parinfer-span ed)]
       (reset! (:parinfer-span ed) nil)
       (when-let [mode (parinfer-mode ed)]
-       (try
-        (let [buf (:buf ed)
-              ;; On a cache hit with an armed span, the post-action text is
-              ;; the cached head, the changed middle read from the buffer,
-              ;; and the cached tail: three exact pieces (the span's head
-              ;; and tail are untouched by construction), 0.12 ms against
-              ;; the 10.8 ms full read. The length guard
-              ;; only catches a ranged read disagreeing with GTK's char
-              ;; count (embedded objects, hidden text); a wrong span is
-              ;; invisible to it, which is why the span must stay sound.
-              ;; A miss's prev is a fresh read of the begin-time buffer,
-              ;; ground truth by construction, so the splice doesn't need
-              ;; the cache.
-              text (or (when span
-                         (let [pt ^String (:text prev)
-                               n (count pt)
-                               m (g/gtk-text-buffer-get-char-count buf)
-                               p (min (:prefix span) n m)
-                               q (min (:suffix span) (- n p) (- m p))
-                               spliced (str (subs pt 0 p)
-                                            (g/buffer-text-range buf p (- m q))
-                                            (subs pt (- n q)))]
-                           (when (= (count spliced) m) spliced)))
-                       (g/buffer-text buf))
-              r (pe/adjust {:mode mode
-                            :prev-text (:text prev) :prev-caret (:caret prev)
-                            :text text :caret (g/cursor-offset buf)
-                            ;; the signals' untouched head/tail replaces the
-                            ;; whole-buffer diff. The re-indent probe skips
-                            ;; only when this edit starts in the SAME form
-                            ;; the previous action edited: a cache hit
-                            ;; proves the buffer is our last output, not
-                            ;; that the form under the caret ever met
-                            ;; Parinfer (a caret move changes no gen), so
-                            ;; same-form is the part that keeps the user's
-                            ;; first-edit re-indent.
-                            :bounds (when span [(:prefix span) (:suffix span)])
-                            :prev-consistent?
-                            (boolean
-                             (and (:cached? prev) span (some? (:edit-at prev))
-                                  ;; one region call, on the prev text the
-                                  ;; painter's tick has already bracketed:
-                                  ;; the last action's form, by its edit
-                                  ;; start, must contain this edit's start
-                                  (let [pt (:text prev)
-                                        n (count pt)
-                                        [ls le] (pe/region pt (min (:edit-at prev) n))]
-                                    (<= ls (:prefix span) le))))})
-              status @(:parinfer-status-fn ed)]
-          (cond
-            (= ::pe/too-long r)
-            (when status
-              (status (str "over " pe/default-max-lines " lines here, not adjusted")))
-
-            ;; A Jolt shim gap the engine caught (parinfer-edit): name it
-            ;; once; the buffer stays as typed.
-            (:engine-error r)
-            (when-let [f @(:on-error-fn ed)]
-              (f (str "; parinfer: " (:engine-error r))))
-
-            :else
-            (do (when (map? r)
-                  (reset! (:parinfer-busy? ed) true)
-                  (try
-                    (let [[sa sb] (g/selection-offsets buf)]
-                      (if (and sa sb (< sa sb))
-                        ;; The op selected a range (indent, toggle-comment
-                        ;; on lines): the selection survives the fix, each
-                        ;; end mapped through the fix's one edit. A delete would swallow the marks, so
-                        ;; following GTK's own mark motion isn't enough.
-                        (let [fixed (edit/apply-edits text (:edits r))
-                              remap (fn [x] (pe/remap-offset text fixed x))]
-                          (g/gtk-text-buffer-begin-user-action buf)
-                          (try
-                            (doseq [[s e rep'] (rseq (vec (:edits r)))]
-                              (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
-                              (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a rep' -1))))
-                            (g/with-iters* buf (remap sa) (remap sb)
-                              (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
-                            (finally (g/gtk-text-buffer-end-user-action buf))))
-                        (apply-op! ed r)))
-                    (finally (reset! (:parinfer-busy? ed) false))))
-                (when status (status nil))))
-          ;; prime the next action's prev: the final text without another
-          ;; buffer copy, with the gen read after our own apply bumped it
-          (let [fixed? (and (map? r) (:edits r))
-                final (if fixed? (edit/apply-edits text (:edits r)) text)]
-            (reset! (:parinfer-prev-cache ed)
-                    {:text final :gen @(:edit-gen ed)
-                     ;; Where this action edited, in final coordinates, and
-                     ;; only when Parinfer really probed a changed form:
-                     ;; the fix can move text before the offset, so it's
-                     ;; carried across by line and column, and
-                     ;; a no-op action, a too-long skip or an engine error
-                     ;; probed nothing, so nothing is marked consistent.
-                     :edit-at (when (and span
-                                         (not= text (:text prev))
-                                         (or (nil? r) fixed?))
-                                (if fixed?
-                                  (pe/remap-offset text final (:prefix span))
-                                  (:prefix span)))})
-            ;; after the prime, in this same step: the fix's own signals
-            ;; have fired, so everything narrowing it from here on really
-            ;; is outside the hook's sight
-            (arm-outside-span! ed (count final))))
-        (catch :default e
-          (reset! (:parinfer-prev-cache ed) nil)
-          (arm-outside-span! ed nil)
-          (when-let [f @(:on-error-fn ed)]
-            (f (str "; parinfer: " (ex-message e))))))))))
+        (try
+          (let [buf (:buf ed)
+                text (post-action-text buf prev span)
+                r (pe/adjust {:mode mode
+                              :prev-text (:text prev) :prev-caret (:caret prev)
+                              :text text :caret (g/cursor-offset buf)
+                              ;; the signals' untouched head/tail replaces the
+                              ;; whole-buffer diff. The re-indent probe skips
+                              ;; only when this edit starts in the SAME form
+                              ;; the previous action edited: a cache hit
+                              ;; proves the buffer is our last output, not
+                              ;; that the form under the caret ever met
+                              ;; Parinfer (a caret move changes no gen), so
+                              ;; same-form is the part that keeps the user's
+                              ;; first-edit re-indent.
+                              :bounds (when span [(:prefix span) (:suffix span)])
+                              :prev-consistent? (prev-consistent? prev span)})
+                status @(:parinfer-status-fn ed)]
+            (use-result! ed {:buf buf :text text :r r :status status})
+            (prime-next-action! ed {:text text :r r :prev prev :span span}))
+          (catch :default e
+            (parinfer-failed! ed e)))))))
 
 (defn set-parinfer-fns!
   "Wires the window's Parinfer reads: mode-fn answers the current mode
