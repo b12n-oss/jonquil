@@ -88,7 +88,7 @@
                   win-session/session-snapshot (fn [_] ::snapshot)
                   parts/run-hooks! (fn [_ k args _] (l [:hooks k args]))]
       (win-startup/startup! w)
-      (deref ran 5000 nil))
+      (is (true? (deref ran 5000 :timeout))))
     (let [ctx @(:tab-ctx* w)]
       (is (= [[:add-tab true {:path nil :text ""}] [:settings "/s.edn"]
               [:parinfer-label]
@@ -184,6 +184,9 @@
     (is (= [::ev :w1 :w2] [(:session w) (:notebook w) (:win w)]))
     (reset! (:tabs w) [{:id 1} {:id 2}])
     (reset! (:active-id w) 2)
+    (is (= [] @(:recent-tabs w)))
+    (reset! (:recent-tabs w) [7])
+    (is (= [{:id 1} {:id 2}] @(:tabs w)))
     (is (= {:id 2} ((:active-tab w))))
     (is (true? ((:active? w) {:id 2})))
     (with-redefs [ev/evaluating? (fn [e] [:evaluating? e])]

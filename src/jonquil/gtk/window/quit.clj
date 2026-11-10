@@ -3,9 +3,10 @@
   and otherwise saves the session, stops the runtime and quits; the close
   alert's choice and Save All; unparenting the popovers before the real quit;
   and connect!, which makes activate!'s close-request connect and its quit
-  action. build makes activate!'s close flags. Internal to the window, as jonquil.gtk.window.status is. Moved out of
-  jonquil.gtk.window unchanged, then close-request-fn's branches split into
-  named steps; connect! holds activate!'s own statements in their order."
+  action. build makes activate!'s close flags. Internal to the window, as
+  jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged,
+  then close-request-fn's branches split into named steps; connect! holds
+  activate!'s own statements in their order."
   (:require [jolt.ffi :as ffi]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [callable]]
