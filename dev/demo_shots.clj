@@ -447,7 +447,7 @@
 
 (defn- scene-completion
   "\"(ma\" in the editor, :complete!* -- the exact fn Ctrl+Space
-  calls (jonquil.gtk.window's own do-complete!). \"ma\" has several
+  calls (jonquil.gtk.window.help's own do-complete!). \"ma\" has several
   candidates (docs/candidates, measured live: macroexpand and friends),
   so the popover opens with its own rows AND the selected candidate's doc
   preview, both visible in the same shot -- a popup with

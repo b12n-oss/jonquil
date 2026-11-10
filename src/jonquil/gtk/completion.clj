@@ -23,14 +23,14 @@
   popover's own :open? -- (popover/open? c) is the single source of truth
   for \"is completion active\": (state c) reads @(:state c) only while the
   popover is actually open, so a close driven from OUTSIDE this namespace
-  (jonquil.gtk.window's registry-wide close-popovers!, used both for Escape
-  and for the \"opening another popover closes this one\" rule below, which
-  only ever calls the generic popover/hide!, never knows this namespace's
-  :state atom exists) still reads back as closed everywhere here, even
-  though the atom itself is left stale until the next open!/refine! resets
-  it. handle-key!/refine!/commit! all gate on (popover/open? c) for the
-  same reason: a stale :state must never drive a swallowed key or a
-  reopened popup once the widget itself is hidden.
+  (jonquil.gtk.window.help's registry-wide close-popovers!, used both for
+  Escape and for the \"opening another popover closes this one\" rule
+  below, which only ever calls the generic popover/hide!, never knows this
+  namespace's :state atom exists) still reads back as closed everywhere
+  here, even though the atom itself is left stale until the next
+  open!/refine! resets it. handle-key!/refine!/commit! all gate on
+  (popover/open? c) for the same reason: a stale :state must never drive
+  a swallowed key or a reopened popup once the widget itself is hidden.
 
   ns-fn (opts, at construction) is only the default :candidates-fn/:doc-fn
   closures' own source of the running namespace, called at every lookup
@@ -41,7 +41,7 @@
   jonquil.evaluator instead while ns-fn keeps its old meaning for any
   caller that still passes it.
 
-  close-others! (opts) is jonquil.gtk.window's own close-popovers-fn:
+  close-others! (opts) is jonquil.gtk.window.help's own close-popovers-fn:
   open!'s own multi-candidate branch calls it right before
   showing, so opening completion closes quick doc/jump's popover the same
   way Escape closes any of them -- through the registry, never a pairwise
@@ -242,11 +242,12 @@
   "Selects st's own index row and sets the doc-preview label to help/
   doc-text for the selected candidate: docs/symbol-doc looked up with st's
   own :text (the snapshot text open!/refine! saw when they built st --
-  mirroring window.clj's do-quick-doc!/do-jump!, which pass the target
-  symbol's own start as pos) and the prefix's own start. The rows stay as
-  they are, so an arrow key costs one select, not a list rebuild. Nothing
-  scrolls the row into view here, same as render! before it. An empty
-  list (a popup still waiting for the server) shows waiting-text; a
+  mirroring jonquil.gtk.window.help's do-quick-doc!/do-jump!, which pass
+  the target symbol's own start as pos) and the prefix's own start. The
+  rows stay as they are, so an arrow key costs one select, not a list
+  rebuild. Nothing scrolls the row into view here, same as render!
+  before it. An empty list (a popup still waiting for the server) shows
+  waiting-text; a
   server evaluator's doc comes through ev/ask-help!, with loading-text
   until a late answer lands (doc-arrived!)."
   [c st]
@@ -275,9 +276,9 @@
   first -- gtk_list_box_remove_all, 4.12+), selects st's own index, and
   sets the doc-preview label to help/doc-text for the selected candidate:
   docs/symbol-doc looked up with st's own :text (the snapshot text open!/
-  refine! saw when they built st -- mirroring window.clj's do-quick-doc!/
-  do-jump!, which pass the target symbol's own start as pos) and the
-  prefix's own start. Each row's label gets xalign
+  refine! saw when they built st -- mirroring jonquil.gtk.window.help's
+  do-quick-doc!/do-jump!, which pass the target symbol's own start as pos)
+  and the prefix's own start. Each row's label gets xalign
   0 and halign START -- GTK_ALIGN_FILL's default centres a GtkListBoxRow's
   child when the row is wider than the label's own natural size, which is
   every row here (list-box is LIST-WIDTH wide, a candidate name is not)."

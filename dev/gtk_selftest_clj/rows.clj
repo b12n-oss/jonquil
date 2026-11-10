@@ -416,9 +416,9 @@
 
 (defn row-clj-full-doc-escape
   "With the full-doc popover open (the same double quick-doc press as
-  row-clj-full-doc), Escape closes it -- window.clj's own popover
-  registry (:close-popovers!*), the same path the popover escape row
-  uses."
+  row-clj-full-doc), Escape closes it -- the window's own popover
+  registry (:close-popovers!*, made by jonquil.gtk.window.help's build),
+  the same path the popover escape row uses."
   [ui]
   (go-row :clj-full-doc-escape support/check
     (let [fp (:full-doc-popover ui)]
