@@ -514,7 +514,7 @@
   prompt. Typing \"answer\" into the prompt's entry (inserting text into
   the entry, the same gtk-editable-set-text idiom rename/find-bar rows use)
   and Return -- mirroring inspector-pane's own \"activate\" handler
-  (jonquil.gtk.inspector-pane/make-pane's def-entry wiring: trim, hide,
+  (jonquil.gtk.inspector-pane/connect-def-prompt!: trim, hide,
   call on-def when non-blank), driven here through the pane's own exposed
   :on-def rather than a synthesized keystroke into a live popover -- sends
   :def {:name \"answer\"}: the console shows \"; Defined #'user/answer\",

@@ -62,8 +62,9 @@
 (defn- rect-visible?
   "True when rect (g/caret-window-rect's own [x y w h], TEXT-window
   coordinates) falls entirely inside a view of view-height pixels. The
-  one shared check behind caret-visible?, below, and make-pane's own
-  pre-pane scroll-settle-cb (which closes over the editor directly, not
+  one shared check behind caret-visible?, below, and the pre-pane
+  scroll-settle callback built in make-pane (the body is
+  scroll-settle-callback, which closes over the editor directly, not
   pane -- see its own comment)."
   [[_ y _ h] view-height]
   (and (>= y 0) (<= (+ y h) view-height)))
@@ -94,13 +95,13 @@
   through hide-right-panel!, not by calling this a second time. Takes the
   pane's own scroll-cancelled? atom directly, not pane itself, since two
   of its callers -- the scroll controller's handler and the cursor-moved
-  hook, both wired in make-pane -- are built before pane exists (same
-  reasoning as scroll-settle-cb closing over ed instead of pane); the
-  panel editor view's own \"destroy\" handler (also make-pane) and
-  jonquil.gtk.window both reach it through the pane's public
-  :scroll-cancelled? key instead. arm-scroll-settle! resets it back to
-  false on every fresh jump, so a later place-caret! isn't short-circuited
-  by an earlier cancel."
+  hook, both wired in connect-scroll-cancels! -- are built before pane
+  exists (same reasoning as scroll-settle-cb closing over ed instead of
+  pane); the panel editor view's own \"destroy\" handler (also
+  connect-scroll-cancels!) and jonquil.gtk.window both reach it through
+  the pane's public :scroll-cancelled? key instead. arm-scroll-settle!
+  resets it back to false on every fresh jump, so a later place-caret!
+  isn't short-circuited by an earlier cancel."
   [cancelled?-atom]
   (reset! cancelled?-atom true)
   nil)
@@ -302,8 +303,7 @@
   ;; close-source-panel! already cancel on every ordinary hide, well
   ;; before the view ever goes away) -- a transient window closing out
   ;; from under the panel, as dev/gtk_selftest_window/source_pane.clj's
-  ;; with-source-pane does between rows. Connected ONCE, here, like
-  ;; every other signal in this fn.
+  ;; with-source-pane does between rows. Connected ONCE, here.
   (g/g-signal-connect-data (:view ed) "destroy"
                            (callable (fn [_view _data] (cancel-scroll-settle! scroll-cancelled?) nil)
                                      [:pointer :pointer] :void)
@@ -329,8 +329,8 @@
   editor is read-only and carries the jonquil-code CSS class, so the
   window's zoom reaches it.
 
-  The panel editor view's own \"destroy\" signal
-  is connected ONCE, here, to a callable that cancels scroll-settle (sets
+  The panel editor view's own \"destroy\" signal is connected ONCE, in
+  connect-scroll-cancels!, to a callable that cancels scroll-settle (sets
   scroll-cancelled? true) so scroll-settle-cb's next tick sees it and
   removes itself (G_SOURCE_REMOVE) before touching the now-gone view --
   rather than finding out the hard way, via a GTK_IS_TEXT_VIEW/
@@ -366,8 +366,8 @@
         ;; data); dx/dy are never read, since ANY scroll at all means the
         ;; person is driving the view themselves. Plain fn, not yet
         ;; wrapped in callable, so it can also be called directly (no FFI
-        ;; marshaling) by a self-test row, and wrapped once below for the
-        ;; real GTK connection.
+        ;; marshaling) by a self-test row, and wrapped once, in
+        ;; connect-scroll-cancels!, for the real GTK connection.
         on-user-scroll! (user-scroll-fn footer scroll-cancelled?)
         pane {:root root :header header :editor ed :footer footer
               :open-btn open-btn :close-btn close-btn

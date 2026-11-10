@@ -253,7 +253,7 @@
   (let [h (atom {:items items})]
     {:cv {:replay-tab* (atom rt)}
      :ev* (atom #_{:clj-kondo/ignore [:missing-protocol-method]}
-                (reify ev/Evaluator (history [_] h)))
+           (reify ev/Evaluator (history [_] h)))
      :sel* (atom {:profile {:id :jolt :name "Jolt"}})
      :settings-path* (atom "settings.edn")
      :replay* (atom st)}))
