@@ -15,7 +15,7 @@
     [jonquil.gtk.window.inspector jonquil.gtk.window.help]
     [jonquil.gtk.window.tabs jonquil.gtk.window.console]
     [jonquil.gtk.window.reopen jonquil.gtk.window.tree-ops jonquil.gtk.window.context]
-    [jonquil.gtk.window.startup]])
+    [jonquil.gtk.window.startup jonquil.gtk.window.ui]])
 
 (defn- ns-file [sym]
   (str "src/" (str/replace (str/replace (str sym) "-" "_") "." "/") ".clj"))
