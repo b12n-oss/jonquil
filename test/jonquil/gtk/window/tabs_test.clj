@@ -400,7 +400,9 @@
                   editor/set-rename-fn! (keep-fn :rename-fn)
                   editor/set-run-form-fn! (keep-fn :run-form-fn)
                   editor/set-flash-cancel-fn! (fn [_ f] (l [:flash-cancel f]))
-                  win-help/wire-completion! (fn [c & _] (l [:completion c]))]
+                  win-help/wire-completion! (fn [c complete-fn label register-fn & _]
+                                              (swap! caps assoc :completion [complete-fn label register-fn])
+                                              (l [:completion c]))]
       (f))))
 
 (def ^:private wired-in-order
@@ -462,6 +464,12 @@
            (set (keys mc))))
     (doseq [k [:jump! :rename! :quick-doc! :complete! :run-form!]]
       (is (identical? (k a) (k mc)) (str k)))
+    (doseq [[cap k] {:quick-doc-fn :quick-doc! :jump-fn :jump! :rename-fn :rename! :run-form-fn :run-form!}]
+      (is (identical? (cap @caps) (k a)) (str cap)))
+    (let [[complete-fn label register-fn] (:completion @caps)]
+      (is (identical? complete-fn (:complete! a)))
+      (is (= ::l label))
+      (is (identical? register-fn (:register-popover-fn ctx))))
     (is (= ::ilf (:inspect-last-fn mc)))
     (is (= ::iff (:inspect-form-fn mc)))
     (is (= ::of (:open-find-fn mc)))
