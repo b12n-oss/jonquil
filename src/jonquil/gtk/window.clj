@@ -15,12 +15,10 @@
   namespace (button/key handlers, the file dialogs' async callbacks, the
   dirty-changed callback, the self-test's direct calls) already runs on the
   GTK thread, so it calls GTK directly."
-  (:require [clojure.string :as str]
-            [jolt.ffi :as ffi]
+  (:require [jolt.ffi :as ffi]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
-            [jonquil.gtk.callbacks :refer [callable on-gui!]]
-            [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
@@ -42,13 +40,11 @@
             [jonquil.gtk.window.runtime :as win-runtime]
             [jonquil.gtk.window.session :as win-session]
             [jonquil.gtk.window.startup :as win-startup]
-            [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.status-bar :as win-status-bar]
             [jonquil.gtk.window.tabs :as win-tabs]
             [jonquil.gtk.window.theme :as win-theme]
             [jonquil.gtk.window.tree-ops :as win-tree-ops]
             [jonquil.parts :as parts]
-            [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach]
             [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.jank]
@@ -56,8 +52,7 @@
             [jonquil.nrepl.shadow]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
-            [jonquil.settings :as settings]
-            [jonquil.tabs :as tabs]))
+            [jonquil.settings :as settings]))
 
 ;; --- construction ------------------------------------------------------
 
@@ -282,169 +277,7 @@
                           :open-fn open-fn :save-fn save-fn :ev* ev* :window-key-fn window-key-fn})
     (win-startup/connect-quit! {:tabs tabs :cv cv :win win :app app :confirmed-close? confirmed-close? :suppress-close? suppress-close? :closing? closing? :popovers popovers :ev* ev* :part-contribution part-contribution :part-error! part-error! :tab-ctx* *tab-ctx})
     (win-help/connect! {:cv cv :status-label status-label :sp sp :source-jump-fn source-jump-fn :source-open-fn source-open-fn :source-close-fn source-close-fn :register-popover-fn register-popover-fn :pane pane :repl-completion repl-completion :repl-complete-fn repl-complete-fn})
-    (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
-                   :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
-                   :active-ed (fn [] (:ed (active-tab)))
-                   :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}
-          ;; A file argument that doesn't exist opens an empty editor with
-          ;; the path remembered anyway, so Save creates it -- unlike the
-          ;; Open button's dialog result, this is the documented normal
-          ;; case, not an error to report.
-          text (when file (try (slurp file) (catch :default _ nil)))
-          ;; A launch file holding a NUL is refused like any open. Its path must NOT be remembered (Save would write
-          ;; "" over the binary), but `file` stays bound so the
-          ;; session-reopen gate below (when-not file) is untouched.
-          file-nul (when text (tabs/nul-line text))
-          ;; A save (or a path change) under the root
-          ;; expands to the file and highlights it when its tab is active.
-          tree-saved! (fn [t]
-                        (let [p @(:path t)
-                              m @(:state tree-pane)]
-                          (when (and p (ft/under-root? m p))
-                            (file-tree-pane/show-model! tree-pane (ft/expand-to m p))
-                            (when (active? t) (file-tree-pane/select-path! tree-pane p)))))
-          tab-ctx {:win win :cv cv :ev* ev* :sel* sel* :status-label status-label
-                   :line-col-label line-col-label :close-popovers-fn close-popovers-fn
-                   :register-popover-fn register-popover-fn :active? active? :source-ctx source-ctx
-                   :sel-ctx sel-ctx :settings-path* settings-path* :inspect-last-fn inspect-last-fn
-                   :inspect-form-fn inspect-form-fn :open-find-fn open-find-fn
-                   :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook
-                   :theme-name theme-name :completion-opts completion-opts
-                   :active-id active-id :active-tab active-tab :popovers popovers
-                   :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result
-                   :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
-                   :session-restoring? (atom false)
-                   :window-key-args window-key-args :repl-complete-fn repl-complete-fn
-                   :parinfer-mode-read (fn [] @parinfer-mode*)
-                   :parinfer-status-fn parinfer-status-fn
-                   :parinfer-label-update! update-parinfer-label!
-                   :part-contribution part-contribution :part-error! part-error!
-                   :recent-tabs recent-tabs
-                   :hint-label hint-label :hints-on? hints-on?}
-          first-tab (win-tabs/add-tab! tab-ctx {:path (when-not file-nul file)
-                                       :text (if file-nul "" (or text ""))})
-          tree-settings (:file-tree (settings/load-settings @settings-path*))
-          ;; Open Folder...'s result: re-roots the tree; the window's project
-          ;; follows only while its one tab is an untouched Untitled one.
-          folder-result! (fn [{p :path err :error :as r}]
-                           (cond
-                             p (do (file-tree-pane/show-model! tree-pane (ft/load-model p))
-                                   (let [ts @tabs
-                                         t (first ts)]
-                                     (when (and (= 1 (count ts))
-                                                (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))}))
-                                       (win-runtime/apply-selection! sel-ctx (ft/project-selection
-                                                                  p (:dialect (settings/load-settings @settings-path*))))))
-                                   (parts/run-hooks! part-contribution :on-reroot [{:path p}] part-error!))
-                             (win-files/dialog-dismissed? r) nil
-                             :else (cview/append! cv :error (str "; open folder: " err "\n"))))]
-      ;; switch-page fired inside that first append, before the tab was in
-      ;; tabs, so the tab is made active here, and starts the recent list.
-      (reset! active-id (:id first-tab))
-      (reset! recent-tabs [(:id first-tab)])
-      ;; A launch on a project file: the first tab never goes through
-      ;; on-switch!, so its override reaches the label here.
-      (update-parinfer-label!)
-      (reset! *tab-ctx tab-ctx)
-      (reset! *folder-result folder-result!)
-      ;; Open With and Dock drops. A directory re-roots the tree like an
-      ;; Open Folder result and shows it; a file opens in a tab, and one
-      ;; that can't be read goes to the status line while the rest still
-      ;; open.
-      (reset! current-report (fn [text] (win-status/set-status! status-label text)))
-      (reset! current-open-paths
-              (fn [paths]
-                (doseq [p paths]
-                  (try
-                    (if (.isDirectory (java.io.File. ^String p))
-                      (do (folder-result! {:path p})
-                          ;; The tree now shows this folder, so show the tree
-                          ;; too; the toggle handler saves it as a choice.
-                          (g/gtk-toggle-button-set-active files-btn 1))
-                      (when-let [err (:error (win-tabs/open-file! @*tab-ctx p))]
-                        (win-status/set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
-                    (catch :default e
-                      (win-status/set-status! status-label (str "Couldn't open " p ": " (ex-message e))))))))
-      ;; The tree's root, Open Folder..., then the file-tree part's
-      ;; :tree-start!: the starting width and visibility (saved, else shown
-      ;; only for a directory launch) and the toggle's handler, the one
-      ;; place that shows, hides and saves.
-      (file-tree-pane/show-model! tree-pane (ft/load-model (ft/root-for {:dir dir :file file :cwd cwd})))
-      (reset! *open-folder (fn [] (win-files/file-dialog! :folder win
-                                                (fn [r] (try (folder-result! r)
-                                                             (catch :default e
-                                                               (cview/append! cv :error (str "; open folder: " (ex-message e) "\n")))))
-                                                (:root @(:state tree-pane)))))
-      (if-let [f (:tree-start! (:fns part-contribution))]
-        (f {:tree-settings tree-settings :dir dir})
-        (g/gtk-widget-set-visible (:root tree-pane) 0))
-      (g/g-signal-connect-data notebook "switch-page"
-                               (callable (win-tabs/switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      (win-theme/load-and-apply-theme! theme-ctx @settings-path*)
-      ;; Same refusal as open-path!, for the launch file.
-      (when file-nul
-        (cview/append! cv :error
-                       (str "; open: " file " holds a NUL byte on line " file-nul
-                            ", which Jonquil can't edit, so it wasn't opened.\n")))
-      ;; Same non-UTF-8 warning as open-path!.
-      (when (and text (not file-nul) (str/includes? text "�"))
-        (cview/append! cv :system
-                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
-      (try
-        (win-runtime/show-selection! cv dialect-label @sel*)
-        ;; The starting evaluator's connection, label and Reset on Run, as
-        ;; apply-selection! does for every later one.
-        (win-runtime/watch-connection! @ev* ev* sel* dialect-label cv status-label)
-        (win-runtime/apply-reset-toggle! reset-chk reset-state @sel*)
-        (g/gtk-label-set-text dialect-label (win-runtime/dialect-text @sel* @ev*))
-        (win-runtime/refresh-prompt! cv ev*)
-        (catch :default e
-          (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
-      (win-runtime/start-and-report! cv status-label @ev* @sel*)
-      ;; A launch that named no file reopens the
-      ;; tabs open at the last quit in this project. The entry, and any
-      ;; re-root, come now, so the tree shows its folder from the first
-      ;; frame. The files open after the window is up (reopen-later!).
-      (let [entry (when-not file
-                    (try (win-reopen/session-entry! tab-ctx {:reroot? true})
-                         (catch :default e
-                           (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
-                           nil)))
-            ;; The launch's tabs are open, so from here on every change to
-            ;; them is saved as it happens (session-changed!). The state the
-            ;; launch ends in isn't written: a launch on one file would
-            ;; otherwise replace the folder's remembered tabs before
-            ;; anything changed. A re-root alone doesn't save either, for the
-            ;; same reason; the next tab change does.
-            live! (fn []
-                    (reset! (:session-last tab-ctx) (win-session/session-snapshot tab-ctx))
-                    (reset! (:session-live? tab-ctx) true)
-                    (parts/run-hooks! part-contribution :on-start [] part-error!))]
-        ;; Say where the child tools' PATH came from. The wait for the
-        ;; lookup is off the GTK thread; the append goes through on-gui!, and
-        ;; a window closed meanwhile must not throw out of the future.
-        (future
-          (try (when-let [line (login-path/console-line)]
-                 (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
-               (catch :default _ nil)))
-        (let [t (active-tab)]
-          (win-files/update-title! (:ed t) win (:path t))
-          (g/gtk-window-present win)
-          (editor/focus! (:ed t)))
-        (if (seq (:tabs entry))
-          (win-reopen/reopen-later! tab-ctx entry
-                         (fn []
-                           (try
-                             (let [t (active-tab)]
-                               (win-files/update-title! (:ed t) win (:path t))
-                               (editor/focus! (:ed t)))
-                             (finally (live!)))))
-          (live!))))
-    ;; The plugins part's :plugins-start!: the console, the reviews
-    ;; callback, the effects, the startup load and the save hook, set once
-    ;; the window is up.
-    (when-let [f (:plugins-start! (:fns part-contribution))] (f))
+    (win-startup/startup! {:part-contribution part-contribution :cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev* :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state :active-tab active-tab :file file :tree-pane tree-pane :active? active? :win win :line-col-label line-col-label :close-popovers-fn close-popovers-fn :register-popover-fn register-popover-fn :source-ctx source-ctx :settings-path* settings-path* :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn :open-find-fn open-find-fn :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook :theme-name theme-name :completion-opts completion-opts :active-id active-id :popovers popovers :window-key-args window-key-args :repl-complete-fn repl-complete-fn :parinfer-mode* parinfer-mode* :parinfer-status-fn parinfer-status-fn :update-parinfer-label! update-parinfer-label! :part-error! part-error! :recent-tabs recent-tabs :hint-label hint-label :hints-on? hints-on? :files-btn files-btn :dir dir :cwd cwd :theme-ctx theme-ctx :current-report current-report :current-open-paths current-open-paths :folder-result* *folder-result :tab-ctx* *tab-ctx :open-folder* *open-folder})
     (when on-ready
       ;; The per-tab keys below are the FIRST tab's objects; rows that
       ;; need another tab use :tabs* and :active-tab*. Actions that act on
