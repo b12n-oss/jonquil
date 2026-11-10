@@ -17,7 +17,7 @@
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.tabs :as tabs]
             [jonquil.gtk.editor :as editor]
-            [jonquil.gtk.window :as window]
+            [jonquil.gtk.window.tabs :as win-tabs]
             [jonquil.last-session :as last-session]
             [jonquil.settings :as settings]
             [temp-dirs]))
@@ -240,7 +240,7 @@
   [ui]
   (go-row :session-throwing-file-skipped support/check
     (let [original (on-gtk (root ui))
-          orig-read @#'window/read-for-tab
+          orig-read @#'win-tabs/read-for-tab
           [mark p0 a b]
           (on-gtk (tabs/occupy-first! ui)
                   (let [p0 (open-paths ui)
@@ -250,7 +250,7 @@
                     ((:simulate-folder-result! ui) {:path d})
                     (write-sessions! ui [{:root d :tabs [boom a b] :active b}])
                     (let [m (support/out-end-offset ui)]
-                      (with-redefs [window/read-for-tab
+                      (with-redefs [win-tabs/read-for-tab
                                     (fn [cv path]
                                       (if (= path boom)
                                         (throw (ex-info "forced open failure" {}))

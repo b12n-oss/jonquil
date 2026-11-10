@@ -149,10 +149,10 @@
         (support/check :editor-paints-profile-sets (and cljd? plain?) {:cljd cljd? :plain plain?})))))
 
 (defn row-selection-throw-still-paints-new-profile
-  "window.clj's add-watch ::dialect callback calls editor/set-profile!
-  in a finally, so it runs from @sel* whether or not apply-selection!
-  threw. A throw anywhere inside apply-selection!, once past its own
-  (reset! sel* sel), must not skip set-profile! and leave the editor
+  "jonquil.gtk.window.tabs's add-watch ::dialect callback calls
+  editor/set-profile! in a finally, so it runs from @sel* whether or not
+  apply-selection! threw. A throw anywhere inside apply-selection!, once
+  past its own (reset! sel* sel), must not skip set-profile! and leave the editor
   painting whatever profile it held before the open, even though @sel*
   has already moved to the new selection.
 
@@ -165,10 +165,10 @@
   show-selection!'s OWN next call): editor/set-text! -- open-path!'s
   first step, before it ever resets the path atom that ::dialect
   watches -- fires the SAME editor's on-cursor-moved! listeners, and
-  window.clj's own listener calls g/gtk-label-set-text on the line/col
-  label. Redefining that var throws there first, inside open-path!'s
-  OWN try, before the watch ever fires at all -- caught by open-path!'s
-  \"; open:\" catch, never reaching apply-selection! or the finally.
+  jonquil.gtk.window.tabs's own listener calls g/gtk-label-set-text on
+  the line/col label. Redefining that var throws there first, inside
+  open-path!'s OWN try, before the watch ever fires at all -- caught by
+  open-path!'s \"; open:\" catch, never reaching apply-selection! or the finally.
   dialect/label has no such second caller in this path: show-selection!,
   dialect-text and start-and-report!'s status text are the only
   callers, and none of those three run before the watch fires.

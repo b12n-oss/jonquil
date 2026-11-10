@@ -943,7 +943,7 @@
   (if (apply-op! ed result) 1 0))
 
 ;; Named (not inline lambdas in handle-key!) so the context menu's items
-;; (window.clj) call the EXACT same function as their key.
+;; (jonquil.gtk.window.tabs) call the EXACT same function as their key.
 
 (defn do-toggle-comment! [ed]
   (apply-edit! ed (edit/toggle-comment (snapshot ed))))
@@ -1131,10 +1131,10 @@
   hardware keycode to check.
 
   Before the pipeline below runs, a pending Run Form flash is
-  cancelled at once (window.clj's set-flash-cancel-fn!, restoring the
-  caret and clearing the selection) unless keyval is a bare modifier
-  press (modifier-keyval?) -- otherwise a printable key, Backspace or Tab
-  would act on the flash's own selection instead of the buffer's real
+  cancelled at once (jonquil.gtk.window.tabs's set-flash-cancel-fn!,
+  restoring the caret and clearing the selection) unless keyval is a bare
+  modifier press (modifier-keyval?) -- otherwise a printable key,
+  Backspace or Tab would act on the flash's own selection instead of the buffer's real
   one.
 
   The rest is
@@ -1237,15 +1237,16 @@
             ;; set-flash-cancel-fn!.
             :flash-cancel-fn (atom nil)
             ;; Single-slot registration for completion: see
-            ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
+            ;; set-completion-fns!. nil until jonquil.gtk.window.tabs wires it.
             :completion-fns (atom nil)
             ;; The dialect profile whose sets paint
             ;; symbols -- see set-profile!. nil until the window sets it.
             :profile (atom nil)
             ;; Single-slot registration for error reporting -- see
-            ;; set-error-fn!. nil until jonquil.gtk.window wires it, so a
-            ;; throw before that point is silently dropped rather than
-            ;; reported (there is no status label to report it to yet).
+            ;; set-error-fn!. nil until jonquil.gtk.window.tabs wires it,
+            ;; so a throw before that point is silently dropped rather
+            ;; than reported (there is no status label to report it to
+            ;; yet).
             :on-error-fn (atom nil)
             ;; Source panel: read-only mode (set-read-only!) and the
             ;; asynchronous paint's generation (paint-async!).
