@@ -2,7 +2,8 @@
   "The window's inspector panel: showing and closing it, the one-request-at-a-time
   guard (try-inspect!), folding each reply into the pane's state, and Inspect
   Last Result and Inspect Form, which open it on the last value or on the form
-  at the caret. Internal to the window, as jonquil.gtk.window.status is. Moved
+  at the caret. build makes activate!'s inspector pane and its closures.
+  Internal to the window, as jonquil.gtk.window.status is. Moved
   out of jonquil.gtk.window unchanged; the lock caller rule in its docstring
   applies here."
   (:require [jonquil.commands :as commands]
@@ -10,6 +11,7 @@
             [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.run :as win-run]
@@ -36,7 +38,7 @@
   [right]
   (win-right-slot/show-right-panel! right :inspector))
 
-(defn try-inspect!
+(defn- try-inspect!
   "The window sends at most one inspect! at a time. Runs f
   (which must send exactly one ev/inspect! request, through an on-view
   that eventually flips inspecting? back to false) only when no request
@@ -53,7 +55,7 @@
            (reset! inspecting? false)
            (throw e)))))
 
-(defn on-inspect-view!
+(defn- on-inspect-view!
   "on-view's own body, already handed to on-gui! by its caller: swap! inspector-state with jonquil.inspect/on-reply -- or, the first
   time (inspector-state nil, since inspect-last!/inspect-form! reset it
   right before sending :start), jonquil.inspect/open, which a :start
@@ -166,3 +168,55 @@
                   warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
               (when warning (cview/append! cv :system warning))))
           (win-status/set-status! status-label "No form at the caret."))))))
+
+(defn build
+  "activate!'s inspector bindings, in activate!'s order: h-paned, the inspector's state atoms, on-view, the pane's request, def and close fns, and the pane, with *pane (the forward reference those closures read) reset to it. w holds what they read: :active-tab :cv :ev* :status-label, and :right* (activate!'s *right, read when the pane closes). Returns w with :h-paned :inspector-state :inspecting? :inspect-queued :inspector-last-args :on-view :on-inspector-close and :pane added."
+  [{:keys [active-tab cv ev* status-label] *right :right* :as w}]
+  (let [;; The inspector panel. h-paned is the horizontal split (editor+
+        ;; console keep their vertical paned as its start child; the
+        ;; pane's own :root becomes its end child, wired in activate! once
+        ;; both exist). *pane is a forward reference the on-view/on-request/
+        ;; on-def/on-close closures below close over -- pane itself doesn't
+        ;; exist until make-pane returns, the same atom-indirection
+        ;; activate!'s *cv gives make-on-submit.
+        h-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
+        inspector-state (atom nil)
+        inspecting? (atom false)
+        ;; An Inspect Form open that arrived while another request was in
+        ;; flight: the thunk on-inspect-view! runs once that reply lands.
+        inspect-queued (atom nil)
+        ;; Self-test hook only (:inspector-last-args*): the args of the
+        ;; last inspect! request this window actually sent, so a row can
+        ;; compare a :start's own :cols against the pane's own measure.
+        inspector-last-args (atom nil)
+        *pane (atom nil)
+        on-view (fn [reply]
+                  (on-gui! (fn [] (on-inspect-view! @*pane inspector-state inspecting? inspect-queued cv status-label reply))))
+        on-inspector-request
+        (fn [[op args]]
+          ;; Returns true only when the request was actually sent, so the
+          ;; pane commits a key step's :pending/:selected only then.
+          (boolean
+           (try-inspect! inspecting?
+                         (fn [] (reset! inspector-last-args args) (ev/inspect! @ev* op args on-view) true))))
+        on-inspector-def
+        (fn [name]
+          (try-inspect! inspecting?
+                        (fn []
+                          (let [args {:name name}]
+                            (reset! inspector-last-args args)
+                            ;; :pending :keep, so on-reply's default (row 0)
+                            ;; doesn't reset the selection: the panel stays
+                            ;; on the same view. The pane shares
+                            ;; this atom, so :selected is the row on screen.
+                            (swap! inspector-state assoc :pending :keep)
+                            (ev/inspect! @ev* :def args on-view)))))
+        on-inspector-close (fn [] (close-inspector-panel! @*right (:ed (active-tab))))
+        pane (inspector-pane/make-pane {:on-request on-inspector-request
+                                        :on-close on-inspector-close
+                                        :on-def on-inspector-def
+                                        :state inspector-state})
+        _ (reset! *pane pane)]
+    (assoc w :h-paned h-paned :inspector-state inspector-state :inspecting? inspecting?
+           :inspect-queued inspect-queued :inspector-last-args inspector-last-args
+           :on-view on-view :on-inspector-close on-inspector-close :pane pane)))

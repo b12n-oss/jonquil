@@ -1,7 +1,10 @@
 (ns jonquil.gtk.window.inspector-test
   (:require [clojure.test :refer [deftest is]]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.callbacks]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.window.inspector :as win-inspector]
             [jonquil.gtk.window.right-slot :as win-right-slot]
@@ -138,3 +141,57 @@
                            :inspecting? inspecting? :last-args (atom nil)})
         (is (thrown? Exception (@ready {:rows 1 :cols 1})))
         (is (false? @inspecting?))))))
+
+(deftest build-adds-the-inspector-bindings-test
+  (let [made (atom nil)
+        ev* (atom nil)
+        r (atom ::r)
+        af (fn [] {:ed ::ed})]
+    (with-redefs [g/gtk-paned-new (fn [_] ::h-paned)
+                  inspector-pane/make-pane (fn [opts] (reset! made opts) {:root ::root})]
+      (let [w (win-inspector/build {:active-tab af :cv ::cv :ev* ev* :status-label ::l :right* r :x 1})]
+        (is (= #{:active-tab :cv :ev* :status-label :right* :x
+                 :h-paned :inspector-state :inspecting? :inspect-queued :inspector-last-args
+                 :on-view :pane :on-inspector-close}
+               (set (keys w))))
+        (is (= 1 (:x w)))
+        (is (identical? af (:active-tab w)))
+        (is (= ::h-paned (:h-paned w)))
+        (is (= {:root ::root} (:pane w)))
+        (is (nil? @(:inspector-state w)))
+        (is (false? @(:inspecting? w)))
+        (is (identical? (:inspector-state w) (:state @made)))
+        (is (identical? (:on-inspector-close w) (:on-close @made)))))))
+
+(deftest build-closures-read-the-forward-atoms-test
+  (let [made (atom nil)
+        log (atom [])
+        ev* (atom (inspector-ev :e1 true log))
+        r (atom ::r1)
+        af (fn [] {:ed ::ed})]
+    (with-redefs [g/gtk-paned-new (fn [_] ::h-paned)
+                  inspector-pane/make-pane (fn [opts] (reset! made opts) {:root ::root})
+                  jonquil.gtk.callbacks/on-gui! (fn [f] (f))
+                  inspector-pane/show-state! (fn [pane s] (swap! log conj [:show pane s]))
+                  inspect/open (fn [reply] [:open reply])
+                  win-right-slot/hide-right-panel! (fn [right k] (swap! log conj [:hide right k]))
+                  editor/focus! (fn [ed] (swap! log conj [:focus ed]))]
+      (let [w (win-inspector/build {:active-tab af :cv ::cv :ev* ev* :status-label ::l :right* r})]
+        (reset! r ::r2)
+        ((:on-close @made))
+        (is (= [[:hide ::r2 :inspector] [:focus ::ed]] @log))
+        (reset! log [])
+        (is (true? ((:on-request @made) [:in {:i 0}])))
+        (is (= [[:inspect! :e1 :in {:i 0} (:on-view w)]] @log))
+        (is (= {:i 0} @(:inspector-last-args w)))
+        (is (false? ((:on-request @made) [:in {:i 1}])))
+        (is (= 1 (count @log)))
+        (reset! log [])
+        ((:on-view w) {:v 1})
+        (is (= [[:show {:root ::root} [:open {:v 1}]]] @log))
+        (is (false? @(:inspecting? w)))
+        (reset! log [])
+        (reset! (:inspector-state w) nil)
+        ((:on-def @made) "a")
+        (is (= [[:inspect! :e1 :def {:name "a"} (:on-view w)]] @log))
+        (is (= :keep (:pending @(:inspector-state w))))))))

@@ -1556,51 +1556,8 @@
                        (let [ts @tabs]
                          (when-let [i (tabs/index-for-digit (count ts) digit)]
                            (select-tab! @*tab-ctx (:id (nth ts i))))))
-        ;; The inspector panel. h-paned is the horizontal split (editor+
-        ;; console keep their vertical paned as its start child; the
-        ;; pane's own :root becomes its end child, wired below once both
-        ;; exist). *pane is a forward reference the on-view/on-request/
-        ;; on-def/on-close closures below close over -- pane itself doesn't
-        ;; exist until make-pane returns, the same atom-indirection *cv
-        ;; gives make-on-submit above.
-        h-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        inspector-state (atom nil)
-        inspecting? (atom false)
-        ;; An Inspect Form open that arrived while another request was in
-        ;; flight: the thunk on-inspect-view! runs once that reply lands.
-        inspect-queued (atom nil)
-        ;; Self-test hook only (:inspector-last-args*): the args of the
-        ;; last inspect! request this window actually sent, so a row can
-        ;; compare a :start's own :cols against the pane's own measure.
-        inspector-last-args (atom nil)
-        *pane (atom nil)
-        on-view (fn [reply]
-                  (on-gui! (fn [] (win-inspector/on-inspect-view! @*pane inspector-state inspecting? inspect-queued cv status-label reply))))
-        on-inspector-request
-        (fn [[op args]]
-          ;; Returns true only when the request was actually sent, so the
-          ;; pane commits a key step's :pending/:selected only then.
-          (boolean
-           (win-inspector/try-inspect! inspecting?
-                         (fn [] (reset! inspector-last-args args) (ev/inspect! @ev* op args on-view) true))))
-        on-inspector-def
-        (fn [name]
-          (win-inspector/try-inspect! inspecting?
-                        (fn []
-                          (let [args {:name name}]
-                            (reset! inspector-last-args args)
-                            ;; :pending :keep, so on-reply's default (row 0)
-                            ;; doesn't reset the selection: the panel stays
-                            ;; on the same view. The pane shares
-                            ;; this atom, so :selected is the row on screen.
-                            (swap! inspector-state assoc :pending :keep)
-                            (ev/inspect! @ev* :def args on-view)))))
-        on-inspector-close (fn [] (win-inspector/close-inspector-panel! @*right (:ed (active-tab))))
-        pane (inspector-pane/make-pane {:on-request on-inspector-request
-                                        :on-close on-inspector-close
-                                        :on-def on-inspector-def
-                                        :state inspector-state})
-        _ (reset! *pane pane)
+        {:keys [h-paned inspector-state inspecting? inspect-queued inspector-last-args on-view on-inspector-close pane]}
+        (win-inspector/build {:active-tab active-tab :cv cv :ev* ev* :status-label status-label :right* *right})
         {:keys [slot part-panels* right panel-focus-fn]}
         (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
                                :settings-path* settings-path* :status-label status-label})
