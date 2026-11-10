@@ -2318,6 +2318,37 @@ b" text) eq (pos? @splices))
         (on-gtk (check :callable-contains-throw (and ok (= 3 @kept) (= 1 @dropped))
                        {:kept @kept :dropped @dropped}))))))
 
+(defn- row-console-input-fn-throw-named
+  "A registrant of on-input-changed! that throws must not break the cursor
+  move that called it: the console reports it through its error fn as
+  \"; cursor: <message>\" and leaves its text alone."
+  [cv]
+  (go-row :console-input-fn-throw-named check
+    (on-gtk (let [buf (:buf cv)
+                  saved-fns @(:on-input-fns cv)
+                  saved-error-fn @(:on-error-fn cv)
+                  errors (atom [])]
+              (try
+                (cview/set-error-fn! cv (fn [msg] (swap! errors conj msg)))
+                (cview/on-input-changed! cv (fn [] (throw (ex-info "bad" {}))))
+                (cview/clear-input! cv)
+                (g/gtk-text-buffer-insert-interactive-at-cursor buf "ab" -1 1)
+                ;; the insert itself fires the throwing fn; only the caret moves may satisfy the check
+                (reset! errors [])
+                (let [before (g/buffer-text buf)
+                      end (g/gtk-text-buffer-get-char-count buf)]
+                  (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                  (g/with-iters* buf (dec end) (dec end) (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                  (check :console-input-fn-throw-named
+                         (and (some #{"; cursor: bad"} @errors)
+                              (= before (g/buffer-text buf)))
+                         {:errors @errors :before-chars (count before)
+                          :after-chars (count (g/buffer-text buf))}))
+                (finally
+                  (cview/clear-input! cv)
+                  (reset! (:on-input-fns cv) saved-fns)
+                  (reset! (:on-error-fn cv) saved-error-fn)))))))
+
 (def ^:private console-row-fns
   [row-console-readonly
    row-console-readonly-delete
@@ -2329,6 +2360,7 @@ b" text) eq (pos? @splices))
    row-console-unicode
    row-console-history-multiline-caret
    row-console-set-prompt-keeps-selection
+   row-console-input-fn-throw-named
    row-callable-contains-throw
    row-console-preedit-guard
    row-console-history])
