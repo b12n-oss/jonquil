@@ -35,6 +35,7 @@
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.inspector :as win-inspector]
+            [jonquil.gtk.window.layout :as win-layout]
             [jonquil.gtk.window.quit :as win-quit]
             [jonquil.gtk.window.reopen :as win-reopen]
             [jonquil.gtk.window.right-slot :as win-right-slot]
@@ -241,9 +242,8 @@
         ;; outer paned that holds it beside h-paned.
         {:keys [tree-pane] *open-folder :open-folder* *folder-result :folder-result*}
         (win-tree-ops/build {:status-label status-label :tab-ctx* *tab-ctx})
-        files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
-        tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
+        {:keys [files-btn tree-paned paned toolbar run-btn stop-btn open-btn save-btn reset-chk reset-state vbox keyctl]}
+        (win-layout/build {})
         {:keys [part-error! part-contribution]}
         (win-context/build-parts {:win win :status-label status-label :cv cv :ev* ev* :sel* sel* :tabs tabs
                                   :active-tab active-tab :settings-path* settings-path* :bang* bang*
@@ -267,17 +267,7 @@
                                  :inspect-form-fn inspect-form-fn :pane pane :close-inspector-fn close-inspector-fn
                                  :source-keys source-keys :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                  :digit-tab-fn digit-tab-fn :parinfer-fn parinfer-fn
-                                 :part-contribution part-contribution :tab-ctx* *tab-ctx})
-        toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        run-btn (g/gtk-button-new-with-label "Run (F5)")
-        stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
-        open-btn (g/gtk-button-new-with-label "Open…")
-        save-btn (g/gtk-button-new-with-label "Save…")
-        reset-chk (g/gtk-check-button-new-with-label "Reset on Run")
-        ;; The tick an attach runtime took down (dialect/reset-toggle).
-        reset-state (atom {})
-        vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        keyctl (g/gtk-event-controller-key-new)]
+                                 :part-contribution part-contribution :tab-ctx* *tab-ctx})]
     (g/gtk-box-append toolbar files-btn)
     (g/gtk-box-append toolbar run-btn)
     (g/gtk-box-append toolbar stop-btn)
@@ -349,31 +339,9 @@
     (add-watch theme-name ::source-pane (fn [_ _ _ k] (source-pane/apply-theme! sp (theme/theme k))))
     (inspector-pane/apply-theme! pane (theme/theme @theme-name))
     (add-watch theme-name ::inspector-pane (fn [_ _ _ k] (inspector-pane/apply-theme! pane (theme/theme k))))
-    (g/g-signal-connect-data run-btn "clicked"
-                             (callable (win-status/contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data stop-btn "clicked"
-                             (callable (win-status/contain-click status-label "stop" (fn [_] (stop-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data open-btn "clicked"
-                             (callable (win-status/contain-click status-label "open" (fn [_] (open-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data save-btn "clicked"
-                             (callable (win-status/contain-click status-label "save" (fn [_] (save-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data reset-chk "toggled"
-                             (callable (win-status/contain-click status-label "reset on run"
-                                                      (fn [btn]
-                                                        (ev/set-mode! @ev*
-                                                                      (if (zero? (g/gtk-check-button-get-active btn))
-                                                                        :accumulate :reset))))
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
-    (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable window-key-fn [:pointer :uint :uint :uint :pointer] :int)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller win keyctl)
+    (win-layout/connect! {:run-btn run-btn :stop-btn stop-btn :open-btn open-btn :save-btn save-btn :reset-chk reset-chk
+                          :keyctl keyctl :win win :status-label status-label :run-fn run-fn :stop-fn stop-fn
+                          :open-fn open-fn :save-fn save-fn :ev* ev* :window-key-fn window-key-fn})
     (win-quit/connect! {:tabs tabs :select! (fn [t] (win-tabs/select-tab! @*tab-ctx (:id t)))
                         :cv cv :win win :app app
                         :confirmed-close? confirmed-close?

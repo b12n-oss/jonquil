@@ -131,6 +131,7 @@
     jonquil.gtk.window.status-bar-test
     jonquil.gtk.window.console-test
     jonquil.gtk.window.context-test
+    jonquil.gtk.window.layout-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.gtk.processes-pane-test

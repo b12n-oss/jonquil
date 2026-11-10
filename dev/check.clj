@@ -165,6 +165,7 @@
     jonquil.gtk.window.status-bar
     jonquil.gtk.window.runtime
     jonquil.gtk.window.quit
+    jonquil.gtk.window.layout
     jonquil.gtk.window.run
     jonquil.gtk.window.inspector
     jonquil.gtk.window.help
