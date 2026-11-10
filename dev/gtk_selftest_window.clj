@@ -501,6 +501,7 @@
    source-pane/row-source-pane-history
    source-pane/row-source-pane-back-deleted-file
    source-pane/row-source-pane-same-file-no-reload
+   source-pane/row-source-pane-wiring
    tab-widget/row-tab-widget-builds
    tab-widget/row-tab-widget-dispose-unparents
    file-tree-pane/row-tree-pane-shows-rows
@@ -521,6 +522,7 @@
    file-tree-pane/row-tree-pane-stale-menu-actions
    file-tree-pane/row-tree-pane-menu-focus-and-anchor
    file-tree-pane/row-tree-pane-error-row-no-menu
+   file-tree-pane/row-tree-pane-header-buttons
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    tabs/row-tab-new-shows-strip

@@ -424,3 +424,28 @@
                                       (nil? (:opened v)) (false? (:open? (:s1 v)))
                                       (= 0 (:menu-key v)) (false? (:open? (:s2 v))))
                                  v)))))))
+
+(defn row-tree-pane-header-buttons
+  "Refresh and Open Folder reach the pane's refresh! and :on-open-folder,
+  and a throw in :on-open-folder goes to :on-error."
+  [_ui]
+  (go-row :tree-pane-header-buttons support/check
+    (let [calls (atom [])
+          errors (atom [])]
+      (with-pane
+        {:on-open-folder (fn [] (swap! calls conj :open-folder))
+         :on-error (fn [m] (swap! errors conj m))}
+        (fn [p _]
+          (on-gtk (with-redefs-fn {#'pane/refresh! (fn [_] (swap! calls conj :refresh))}
+                    (fn []
+                      (g/g-signal-emit-by-name (:refresh-btn p) "clicked")
+                      (g/g-signal-emit-by-name (:open-folder-btn p) "clicked"))))))
+      (with-pane
+        {:on-open-folder (fn [] (throw (ex-info "gone" {})))
+         :on-error (fn [m] (swap! errors conj m))}
+        (fn [p _]
+          (on-gtk (g/g-signal-emit-by-name (:open-folder-btn p) "clicked"))))
+      (on-gtk (support/check :tree-pane-header-buttons
+                             (and (= [:refresh :open-folder] @calls)
+                                  (= ["; open folder: gone"] @errors))
+                             {:calls @calls :errors @errors})))))
