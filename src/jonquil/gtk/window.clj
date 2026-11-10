@@ -19,7 +19,6 @@
             [jolt.ffi :as ffi]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.commands :as commands]
-            [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
@@ -49,6 +48,7 @@
             [jonquil.gtk.window.runtime :as win-runtime]
             [jonquil.gtk.window.session :as win-session]
             [jonquil.gtk.window.status :as win-status]
+            [jonquil.gtk.window.status-bar :as win-status-bar]
             [jonquil.gtk.window.tabs :as win-tabs]
             [jonquil.gtk.window.theme :as win-theme]
             [jonquil.gtk.window.tree-ops :as win-tree-ops]
@@ -64,11 +64,6 @@
             [jonquil.settings :as settings]
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
-
-(def ^:private STATUS-MARGIN
-  ;; px at each end of the status bar: GNOME's usual 6-12 px gutter, the
-  ;; status box's own child spacing (6) plus a little.
-  8)
 
 ;; --- construction ------------------------------------------------------
 
@@ -186,21 +181,9 @@
         ;; front, remove-tab! drops it): Genera's Select order
         recent-tabs (atom [])
         win (g/gtk-application-window-new app)
-        status-label (g/gtk-label-new "Ready")
-        line-col-label (g/gtk-label-new "Ln 1, Col 1")
-        ;; LM6: what keys do at the caret, dim, hidden while there's nothing
-        hint-label (doto (g/gtk-label-new "")
-                     (g/gtk-widget-add-css-class "dim-label")
-                     ;; never wider than this, so the status bar doesn't jump
-                     (g/gtk-label-set-ellipsize g/PANGO-ELLIPSIZE-END)
-                     (g/gtk-label-set-max-width-chars 44))
-        hints-on? (atom true)
-        parinfer-label (g/gtk-label-new "")
-        ;; How many agent proposals are pending, hidden at zero
-        pending-label (g/gtk-label-new "")
-        ;; The window's dialect (and runtime, when it isn't the
-        ;; dialect's default), between the status text and Ln/Col.
-        dialect-label (g/gtk-label-new (dialect/label @sel*))
+        {:keys [status-label line-col-label hint-label hints-on? parinfer-label pending-label dialect-label
+                unread-label hints-toggle-fn]}
+        (win-status-bar/build {:sel* sel*})
         confirmed-close? (atom false)
         ;; Self-test hooks only -- see close-request-fn's docstring.
         suppress-close? (atom false)
@@ -242,9 +225,6 @@
         ;; The plugin list shares the slot too; its rows are rebuilt after
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
-        ;; The Messages panel's unread count (LM8), shown in the status
-        ;; bar while it's above zero; the Messages part fills it
-        unread-label (g/gtk-label-new "")
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
         *right (atom nil)
@@ -443,12 +423,7 @@
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn
-                         :hints-toggle-fn (fn []
-                                            (let [on? (swap! hints-on? not)]
-                                              (when-not on? (g/gtk-widget-set-visible hint-label 0))
-                                              (win-status/set-status! status-label (if on?
-                                                                          "; Key hints on: the status bar names the keys for the symbol at the caret."
-                                                                          "; Key hints off."))))
+                         :hints-toggle-fn hints-toggle-fn
                          :run-changed-fn run-changed-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (win-tabs/tab-by-id tabs id) (win-tabs/select-tab! @*tab-ctx id)))
@@ -479,10 +454,6 @@
         reset-chk (g/gtk-check-button-new-with-label "Reset on Run")
         ;; The tick an attach runtime took down (dialect/reset-toggle).
         reset-state (atom {})
-        ;; The status bar is a horizontal box: the status label on the
-        ;; left (hexpand, so it claims the box's spare width) and the
-        ;; Ln/Col label on the right.
-        status-box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
     (g/gtk-box-append toolbar files-btn)
@@ -541,23 +512,9 @@
     (g/gtk-paned-set-shrink-start-child tree-paned 0)
     (g/gtk-widget-set-vexpand tree-paned 1)
     (g/gtk-box-append vbox tree-paned)
-    (g/gtk-widget-set-hexpand status-label 1)
-    (g/gtk-box-append status-box status-label)
-    (g/gtk-box-append status-box hint-label)
-    (g/gtk-widget-set-visible hint-label 0)
-    (g/gtk-box-append status-box pending-label)
-    (g/gtk-widget-set-visible pending-label 0)
-    (g/gtk-box-append status-box unread-label)
-    (g/gtk-widget-set-visible unread-label 0)
-    (g/gtk-box-append status-box dialect-label)
-    (g/gtk-box-append status-box parinfer-label)
-    (update-parinfer-label!)
-    (g/gtk-box-append status-box line-col-label)
-    ;; Room at both ends, so "Ln N, Col N" doesn't touch the window's right
-    ;; edge and the left matches it.
-    (g/gtk-widget-set-margin-start status-box STATUS-MARGIN)
-    (g/gtk-widget-set-margin-end status-box STATUS-MARGIN)
-    (g/gtk-box-append vbox status-box)
+    (win-status-bar/place! {:vbox vbox :status-label status-label :hint-label hint-label :pending-label pending-label
+                            :unread-label unread-label :dialect-label dialect-label :parinfer-label parinfer-label
+                            :line-col-label line-col-label :update-parinfer-label! update-parinfer-label!})
     (g/gtk-window-set-child win vbox)
     (g/gtk-window-set-default-size win 900 700)
     ;; One shared GtkCssProvider for the display, added once; both views
