@@ -94,6 +94,57 @@
 
 (defn footer-text [pane] (g/label-text (:footer pane)))
 
+(defn- connect-filter-btns!
+  "Ticks each filter button, adds it to the filter row and connects its
+  toggled signal to :on-hows."
+  [pane filter-box filter-btns]
+  (doseq [[_ btn] filter-btns]
+    (g/gtk-check-button-set-active btn 1)
+    (g/gtk-box-append filter-box btn)
+    (g/g-signal-connect-data btn "toggled"
+                             (callable (fn [_btn _data]
+                                         (try (when-not @(:syncing? pane)
+                                                (when-let [f (:on-hows @(:handlers pane))]
+                                                  (f (ticked pane))))
+                                              (catch :default e (report! pane (str "; " (ex-message e)))))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)))
+
+(defn- lay-out!
+  "Hides the filter row, sets up the list and the labels, and packs the
+  widgets into the root."
+  [{:keys [root title filter-box scroll close-btn footer] lb :list}]
+  (g/gtk-widget-set-visible filter-box 0)
+  (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
+  (g/gtk-scrolled-window-set-child scroll lb)
+  (g/gtk-widget-set-vexpand scroll 1)
+  (doseq [l [title footer]]
+    (g/gtk-label-set-xalign l 0.0)
+    (g/gtk-label-set-wrap l 1))
+  (doseq [w [title filter-box scroll close-btn footer]] (g/gtk-box-append root w))
+  (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
+
+(defn- connect-list-and-close!
+  "Connects the list's row-activated and the Close button's clicked to
+  their handlers."
+  [{lb :list :keys [close-btn] :as pane}]
+  (g/g-signal-connect-data lb "row-activated"
+                           (callable (fn [_box row _data]
+                                       (try (when-let [f (:on-activate @(:handlers pane))]
+                                              (f (g/gtk-list-box-row-get-index row)))
+                                            (catch :default e (report! pane (str "; " (ex-message e)))))
+                                       nil)
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data close-btn "clicked"
+                           (callable (fn [_button _data]
+                                       (try (when-let [f (:on-close @(:handlers pane))] (f))
+                                            (catch :default e (report! pane (str "; " (ex-message e)))))
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
 (defn make-pane
   "Builds the panel: {:root :title :filter-box :filter-btns :list :scroll
   :close-btn :footer :rows (atom []) :handlers (atom {}) :syncing? (atom
@@ -114,40 +165,7 @@
         pane {:root root :title title :filter-box filter-box :filter-btns filter-btns
               :list lb :scroll scroll :close-btn close-btn
               :footer footer :rows (atom []) :handlers (atom {}) :syncing? (atom false)}]
-    (doseq [[_ btn] filter-btns]
-      (g/gtk-check-button-set-active btn 1)
-      (g/gtk-box-append filter-box btn)
-      (g/g-signal-connect-data btn "toggled"
-                               (callable (fn [_btn _data]
-                                           (try (when-not @(:syncing? pane)
-                                                  (when-let [f (:on-hows @(:handlers pane))]
-                                                    (f (ticked pane))))
-                                                (catch :default e (report! pane (str "; " (ex-message e)))))
-                                           nil)
-                                         [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT))
-    (g/gtk-widget-set-visible filter-box 0)
-    (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
-    (g/gtk-scrolled-window-set-child scroll lb)
-    (g/gtk-widget-set-vexpand scroll 1)
-    (doseq [l [title footer]]
-      (g/gtk-label-set-xalign l 0.0)
-      (g/gtk-label-set-wrap l 1))
-    (doseq [w [title filter-box scroll close-btn footer]] (g/gtk-box-append root w))
-    (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
-    (g/g-signal-connect-data lb "row-activated"
-                             (callable (fn [_box row _data]
-                                         (try (when-let [f (:on-activate @(:handlers pane))]
-                                                (f (g/gtk-list-box-row-get-index row)))
-                                              (catch :default e (report! pane (str "; " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data close-btn "clicked"
-                             (callable (fn [_button _data]
-                                         (try (when-let [f (:on-close @(:handlers pane))] (f))
-                                              (catch :default e (report! pane (str "; " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (connect-filter-btns! pane filter-box filter-btns)
+    (lay-out! pane)
+    (connect-list-and-close! pane)
     pane))

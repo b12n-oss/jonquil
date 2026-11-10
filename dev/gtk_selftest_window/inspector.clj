@@ -214,6 +214,30 @@
                          (and (str/includes? before "not tabular") cleared?)
                          {:before before :cleared cleared?}))))))
 
+(defn row-pane-buttons-reach-their-steps
+  "Back, Earlier, Later, Meta, Table, Def and Close reach step! (:out
+  :earlier :later :meta :table), the def prompt and :on-close, and a throw
+  in :on-close lands on the footer."
+  [_ui]
+  (go-row :row-pane-buttons-reach-their-steps support/check
+    (let [calls (atom [])
+          boom (atom nil)]
+      (with-pane (assoc (noop-opts) :on-close (fn [] (swap! calls conj :close)))
+        (fn [pane]
+          (on-gtk (with-redefs-fn {#'inspector-pane/step! (fn [_ op] (swap! calls conj op))
+                                   #'inspector-pane/open-def-prompt! (fn [_] (swap! calls conj :def))}
+                    (fn []
+                      (doseq [b [:back-btn :earlier-btn :later-btn :meta-btn :table-btn :def-btn :close-btn]]
+                        (g/g-signal-emit-by-name (b pane) "clicked")))))))
+      (with-pane (assoc (noop-opts) :on-close (fn [] (throw (ex-info "boom" {}))))
+        (fn [pane]
+          (on-gtk (g/g-signal-emit-by-name (:close-btn pane) "clicked")
+                  (reset! boom (g/label-text (:footer pane))))))
+      (on-gtk (support/check :pane-buttons-reach-their-steps
+                             (and (= [:out :earlier :later :meta :table :def :close] @calls)
+                                  (= "; boom" @boom))
+                             {:calls @calls :boom @boom})))))
+
 ;; --- the window's own pane, wired end to end ------------------------
 
 ;; This file's own private copies, gdkkeysyms.h (GTK 4.22.4 installed
@@ -490,7 +514,7 @@
   prompt. Typing \"answer\" into the prompt's entry (inserting text into
   the entry, the same gtk-editable-set-text idiom rename/find-bar rows use)
   and Return -- mirroring inspector-pane's own \"activate\" handler
-  (jonquil.gtk.inspector-pane/make-pane's def-entry wiring: trim, hide,
+  (jonquil.gtk.inspector-pane/connect-def-prompt!: trim, hide,
   call on-def when non-blank), driven here through the pane's own exposed
   :on-def rather than a synthesized keystroke into a live popover -- sends
   :def {:name \"answer\"}: the console shows \"; Defined #'user/answer\",
