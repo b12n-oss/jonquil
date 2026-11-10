@@ -176,7 +176,7 @@
   for, but first carries into :current the other forms of that :previous that
   are still behind #_ in the Run's text (the record's :code), ahead of what
   the Run recorded."
-  [{:keys [cv ev* sel* settings-path* replay*] :as ctx} {:keys [source tab-id root] :as record} result]
+  [{:keys [cv sel* settings-path* replay*] :as ctx} {:keys [source tab-id root] :as record} result]
   (when (remember-session? @settings-path*)
     (let [ok? (= :ok (:status result))
           es (when ok?
