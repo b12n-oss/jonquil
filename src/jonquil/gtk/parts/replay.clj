@@ -144,6 +144,32 @@
                                      (seq es) (replay/add-entries es)
                                      forget? replay/forget)})))))
 
+(defn- file-in-window!
+  "Files an evaluation's entries in the window's own record: the evaluator's
+  history, the Run's skipped forms and forgetting when forget-here?, then the
+  entries when any. Marks the record dirty and schedules the save."
+  [{:keys [ev* replay*] :as ctx} {:keys [es forget-here? run-text]}]
+  (let [items (:items @(ev/history @ev*))]
+    (swap! replay* (fn [s]
+                     (-> s
+                         (update :record (fn [r] (cond-> (replay/with-history r items)
+                                                   forget-here? (replay/carry-skipped run-text)
+                                                   (seq es) (replay/add-entries es)
+                                                   forget-here? replay/forget)))
+                         (assoc :dirty? true))))
+    (schedule-replay-save! ctx)))
+
+(defn- forget-tab-root!
+  "Forgets the replay tab's root when it isn't the root the entries went to:
+  in the window's record when st holds that root, else through append-to-root!."
+  [{:keys [replay*] :as ctx} {:keys [rt st run-text]}]
+  (if (and st (= (:root rt) (:root st)))
+    (do (swap! replay* (fn [s] (-> s
+                                   (update :record #(-> % (replay/carry-skipped run-text) replay/forget))
+                                   (assoc :dirty? true))))
+        (schedule-replay-save! ctx))
+    (append-to-root! ctx (:root rt) nil {:forget? true :run-text run-text})))
+
 (defn- record-eval!
   "The recorder's work for one finished evaluation, on the GTK thread. An :ok
   Run of the replay tab forgets the :previous of the root the tab was opened
@@ -165,23 +191,10 @@
           run-text (:code record)
           st @replay*]
       (if (and st (= root (:root st)))
-        (let [items (:items @(ev/history @ev*))]
-          (swap! replay* (fn [s]
-                           (-> s
-                               (update :record (fn [r] (cond-> (replay/with-history r items)
-                                                         forget-here? (replay/carry-skipped run-text)
-                                                         (seq es) (replay/add-entries es)
-                                                         forget-here? replay/forget)))
-                               (assoc :dirty? true))))
-          (schedule-replay-save! ctx))
+        (file-in-window! ctx {:es es :forget-here? forget-here? :run-text run-text})
         (append-to-root! ctx root es {:forget? forget-here? :run-text run-text}))
       (when (and forget? (not forget-here?))
-        (if (and st (= (:root rt) (:root st)))
-          (do (swap! replay* (fn [s] (-> s
-                                         (update :record #(-> % (replay/carry-skipped run-text) replay/forget))
-                                         (assoc :dirty? true))))
-              (schedule-replay-save! ctx))
-          (append-to-root! ctx (:root rt) nil {:forget? true :run-text run-text}))))))
+        (forget-tab-root! ctx {:rt rt :st st :run-text run-text})))))
 
 (defn- make-recorder
   "The fn (record result) hooked-opts calls when an evaluation that carries a
