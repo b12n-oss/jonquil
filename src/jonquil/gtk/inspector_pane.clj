@@ -359,20 +359,9 @@
     (try (f) (catch :default e (report-error! pane (ex-message e))))
     nil))
 
-(defn make-pane
-  "Builds the inspector panel widget tree. f/g/h below are on-request/
-  on-close/on-def -- f is called on the GTK thread with [op args] whenever
-  a key or button asks for a request key-step didn't resolve locally; g
-  and h take no state, the pane's own current state living entirely in
-  the returned map's :state atom.
-
-  Returns {:root :view :buf :header :info :table-header :footer
-  :def-popover :state (atom nil)} plus internal bookkeeping (:back-btn
-  etc, :selected-tag, :note-clear-cb/:note-clear-deadline/:note-clear-
-  armed?, :on-request/:on-close/:on-def) show-state!/measure/focus!/
-  focused? and this namespace's own button/key/click handlers read
-  back."
-  [{:keys [on-request on-close on-def] :as opts}]
+(defn- inspector-widgets
+  "Creates the panel's GTK widgets, returned by name."
+  []
   (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
         header (g/gtk-label-new "")
         info (g/gtk-label-new "")
@@ -399,7 +388,178 @@
         def-entry (g/gtk-entry-new)
         def-popover (popover/make-popover view {:autohide? true :position :bottom})
         keyctl (g/gtk-event-controller-key-new)
-        click (g/gtk-gesture-click-new)
+        click (g/gtk-gesture-click-new)]
+    {:root root :header header :info info :toolbar toolbar
+     :back-btn back-btn :earlier-btn earlier-btn :later-btn later-btn
+     :meta-btn meta-btn :table-btn table-btn :def-btn def-btn
+     :close-btn close-btn :table-header table-header :view view :buf buf
+     :scroll scroll :footer footer :selected-tag selected-tag
+     :def-entry def-entry :def-popover def-popover :keyctl keyctl
+     :click click}))
+
+(defn- note-clear-callback
+  "The pane's one note-clear timer callable."
+  [{:keys [state footer note-clear-deadline note-clear-armed?]}]
+  (callable (fn [_data]
+              (try
+                (if (>= (System/nanoTime) @note-clear-deadline)
+                  (do (reset! note-clear-armed? false)
+                      (swap! state dissoc :note :defd)
+                      (g/gtk-label-set-text footer (footer-text @state))
+                      0) ;; G_SOURCE_REMOVE
+                  1) ;; G_SOURCE_CONTINUE: the deadline moved out
+                (catch :default e
+                  (reset! note-clear-armed? false)
+                  (g/gtk-label-set-text footer (str "; " (ex-message e)))
+                  0)))
+            [:pointer] :int))
+
+(defn- ready-callback
+  "The pane's one measure-when-ready! wait callable."
+  [{:keys [pane* ready-waiters ready-armed?]}]
+  (callable (fn [_data]
+              (try
+                (ready-tick @pane*)
+                (catch :default e
+                  (reset! ready-waiters [])
+                  (reset! ready-armed? false)
+                  (report-error! @pane* (ex-message e))
+                  0)))
+            [:pointer] :int))
+
+(defn- style-widgets!
+  "Sets up the labels, rows view, scroll and def prompt entry."
+  [{:keys [header info table-header footer view buf selected-tag]}
+   {:keys [scroll def-entry def-popover]}]
+  ;; labels
+  (g/gtk-label-set-xalign header 0.0)
+  (g/gtk-label-set-ellipsize header g/PANGO-ELLIPSIZE-START)
+  (g/gtk-label-set-xalign info 0.0)
+  (g/gtk-label-set-xalign table-header 0.0)
+  (g/gtk-widget-add-css-class table-header "monospace")
+  (g/gtk-widget-set-visible table-header 0)
+  (g/gtk-label-set-xalign footer 0.0)
+  ;; rows view: read-only monospace, no visible cursor
+  (g/gtk-text-view-set-editable view 0)
+  (g/gtk-text-view-set-monospace view 1)
+  (g/gtk-text-view-set-cursor-visible view 0)
+  (g/gtk-widget-add-css-class view "jonquil-code")
+  (g/set-string-property! selected-tag "background" (:selection (theme/theme theme/default-theme)))
+  (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) selected-tag)
+  (g/gtk-widget-set-vexpand scroll 1)
+  ;; the def prompt entry
+  (g/gtk-widget-set-size-request def-entry DEF-ENTRY-WIDTH -1)
+  (popover/set-child! def-popover def-entry))
+
+(defn- lay-out!
+  "Appends the toolbar's buttons and the panel's rows to their boxes."
+  [{:keys [root header info table-header footer
+           back-btn earlier-btn later-btn meta-btn table-btn def-btn close-btn]}
+   toolbar scroll]
+  ;; layout
+  (g/gtk-box-append toolbar back-btn)
+  (g/gtk-box-append toolbar earlier-btn)
+  (g/gtk-box-append toolbar later-btn)
+  (g/gtk-box-append toolbar meta-btn)
+  (g/gtk-box-append toolbar table-btn)
+  (g/gtk-box-append toolbar def-btn)
+  (g/gtk-box-append toolbar close-btn)
+  (g/gtk-box-append root header)
+  (g/gtk-box-append root info)
+  (g/gtk-box-append root toolbar)
+  (g/gtk-box-append root table-header)
+  (g/gtk-box-append root scroll)
+  (g/gtk-box-append root footer)
+  (g/gtk-widget-set-size-request root WIDTH-REQUEST -1))
+
+(defn- connect-toolbar!
+  "Connects the seven toolbar buttons' \"clicked\" signals."
+  [{:keys [back-btn earlier-btn later-btn meta-btn table-btn def-btn close-btn on-close] :as pane}]
+  ;; buttons
+  (g/g-signal-connect-data back-btn "clicked"
+                           (callable (guarded-click pane #(step! pane :out)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data earlier-btn "clicked"
+                           (callable (guarded-click pane #(step! pane :earlier)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data later-btn "clicked"
+                           (callable (guarded-click pane #(step! pane :later)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data meta-btn "clicked"
+                           (callable (guarded-click pane #(step! pane :meta)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data table-btn "clicked"
+                           (callable (guarded-click pane #(step! pane :table)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data def-btn "clicked"
+                           (callable (guarded-click pane #(open-def-prompt! pane)) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data close-btn "clicked"
+                           (callable (guarded-click pane on-close) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-def-prompt!
+  "Wires the def prompt's close refocus and its entry's \"activate\"."
+  [{:keys [on-def] :as pane} def-popover def-entry]
+  ;; def prompt: Return with a non-blank name calls on-def; blank hides it.
+  ;; Escape/click-outside close it themselves (autohide true), and the
+  ;; popover's own "closed" signal (jonquil.gtk.popover/make-popover)
+  ;; already keeps its :open? atom in sync -- this connects a SECOND
+  ;; "closed" handler, as the rename popover does, to give keyboard focus
+  ;; back to the rows view whichever way it closed, once GTK has finished
+  ;; closing (jonquil.gtk.popover/refocus-view-on-close!: a grab in the
+  ;; handler itself was undone, leaving focus on the scrolled window)
+  (popover/refocus-view-on-close! def-popover)
+  (g/g-signal-connect-data def-entry "activate"
+                           (callable (fn [_entry _data]
+                                       (try
+                                         (let [dp (:def-popover pane)
+                                               name (str/trim (or (g/editable-text (:entry dp)) ""))]
+                                           (popover/hide! dp)
+                                           (when (seq name) (on-def name)))
+                                         (catch :default e (report-error! pane (ex-message e))))
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-view-input!
+  "Attaches the key controller and the double-click gesture to the rows view."
+  [{:keys [view] :as pane} keyctl click]
+  ;; keys: bubble phase, attached to the rows view itself.
+  (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-BUBBLE)
+  (g/g-signal-connect-data keyctl "key-pressed"
+                           (callable (on-key pane) [:pointer :uint :uint :uint :pointer] :int)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller view keyctl)
+  ;; double click
+  (g/g-signal-connect-data click "pressed"
+                           (callable (fn [_gesture n-press x y _data]
+                                       (try
+                                         (when (= 2 n-press) (click-row! pane x y))
+                                         (catch :default e (report-error! pane (ex-message e))))
+                                       nil)
+                                     [:pointer :int :double :double :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller view click))
+
+(defn make-pane
+  "Builds the inspector panel widget tree. f/g/h below are on-request/
+  on-close/on-def -- f is called on the GTK thread with [op args] whenever
+  a key or button asks for a request key-step didn't resolve locally; g
+  and h take no state, the pane's own current state living entirely in
+  the returned map's :state atom.
+
+  Returns {:root :view :buf :header :info :table-header :footer
+  :def-popover :state (atom nil)} plus internal bookkeeping (:back-btn
+  etc, :selected-tag, :note-clear-cb/:note-clear-deadline/:note-clear-
+  armed?, :on-request/:on-close/:on-def) show-state!/measure/focus!/
+  focused? and this namespace's own button/key/click handlers read
+  back."
+  [{:keys [on-request on-close on-def] :as opts}]
+  (let [{:keys [root header info toolbar back-btn earlier-btn later-btn meta-btn
+                table-btn def-btn close-btn table-header view buf scroll footer
+                selected-tag def-entry def-popover keyctl click]}
+        (inspector-widgets)
         ;; state/note-clear-deadline/armed? are hoisted out of the pane
         ;; map literal (rather than built as `(atom nil)` inline there)
         ;; so note-clear-cb, below, can close over the SAME atoms before
@@ -411,36 +571,17 @@
         state (or (:state opts) (atom nil))
         note-clear-deadline (atom 0)
         note-clear-armed? (atom false)
-        note-clear-cb
-        (callable (fn [_data]
-                    (try
-                      (if (>= (System/nanoTime) @note-clear-deadline)
-                        (do (reset! note-clear-armed? false)
-                            (swap! state dissoc :note :defd)
-                            (g/gtk-label-set-text footer (footer-text @state))
-                            0) ;; G_SOURCE_REMOVE
-                        1) ;; G_SOURCE_CONTINUE: the deadline moved out
-                      (catch :default e
-                        (reset! note-clear-armed? false)
-                        (g/gtk-label-set-text footer (str "; " (ex-message e)))
-                        0)))
-                  [:pointer] :int)
+        note-clear-cb (note-clear-callback {:state state :footer footer
+                                            :note-clear-deadline note-clear-deadline
+                                            :note-clear-armed? note-clear-armed?})
         ;; measure-when-ready!'s wait, one callable for the pane's
         ;; lifetime as note-clear-cb is; it reads the pane through pane*,
         ;; set once the map below exists
         pane* (atom nil)
         ready-waiters (atom [])
         ready-armed? (atom false)
-        ready-cb
-        (callable (fn [_data]
-                    (try
-                      (ready-tick @pane*)
-                      (catch :default e
-                        (reset! ready-waiters [])
-                        (reset! ready-armed? false)
-                        (report-error! @pane* (ex-message e))
-                        0)))
-                  [:pointer] :int)
+        ready-cb (ready-callback {:pane* pane* :ready-waiters ready-waiters
+                                  :ready-armed? ready-armed?})
         pane {:root root :view view :buf buf :header header :info info
               :table-header table-header :footer footer
               :def-popover (assoc def-popover :entry def-entry)
@@ -455,96 +596,9 @@
               :def-btn def-btn :close-btn close-btn
               :on-request on-request :on-close on-close :on-def on-def}]
     (reset! pane* pane)
-    ;; labels
-    (g/gtk-label-set-xalign header 0.0)
-    (g/gtk-label-set-ellipsize header g/PANGO-ELLIPSIZE-START)
-    (g/gtk-label-set-xalign info 0.0)
-    (g/gtk-label-set-xalign table-header 0.0)
-    (g/gtk-widget-add-css-class table-header "monospace")
-    (g/gtk-widget-set-visible table-header 0)
-    (g/gtk-label-set-xalign footer 0.0)
-    ;; rows view: read-only monospace, no visible cursor
-    (g/gtk-text-view-set-editable view 0)
-    (g/gtk-text-view-set-monospace view 1)
-    (g/gtk-text-view-set-cursor-visible view 0)
-    (g/gtk-widget-add-css-class view "jonquil-code")
-    (g/set-string-property! selected-tag "background" (:selection (theme/theme theme/default-theme)))
-    (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) selected-tag)
-    (g/gtk-widget-set-vexpand scroll 1)
-    ;; the def prompt entry
-    (g/gtk-widget-set-size-request def-entry DEF-ENTRY-WIDTH -1)
-    (popover/set-child! def-popover def-entry)
-    ;; layout
-    (g/gtk-box-append toolbar back-btn)
-    (g/gtk-box-append toolbar earlier-btn)
-    (g/gtk-box-append toolbar later-btn)
-    (g/gtk-box-append toolbar meta-btn)
-    (g/gtk-box-append toolbar table-btn)
-    (g/gtk-box-append toolbar def-btn)
-    (g/gtk-box-append toolbar close-btn)
-    (g/gtk-box-append root header)
-    (g/gtk-box-append root info)
-    (g/gtk-box-append root toolbar)
-    (g/gtk-box-append root table-header)
-    (g/gtk-box-append root scroll)
-    (g/gtk-box-append root footer)
-    (g/gtk-widget-set-size-request root WIDTH-REQUEST -1)
-    ;; buttons
-    (g/g-signal-connect-data back-btn "clicked"
-                             (callable (guarded-click pane #(step! pane :out)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data earlier-btn "clicked"
-                             (callable (guarded-click pane #(step! pane :earlier)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data later-btn "clicked"
-                             (callable (guarded-click pane #(step! pane :later)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data meta-btn "clicked"
-                             (callable (guarded-click pane #(step! pane :meta)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data table-btn "clicked"
-                             (callable (guarded-click pane #(step! pane :table)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data def-btn "clicked"
-                             (callable (guarded-click pane #(open-def-prompt! pane)) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data close-btn "clicked"
-                             (callable (guarded-click pane on-close) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; def prompt: Return with a non-blank name calls on-def; blank hides it.
-    ;; Escape/click-outside close it themselves (autohide true), and the
-    ;; popover's own "closed" signal (jonquil.gtk.popover/make-popover)
-    ;; already keeps its :open? atom in sync -- this connects a SECOND
-    ;; "closed" handler, as the rename popover does, to give keyboard focus
-    ;; back to the rows view whichever way it closed, once GTK has finished
-    ;; closing (jonquil.gtk.popover/refocus-view-on-close!: a grab in the
-    ;; handler itself was undone, leaving focus on the scrolled window)
-    (popover/refocus-view-on-close! def-popover)
-    (g/g-signal-connect-data def-entry "activate"
-                             (callable (fn [_entry _data]
-                                         (try
-                                           (let [dp (:def-popover pane)
-                                                 name (str/trim (or (g/editable-text (:entry dp)) ""))]
-                                             (popover/hide! dp)
-                                             (when (seq name) (on-def name)))
-                                           (catch :default e (report-error! pane (ex-message e))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; keys: bubble phase, attached to the rows view itself.
-    (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-BUBBLE)
-    (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (on-key pane) [:pointer :uint :uint :uint :pointer] :int)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller view keyctl)
-    ;; double click
-    (g/g-signal-connect-data click "pressed"
-                             (callable (fn [_gesture n-press x y _data]
-                                         (try
-                                           (when (= 2 n-press) (click-row! pane x y))
-                                           (catch :default e (report-error! pane (ex-message e))))
-                                         nil)
-                                       [:pointer :int :double :double :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller view click)
+    (style-widgets! pane {:scroll scroll :def-entry def-entry :def-popover def-popover})
+    (lay-out! pane toolbar scroll)
+    (connect-toolbar! pane)
+    (connect-def-prompt! pane def-popover def-entry)
+    (connect-view-input! pane keyctl click)
     pane))
