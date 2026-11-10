@@ -641,9 +641,9 @@
 (defn make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console
   view it will act on exists, so it takes an atom and derefs it lazily, at
-  call time -- by then activate! has reset! it to the real cv (the only
-  forward reference; every other closure in activate! is built after its
-  pieces already exist)."
+  call time -- by then jonquil.gtk.window.console's build has reset! it to
+  the real cv (the only forward reference; every other closure in
+  activate! is built after its pieces already exist)."
   [tab-fn *cv ev* status-label bang*]
   (fn [{:keys [action text]}]
     (case action

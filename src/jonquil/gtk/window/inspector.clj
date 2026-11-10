@@ -201,7 +201,8 @@
         ;; both exist). *pane is a forward reference the on-view/on-request/
         ;; on-def/on-close closures below close over -- pane itself doesn't
         ;; exist until make-pane returns, the same atom-indirection
-        ;; activate!'s *cv gives make-on-submit.
+        ;; the console's *cv (made in jonquil.gtk.window.console's build)
+        ;; gives make-on-submit.
         h-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         inspector-state (atom nil)
         inspecting? (atom false)
