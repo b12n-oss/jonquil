@@ -120,7 +120,8 @@
 
 (defn row-source-pane-hide-stops-settle
   "Hiding the panel (source-pane/cancel-scroll-settle!, the same public fn
-  jonquil.gtk.window's close-source-panel!/hide-right-panel! call when the
+  jonquil.gtk.window.help's close-source-panel! (through
+  jonquil.gtk.window.right-slot's hide-right-panel!) call when the
   source root hides) stops the settle timer in flight instead of leaving
   it to keep re-scrolling a view nobody's looking at. Same shape as row-source-pane-user-scroll-wins, above,
   with cancel-scroll-settle! in place of :on-user-scroll! as the thing

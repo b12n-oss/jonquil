@@ -140,7 +140,7 @@
 
 (defprotocol FullDoc
   "Full documentation beyond quick doc's own summary, for a second
-  quick-doc press on the same target (jonquil.gtk.window's do-quick-doc!).
+  quick-doc press on the same target (jonquil.gtk.window.help's do-quick-doc!).
   Only jonquil.nrepl.jvm's evaluator implements this today
   (backed by the server's own \"doc\" op); every caller checks (satisfies?
   FullDoc ev) first, and an evaluator that doesn't implement it never sees

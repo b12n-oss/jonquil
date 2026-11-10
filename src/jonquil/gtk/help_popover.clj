@@ -17,8 +17,8 @@
   to view once rename closes, whatever closed it.
 
   It also holds the full-doc popover: a SECOND quick-doc-shaped popover
-  (make-full-doc-popover), for jonquil.gtk.window's do-quick-doc! to show
-  in on a second press over the SAME target -- an evaluator's
+  (make-full-doc-popover), for jonquil.gtk.window.help's do-quick-doc! to
+  show in on a second press over the SAME target -- an evaluator's
   jonquil.evaluator/FullDoc, backed by the server's own doc op, answers
   more than quick doc's summary. show-full-doc! raises its max content
   height (60% of the window's own height) before popping it up, since
@@ -115,7 +115,7 @@
 (defn make-full-doc-popover
   "Builds the full-doc popover: a SECOND popover, built once per editor
   the same way make-help-popover above builds the quick-doc one (same
-  DOC-WIDTH, autohide off, position :bottom), for jonquil.gtk.window's
+  DOC-WIDTH, autohide off, position :bottom), for jonquil.gtk.window.help's
   do-quick-doc! to show a second quick-doc press's full documentation in.
   Its own map also keeps :scroll, unlike make-help-popover's
   -- show-full-doc! below raises this popover's max content height at

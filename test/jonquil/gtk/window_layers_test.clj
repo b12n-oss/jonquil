@@ -12,7 +12,7 @@
     [jonquil.gtk.window.files jonquil.gtk.window.right-slot jonquil.gtk.window.theme jonquil.gtk.window.keys]
     [jonquil.gtk.window.runtime jonquil.gtk.window.quit]
     [jonquil.gtk.window.run]
-    [jonquil.gtk.window.inspector]])
+    [jonquil.gtk.window.inspector jonquil.gtk.window.help]])
 
 (defn- ns-file [sym]
   (str "src/" (str/replace (str/replace (str sym) "-" "_") "." "/") ".clj"))
