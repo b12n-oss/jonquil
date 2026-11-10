@@ -376,15 +376,8 @@
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action (:menu-group (first @tabs)) name ffi/null))
         ;; The tree on the left, its toggle first in the toolbar, and the
         ;; outer paned that holds it beside h-paned.
-        *open-folder (atom nil)
-        *folder-result (atom nil)
-        tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (win-tabs/open-file! @*tab-ctx p))
-                                             :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
-                                             :on-error (fn [msg] (win-status/set-status! status-label msg))
-                                             :on-new-file (fn [dir n] (win-tree-ops/tree-new-file! @*tab-ctx dir n))
-                                             :on-new-folder (fn [dir n] (win-tree-ops/tree-new-folder! @*tab-ctx dir n))
-                                             :on-rename (fn [p n] (win-tree-ops/tree-rename! @*tab-ctx p n))
-                                             :on-trash (fn [p] (win-tree-ops/tree-trash! @*tab-ctx p))})
+        {:keys [tree-pane] *open-folder :open-folder* *folder-result :folder-result*}
+        (win-tree-ops/build {:status-label status-label :tab-ctx* *tab-ctx})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)

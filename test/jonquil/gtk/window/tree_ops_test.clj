@@ -9,6 +9,7 @@
             [jonquil.gtk.trash :as trash]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.tabs :as win-tabs]
             [jonquil.gtk.window.tree-ops :as win-tree-ops]))
 
@@ -167,3 +168,33 @@
           (is (false? @win-alerts/alert-pending?))
           (is (= [[:append :error "; trash: boom\n"]] @log))))
       (finally (reset! win-alerts/alert-pending? false)))))
+
+(deftest build-makes-the-tree-pane-test
+  (let [log (atom []) l (fn [x] (swap! log conj x)) made (atom nil) tc (atom ::tc1)]
+    (with-redefs [file-tree-pane/make-pane (fn [opts] (reset! made opts) ::pane)
+                  win-status/set-status! (fn [lab s] (l [:status lab s]))
+                  win-tabs/open-file! (fn [c p] (l [:open c p]))
+                  win-tree-ops/tree-new-file! (fn [c d n] (l [:new-file c d n]))
+                  win-tree-ops/tree-new-folder! (fn [c d n] (l [:new-folder c d n]))
+                  win-tree-ops/tree-rename! (fn [c p n] (l [:rename c p n]))
+                  win-tree-ops/tree-trash! (fn [c p] (l [:trash c p]))]
+      (let [w (win-tree-ops/build {:status-label ::l :tab-ctx* tc :x 1})]
+        (is (= #{:status-label :tab-ctx* :x :open-folder* :folder-result* :tree-pane} (set (keys w))))
+        (is (= ::pane (:tree-pane w)))
+        (is (nil? @(:open-folder* w)))
+        (is (nil? @(:folder-result* w)))
+        (is (not (identical? (:open-folder* w) (:folder-result* w))))
+        (is (= #{:on-open :on-open-folder :on-error :on-new-file :on-new-folder :on-rename :on-trash} (set (keys @made))))
+        (reset! tc ::tc2)
+        (is (nil? ((:on-open-folder @made))))
+        (reset! (:open-folder* w) (fn [] (l :open-folder)))
+        ((:on-open @made) "/p")
+        ((:on-open-folder @made))
+        ((:on-error @made) "m")
+        ((:on-new-file @made) "/d" "n")
+        ((:on-new-folder @made) "/d" "f")
+        ((:on-rename @made) "/p" "q")
+        ((:on-trash @made) "/t")
+        (is (= [[:open ::tc2 "/p"] :open-folder [:status ::l "m"] [:new-file ::tc2 "/d" "n"]
+                [:new-folder ::tc2 "/d" "f"] [:rename ::tc2 "/p" "q"] [:trash ::tc2 "/t"]]
+               @log))))))

@@ -1,5 +1,5 @@
 (ns jonquil.gtk.window.tree-ops
-  "The file tree's file operations: New File, New Folder, Rename and Move to Trash. Each runs inside the tree's popover, so the disk change happens now and the tree rebuild and any tab change wait for the next main-loop turn; a rename moves the tabs on the old path, and the trash asks first through the window's one alert guard. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
+  "The file tree's file operations: New File, New Folder, Rename and Move to Trash. Each runs inside the tree's popover, so the disk change happens now and the tree rebuild and any tab change wait for the next main-loop turn; a rename moves the tabs on the old path, and the trash asks first through the window's one alert guard. build makes activate!'s tree pane and its two forward atoms. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; the lock caller rule in jonquil.gtk.window's docstring applies here."
   (:require [clojure.string :as str]
             [jonquil.file-ops :as ops]
             [jonquil.file-tree :as ft]
@@ -9,6 +9,7 @@
             [jonquil.gtk.trash :as trash]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.tabs :as win-tabs]))
 
 ;; --- file operations from the tree ---------------------------------------------
@@ -53,7 +54,7 @@
   (when (some (fn [t] (and (not-any? (fn [x] (identical? x t)) except) (ops/retarget @(:path t) path path))) tabs)
     (str (.getName (java.io.File. ^String path)) " is open in a tab; close that tab first.")))
 
-(defn tree-new-file!
+(defn- tree-new-file!
   "New File... in dir: creates name, then shows and selects it and opens it
   in a tab. nil, or the error string for the entry (a tab still on that
   path is checked before the disk is touched)."
@@ -70,7 +71,7 @@
                                        (note-if-hidden! ctx path false)))
           nil))))
 
-(defn tree-new-folder!
+(defn- tree-new-folder!
   "New Folder... in dir: creates name, then shows and selects it. nil, or
   the error string for the entry."
   [{:keys [cv tree-pane] :as ctx} dir name]
@@ -82,7 +83,7 @@
                                          (note-if-hidden! ctx path true)))
           nil))))
 
-(defn tree-rename!
+(defn- tree-rename!
   "Rename...: renames old (the entry as listed: a symlink itself, never its
   target) to new-name, then every tab on old (or under it, for a folder)
   follows to the new listed path, keeping its text and dirty state. A tab on
@@ -143,7 +144,7 @@
         (cview/append! cv :system (ops/trash-message (.getName (java.io.File. ^String path)) n-tabs dir?)))
       (tree-later! cv "trash" (fn [] (file-tree-pane/refresh! tree-pane))))))
 
-(defn tree-trash!
+(defn- tree-trash!
   "Move to Trash: asks first (Cancel is the default), sharing the close
   alerts' alert-pending? guard, so a second alert never opens over one."
   [{:keys [win cv] :as ctx} path]
@@ -157,3 +158,24 @@
         (reset! win-alerts/alert-pending? false)
         (cview/append! cv :error (str "; trash: " (ex-message e) "\n")))))
   nil)
+
+(defn build
+  "activate!'s file tree binding, in activate!'s order: the two forward
+  atoms the pane's callbacks read, *open-folder (Open Folder...'s dialog
+  fn) and *folder-result (its result handler), both reset later by
+  activate!, then the tree pane, whose callbacks open a file in a tab, run
+  Open Folder..., say an error on the status line and run New File, New
+  Folder, Rename and Move to Trash. w holds what they read: :status-label,
+  and :tab-ctx* (activate!'s *tab-ctx, read when a callback runs). Returns
+  w with :open-folder* :folder-result* and :tree-pane added."
+  [{:keys [status-label] *tab-ctx :tab-ctx* :as w}]
+  (let [*open-folder (atom nil)
+        *folder-result (atom nil)
+        tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (win-tabs/open-file! @*tab-ctx p))
+                                             :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
+                                             :on-error (fn [msg] (win-status/set-status! status-label msg))
+                                             :on-new-file (fn [dir n] (tree-new-file! @*tab-ctx dir n))
+                                             :on-new-folder (fn [dir n] (tree-new-folder! @*tab-ctx dir n))
+                                             :on-rename (fn [p n] (tree-rename! @*tab-ctx p n))
+                                             :on-trash (fn [p] (tree-trash! @*tab-ctx p))})]
+    (assoc w :open-folder* *open-folder :folder-result* *folder-result :tree-pane tree-pane)))
