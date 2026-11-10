@@ -1227,6 +1227,61 @@
                    (finally (editor/set-error-fn! ed (fn [_]))
                             (parinfer-off! ed)))))))
 
+(defn- row-parinfer-throw-clears-the-prime [ed]
+  (go-row :parinfer-throw-clears-the-prime check
+    (on-gtk (let [errors (atom [])]
+              (try (parinfer-on! ed :smart)
+                   (editor/set-error-fn! ed (fn [msg] (swap! errors conj msg)))
+                   (editor/set-text! ed "(a)")
+                   (caret! ed 2)
+                   ;; primes the cache
+                   (type-str! ed "x")
+                   ;; a throw (not an engine-error result) lands in the
+                   ;; hook's catch: it names the error once and drops the
+                   ;; cache and the outside span, so the next keystroke
+                   ;; starts from scratch
+                   (reset! errors [])
+                   (with-redefs-fn {#'pe/adjust
+                                    (fn [_] (throw (ex-info "kaput" {})))}
+                     #(type-str! ed "y"))
+                   (let [after (editor/editor-text ed)
+                         cache @(:parinfer-prev-cache ed)
+                         span @(:parinfer-outside-span ed)]
+                     (type-str! ed "(")
+                     (check :parinfer-throw-clears-the-prime
+                            (and (= ["; parinfer: kaput"] @errors)
+                                 (= "(axy)" after)
+                                 (nil? cache)
+                                 (nil? span)
+                                 (= "(axy())" (editor/editor-text ed)))
+                            {:errors @errors :after after :cache cache
+                             :span span :text (editor/editor-text ed)}))
+                   (finally (editor/set-error-fn! ed (fn [_]))
+                            (parinfer-off! ed)))))))
+
+(defn- row-editor-cursor-fn-throw-named
+  "A registrant of on-cursor-moved! that throws must not break the cursor
+  move that called it: the editor reports it through its error fn as
+  \"; cursor: <message>\" and leaves its text alone."
+  [ed]
+  (go-row :editor-cursor-fn-throw-named check
+    (on-gtk (let [saved @(:on-cursor-fns ed)
+                  errors (atom [])]
+              (try
+                (editor/set-error-fn! ed (fn [msg] (swap! errors conj msg)))
+                (editor/set-text! ed "abc")
+                (editor/on-cursor-moved! ed (fn [_] (throw (ex-info "bad" {}))))
+                ;; set-text! may notify too; only the caret move may satisfy the check
+                (reset! errors [])
+                (caret! ed 1)
+                (check :editor-cursor-fn-throw-named
+                       (and (some #{"; cursor: bad"} @errors)
+                            (= "abc" (editor/editor-text ed)))
+                       {:errors @errors :text (editor/editor-text ed)})
+                (finally
+                  (reset! (:on-cursor-fns ed) saved)
+                  (editor/set-error-fn! ed (fn [_]))))))))
+
 ;; --- Parinfer speedup rows ---------------------
 ;; Each row asserts the edit's visible result equals what the fallback
 ;; (cache-less) path computes on copied strings, so a stale cache or a
@@ -1926,6 +1981,7 @@ b" text) eq (pos? @splices))
    row-editor-dirty
    row-editor-emoji-offsets
    row-editor-preedit-guard
+   row-editor-cursor-fn-throw-named
    row-editor-tick-skips-unchanged
    row-on-gui-concurrent
    row-edit-auto-pair
@@ -1969,6 +2025,7 @@ b" text) eq (pos? @splices))
    row-parinfer-op-keeps-caret
    row-parinfer-op-keeps-selection
    row-parinfer-engine-failure-named-once
+   row-parinfer-throw-clears-the-prime
    row-parinfer-cache-steady-typing
    row-parinfer-cache-invalidated-by-undo
    row-parinfer-cache-reprimed-by-set-text

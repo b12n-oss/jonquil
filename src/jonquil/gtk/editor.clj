@@ -455,6 +455,134 @@
        (= \" (nth text (dec caret)))
        (= \" (nth text caret))))
 
+(defn- post-action-text
+  "The buffer's text after the action, for parinfer-after-action!."
+  [buf prev span]
+  ;; On a cache hit with an armed span, the post-action text is
+  ;; the cached head, the changed middle read from the buffer,
+  ;; and the cached tail: three exact pieces (the span's head
+  ;; and tail are untouched by construction), 0.12 ms against
+  ;; the 10.8 ms full read. The length guard
+  ;; only catches a ranged read disagreeing with GTK's char
+  ;; count (embedded objects, hidden text); a wrong span is
+  ;; invisible to it, which is why the span must stay sound.
+  ;; A miss's prev is a fresh read of the begin-time buffer,
+  ;; ground truth by construction, so the splice doesn't need
+  ;; the cache.
+  (or (when span
+        (let [pt ^String (:text prev)
+              n (count pt)
+              m (g/gtk-text-buffer-get-char-count buf)
+              p (min (:prefix span) n m)
+              q (min (:suffix span) (- n p) (- m p))
+              spliced (str (subs pt 0 p)
+                           (g/buffer-text-range buf p (- m q))
+                           (subs pt (- n q)))]
+          (when (= (count spliced) m) spliced)))
+      (g/buffer-text buf)))
+
+(defn- prev-consistent?
+  "Whether the last action's form, by its edit start, contains this
+  edit's start, for pe/adjust's :prev-consistent?."
+  [prev span]
+  (boolean
+   (and (:cached? prev) span (some? (:edit-at prev))
+        ;; one region call, on the prev text the
+        ;; painter's tick has already bracketed:
+        ;; the last action's form, by its edit
+        ;; start, must contain this edit's start
+        (let [pt (:text prev)
+              n (count pt)
+              [ls le] (pe/region pt (min (:edit-at prev) n))]
+          (<= ls (:prefix span) le)))))
+
+(defn- apply-fix-keeping-selection!
+  "Applies the fix r inside a nested user action and selects [sa sb]
+  mapped through it."
+  [{:keys [buf text r sa sb]}]
+  (let [fixed (edit/apply-edits text (:edits r))
+        remap (fn [x] (pe/remap-offset text fixed x))]
+    (g/gtk-text-buffer-begin-user-action buf)
+    (try
+      (doseq [[s e rep'] (rseq (vec (:edits r)))]
+        (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+        (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a rep' -1))))
+      (g/with-iters* buf (remap sa) (remap sb)
+        (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (finally (g/gtk-text-buffer-end-user-action buf)))))
+
+(defn- apply-fix!
+  "Applies an adjusted result r with the hook's own apply guarded by
+  :parinfer-busy?."
+  [ed {:keys [buf text r]}]
+  (when (map? r)
+    (reset! (:parinfer-busy? ed) true)
+    (try
+      (let [[sa sb] (g/selection-offsets buf)]
+        (if (and sa sb (< sa sb))
+          ;; The op selected a range (indent, toggle-comment
+          ;; on lines): the selection survives the fix, each
+          ;; end mapped through the fix's one edit. A delete would swallow the marks, so
+          ;; following GTK's own mark motion isn't enough.
+          (apply-fix-keeping-selection! {:buf buf :text text :r r :sa sa :sb sb})
+          (apply-op! ed r)))
+      (finally (reset! (:parinfer-busy? ed) false)))))
+
+(defn- use-result!
+  "Says a too-long form or an engine error, or applies r and clears the
+  status."
+  [ed {:keys [buf text r status]}]
+  (cond
+    (= ::pe/too-long r)
+    (when status
+      (status (str "over " pe/default-max-lines " lines here, not adjusted")))
+
+    ;; A Jolt shim gap the engine caught (parinfer-edit): name it
+    ;; once; the buffer stays as typed.
+    (:engine-error r)
+    (when-let [f @(:on-error-fn ed)]
+      (f (str "; parinfer: " (:engine-error r))))
+
+    :else
+    (do (apply-fix! ed {:buf buf :text text :r r})
+        (when status (status nil)))))
+
+(defn- prime-next-action!
+  "Primes the next action's prev from the final text and arms the
+  outside span."
+  [ed {:keys [text r prev span]}]
+  ;; prime the next action's prev: the final text without another
+  ;; buffer copy, with the gen read after our own apply bumped it
+  (let [fixed? (and (map? r) (:edits r))
+        final (if fixed? (edit/apply-edits text (:edits r)) text)]
+    (reset! (:parinfer-prev-cache ed)
+            {:text final :gen @(:edit-gen ed)
+             ;; Where this action edited, in final coordinates, and
+             ;; only when Parinfer really probed a changed form:
+             ;; the fix can move text before the offset, so it's
+             ;; carried across by line and column, and
+             ;; a no-op action, a too-long skip or an engine error
+             ;; probed nothing, so nothing is marked consistent.
+             :edit-at (when (and span
+                                 (not= text (:text prev))
+                                 (or (nil? r) fixed?))
+                        (if fixed?
+                          (pe/remap-offset text final (:prefix span))
+                          (:prefix span)))})
+    ;; after the prime, in this same step: the fix's own signals
+    ;; have fired, so everything narrowing it from here on really
+    ;; is outside the hook's sight
+    (arm-outside-span! ed (count final))))
+
+(defn- parinfer-failed!
+  "A throw in the hook: drops the cache and the outside span, and names
+  the error."
+  [ed e]
+  (reset! (:parinfer-prev-cache ed) nil)
+  (arm-outside-span! ed nil)
+  (when-let [f @(:on-error-fn ed)]
+    (f (str "; parinfer: " (ex-message e)))))
+
 (defn- parinfer-after-action!
   "The Parinfer hook at end-user-action: parinfer-edit/adjust from the
   begin-user-action snapshot, applied inside a nested user action, which
@@ -469,116 +597,28 @@
     (let [span @(:parinfer-span ed)]
       (reset! (:parinfer-span ed) nil)
       (when-let [mode (parinfer-mode ed)]
-       (try
-        (let [buf (:buf ed)
-              ;; On a cache hit with an armed span, the post-action text is
-              ;; the cached head, the changed middle read from the buffer,
-              ;; and the cached tail: three exact pieces (the span's head
-              ;; and tail are untouched by construction), 0.12 ms against
-              ;; the 10.8 ms full read. The length guard
-              ;; only catches a ranged read disagreeing with GTK's char
-              ;; count (embedded objects, hidden text); a wrong span is
-              ;; invisible to it, which is why the span must stay sound.
-              ;; A miss's prev is a fresh read of the begin-time buffer,
-              ;; ground truth by construction, so the splice doesn't need
-              ;; the cache.
-              text (or (when span
-                         (let [pt ^String (:text prev)
-                               n (count pt)
-                               m (g/gtk-text-buffer-get-char-count buf)
-                               p (min (:prefix span) n m)
-                               q (min (:suffix span) (- n p) (- m p))
-                               spliced (str (subs pt 0 p)
-                                            (g/buffer-text-range buf p (- m q))
-                                            (subs pt (- n q)))]
-                           (when (= (count spliced) m) spliced)))
-                       (g/buffer-text buf))
-              r (pe/adjust {:mode mode
-                            :prev-text (:text prev) :prev-caret (:caret prev)
-                            :text text :caret (g/cursor-offset buf)
-                            ;; the signals' untouched head/tail replaces the
-                            ;; whole-buffer diff. The re-indent probe skips
-                            ;; only when this edit starts in the SAME form
-                            ;; the previous action edited: a cache hit
-                            ;; proves the buffer is our last output, not
-                            ;; that the form under the caret ever met
-                            ;; Parinfer (a caret move changes no gen), so
-                            ;; same-form is the part that keeps the user's
-                            ;; first-edit re-indent.
-                            :bounds (when span [(:prefix span) (:suffix span)])
-                            :prev-consistent?
-                            (boolean
-                             (and (:cached? prev) span (some? (:edit-at prev))
-                                  ;; one region call, on the prev text the
-                                  ;; painter's tick has already bracketed:
-                                  ;; the last action's form, by its edit
-                                  ;; start, must contain this edit's start
-                                  (let [pt (:text prev)
-                                        n (count pt)
-                                        [ls le] (pe/region pt (min (:edit-at prev) n))]
-                                    (<= ls (:prefix span) le))))})
-              status @(:parinfer-status-fn ed)]
-          (cond
-            (= ::pe/too-long r)
-            (when status
-              (status (str "over " pe/default-max-lines " lines here, not adjusted")))
-
-            ;; A Jolt shim gap the engine caught (parinfer-edit): name it
-            ;; once; the buffer stays as typed.
-            (:engine-error r)
-            (when-let [f @(:on-error-fn ed)]
-              (f (str "; parinfer: " (:engine-error r))))
-
-            :else
-            (do (when (map? r)
-                  (reset! (:parinfer-busy? ed) true)
-                  (try
-                    (let [[sa sb] (g/selection-offsets buf)]
-                      (if (and sa sb (< sa sb))
-                        ;; The op selected a range (indent, toggle-comment
-                        ;; on lines): the selection survives the fix, each
-                        ;; end mapped through the fix's one edit. A delete would swallow the marks, so
-                        ;; following GTK's own mark motion isn't enough.
-                        (let [fixed (edit/apply-edits text (:edits r))
-                              remap (fn [x] (pe/remap-offset text fixed x))]
-                          (g/gtk-text-buffer-begin-user-action buf)
-                          (try
-                            (doseq [[s e rep'] (rseq (vec (:edits r)))]
-                              (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
-                              (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a rep' -1))))
-                            (g/with-iters* buf (remap sa) (remap sb)
-                              (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
-                            (finally (g/gtk-text-buffer-end-user-action buf))))
-                        (apply-op! ed r)))
-                    (finally (reset! (:parinfer-busy? ed) false))))
-                (when status (status nil))))
-          ;; prime the next action's prev: the final text without another
-          ;; buffer copy, with the gen read after our own apply bumped it
-          (let [fixed? (and (map? r) (:edits r))
-                final (if fixed? (edit/apply-edits text (:edits r)) text)]
-            (reset! (:parinfer-prev-cache ed)
-                    {:text final :gen @(:edit-gen ed)
-                     ;; Where this action edited, in final coordinates, and
-                     ;; only when Parinfer really probed a changed form:
-                     ;; the fix can move text before the offset, so it's
-                     ;; carried across by line and column, and
-                     ;; a no-op action, a too-long skip or an engine error
-                     ;; probed nothing, so nothing is marked consistent.
-                     :edit-at (when (and span
-                                         (not= text (:text prev))
-                                         (or (nil? r) fixed?))
-                                (if fixed?
-                                  (pe/remap-offset text final (:prefix span))
-                                  (:prefix span)))})
-            ;; after the prime, in this same step: the fix's own signals
-            ;; have fired, so everything narrowing it from here on really
-            ;; is outside the hook's sight
-            (arm-outside-span! ed (count final))))
-        (catch :default e
-          (reset! (:parinfer-prev-cache ed) nil)
-          (arm-outside-span! ed nil)
-          (when-let [f @(:on-error-fn ed)]
-            (f (str "; parinfer: " (ex-message e))))))))))
+        (try
+          (let [buf (:buf ed)
+                text (post-action-text buf prev span)
+                r (pe/adjust {:mode mode
+                              :prev-text (:text prev) :prev-caret (:caret prev)
+                              :text text :caret (g/cursor-offset buf)
+                              ;; the signals' untouched head/tail replaces the
+                              ;; whole-buffer diff. The re-indent probe skips
+                              ;; only when this edit starts in the SAME form
+                              ;; the previous action edited: a cache hit
+                              ;; proves the buffer is our last output, not
+                              ;; that the form under the caret ever met
+                              ;; Parinfer (a caret move changes no gen), so
+                              ;; same-form is the part that keeps the user's
+                              ;; first-edit re-indent.
+                              :bounds (when span [(:prefix span) (:suffix span)])
+                              :prev-consistent? (prev-consistent? prev span)})
+                status @(:parinfer-status-fn ed)]
+            (use-result! ed {:buf buf :text text :r r :status status})
+            (prime-next-action! ed {:text text :r r :prev prev :span span}))
+          (catch :default e
+            (parinfer-failed! ed e)))))))
 
 (defn set-parinfer-fns!
   "Wires the window's Parinfer reads: mode-fn answers the current mode
@@ -1191,6 +1231,335 @@
 
 ;; --- construction ----------------------------------------------------------
 
+(defn- editor-state
+  "The editor's state map, its tags made on buf."
+  [{:keys [view buf scroll readonly-tag]}]
+  {:view view
+   :buf buf
+   :scroll scroll
+   :tags (make-tags! buf)
+   :readonly-tag readonly-tag
+   :saved-text (atom "")
+   :last-dirty? (atom false)
+   :on-dirty-fns (atom [])
+   :on-cursor-fns (atom [])
+   :on-focus-fns (atom [])
+   :dirty-at (atom nil)
+   :preedit-active? (atom false)
+   ;; Starts true so the first tick always checks, establishing
+   ;; a baseline; `changed` (below), set-text! and mark-saved! are
+   ;; the only writers after that.
+   :dirty-check-needed? (atom true)
+   :dirty-check-count (atom 0)
+   ;; Single-slot registrations for the quick-doc/jump chords: see
+   ;; set-quick-doc-fn!/set-jump-fn!.
+   :quick-doc-fn (atom nil)
+   :jump-fn (atom nil)
+   ;; Single-slot registration for the rename chords: see
+   ;; set-rename-fn!.
+   :rename-fn (atom nil)
+   ;; Single-slot registration for Run Form: see set-run-form-fn!.
+   :run-form-fn (atom nil)
+   ;; Single-slot registration for Run Form's flash cancel: see
+   ;; set-flash-cancel-fn!.
+   :flash-cancel-fn (atom nil)
+   ;; Single-slot registration for completion: see
+   ;; set-completion-fns!. nil until jonquil.gtk.window.tabs wires it.
+   :completion-fns (atom nil)
+   ;; The dialect profile whose sets paint
+   ;; symbols -- see set-profile!. nil until the window sets it.
+   :profile (atom nil)
+   ;; Single-slot registration for error reporting -- see
+   ;; set-error-fn!. nil until jonquil.gtk.window.tabs wires it,
+   ;; so a throw before that point is silently dropped rather
+   ;; than reported (there is no status label to report it to
+   ;; yet).
+   :on-error-fn (atom nil)
+   ;; Source panel: read-only mode (set-read-only!) and the
+   ;; asynchronous paint's generation (paint-async!).
+   :read-only? (atom false)
+   ;; Parinfer: :parinfer-mode-fn answers the window's
+   ;; mode (set-parinfer-fns!); :parinfer-prev is the text and
+   ;; caret at begin-user-action; :parinfer-busy? guards the
+   ;; hook's own nested apply; :parinfer-skip? exempts one edit
+   ;; (apply-op-plain!, the MCP path).
+   :parinfer-mode-fn (atom (constantly :off))
+   ;; :format-style-fn answers the tab's .jonquil.edn
+   ;; :format-style (set-format-style-fn!): :paren-stable or
+   ;; :plain pins what a format produces, nil follows the mode.
+   :format-style-fn (atom (constantly nil))
+   :parinfer-status-fn (atom nil)
+   :parinfer-prev (atom nil)
+   :parinfer-busy? (atom false)
+   :parinfer-skip? (atom false)
+   ;; The speedup slots: :parinfer-prev-cache holds {:text s :gen n}, the buffer as
+   ;; the hook last saw it with :edit-gen at that moment, so the
+   ;; next action starts without a 262k copy when the gen hasn't
+   ;; moved (any outside write bumps the gen through `changed`).
+   ;; :parinfer-span accumulates the action's untouched head and
+   ;; tail from the insert/delete signals, feeding adjust's
+   ;; :bounds; nil when unarmed.
+   ;; :parinfer-outside-span records what changed SINCE the last
+   ;; cache prime, armed full in the same step as each prime and
+   ;; narrowed by the same two signals, undo and redo replays
+   ;; included, so the begin handler can rebuild prev from the
+   ;; cache plus one ranged read; nil when
+   ;; there is no cache to recover from.
+   :parinfer-prev-cache (atom nil)
+   :parinfer-span (atom nil)
+   :parinfer-outside-span (atom nil)
+   :paint (atom {:gen 0 :done? true})
+   ;; The tick's incremental repaint (repaint!).
+   ;; :painted is {:text :plan} of what our tags show now, or nil
+   ;; when unknown. :edit-gen is bumped by every `changed`.
+   ;; :edit-bounds is {:prefix m :suffix n}, no edit since :painted
+   ;; touched the first m or last n chars, nil when :painted is.
+   ;; :repaint-req counts the tick's futures, so only the latest
+   ;; dropped result re-arms the debounce. Without it, every result
+   ;; dropped because typing moved :edit-gen would re-arm, and each
+   ;; re-arm starts another tick: another full text copy (~54 ms at
+   ;; 20,000 lines) and another plan future, which is dropped in turn
+   ;; while a newer future is already on its way.
+   :painted (atom nil)
+   :edit-gen (atom 0)
+   :edit-bounds (atom nil)
+   :repaint-req (atom 0)
+   ;; Counts the tick's dropped results; only the self-test reads it.
+   :repaint-drops (atom 0)
+   ;; True once view's own "destroy" signal has fired (connected
+   ;; once, below). A paint (paint-async!) or the 20ms tick
+   ;; (tick!) can outlive the editor's own window -- F12 into a
+   ;; large file, then close that window before colouring
+   ;; finishes -- and both check this flag before touching the
+   ;; buffer, so neither runs a GTK call against a destroyed
+   ;; widget.
+   :destroyed? (atom false)})
+
+(defn- set-up-view!
+  "Registers the read-only tag and sets up the view, its buffer and its scroller."
+  [{:keys [view buf scroll readonly-tag]}]
+  (g/set-bool-property! readonly-tag "editable" false)
+  (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) readonly-tag)
+  (g/gtk-text-view-set-editable view 1)
+  (g/gtk-text-view-set-monospace view 1)
+  (g/gtk-text-view-set-left-margin view 8)
+  (g/gtk-text-view-set-top-margin view 4)
+  (g/gtk-text-buffer-set-enable-undo buf 1)
+  (g/gtk-scrolled-window-set-child scroll view))
+
+(defn- connect-changed!
+  "Connects the buffer's changed handler, which marks the edit for the tick."
+  [{:keys [buf] :as ed}]
+  (g/g-signal-connect-data buf "changed"
+                           (callable (fn [_buf _data]
+                                       (reset! (:dirty-at ed) (System/currentTimeMillis))
+                                       (reset! (:dirty-check-needed? ed) true)
+                                       (swap! (:edit-gen ed) inc)
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- narrow-spans!
+  "Narrows the edit bounds and both Parinfer spans that are armed by an edit at o."
+  [ed o tail]
+  (when @(:edit-bounds ed)
+    (swap! (:edit-bounds ed) narrow-bounds o tail))
+  ;; the parinfer spans see the same edits
+  (when @(:parinfer-span ed)
+    (swap! (:parinfer-span ed) narrow-bounds o tail))
+  (when @(:parinfer-outside-span ed)
+    (swap! (:parinfer-outside-span ed) narrow-bounds o tail)))
+
+(defn- connect-insert-text!
+  "Connects the buffer's insert-text handler, which narrows the spans."
+  [{:keys [buf] :as ed}]
+  ;; insert-text and delete-range (connect-delete-range!) narrow
+  ;; :edit-bounds. Connected without G_CONNECT_AFTER, both run before
+  ;; GTK's default handler, so the iters and the char count are pre-edit.
+  ;; Probe 2026-10-14: inserting "XYé" at 3 into "abcdef" read offset
+  ;; 3, len 4 and char count 6; deleting [1, 4) from the 9-char result
+  ;; read 1, 4 and 9; `changed` then read 9 and 6. len is in bytes, so it
+  ;; goes unused. Callbacks: (buf, GtkTextIter*, char*, int, data) and
+  ;; (buf, GtkTextIter* start, GtkTextIter* end, data).
+  ;; Any other way of inserting into the buffer (insert-paintable,
+  ;; insert-child-anchor) must also narrow :edit-bounds, or the tick
+  ;; repaints the wrong range and colours go wrong.
+  (g/g-signal-connect-data buf "insert-text"
+                           (callable (fn [_buf iter _text _len _data]
+                                       (let [o (g/gtk-text-iter-get-offset iter)
+                                             n (g/gtk-text-buffer-get-char-count buf)]
+                                         (narrow-spans! ed o (- n o)))
+                                       nil)
+                                     [:pointer :pointer :pointer :int :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- recovered-prev-text
+  "The pre-action text rebuilt from the cache plus one ranged read, or
+  the full read when the lengths disagree."
+  [{:keys [buf cache os nc]}]
+  (let [pt ^String (:text cache)
+        m (g/gtk-text-buffer-get-char-count buf)
+        p (min (:prefix os) nc m)
+        q (min (:suffix os) (- nc p) (- m p))
+        rec (str (subs pt 0 p)
+                 (g/buffer-text-range buf p (- m q))
+                 (subs pt (- nc q)))]
+    (if (= (count rec) m) rec (g/buffer-text buf))))
+
+(defn- snapshot-prev!
+  "Records Parinfer's pre-action text and caret when Parinfer is on,
+  and arms :parinfer-span at full length (no edit yet narrowed it)."
+  [{:keys [buf] :as ed}]
+  (when (parinfer-mode ed)
+    (let [cache @(:parinfer-prev-cache ed)
+          os @(:parinfer-outside-span ed)
+          nc (when cache (count ^String (:text cache)))
+          ;; a hit also needs the outside-span still at
+          ;; full length, a free cross-check: narrowed
+          ;; would mean a signal fired without the gen
+          ;; moving
+          hit? (and cache (= (:gen cache) @(:edit-gen ed))
+                    (= os {:prefix nc :suffix nc}))
+          text (cond
+                 hit? (:text cache)
+                 ;; outside recovery:
+                 ;; cached head, the changed middle read
+                 ;; from the buffer, cached tail; the end
+                 ;; splice's argument with prev and the
+                 ;; live buffer swapping roles, so the
+                 ;; same induction carries it, and the
+                 ;; same length guard turns any surprise
+                 ;; into the full read. Only on a NARROWED
+                 ;; span: a moved gen with a still-full
+                 ;; span means a change the signals never
+                 ;; saw (a child anchor), so the full read
+                 (and cache os
+                      (not= os {:prefix nc :suffix nc}))
+                 (recovered-prev-text {:buf buf :cache cache :os os :nc nc})
+                 :else (g/buffer-text buf))
+          n (count text)]
+      (reset! (:parinfer-span ed) {:prefix n :suffix n})
+      (reset! (:parinfer-prev ed)
+              {:text text
+               :caret (g/cursor-offset buf)
+               :cached? hit?
+               :edit-at (when hit? (:edit-at cache))}))))
+
+(defn- connect-user-actions!
+  "Connects Parinfer's snapshot at begin-user-action and its hook at end-user-action."
+  [{:keys [buf] :as ed}]
+  ;; Parinfer: the snapshot at begin-user-action and the hook at
+  ;; end-user-action. Every typed key, paste, cut and apply-op! is one
+  ;; user action; GTK's own undo and redo emit neither signal (probed), and set-text! is an irreversible action, so loads,
+  ;; reloads, undo and redo never reach the hook.
+  (g/g-signal-connect-data buf "begin-user-action"
+                           (callable (fn [_buf _data] (snapshot-prev! ed) nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data buf "end-user-action"
+                           (callable (fn [_buf _data]
+                                       (parinfer-after-action! ed)
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-delete-range!
+  "Connects the buffer's delete-range handler, which narrows the spans."
+  [{:keys [buf] :as ed}]
+  (g/g-signal-connect-data buf "delete-range"
+                           (callable (fn [_buf start end _data]
+                                       (let [o (g/gtk-text-iter-get-offset start)
+                                             e (g/gtk-text-iter-get-offset end)
+                                             n (g/gtk-text-buffer-get-char-count buf)]
+                                         (narrow-spans! ed o (- n e)))
+                                       nil)
+                                     [:pointer :pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-cursor-notify!
+  "Connects the cursor-position notify, which runs the cursor fns."
+  [{:keys [buf] :as ed}]
+  ;; The buffer's "cursor-position" property notify, in place of
+  ;; "mark-set" filtered to the insert mark. An insert or
+  ;; delete moves the insert mark by gravity without emitting mark-set,
+  ;; so Ln/Col went stale while typing. GtkTextBuffer notifies
+  ;; cursor-position from real_insert_text, real_delete_range and
+  ;; real_mark_set when the mark is the insert mark
+  ;; (gtk/gtktextbuffer.c:1293, 2090 and 3067 at the 4.22.4 tag), so this
+  ;; one signal covers typing, deletion and every mark-set case.
+  ;; GObject::notify's callback is (instance, GParamSpec*, user_data).
+  (g/g-signal-connect-data buf "notify::cursor-position"
+                           (callable (fn [_buf _pspec _data]
+                                       (doseq [f @(:on-cursor-fns ed)]
+                                         (try
+                                           (f (g/cursor-line-col buf))
+                                           (catch :default e
+                                             (when-let [ef @(:on-error-fn ed)]
+                                               (ef (str "; cursor: " (ex-message e)))))))
+                                       nil)
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-view-signals!
+  "Connects the view's preedit-changed and destroy handlers."
+  [{:keys [view] :as ed}]
+  ;; GtkTextView's OWN "preedit-changed" signal (distinct from
+  ;; GtkIMContext's identically-named one) -- gtk/gtktextview.c:1529 per
+  ;; Gtk-4.0.gir (not declared in the public gtktextview.h header; GTK
+  ;; signals are registered at runtime and documented via GIR/gtk-doc,
+  ;; not exposed as C symbols to grep for). Callback signature (instance,
+  ;; gchar* preedit, user_data): [:pointer :string :pointer] :void.
+  (g/g-signal-connect-data view "preedit-changed"
+                           (callable (fn [_view preedit _data]
+                                       (reset! (:preedit-active? ed) (not (empty? preedit)))
+                                       nil)
+                                     [:pointer :string :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  ;; A paint (paint-async!) or the 20ms tick (tick!) can outlive the
+  ;; editor's own window: a transient window (the source panel, F12's
+  ;; jump target) can close while either is still running, and both read
+  ;; buffer offsets computed against a buffer that no longer exists once
+  ;; the view is gone. Connected ONCE, here, like every other signal
+  ;; make-editor connects (mirrors jonquil.gtk.source-pane's own "destroy" backstop).
+  (g/g-signal-connect-data view "destroy"
+                           (callable (fn [_view _data] (reset! (:destroyed? ed) true) nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-focus-leave!
+  "Connects the focus controller's leave handler and adds the controller to view."
+  [ed view focusctl]
+  ;; GtkEventControllerFocus's own "leave" signal: fires whenever view (or a descendant) stops being the
+  ;; root's focus widget. No signal args beyond instance/user_data.
+  (g/g-signal-connect-data focusctl "leave"
+                           (callable (fn [_ctl _data]
+                                       (doseq [f @(:on-focus-fns ed)]
+                                         (try
+                                           (f)
+                                           (catch :default e
+                                             (when-let [ef @(:on-error-fn ed)]
+                                               (ef (str "; focus: " (ex-message e)))))))
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller view focusctl))
+
+(defn- add-key-controller!
+  "Connects the key handler in the capture phase and adds the controller to view."
+  [ed view keyctl]
+  (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
+  (g/g-signal-connect-data keyctl "key-pressed"
+                           (callable (on-key ed) [:pointer :uint :uint :uint :pointer] :int)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller view keyctl))
+
+(defn- start-tick!
+  "Starts the editor's 20ms tick."
+  [ed]
+  ;; on-throw 1 (G_SOURCE_CONTINUE): a throw in one tick must not stop
+  ;; dirty tracking for the rest of the session.
+  (g/g-timeout-add 20 (callable (fn [_data] (tick! ed)) [:pointer] :int :on-throw 1) ffi/null))
+
 (defn make-editor
   "Builds the Definitions editor: an editable, monospace GtkTextView with
   an 8px left / 4px top margin and undo enabled, inside a
@@ -1207,279 +1576,15 @@
         ;; see set-read-only!'s docstring for why the view's own editable
         ;; property alone isn't enough.
         readonly-tag (g/gtk-text-tag-new "editor-read-only")
-        ed {:view view
-            :buf buf
-            :scroll scroll
-            :tags (make-tags! buf)
-            :readonly-tag readonly-tag
-            :saved-text (atom "")
-            :last-dirty? (atom false)
-            :on-dirty-fns (atom [])
-            :on-cursor-fns (atom [])
-            :on-focus-fns (atom [])
-            :dirty-at (atom nil)
-            :preedit-active? (atom false)
-            ;; Starts true so the first tick always checks, establishing
-            ;; a baseline; `changed` (below), set-text! and mark-saved! are
-            ;; the only writers after that.
-            :dirty-check-needed? (atom true)
-            :dirty-check-count (atom 0)
-            ;; Single-slot registrations for the quick-doc/jump chords: see
-            ;; set-quick-doc-fn!/set-jump-fn!.
-            :quick-doc-fn (atom nil)
-            :jump-fn (atom nil)
-            ;; Single-slot registration for the rename chords: see
-            ;; set-rename-fn!.
-            :rename-fn (atom nil)
-            ;; Single-slot registration for Run Form: see set-run-form-fn!.
-            :run-form-fn (atom nil)
-            ;; Single-slot registration for Run Form's flash cancel: see
-            ;; set-flash-cancel-fn!.
-            :flash-cancel-fn (atom nil)
-            ;; Single-slot registration for completion: see
-            ;; set-completion-fns!. nil until jonquil.gtk.window.tabs wires it.
-            :completion-fns (atom nil)
-            ;; The dialect profile whose sets paint
-            ;; symbols -- see set-profile!. nil until the window sets it.
-            :profile (atom nil)
-            ;; Single-slot registration for error reporting -- see
-            ;; set-error-fn!. nil until jonquil.gtk.window.tabs wires it,
-            ;; so a throw before that point is silently dropped rather
-            ;; than reported (there is no status label to report it to
-            ;; yet).
-            :on-error-fn (atom nil)
-            ;; Source panel: read-only mode (set-read-only!) and the
-            ;; asynchronous paint's generation (paint-async!).
-            :read-only? (atom false)
-            ;; Parinfer: :parinfer-mode-fn answers the window's
-            ;; mode (set-parinfer-fns!); :parinfer-prev is the text and
-            ;; caret at begin-user-action; :parinfer-busy? guards the
-            ;; hook's own nested apply; :parinfer-skip? exempts one edit
-            ;; (apply-op-plain!, the MCP path).
-            :parinfer-mode-fn (atom (constantly :off))
-            ;; :format-style-fn answers the tab's .jonquil.edn
-            ;; :format-style (set-format-style-fn!): :paren-stable or
-            ;; :plain pins what a format produces, nil follows the mode.
-            :format-style-fn (atom (constantly nil))
-            :parinfer-status-fn (atom nil)
-            :parinfer-prev (atom nil)
-            :parinfer-busy? (atom false)
-            :parinfer-skip? (atom false)
-            ;; The speedup slots: :parinfer-prev-cache holds {:text s :gen n}, the buffer as
-            ;; the hook last saw it with :edit-gen at that moment, so the
-            ;; next action starts without a 262k copy when the gen hasn't
-            ;; moved (any outside write bumps the gen through `changed`).
-            ;; :parinfer-span accumulates the action's untouched head and
-            ;; tail from the insert/delete signals, feeding adjust's
-            ;; :bounds; nil when unarmed.
-            ;; :parinfer-outside-span records what changed SINCE the last
-            ;; cache prime, armed full in the same step as each prime and
-            ;; narrowed by the same two signals, undo and redo replays
-            ;; included, so the begin handler can rebuild prev from the
-            ;; cache plus one ranged read; nil when
-            ;; there is no cache to recover from.
-            :parinfer-prev-cache (atom nil)
-            :parinfer-span (atom nil)
-            :parinfer-outside-span (atom nil)
-            :paint (atom {:gen 0 :done? true})
-            ;; The tick's incremental repaint (repaint!).
-            ;; :painted is {:text :plan} of what our tags show now, or nil
-            ;; when unknown. :edit-gen is bumped by every `changed`.
-            ;; :edit-bounds is {:prefix m :suffix n}, no edit since :painted
-            ;; touched the first m or last n chars, nil when :painted is.
-            ;; :repaint-req counts the tick's futures, so only the latest
-            ;; dropped result re-arms the debounce. Without it, every result
-            ;; dropped because typing moved :edit-gen would re-arm, and each
-            ;; re-arm starts another tick: another full text copy (~54 ms at
-            ;; 20,000 lines) and another plan future, which is dropped in turn
-            ;; while a newer future is already on its way.
-            :painted (atom nil)
-            :edit-gen (atom 0)
-            :edit-bounds (atom nil)
-            :repaint-req (atom 0)
-            ;; Counts the tick's dropped results; only the self-test reads it.
-            :repaint-drops (atom 0)
-            ;; True once view's own "destroy" signal has fired (connected
-            ;; once, below). A paint (paint-async!) or the 20ms tick
-            ;; (tick!) can outlive the editor's own window -- F12 into a
-            ;; large file, then close that window before colouring
-            ;; finishes -- and both check this flag before touching the
-            ;; buffer, so neither runs a GTK call against a destroyed
-            ;; widget.
-            :destroyed? (atom false)}]
-    (g/set-bool-property! readonly-tag "editable" false)
-    (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) readonly-tag)
-    (g/gtk-text-view-set-editable view 1)
-    (g/gtk-text-view-set-monospace view 1)
-    (g/gtk-text-view-set-left-margin view 8)
-    (g/gtk-text-view-set-top-margin view 4)
-    (g/gtk-text-buffer-set-enable-undo buf 1)
-    (g/gtk-scrolled-window-set-child scroll view)
-    (g/g-signal-connect-data buf "changed"
-                             (callable (fn [_buf _data]
-                                         (reset! (:dirty-at ed) (System/currentTimeMillis))
-                                         (reset! (:dirty-check-needed? ed) true)
-                                         (swap! (:edit-gen ed) inc)
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; insert-text and delete-range narrow
-    ;; :edit-bounds. Connected without G_CONNECT_AFTER, both run before
-    ;; GTK's default handler, so the iters and the char count are pre-edit.
-    ;; Probe 2026-10-14: inserting "XYé" at 3 into "abcdef" read offset
-    ;; 3, len 4 and char count 6; deleting [1, 4) from the 9-char result
-    ;; read 1, 4 and 9; `changed` then read 9 and 6. len is in bytes, so it
-    ;; goes unused. Callbacks: (buf, GtkTextIter*, char*, int, data) and
-    ;; (buf, GtkTextIter* start, GtkTextIter* end, data).
-    ;; Any other way of inserting into the buffer (insert-paintable,
-    ;; insert-child-anchor) must also narrow :edit-bounds, or the tick
-    ;; repaints the wrong range and colours go wrong.
-    (g/g-signal-connect-data buf "insert-text"
-                             (callable (fn [_buf iter _text _len _data]
-                                         (let [o (g/gtk-text-iter-get-offset iter)
-                                               n (g/gtk-text-buffer-get-char-count buf)]
-                                           (when @(:edit-bounds ed)
-                                             (swap! (:edit-bounds ed) narrow-bounds o (- n o)))
-                                           ;; the parinfer spans see the same edits
-                                           (when @(:parinfer-span ed)
-                                             (swap! (:parinfer-span ed) narrow-bounds o (- n o)))
-                                           (when @(:parinfer-outside-span ed)
-                                             (swap! (:parinfer-outside-span ed) narrow-bounds o (- n o))))
-                                         nil)
-                                       [:pointer :pointer :pointer :int :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; Parinfer: the snapshot at begin-user-action and the hook at
-    ;; end-user-action. Every typed key, paste, cut and apply-op! is one
-    ;; user action; GTK's own undo and redo emit neither signal (probed), and set-text! is an irreversible action, so loads,
-    ;; reloads, undo and redo never reach the hook.
-    (g/g-signal-connect-data buf "begin-user-action"
-                             (callable (fn [_buf _data]
-                                         (when (parinfer-mode ed)
-                                           (let [cache @(:parinfer-prev-cache ed)
-                                                 os @(:parinfer-outside-span ed)
-                                                 nc (when cache (count ^String (:text cache)))
-                                                 ;; a hit also needs the outside-span still at
-                                                 ;; full length, a free cross-check: narrowed
-                                                 ;; would mean a signal fired without the gen
-                                                 ;; moving
-                                                 hit? (and cache (= (:gen cache) @(:edit-gen ed))
-                                                           (= os {:prefix nc :suffix nc}))
-                                                 text (cond
-                                                        hit? (:text cache)
-                                                        ;; outside recovery:
-                                                        ;; cached head, the changed middle read
-                                                        ;; from the buffer, cached tail; the end
-                                                        ;; splice's argument with prev and the
-                                                        ;; live buffer swapping roles, so the
-                                                        ;; same induction carries it, and the
-                                                        ;; same length guard turns any surprise
-                                                        ;; into the full read. Only on a NARROWED
-                                                        ;; span: a moved gen with a still-full
-                                                        ;; span means a change the signals never
-                                                        ;; saw (a child anchor), so the full read
-                                                        (and cache os
-                                                             (not= os {:prefix nc :suffix nc}))
-                                                        (let [pt ^String (:text cache)
-                                                              m (g/gtk-text-buffer-get-char-count buf)
-                                                              p (min (:prefix os) nc m)
-                                                              q (min (:suffix os) (- nc p) (- m p))
-                                                              rec (str (subs pt 0 p)
-                                                                       (g/buffer-text-range buf p (- m q))
-                                                                       (subs pt (- nc q)))]
-                                                          (if (= (count rec) m) rec (g/buffer-text buf)))
-                                                        :else (g/buffer-text buf))
-                                                 n (count text)]
-                                             (reset! (:parinfer-span ed) {:prefix n :suffix n})
-                                             (reset! (:parinfer-prev ed)
-                                                     {:text text
-                                                      :caret (g/cursor-offset buf)
-                                                      :cached? hit?
-                                                      :edit-at (when hit? (:edit-at cache))})))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data buf "end-user-action"
-                             (callable (fn [_buf _data]
-                                         (parinfer-after-action! ed)
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data buf "delete-range"
-                             (callable (fn [_buf start end _data]
-                                         (let [o (g/gtk-text-iter-get-offset start)
-                                               e (g/gtk-text-iter-get-offset end)
-                                               n (g/gtk-text-buffer-get-char-count buf)]
-                                           (when @(:edit-bounds ed)
-                                             (swap! (:edit-bounds ed) narrow-bounds o (- n e)))
-                                           (when @(:parinfer-span ed)
-                                             (swap! (:parinfer-span ed) narrow-bounds o (- n e)))
-                                           (when @(:parinfer-outside-span ed)
-                                             (swap! (:parinfer-outside-span ed) narrow-bounds o (- n e))))
-                                         nil)
-                                       [:pointer :pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; The buffer's "cursor-position" property notify, in place of
-    ;; "mark-set" filtered to the insert mark. An insert or
-    ;; delete moves the insert mark by gravity without emitting mark-set,
-    ;; so Ln/Col went stale while typing. GtkTextBuffer notifies
-    ;; cursor-position from real_insert_text, real_delete_range and
-    ;; real_mark_set when the mark is the insert mark
-    ;; (gtk/gtktextbuffer.c:1293, 2090 and 3067 at the 4.22.4 tag), so this
-    ;; one signal covers typing, deletion and every mark-set case.
-    ;; GObject::notify's callback is (instance, GParamSpec*, user_data).
-    (g/g-signal-connect-data buf "notify::cursor-position"
-                             (callable (fn [_buf _pspec _data]
-                                         (doseq [f @(:on-cursor-fns ed)]
-                                           (try
-                                             (f (g/cursor-line-col buf))
-                                             (catch :default e
-                                               (when-let [ef @(:on-error-fn ed)]
-                                                 (ef (str "; cursor: " (ex-message e)))))))
-                                         nil)
-                                       [:pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; GtkTextView's OWN "preedit-changed" signal (distinct from
-    ;; GtkIMContext's identically-named one) -- gtk/gtktextview.c:1529 per
-    ;; Gtk-4.0.gir (not declared in the public gtktextview.h header; GTK
-    ;; signals are registered at runtime and documented via GIR/gtk-doc,
-    ;; not exposed as C symbols to grep for). Callback signature (instance,
-    ;; gchar* preedit, user_data): [:pointer :string :pointer] :void.
-    (g/g-signal-connect-data view "preedit-changed"
-                             (callable (fn [_view preedit _data]
-                                         (reset! (:preedit-active? ed) (not (empty? preedit)))
-                                         nil)
-                                       [:pointer :string :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; A paint (paint-async!) or the 20ms tick (tick!) can outlive the
-    ;; editor's own window: a transient window (the source panel, F12's
-    ;; jump target) can close while either is still running, and both read
-    ;; buffer offsets computed against a buffer that no longer exists once
-    ;; the view is gone. Connected ONCE, here, like every other signal in
-    ;; this fn (mirrors jonquil.gtk.source-pane's own "destroy" backstop).
-    (g/g-signal-connect-data view "destroy"
-                             (callable (fn [_view _data] (reset! (:destroyed? ed) true) nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; GtkEventControllerFocus's own "leave" signal: fires whenever view (or a descendant) stops being the
-    ;; root's focus widget. No signal args beyond instance/user_data.
-    (g/g-signal-connect-data focusctl "leave"
-                             (callable (fn [_ctl _data]
-                                         (doseq [f @(:on-focus-fns ed)]
-                                           (try
-                                             (f)
-                                             (catch :default e
-                                               (when-let [ef @(:on-error-fn ed)]
-                                                 (ef (str "; focus: " (ex-message e)))))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller view focusctl)
-    (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
-    (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (on-key ed) [:pointer :uint :uint :uint :pointer] :int)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller view keyctl)
-    ;; on-throw 1 (G_SOURCE_CONTINUE): a throw in one tick must not stop
-    ;; dirty tracking for the rest of the session.
-    (g/g-timeout-add 20 (callable (fn [_data] (tick! ed)) [:pointer] :int :on-throw 1) ffi/null)
+        ed (editor-state {:view view :buf buf :scroll scroll :readonly-tag readonly-tag})]
+    (set-up-view! ed)
+    (connect-changed! ed)
+    (connect-insert-text! ed)
+    (connect-user-actions! ed)
+    (connect-delete-range! ed)
+    (connect-cursor-notify! ed)
+    (connect-view-signals! ed)
+    (connect-focus-leave! ed view focusctl)
+    (add-key-controller! ed view keyctl)
+    (start-tick! ed)
     ed))
