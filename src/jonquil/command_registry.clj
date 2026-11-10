@@ -230,9 +230,9 @@
     (f ctx (or (:args binding) {}))))
 
 (defn menu-items
-  "menu's items as jonquil.gtk.window/install-context-menu! takes them,
-  [[label action thunk] ...] in menu order, each thunk running its command
-  from commands with ctx. A command's outcome is ignored, as a menu item
+  "menu's items as jonquil.gtk.window.keys/install-context-menu! takes
+  them, [[label action thunk] ...] in menu order, each thunk running its
+  command from commands with ctx. A command's outcome is ignored, as a menu item
   has no key to hand on."
   [menu ctx]
   (mapv (fn [{:keys [label action command]}]

@@ -20,7 +20,6 @@
             [jonquil.command-registry :as cmd-registry]
             [jonquil.changed :as changed]
             [jonquil.commands :as commands]
-            [jonquil.describe :as describe]
             [jonquil.dialect :as dialect]
             [jonquil.edit :as edit]
             [jonquil.evaluator :as ev]
@@ -46,11 +45,12 @@
             [jonquil.gtk.tab :as tab]
             [jonquil.gtk.trash :as trash]
             [jonquil.help :as help]
-            [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.inspector :as win-inspector]
+            [jonquil.gtk.window.keys :as win-keys]
             [jonquil.gtk.window.quit :as win-quit]
             [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.right-slot :as win-right-slot]
@@ -78,182 +78,6 @@
   ;; px at each end of the status bar: GNOME's usual 6-12 px gutter, the
   ;; status box's own child spacing (6) plus a little.
   8)
-
-;; --- inspector panel -----------------------------------------------------
-
-(defn- close-inspector-panel!
-  "Hides pane's root and focuses the editor (the pane keeps its state, so
-  the next open replaces it). Used both as the pane's own on-close (its
-  Close button, or Escape while the rows view itself has focus) and the
-  window keymap's :inspector/close Escape binding."
-  [right ed]
-  (win-right-slot/hide-right-panel! right :inspector)
-  (editor/focus! ed))
-
-(defn- show-inspector-panel!
-  "Makes the inspector's root visible. The FIRST time (the slot was
-  hidden), also sizes h-paned so the panel claims about PANEL-WIDTH of the
-  window (the position is the window width minus 420, an estimate) -- a
-  later open, while it's already showing, leaves the split exactly where
-  the person put it. See show-right-panel!. GTK-thread only."
-  [right]
-  (win-right-slot/show-right-panel! right :inspector))
-
-(defn- try-inspect!
-  "The window sends at most one inspect! at a time. Runs f
-  (which must send exactly one ev/inspect! request, through an on-view
-  that eventually flips inspecting? back to false) only when no request
-  is already pending, atomically flipping inspecting? true first -- a key
-  or button press while one is pending is dropped here, with nothing
-  queued for after it (only inspect-form!'s own open, not a press, waits
-  in inspect-queued). A throw from f before its request goes out (the
-  panel's show or measure, say) resets the flag before rethrowing, so one
-  failure can't leave the inspector dead for the rest of the session."
-  [inspecting? f]
-  (when (compare-and-set! inspecting? false true)
-    (try (f)
-         (catch :default e
-           (reset! inspecting? false)
-           (throw e)))))
-
-(defn- on-inspect-view!
-  "on-view's own body, already handed to on-gui! by its caller: swap! inspector-state with jonquil.inspect/on-reply -- or, the first
-  time (inspector-state nil, since inspect-last!/inspect-form! reset it
-  right before sending :start), jonquil.inspect/open, which a :start
-  reply's own on-reply application would reduce to anyway. A reply with
-  :defd also prints \"; Defined <defd>\" on the console as a system line.
-  inspecting? is cleared FIRST, so the pane's own next key/click (or
-  another inspect-last!/inspect-form!) is never dropped on account of a
-  request that has, in fact, already finished. Then an open inspect-form!
-  queued behind this request (inspect-queued's thunk) runs, after this
-  reply is shown, so the panel ends on the form's value."
-  [pane inspector-state inspecting? inspect-queued cv status-label reply]
-  (try
-    (reset! inspecting? false)
-    (let [state (swap! inspector-state
-                       (fn [s] (if s (inspect/on-reply s reply) (inspect/open reply))))]
-      (inspector-pane/show-state! pane state)
-      (when-let [defd (:defd reply)]
-        (cview/append! cv :system (str "; Defined " defd "\n"))))
-    (catch :default e
-      (win-status/set-status! status-label (str "; inspect: " (ex-message e)))))
-  (when-let [queued (first (reset-vals! inspect-queued nil))]
-    (try (queued)
-         (catch :default e
-           (win-status/set-status! status-label (str "; inspect: " (ex-message e)))))))
-
-(defn- inspect-last!
-  "Cmd/Ctrl+I and the menu's \"Inspect Last Result\": an availability check
-  puts the unavailable sentence in the status bar and stops; otherwise
-  shows/sizes the panel, moves focus to its rows view (so Return/Escape/
-  arrows go to the panel, not the editor, without an extra click), drops
-  any earlier session's own state (so on-view opens fresh rather than
-  continuing an old browse), and sends :start with the pane's own
-  measured size once its rows view is actually allocated (the first open
-  in a window would otherwise measure before GTK's layout pass ever ran)
-  -- guarded by try-inspect!, so a second press while the first :start is
-  still in flight does nothing. The last argument, [op extra-args], starts
-  it another way: the Frames panel opens a local with [:start-local
-  {:frame i :local name}]."
-  ([ev* right pane inspector-state inspecting? inspector-last-args on-view status-label]
-   (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [:start {}]))
-  ([ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [op extra]]
-  (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
-    (win-status/set-status! status-label inspect/unavailable-message)
-    (try-inspect!
-     inspecting?
-     (fn []
-       (show-inspector-panel! right)
-       (inspector-pane/focus! pane)
-       (reset! inspector-state nil)
-       ;; The evaluator current at the press, not whatever @ev* holds once
-       ;; the rows view is allocated: a file switch in between would hand
-       ;; :start to an evaluator without Inspector. A throw on this deferred
-       ;; path releases the in-flight flag, or the inspector would stay dead.
-       (let [e @ev*]
-         (inspector-pane/measure-when-ready!
-          pane
-          (fn [measured]
-            (try
-              (reset! inspector-last-args measured)
-              (ev/inspect! e op (merge measured extra) on-view)
-              (catch :default ex
-                (reset! inspecting? false)
-                (throw ex)))))))))))
-
-(defn- inspect-form!
-  "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\": the same
-  availability check as inspect-last!, then commands/run-form on the
-  editor's snapshot -- \"No form at the caret.\" for no form, the exact
-  wording do-run-form! uses. Otherwise flashes, echoes and evaluates the
-  form exactly as do-run-form! does, but builds its OWN opts map (never
-  passing a second :on-complete through do-repl-eval!'s extra-opts, which
-  would just replace the window's own): after make-eval-opts' own
-  completion handling runs, an :ok result calls inspect-last! through
-  on-gui!, or queues it in inspect-queued while another request is in
-  flight -- :on-complete runs on the eval worker thread (the lock-caller
-  rule: must only enqueue), and inspect-last! reaches GTK.
-
-  A press while an inspect! request is already pending does
-  nothing at all, not even the eval -- the same drop inspect-last!/
-  on-request/on-def give a key or button in that window. But a request
-  sent while the form evaluates (the person browsing the panel) doesn't
-  drop the form's open: it waits in inspect-queued for that reply."
-  [{:keys [tab cv ev* status-label inspecting? inspect-queued inspect-last-fn] :as ctx}]
-  (let [{:keys [ed flash-fns]} tab]
-    (cond
-    ;; A foreign tab can't evaluate this way either.
-      (win-run/refuse-foreign! ctx) nil
-
-      (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
-      (win-status/set-status! status-label inspect/unavailable-message)
-
-      @inspecting? nil
-
-      :else
-      (let [snap (editor/snapshot ed)]
-        (if-let [{:keys [text start end]} (commands/run-form snap)]
-          (let [base-opts (win-run/make-eval-opts ed cv ev* status-label false)
-                opts (assoc base-opts
-                            :on-complete
-                            (fn [result]
-                              ((:on-complete base-opts) result)
-                              (when (= :ok (:status result))
-                                (on-gui! (fn []
-                                           (if @inspecting?
-                                             (reset! inspect-queued inspect-last-fn)
-                                             (inspect-last-fn)))))))]
-            ((:flash! flash-fns) start end (:caret snap))
-            (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-            (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-                  warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
-              (when warning (cview/append! cv :system warning))))
-          (win-status/set-status! status-label "No form at the caret."))))))
-
-;; --- window commands: F6 focus toggle, clear console, zoom -----------------
-
-(defn- do-toggle-focus!
-  "F6 (Jonquil's own key): moves focus between the editor and
-  console panes. Compares gtk_root_get_focus's FOCUS WIDGET pointer, not
-  gtk_widget_has_focus -- measured: has_focus reads false on a window that isn't the OS key window, which a
-  self-test window (and bb gtk:selftest's own window) usually isn't. When
-  the console gets focus, cview/focus! also places its cursor at the end
-  of the input."
-  [win ed cv]
-  (if (= (g/gtk-root-get-focus win) (:view ed))
-    (cview/focus! cv)
-    (editor/focus! ed)))
-
-(defn- do-clear-console! [cv]
-  (cview/clear-output! cv))
-
-(defn- do-clear-last-output!
-  "Cmd/Ctrl+Shift+L (CIDER's C-c C-o): clears only the most recent
-  entry's own block. cview/clear-last-output! does the actual work; this
-  is only the window's own dispatch fn, same shape as do-clear-console!
-  just above."
-  [cv]
-  (cview/clear-last-output! cv))
 
 ;; --- popovers: a registry so Escape can close whichever popover is open ----
 
@@ -754,200 +578,6 @@
                    (win-status/set-status! status-label (str "; complete: " (ex-message e)))))))
   (on-focus-lost! (fn [] (completion/close! completion))))
 
-;; --- find/replace bar -------------------------------------------------
-
-(defn- find-bar-focused?
-  "True when keyboard focus is anywhere inside the find bar (the
-  has_focus caveat of do-toggle-focus! applies here too, so this reads the ROOT's focus-widget
-  pointer via gtk_root_get_focus, not gtk_widget_has_focus). Used only to
-  route Escape: the window's own capture-phase key controller runs BEFORE
-  the bar's own (win is a more outer ancestor than the bar's box), so
-  without this check Escape would always reach the window's
-  evaluating?-gated Stop handling first, regardless of where focus
-  actually is.
-
-  gtk_root_get_focus returns an entry's internal GtkText DELEGATE, never
-  the outer GtkSearchEntry/GtkEntry itself (measured), so comparing the
-  focus widget against (:query fb)/(:replacement fb) is always false.
-  gtk_widget_is_ancestor(focus, box) sidesteps the delegate: true for
-  anything inside the bar's box, measured true with focus in the query
-  and the replacement entry, false with focus in the editor and the
-  console."
-  [win fb]
-  (let [f (g/gtk-root-get-focus win)]
-    (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:box fb)))))))
-
-(defn- focus-in-popover?
-  "True when win's focus is inside pp's popover (its entry's GtkText
-  delegate, as find-bar-focused? explains). pp may be nil. Asked of the
-  rename popover and of the command palette, both popovers with an entry
-  (window-key-ctx's :entry-focused?)."
-  [win pp]
-  (let [f (g/gtk-root-get-focus win)]
-    (boolean (and pp (not (ffi/null? f))
-                  (not (zero? (g/gtk-widget-is-ancestor f (:popover pp))))))))
-
-;; --- window-level keys: jonquil/keymap.edn's :window, all of them --------
-
-(defn- window-key-ctx
-  "The window keymap's ctx for one key: on-window-key's own argument map ctx
-  plus the active tab's find-bar and focus reads and actions as fns, so
-  jonquil.command-registry never touches GTK itself. keyval0 and state are
-  the key's, for the find bar's Escape (:find-bar-key!). The command
-  palette builds the same ctx to run a window command as its key would."
-  [{:keys [win active-tab pane] :as ctx} keyval0 state]
-  ;; The find bar is the active tab's.
-  (let [fb (:fb (active-tab))]
-    (assoc ctx
-           :find-bar-navigable? #(find-bar/nav-ready? fb)
-           :find-next! #(find-bar/find-next! fb)
-           :find-prev! #(find-bar/find-prev! fb)
-           :find-bar-focused? #(find-bar-focused? win fb)
-           :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
-           :inspector-focused? #(inspector-pane/focused? pane win)
-           ;; the rename popover's entry and the command palette's: either
-           ;; one keeps every key but Escape
-           :entry-focused? #(let [t (active-tab)]
-                               (or (focus-in-popover? win (:rename-pop t))
-                                   (focus-in-popover? win (:palette t)))))))
-
-(defn- on-window-key
-  "The window's capture-phase key handler. Every key goes through
-  jonquil.command-registry/window-answer: one fixed stage (while the
-  rename popover's or the command palette's entry has focus, every key but
-  Escape is the entry's, so Run, close and tab switches can't fire
-  mid-typing), then jonquil/keymap.edn's
-  :window bindings, first match wins, run through the command registry.
-  A command answers :handled (1), :to-gtk (0, the key is GTK's: stop) or
-  :next (try the next matching binding). keymap_shipped_test pins what
-  each window chord runs and the Escape chain's order and conditions.
-
-  keyval is lowered with gdk_keyval_to_lower first. Caps Lock reports
-  the UPPERCASE keyval with no Shift bit, so the chords match whatever Caps
-  Lock says, while a binding's own :shift still reads the modifier mask.
-
-  Escape Stops a running program only while one is evaluating;
-  otherwise it answers 0, so an IME composition or GTK's own handling gets
-  it. Before Stop, Escape goes to the focused find bar (whose own 0, an IME
-  preedit composing, is final and goes to GTK, never to Stop), then closes
-  any open popover, the focused inspector panel, the focused source panel,
-  the file tree's open menu, or leaves the focused tree, in that order,
-  without Stopping.
-
-  ctx is the window's map of fns, which the commands and conditions read;
-  kctx adds the active tab's find-bar reads and actions and the focus
-  checks, so the registry never touches GTK. source-keys ({:focused?
-  :close! :back! :open!}, plus an optional :jump-back!, each a no-arg fn)
-  is the source panel's: Escape closes it when focused, Cmd/Ctrl+Shift+O
-  opens its location in the window, Cmd/Ctrl+[ steps its history back, and
-  anywhere else Cmd/Ctrl+[ goes back from a jump that opened a tab
-  (:jump-back! true when it went back, else the key passes on). tree-keys
-  ({:focused? :leave! :menu-open? :close-menu!}) is the file tree's, and a
-  window without a tree passes nil; F2, Delete, Cmd/Ctrl+BackSpace,
-  Shift+F10 and Menu match no binding, so they reach the tree's own
-  handler.
-
-  The whole answer runs inside try/catch, the same containment
-  editor/dispatch-key! gives the editor: a throw from any condition or
-  command is reported through set-status! and the key counts as used (1),
-  instead of escaping into GTK's signal emission and killing the process."
-  [{:keys [status-label] :as ctx}]
-  (let [os (System/getProperty "os.name")]
-   (fn [_ctl keyval0 keycode state _data]
-    (try
-      (let [keyval (g/gdk-keyval-to-lower keyval0)
-            kctx (window-key-ctx ctx keyval0 state)
-            ;; one read per key: the bindings and commands agree
-            plugins @plugin-registry/live
-            physical (editor/physical-key os keyval0 keycode state)
-            kname (g/keyval-name keyval)
-            key? (and kname (not (describe/modifier-key? kname)))
-            ;; the command that took the key, for recent keys
-            ran (volatile! nil)]
-        (if (and key? (some-> (:describe-pending ctx) (compare-and-set! true false)))
-          ;; it answers a pending Describe Key: described, never run
-          (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
-                                                     :state state :physical physical))]
-            ((:print-lines! ctx) (describe/describe-lines (describe/chord-text kname state os) matches))
-            1)
-          ;; The live plugins' :window bindings ahead of the shipped ones
-          ;; (a plugin may bind a built-in window command)
-          (let [answer (cmd-registry/window-answer
-                        (plugin-registry/window-bindings plugins) keyval state
-                        {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
-                         ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
-                         ;; keyval, and the keycode names the key (editor/physical-key)
-                         :physical physical
-                         ;; plugins' window-scope commands run too, so a :run one bound
-                         ;; to a key runs
-                         :run! (fn [b]
-                                 (let [o (cmd-registry/run-command! (merge cmd-registry/window-commands
-                                                                           (plugin-registry/commands plugins))
-                                                                    b kctx)]
-                                   (when (= :handled o) (vreset! ran (:command b)))
-                                   o))})]
-            ;; Every key but a lone modifier goes into recent keys, after
-            ;; the fact and on its own, so recording never blocks a key
-            (when key?
-              (try
-                (swap! (:recent-keys ctx) describe/remember
-                       (describe/recent-entry kname state os
-                                              (describe/typing? kname state (g/printable-key? keyval))
-                                              @ran))
-                (catch :default _ nil)))
-            answer)))
-      (catch :default e
-        (win-status/set-status! status-label (str "; key: " (ex-message e)))
-        1)))))
-
-;; --- context menus -------------------------------------------------------
-
-(defn- install-context-menu!
-  "Builds view's context menu: a GMenu with one
-  entry per item, each a detailed action name \"p4.<action-name>\"
-  (g_menu_append), set as view's extra-menu (gtk_text_view_set_extra_menu
-  -- GTK's own Cut/Copy/Paste/... stay, this only APPENDS); a matching
-  GSimpleActionGroup holding one no-parameter GSimpleAction per item,
-  each wired to call f (its \"activate\" signal), inserted on view under
-  prefix \"p4\" (gtk_widget_insert_action_group). items is [[label
-  action-name f] ...], from jonquil.command-registry/menu-items
-  -- f runs the item's command, the SAME one its key chord runs.
-
-  Returns the GSimpleActionGroup pointer so a caller can fire an item by
-  its own unprefixed action-name through g_action_group_activate_action
-  directly on the group -- measured equivalent to
-  gtk_widget_activate_action_variant(view, \"p4.<name>\", NULL) on the
-  prefixed name, since \"p4\" here is only this group's own insertion
-  prefix, not a second name the action itself carries.
-
-  Every item's own \"activate\" callback runs inside try/catch, reporting
-  a throw through on-error (fn [msg] -> nil, window.clj's own
-  set-status!) rather than letting it escape: an uncaught throw from a
-  GSimpleAction \"activate\" callback goes through Jolt's foreign-callable
-  and kills the process (exit 1), measured live -- the same failure mode
-  do-complete!/handle-key! guard against, here at the one call site every
-  menu item (current and future) shares, rather than in each item's own
-  fn."
-  [view items on-error]
-  (let [menu (g/g-menu-new)
-        group (g/g-simple-action-group-new)]
-    (doseq [[label action-name f] items]
-      (g/g-menu-append menu label (str "p4." action-name))
-      (let [action (g/g-simple-action-new action-name ffi/null)]
-        (g/g-signal-connect-data action "activate"
-                                 (callable (fn [_action _param _data]
-                                             (try
-                                               (f)
-                                               (catch :default e
-                                                 (on-error (str "; " action-name ": " (ex-message e)))))
-                                             nil)
-                                           [:pointer :pointer :pointer] :void)
-                                 ffi/null ffi/null g/CONNECT-DEFAULT)
-        (g/g-action-map-add-action group action)))
-    (g/gtk-widget-insert-action-group view "p4" group)
-    (g/gtk-text-view-set-extra-menu view menu)
-    group))
-
 ;; --- construction ------------------------------------------------------
 
 ;; --- tab operations ----------------------------------------------------------
@@ -1162,7 +792,7 @@
                   :unindent! (fn [] (editor/do-unindent! ed))
                   :open-find-fn open-find-fn :open-replace-fn open-replace-fn}
         menu-group
-        (install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
+        (win-keys/install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
                                (fn [msg] (win-status/set-status! status-label msg)))]
     (editor/set-error-fn! ed (fn [msg] (win-status/set-status! status-label msg)))
     ;; Parinfer: the tab's editor reads its effective mode on every user
@@ -1281,7 +911,7 @@
                     ((:world-restore-from-fn window-key-args) (second id))
                     :else
                     (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
-                                               id {:window (window-key-ctx window-key-args 0 0)
+                                               id {:window (win-keys/window-key-ctx window-key-args 0 0)
                                                    :editor (editor/key-ctx ed)
                                                    :console {:complete! repl-complete-fn}}))
                   (catch :default e
@@ -1926,58 +1556,17 @@
                        (let [ts @tabs]
                          (when-let [i (tabs/index-for-digit (count ts) digit)]
                            (select-tab! @*tab-ctx (:id (nth ts i))))))
-        ;; The inspector panel. h-paned is the horizontal split (editor+
-        ;; console keep their vertical paned as its start child; the
-        ;; pane's own :root becomes its end child, wired below once both
-        ;; exist). *pane is a forward reference the on-view/on-request/
-        ;; on-def/on-close closures below close over -- pane itself doesn't
-        ;; exist until make-pane returns, the same atom-indirection *cv
-        ;; gives make-on-submit above.
-        h-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        inspector-state (atom nil)
-        inspecting? (atom false)
-        ;; An Inspect Form open that arrived while another request was in
-        ;; flight: the thunk on-inspect-view! runs once that reply lands.
-        inspect-queued (atom nil)
-        ;; Self-test hook only (:inspector-last-args*): the args of the
-        ;; last inspect! request this window actually sent, so a row can
-        ;; compare a :start's own :cols against the pane's own measure.
-        inspector-last-args (atom nil)
-        *pane (atom nil)
-        on-view (fn [reply]
-                  (on-gui! (fn [] (on-inspect-view! @*pane inspector-state inspecting? inspect-queued cv status-label reply))))
-        on-inspector-request
-        (fn [[op args]]
-          ;; Returns true only when the request was actually sent, so the
-          ;; pane commits a key step's :pending/:selected only then.
-          (boolean
-           (try-inspect! inspecting?
-                         (fn [] (reset! inspector-last-args args) (ev/inspect! @ev* op args on-view) true))))
-        on-inspector-def
-        (fn [name]
-          (try-inspect! inspecting?
-                        (fn []
-                          (let [args {:name name}]
-                            (reset! inspector-last-args args)
-                            ;; :pending :keep, so on-reply's default (row 0)
-                            ;; doesn't reset the selection: the panel stays
-                            ;; on the same view. The pane shares
-                            ;; this atom, so :selected is the row on screen.
-                            (swap! inspector-state assoc :pending :keep)
-                            (ev/inspect! @ev* :def args on-view)))))
-        on-inspector-close (fn [] (close-inspector-panel! @*right (:ed (active-tab))))
-        pane (inspector-pane/make-pane {:on-request on-inspector-request
-                                        :on-close on-inspector-close
-                                        :on-def on-inspector-def
-                                        :state inspector-state})
-        _ (reset! *pane pane)
+        {:keys [h-paned inspector-state inspecting? inspect-queued inspector-last-args on-view on-inspector-close pane]}
+        (win-inspector/build {:active-tab active-tab :cv cv :ev* ev* :status-label status-label :right* *right})
         {:keys [slot part-panels* right panel-focus-fn]}
         (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
                                :settings-path* settings-path* :status-label status-label})
         _ (reset! *right right)
-        inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
-                                              inspector-last-args on-view status-label))
-        inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
+        inspect-last-ctx {:ev* ev* :right right :pane pane :inspector-state inspector-state
+                          :inspecting? inspecting? :inspector-last-args inspector-last-args
+                          :on-view on-view :status-label status-label :start [:start {}]}
+        inspect-last-fn (fn [] (win-inspector/inspect-last! inspect-last-ctx))
+        inspect-form-fn (fn [] (win-inspector/inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
         source-jump-fn (fn [] (do-source-jump! (source-ctx (active-tab))))
@@ -1990,10 +1579,10 @@
                                                :tab-open? (fn [id] (some? (tab-by-id tabs id))))))
         source-keys {:focused? (fn [] (source-pane/focused? sp win)) :close! source-close-fn
                      :back! source-back-fn :open! source-open-fn :jump-back! jump-back-fn}
-        close-inspector-fn (fn [] (close-inspector-panel! right (:ed (active-tab))))
-        toggle-focus-fn (fn [] (do-toggle-focus! win (:ed (active-tab)) cv))
-        clear-console-fn (fn [] (do-clear-console! cv))
-        clear-last-fn (fn [] (do-clear-last-output! cv))
+        close-inspector-fn (fn [] (win-inspector/close-inspector-panel! right (:ed (active-tab))))
+        toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv))
+        clear-console-fn (fn [] (win-keys/do-clear-console! cv))
+        clear-last-fn (fn [] (win-keys/do-clear-last-output! cv))
         ;; Parinfer: the window's one mode, read by every tab's editor
         ;; hook; :off unless settings.edn set one.
         parinfer-mode* (atom (or (:parinfer (settings/load-settings @settings-path*)) :off))
@@ -2101,8 +1690,7 @@
                                           :mcp-eval! win-run/mcp-eval!
                                           :refresh-labels! (fn [] (refresh-labels! @*tab-ctx))
                                           :inspect! (fn [start]
-                                                      (inspect-last! ev* right pane inspector-state inspecting?
-                                                                     inspector-last-args on-view status-label start))
+                                                      (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
                                           :ask-lookup! ask-lookup! :jump-to! jump-to!
                                           :source-ctx source-ctx
                                           :place-caret-and-scroll! place-caret-and-scroll! :file-name win-files/file-name
@@ -2117,7 +1705,7 @@
         ;; the live-results part answers the four result fns its items call;
         ;; built earlier those keys were nil.
         console-menu-group
-        (install-context-menu! (:view cv)
+        (win-keys/install-context-menu! (:view cv)
                                (cmd-registry/menu-items cmd-registry/console-menu
                                                         (merge {:complete! repl-complete-fn :clear-last-fn clear-last-fn}
                                                                (select-keys (:fns part-contribution)
@@ -2158,7 +1746,7 @@
                                       :digit-tab-fn digit-tab-fn
                                       :parinfer-fn parinfer-fn}
                          part-contribution)
-        window-key-fn (on-window-key window-key-args)
+        window-key-fn (win-keys/on-window-key window-key-args)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")

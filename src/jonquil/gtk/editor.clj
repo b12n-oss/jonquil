@@ -226,8 +226,9 @@
 (defn on-focus-lost!
   "Registers f (fn [] -> nil) to be called, on the GTK thread, whenever
   the editor's view (or a descendant) stops being the root's focus widget
-  -- GtkEventControllerFocus's own \"leave\" signal, which tracks focus-within independent of OS window-
-  activation, unlike gtk_widget_has_focus (window.clj's do-toggle-focus!
+  -- GtkEventControllerFocus's own \"leave\" signal, which tracks
+  focus-within independent of OS window-activation, unlike
+  gtk_widget_has_focus (jonquil.gtk.window.keys's do-toggle-focus!
   docstring). Multiple registrations fire in registration order, mirroring
   on-dirty-changed!/on-cursor-moved!."
   [ed f]

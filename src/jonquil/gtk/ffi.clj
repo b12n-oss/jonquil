@@ -149,7 +149,7 @@
 ;; leave -- no signal args beyond instance/user_data) closes the
 ;; quick-doc popover when focus moves off the editor's view. Tracks
 ;; focus-within at the GtkRoot level (like gtk_root_get_focus,
-;; window.clj's do-toggle-focus!), not gtk_widget_has_focus's
+;; jonquil.gtk.window.keys's do-toggle-focus!), not gtk_widget_has_focus's
 ;; OS-window-active dependency.
 (ffi/defcfn gtk-event-controller-focus-new "gtk_event_controller_focus_new" [] :pointer)
 
@@ -527,11 +527,13 @@
 (ffi/defcfn gtk-text-buffer-get-can-redo "gtk_text_buffer_get_can_redo" [:pointer] :int)
 
 ;; --- focus, CSS classes, measuring ---
-;; gtk_root_get_focus: gtk/gtkroot.h:43 (gtk4 4.22.4). Returns the widget that currently holds keyboard focus within the
-;; root, or NULL. F6 (jonquil.gtk.window/do-toggle-focus!) compares against
-;; THIS pointer rather than gtk_widget_has_focus -- probing measured has_focus reading false on a window that never became the
-;; OS key window, which a self-test window usually isn't; grab_focus still
-;; moves the root's own focus-widget bookkeeping regardless.
+;; gtk_root_get_focus: gtk/gtkroot.h:43 (gtk4 4.22.4). Returns the widget
+;; that currently holds keyboard focus within the root, or NULL. F6
+;; (jonquil.gtk.window.keys/do-toggle-focus!) compares against THIS pointer
+;; rather than gtk_widget_has_focus -- probing measured has_focus reading
+;; false on a window that never became the OS key window, which a
+;; self-test window usually isn't; grab_focus still moves the root's own
+;; focus-widget bookkeeping regardless.
 (ffi/defcfn gtk-root-get-focus "gtk_root_get_focus" [:pointer] :pointer)
 
 ;; gtk_css_provider_load_from_string / gtk_widget_add_css_class:

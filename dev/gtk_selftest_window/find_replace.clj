@@ -309,14 +309,13 @@
 ;; key handling (already covered by find-escape/find-preedit-yields).
 
 (defn row-window-escape-closes-bar-while-running
-  "window.clj's find-bar-focused? must compare gtk_root_get_focus against
-  the entry's internal GtkText delegate, never the outer (:query fb)/
-  (:replacement fb) widgets directly -- comparing against the outer
-  widgets is always false, so with a program running and the find bar's
-  query focused, the window's own Escape clause would never match and
-  would fall through to Stop, stopping the program instead of closing
-  the bar. Starts a real
-  (loop [] (recur)), waits for it to actually be running, opens the find
+  "jonquil.gtk.window.keys's find-bar-focused? must compare
+  gtk_root_get_focus against the entry's internal GtkText delegate, never
+  the outer (:query fb)/(:replacement fb) widgets directly -- comparing
+  against the outer widgets is always false, so with a program running
+  and the find bar's query focused, the window's own Escape clause would
+  never match and would fall through to Stop, stopping the program
+  instead of closing the bar. Starts a real (loop [] (recur)), waits for it to actually be running, opens the find
   bar (which focuses the query), then drives the WINDOW's own key
   dispatch with Escape: the bar must close, focus must return to the
   editor, and the program must STILL be running (stopped in this row's
