@@ -1562,8 +1562,10 @@
         (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
                                :settings-path* settings-path* :status-label status-label})
         _ (reset! *right right)
-        inspect-last-fn (fn [] (win-inspector/inspect-last! ev* right pane inspector-state inspecting?
-                                              inspector-last-args on-view status-label))
+        inspect-last-ctx {:ev* ev* :right right :pane pane :inspector-state inspector-state
+                          :inspecting? inspecting? :inspector-last-args inspector-last-args
+                          :on-view on-view :status-label status-label :start [:start {}]}
+        inspect-last-fn (fn [] (win-inspector/inspect-last! inspect-last-ctx))
         inspect-form-fn (fn [] (win-inspector/inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
@@ -1688,8 +1690,7 @@
                                           :mcp-eval! win-run/mcp-eval!
                                           :refresh-labels! (fn [] (refresh-labels! @*tab-ctx))
                                           :inspect! (fn [start]
-                                                      (win-inspector/inspect-last! ev* right pane inspector-state inspecting?
-                                                                     inspector-last-args on-view status-label start))
+                                                      (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
                                           :ask-lookup! ask-lookup! :jump-to! jump-to!
                                           :source-ctx source-ctx
                                           :place-caret-and-scroll! place-caret-and-scroll! :file-name win-files/file-name

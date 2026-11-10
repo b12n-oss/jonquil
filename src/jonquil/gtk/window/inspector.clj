@@ -4,8 +4,8 @@
   Last Result and Inspect Form, which open it on the last value or on the form
   at the caret. build makes activate!'s inspector pane and its closures.
   Internal to the window, as jonquil.gtk.window.status is. Moved
-  out of jonquil.gtk.window unchanged; the lock caller rule in its docstring
-  applies here."
+  out of jonquil.gtk.window unchanged, then inspect-last! took one map;
+  the lock caller rule in its docstring applies here."
   (:require [jonquil.commands :as commands]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [on-gui!]]
@@ -91,34 +91,34 @@
   measured size once its rows view is actually allocated (the first open
   in a window would otherwise measure before GTK's layout pass ever ran)
   -- guarded by try-inspect!, so a second press while the first :start is
-  still in flight does nothing. The last argument, [op extra-args], starts
-  it another way: the Frames panel opens a local with [:start-local
-  {:frame i :local name}]."
-  ([ev* right pane inspector-state inspecting? inspector-last-args on-view status-label]
-   (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [:start {}]))
-  ([ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [op extra]]
-   (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
-     (win-status/set-status! status-label inspect/unavailable-message)
-     (try-inspect!
-      inspecting?
-      (fn []
-        (show-inspector-panel! right)
-        (inspector-pane/focus! pane)
-        (reset! inspector-state nil)
+  still in flight does nothing. Takes one map: the window's values under
+  their activate! names, and :start, [op extra-args]: [:start {}] for the
+  key and the menu, or another start, as the Frames panel opens a local
+  with [:start-local {:frame i :local name}]."
+  [{:keys [ev* right pane inspector-state inspecting? inspector-last-args on-view status-label]
+    [op extra] :start}]
+  (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
+    (win-status/set-status! status-label inspect/unavailable-message)
+    (try-inspect!
+     inspecting?
+     (fn []
+       (show-inspector-panel! right)
+       (inspector-pane/focus! pane)
+       (reset! inspector-state nil)
        ;; The evaluator current at the press, not whatever @ev* holds once
        ;; the rows view is allocated: a file switch in between would hand
        ;; :start to an evaluator without Inspector. A throw on this deferred
        ;; path releases the in-flight flag, or the inspector would stay dead.
-        (let [e @ev*]
-          (inspector-pane/measure-when-ready!
-           pane
-           (fn [measured]
-             (try
-               (reset! inspector-last-args measured)
-               (ev/inspect! e op (merge measured extra) on-view)
-               (catch :default ex
-                 (reset! inspecting? false)
-                 (throw ex)))))))))))
+       (let [e @ev*]
+         (inspector-pane/measure-when-ready!
+          pane
+          (fn [measured]
+            (try
+              (reset! inspector-last-args measured)
+              (ev/inspect! e op (merge measured extra) on-view)
+              (catch :default ex
+                (reset! inspecting? false)
+                (throw ex))))))))))
 
 (defn inspect-form!
   "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\": the same

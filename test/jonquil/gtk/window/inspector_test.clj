@@ -26,13 +26,14 @@
       (when (= :throw ok?) (throw (ex-info "boom" {}))))))
 
 (defn- inspect-last-via
-  "Calls inspect-last! with its positional arguments: ev*, ::right, ::pane,
+  "Calls inspect-last! with its map: ev*, ::right, ::pane,
   the :state, :inspecting? and :last-args atoms, ::on-view and ::l, plus
   :start when given."
   [{:keys [ev* start state inspecting? last-args]}]
-  (if start
-    (#'win-inspector/inspect-last! ev* ::right ::pane state inspecting? last-args ::on-view ::l start)
-    (#'win-inspector/inspect-last! ev* ::right ::pane state inspecting? last-args ::on-view ::l)))
+  (#'win-inspector/inspect-last! {:ev* ev* :right ::right :pane ::pane :inspector-state state
+                                  :inspecting? inspecting? :inspector-last-args last-args
+                                  :on-view ::on-view :status-label ::l
+                                  :start (or start [:start {}])}))
 
 (defn- with-panel-stubs
   "Runs f with the panel's show, focus and measure, and the status line,
@@ -141,6 +142,22 @@
                            :inspecting? inspecting? :last-args (atom nil)})
         (is (thrown? Exception (@ready {:rows 1 :cols 1})))
         (is (false? @inspecting?))))))
+
+(deftest inspect-last-takes-one-map-test
+  (let [log (atom [])
+        ready (atom nil)
+        state (atom nil)
+        la (atom nil)
+        f (fn [] (win-inspector/inspect-last!
+                  {:ev* (atom (inspector-ev :e1 true log)) :right ::right :pane ::pane
+                   :inspector-state state :inspecting? (atom false) :inspector-last-args la
+                   :on-view ::on-view :status-label ::l
+                   :start [:start-trace {:id 3 :part :ret}]}))]
+    (with-panel-stubs log ready f)
+    (reset! log [])
+    (@ready {:rows 2 :cols 3})
+    (is (= [[:inspect! :e1 :start-trace {:rows 2 :cols 3 :id 3 :part :ret} ::on-view]] @log))
+    (is (= 1 (count (:arglists (meta #'win-inspector/inspect-last!)))))))
 
 (deftest build-adds-the-inspector-bindings-test
   (let [made (atom nil)
