@@ -4,7 +4,8 @@
   Last Result and Inspect Form, which open it on the last value or on the form
   at the caret. build makes activate!'s inspector pane and its closures.
   Internal to the window, as jonquil.gtk.window.status is. Moved
-  out of jonquil.gtk.window unchanged, then inspect-last! took one map;
+  out of jonquil.gtk.window unchanged, then inspect-last! took one map and
+  inspect-form!'s evaluation split into named steps;
   the lock caller rule in its docstring applies here."
   (:require [jonquil.commands :as commands]
             [jonquil.evaluator :as ev]
@@ -120,6 +121,40 @@
                 (reset! inspecting? false)
                 (throw ex))))))))))
 
+(defn- open-or-queue!
+  "Inspect Form's open once its eval came back :ok, on the GTK thread:
+  inspect-last-fn now, or, while another inspect! request is in flight,
+  queued in inspect-queued for that reply."
+  [{:keys [inspecting? inspect-queued inspect-last-fn]}]
+  (if @inspecting?
+    (reset! inspect-queued inspect-last-fn)
+    (inspect-last-fn)))
+
+(defn- inspect-form-opts
+  "make-eval-opts' map for Inspect Form's eval, with an :on-complete that
+  runs make-eval-opts' own and then, for an :ok result, hands open-or-queue!
+  to on-gui! (the completion runs on the eval worker thread)."
+  [{:keys [tab cv ev* status-label] :as ctx}]
+  (let [base-opts (win-run/make-eval-opts (:ed tab) cv ev* status-label false)]
+    (assoc base-opts
+           :on-complete
+           (fn [result]
+             ((:on-complete base-opts) result)
+             (when (= :ok (:status result))
+               (on-gui! (fn [] (open-or-queue! ctx))))))))
+
+(defn- eval-for-inspect!
+  "Inspect Form's eval of form (commands/run-form's map) from snap: the opts
+  first, then the flash, the echo and the eval, as do-run-form! does; a busy
+  engine's warning goes on the console."
+  [{:keys [tab cv ev*] :as ctx} snap {:keys [text start end]}]
+  (let [opts (inspect-form-opts ctx)]
+    ((:flash! (:flash-fns tab)) start end (:caret snap))
+    (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+    (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+          warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+      (when warning (cview/append! cv :system warning)))))
+
 (defn inspect-form!
   "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\": the same
   availability check as inspect-last!, then commands/run-form on the
@@ -138,8 +173,9 @@
   on-request/on-def give a key or button in that window. But a request
   sent while the form evaluates (the person browsing the panel) doesn't
   drop the form's open: it waits in inspect-queued for that reply."
-  [{:keys [tab cv ev* status-label inspecting? inspect-queued inspect-last-fn] :as ctx}]
-  (let [{:keys [ed flash-fns]} tab]
+  {:arglists '([{:keys [tab cv ev* status-label inspecting? inspect-queued inspect-last-fn] :as ctx}])}
+  [{:keys [tab ev* status-label inspecting?] :as ctx}]
+  (let [{:keys [ed]} tab]
     (cond
     ;; A foreign tab can't evaluate this way either.
       (win-run/refuse-foreign! ctx) nil
@@ -151,22 +187,8 @@
 
       :else
       (let [snap (editor/snapshot ed)]
-        (if-let [{:keys [text start end]} (commands/run-form snap)]
-          (let [base-opts (win-run/make-eval-opts ed cv ev* status-label false)
-                opts (assoc base-opts
-                            :on-complete
-                            (fn [result]
-                              ((:on-complete base-opts) result)
-                              (when (= :ok (:status result))
-                                (on-gui! (fn []
-                                           (if @inspecting?
-                                             (reset! inspect-queued inspect-last-fn)
-                                             (inspect-last-fn)))))))]
-            ((:flash! flash-fns) start end (:caret snap))
-            (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-            (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-                  warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
-              (when warning (cview/append! cv :system warning))))
+        (if-let [form (commands/run-form snap)]
+          (eval-for-inspect! ctx snap form)
           (win-status/set-status! status-label "No form at the caret."))))))
 
 (defn build

@@ -1,5 +1,6 @@
 (ns jonquil.gtk.window.inspector-test
   (:require [clojure.test :refer [deftest is]]
+            [jonquil.commands :as commands]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks]
             [jonquil.gtk.console-view :as cview]
@@ -8,6 +9,7 @@
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.window.inspector :as win-inspector]
             [jonquil.gtk.window.right-slot :as win-right-slot]
+            [jonquil.gtk.window.run :as win-run]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.inspect :as inspect]))
 
@@ -212,3 +214,117 @@
         ((:on-def @made) "a")
         (is (= [[:inspect! :e1 :def {:name "a"} (:on-view w)]] @log))
         (is (= :keep (:pending @(:inspector-state w))))))))
+
+(defn- form-env
+  "Runs f with inspect-form!'s collaborators stubbed, logging into log:
+  refuse-foreign! answers refused, the editor snapshot is {:text :caret},
+  make-eval-opts logs [:opts ed cv ev* status-label is-run?] and answers a
+  base opts map whose :on-complete logs [:base r], and on-gui! logs :gui
+  and runs its thunk. The evaluator (evaluating? is busy, inspectable? is
+  ok?) keeps the opts eval! got in sent and answers warning."
+  [log sent {:keys [refused ok? busy warning text caret]} f]
+  (let [e #_{:clj-kondo/ignore [:missing-protocol-method]}
+        (reify
+          ev/Evaluator
+          (evaluating? [_] busy)
+          (eval! [_ code opts]
+            (reset! sent opts)
+            (swap! log conj [:eval code (dissoc opts :on-complete)])
+            warning)
+          ev/Inspector
+          (inspectable? [_] ok?))
+        ev* (atom e)]
+    (with-redefs [win-run/refuse-foreign! (fn [_] refused)
+                  editor/snapshot (fn [_] {:text text :caret caret})
+                  win-run/make-eval-opts (fn [ed cv ev* l run?]
+                                           (swap! log conj [:opts ed cv ev* l run?])
+                                           {:k 1 :on-complete (fn [r] (swap! log conj [:base r]))})
+                  cview/echo-entry! (fn [_ t fresh?] (swap! log conj [:echo t fresh?]))
+                  cview/note-run-start! (fn [_] (swap! log conj [:note-start]))
+                  cview/append! (fn [cv kind t] (swap! log conj [cv kind t]))
+                  win-status/set-status! (fn [l t] (swap! log conj [l t]))
+                  jonquil.gtk.callbacks/on-gui! (fn [g] (swap! log conj :gui) (g))]
+      (f ev*))))
+
+(defn- form-ctx
+  "inspect-form!'s ctx around ev*, with ilf as inspect-last-fn."
+  [log ev* ilf]
+  {:tab {:id 7 :ed ::ed
+         :flash-fns {:flash! (fn [s e c] (swap! log conj [:flash s e c]))}}
+   :cv ::cv :ev* ev* :sel* ::sel :status-label ::l
+   :inspecting? (atom false) :inspect-queued (atom nil) :inspect-last-fn ilf})
+
+(deftest inspect-form-refusals-test
+  (let [run (fn [env mutate]
+              (let [log (atom [])
+                    sent (atom nil)]
+                (form-env log sent env
+                          (fn [ev*]
+                            (let [ctx (mutate (form-ctx log ev* (fn [] nil)))]
+                              (win-inspector/inspect-form! ctx)
+                              @log)))))
+        ok {:ok? true :text "(+ 1 2)" :caret 3}]
+    (is (= [] (run (assoc ok :refused "no") identity)))
+    (is (= [] (run (assoc ok :refused "no" :ok? false) identity)))
+    (is (= [[::l inspect/unavailable-message]] (run (assoc ok :ok? false) identity)))
+    (is (= [] (run ok #(assoc % :inspecting? (atom true)))))
+    (is (= [[::l "No form at the caret."]] (run (assoc ok :text "  ") identity)))
+    (is (= '([{:keys [tab cv ev* status-label inspecting? inspect-queued inspect-last-fn] :as ctx}])
+           (:arglists (meta #'win-inspector/inspect-form!))))))
+
+(deftest inspect-form-evaluates-like-run-form-test
+  (let [log (atom [])
+        sent (atom nil)
+        form (commands/run-form {:text "(+ 1 2)" :caret 3})]
+    (form-env log sent {:ok? true :busy false :text "(+ 1 2)" :caret 3}
+              (fn [ev*]
+                (is (nil? (win-inspector/inspect-form! (form-ctx log ev* (fn [] nil)))))
+                (is (= [[:opts ::ed ::cv ev* ::l false]
+                        [:flash (:start form) (:end form) 3]
+                        [:echo "(+ 1 2)" true]
+                        [:note-start]
+                        [:eval "(+ 1 2)" {:k 1 :run? false :ns-source "(+ 1 2)" :owner 7}]]
+                       @log))))))
+
+(deftest inspect-form-busy-test
+  (let [log (atom [])
+        sent (atom nil)]
+    (form-env log sent {:ok? true :busy true :warning "; busy\n" :text "(+ 1 2)" :caret 3}
+              (fn [ev*]
+                (win-inspector/inspect-form! (form-ctx log ev* (fn [] nil)))
+                (is (some #{[:echo "(+ 1 2)" false]} @log))
+                (is (not-any? #{[:note-start]} @log))
+                (is (= [::cv :system "; busy\n"] (last @log)))))))
+
+(deftest inspect-form-opens-on-ok-test
+  (let [run (fn [result inspecting]
+              (let [log (atom [])
+                    sent (atom nil)
+                    ilf (fn [] (swap! log conj :inspect-last))]
+                (form-env log sent {:ok? true :busy false :text "(+ 1 2)" :caret 3}
+                          (fn [ev*]
+                            (let [ctx (assoc (form-ctx log ev* ilf) :inspecting? (atom false))]
+                              (win-inspector/inspect-form! ctx)
+                              (reset! log [])
+                              (reset! (:inspecting? ctx) inspecting)
+                              ((:on-complete @sent) result)
+                              {:log @log :queued @(:inspect-queued ctx) :ilf ilf})))))
+        ok (run {:status :ok} false)
+        err (run {:status :error} false)
+        busy (run {:status :ok} true)]
+    (is (= [[:base {:status :ok}] :gui :inspect-last] (:log ok)))
+    (is (= [[:base {:status :error}]] (:log err)))
+    (is (= [[:base {:status :ok}] :gui] (:log busy)))
+    (is (identical? (:ilf busy) (:queued busy)))))
+
+(deftest inspect-form-base-completion-throw-skips-the-open-test
+  (let [log (atom [])
+        sent (atom nil)]
+    (form-env log sent {:ok? true :busy false :text "(+ 1 2)" :caret 3}
+              (fn [ev*]
+                (with-redefs [win-run/make-eval-opts
+                              (fn [& _] {:k 1 :on-complete (fn [_] (throw (ex-info "base" {})))})]
+                  (win-inspector/inspect-form! (form-ctx log ev* (fn [] nil))))
+                (reset! log [])
+                (is (thrown? Exception ((:on-complete @sent) {:status :ok})))
+                (is (not-any? #{:gui} @log))))))
