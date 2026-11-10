@@ -376,6 +376,7 @@
    inspector/row-pane-measure
    inspector/row-pane-ready-wait-survives-measure-throw
    inspector/row-pane-note-clears
+   inspector/row-pane-buttons-reach-their-steps
    inspector/row-inspect-focus-after-open
    inspector/row-inspect-last-after-repl
    inspector/row-inspect-in-out
