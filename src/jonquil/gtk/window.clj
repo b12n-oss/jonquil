@@ -37,7 +37,6 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.trash :as trash]
-            [jonquil.last-session :as last-session]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
@@ -45,6 +44,7 @@
             [jonquil.gtk.window.inspector :as win-inspector]
             [jonquil.gtk.window.keys :as win-keys]
             [jonquil.gtk.window.quit :as win-quit]
+            [jonquil.gtk.window.reopen :as win-reopen]
             [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.run :as win-run]
@@ -72,111 +72,6 @@
   8)
 
 ;; --- construction ------------------------------------------------------
-
-;; --- last session's tabs -----------------------------------------------------
-;; ctx is the window's tab map (tab-ctx), which carries :tree-pane,
-;; :tree-saved! and :folder-result* (the atom holding Open Folder's result
-;; handler, set once activate! has built it).
-
-(defn- session-entry!
-  "The sessions.edn entry for the tree's root, or nil when :reopen-tabs? is
-  off or the file can't be read (said on the console). With reroot? and
-  no root, takes the most recent entry and roots the tree at its folder
-  when that exists."
-  [{:keys [cv tree-pane settings-path* folder-result*]} {:keys [reroot?]}]
-  (when (win-session/reopen-tabs? @settings-path*)
-    (let [{:keys [sessions warning]} (last-session/load-sessions (last-session/sessions-path @settings-path*))
-          root (:root @(:state tree-pane))]
-      (cond
-        warning (do (cview/append! cv :system (str "; " warning "\n")) nil)
-        (and reroot? (nil? root))
-        (let [e (last-session/entry-for sessions nil)]
-          (when (and (:root e) (.isDirectory (java.io.File. ^String (:root e))))
-            (@folder-result* {:path (:root e)}))
-          e)
-        :else (last-session/entry-for sessions root)))))
-
-(defn- reopen-failed?
-  "Opens path as a tab; true when it's gone or couldn't be opened."
-  [ctx path]
-  (try (or (not (.isFile (java.io.File. ^String path))) (boolean (:error (win-tabs/open-file! ctx path))))
-       (catch :default _ true)))
-
-(defn- finish-reopen!
-  "Selects the tab entry had active and names the missing files (their
-  base names) on the console."
-  [{:keys [cv tabs tree-saved!] :as ctx} entry missing]
-  (when-let [t (and (:active entry)
-                    (some (fn [t] (when (= (:active entry) @(:path t)) t)) @tabs))]
-    (win-tabs/select-tab! ctx (:id t))
-    (tree-saved! t))
-  (when-let [line (last-session/missing-line missing)]
-    (cview/append! cv :system line)))
-
-(defn- reopen-entry!
-  "Opens entry's tabs in order, then selects its active one and names the
-  files that couldn't be opened."
-  [ctx entry]
-  (finish-reopen! ctx entry
-                  (reduce (fn [acc p] (if (reopen-failed? ctx p) (conj acc (.getName (java.io.File. ^String p))) acc))
-                          [] (:tabs entry))))
-
-(defn- restore-session!
-  "Reopens the tabs sessions.edn holds for the tree's root, in order, and
-  selects the one that was active (session-entry! picks the entry and does
-  any re-root). Files that are gone (or can't be opened) are named on the
-  console. Does nothing when :reopen-tabs? is off."
-  [ctx opts]
-  (when-let [entry (session-entry! ctx opts)]
-    (reopen-entry! ctx entry))
-  nil)
-
-(def ^:private FIRST-FRAME-FALLBACK-MS
-  "How long after-first-frame! waits for a frame before running anyway (a
-  window that starts minimized may not paint)."
-  1000)
-
-(defn- after-first-frame!
-  "Runs f on a later main-loop turn, once win's first frame has been
-  painted, or after FIRST-FRAME-FALLBACK-MS when no frame comes. Call it
-  after gtk_window_present, since the frame clock exists only once the
-  window is realized."
-  [win f]
-  (let [done? (atom false)
-        handler (atom nil)
-        clock (g/gtk-widget-get-frame-clock win)
-        once! (fn [] (when (compare-and-set! done? false true) (on-gui! f)))]
-    (when-not (ffi/null? clock)
-      ;; Disconnected only from inside its own emission, where the clock is
-      ;; alive. After the timeout wins it stays connected and does nothing,
-      ;; since the timeout may fire after the window, and its clock, is gone.
-      (reset! handler (g/g-signal-connect-data clock "after-paint"
-                                               (callable (fn [clk _data]
-                                                           (when @handler (g/g-signal-handler-disconnect clk @handler))
-                                                           (once!)
-                                                           nil)
-                                                         [:pointer :pointer] :void)
-                                               ffi/null ffi/null g/CONNECT-DEFAULT)))
-    (g/g-timeout-add FIRST-FRAME-FALLBACK-MS (callable (fn [_data] (once!) 0) [:pointer] :int :on-throw 0) ffi/null)))
-
-(defn- reopen-later!
-  "Startup's reopen, once the window has painted its first frame: every
-  tab in one main-loop turn, so nothing the user does can land between
-  two of them. Then done! runs, even when the reopen threw (said on the
-  console). Does nothing if :session-restoring? went false first, which a
-  quit does."
-  [{:keys [cv win session-restoring?] :as ctx} entry done!]
-  (reset! session-restoring? true)
-  (after-first-frame!
-   win
-   (fn []
-     (when @session-restoring?
-       (reset! session-restoring? false)
-       (try
-         (reopen-entry! ctx entry)
-         (catch :default e
-           (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))))
-       (done!)))))
 
 ;; --- file operations from the tree ---------------------------------------------
 ;; The pane calls these inside its popover's own signal emission (the entry's
@@ -1007,7 +902,7 @@
       ;; re-root, come now, so the tree shows its folder from the first
       ;; frame. The files open after the window is up (reopen-later!).
       (let [entry (when-not file
-                    (try (session-entry! tab-ctx {:reroot? true})
+                    (try (win-reopen/session-entry! tab-ctx {:reroot? true})
                          (catch :default e
                            (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
                            nil)))
@@ -1033,7 +928,7 @@
           (g/gtk-window-present win)
           (editor/focus! (:ed t)))
         (if (seq (:tabs entry))
-          (reopen-later! tab-ctx entry
+          (win-reopen/reopen-later! tab-ctx entry
                          (fn []
                            (try
                              (let [t (active-tab)]
@@ -1162,7 +1057,7 @@
                  ;; What the real quit saves and
                  ;; what a launch with no file restores (without re-rooting).
                    :save-session!* (fn [] (win-session/save-session! @*tab-ctx))
-                   :restore-session!* (fn [] (restore-session! @*tab-ctx {:reroot? false}))
+                   :restore-session!* (fn [] (win-reopen/restore-session! @*tab-ctx {:reroot? false}))
                  ;; Live saving on or off, so a row can stand in for a quit
                  ;; and a new launch (off until that launch's restore).
                    :session-live!* (fn [on?] (reset! (:session-live? @*tab-ctx) on?))
