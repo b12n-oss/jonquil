@@ -126,6 +126,8 @@
     jonquil.gtk.window.keys-test
     jonquil.gtk.window.help-test
     jonquil.gtk.window.tabs-test
+    jonquil.gtk.window.reopen-test
+    jonquil.gtk.window.tree-ops-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.gtk.processes-pane-test

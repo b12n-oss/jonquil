@@ -168,6 +168,8 @@
     jonquil.gtk.window.inspector
     jonquil.gtk.window.help
     jonquil.gtk.window.tabs
+    jonquil.gtk.window.reopen
+    jonquil.gtk.window.tree-ops
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen

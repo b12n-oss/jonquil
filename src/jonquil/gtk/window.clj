@@ -21,7 +21,6 @@
             [jonquil.commands :as commands]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
-            [jonquil.file-ops :as ops]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.completion :as completion]
@@ -36,8 +35,6 @@
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
-            [jonquil.gtk.trash :as trash]
-            [jonquil.last-session :as last-session]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
@@ -45,6 +42,7 @@
             [jonquil.gtk.window.inspector :as win-inspector]
             [jonquil.gtk.window.keys :as win-keys]
             [jonquil.gtk.window.quit :as win-quit]
+            [jonquil.gtk.window.reopen :as win-reopen]
             [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.run :as win-run]
@@ -53,6 +51,7 @@
             [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.tabs :as win-tabs]
             [jonquil.gtk.window.theme :as win-theme]
+            [jonquil.gtk.window.tree-ops :as win-tree-ops]
             [jonquil.parts :as parts]
             [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach]
@@ -72,258 +71,6 @@
   8)
 
 ;; --- construction ------------------------------------------------------
-
-;; --- last session's tabs -----------------------------------------------------
-;; ctx is the window's tab map (tab-ctx), which carries :tree-pane,
-;; :tree-saved! and :folder-result* (the atom holding Open Folder's result
-;; handler, set once activate! has built it).
-
-(defn- session-entry!
-  "The sessions.edn entry for the tree's root, or nil when :reopen-tabs? is
-  off or the file can't be read (said on the console). With reroot? and
-  no root, takes the most recent entry and roots the tree at its folder
-  when that exists."
-  [{:keys [cv tree-pane settings-path* folder-result*]} {:keys [reroot?]}]
-  (when (win-session/reopen-tabs? @settings-path*)
-    (let [{:keys [sessions warning]} (last-session/load-sessions (last-session/sessions-path @settings-path*))
-          root (:root @(:state tree-pane))]
-      (cond
-        warning (do (cview/append! cv :system (str "; " warning "\n")) nil)
-        (and reroot? (nil? root))
-        (let [e (last-session/entry-for sessions nil)]
-          (when (and (:root e) (.isDirectory (java.io.File. ^String (:root e))))
-            (@folder-result* {:path (:root e)}))
-          e)
-        :else (last-session/entry-for sessions root)))))
-
-(defn- reopen-failed?
-  "Opens path as a tab; true when it's gone or couldn't be opened."
-  [ctx path]
-  (try (or (not (.isFile (java.io.File. ^String path))) (boolean (:error (win-tabs/open-file! ctx path))))
-       (catch :default _ true)))
-
-(defn- finish-reopen!
-  "Selects the tab entry had active and names the missing files (their
-  base names) on the console."
-  [{:keys [cv tabs tree-saved!] :as ctx} entry missing]
-  (when-let [t (and (:active entry)
-                    (some (fn [t] (when (= (:active entry) @(:path t)) t)) @tabs))]
-    (win-tabs/select-tab! ctx (:id t))
-    (tree-saved! t))
-  (when-let [line (last-session/missing-line missing)]
-    (cview/append! cv :system line)))
-
-(defn- reopen-entry!
-  "Opens entry's tabs in order, then selects its active one and names the
-  files that couldn't be opened."
-  [ctx entry]
-  (finish-reopen! ctx entry
-                  (reduce (fn [acc p] (if (reopen-failed? ctx p) (conj acc (.getName (java.io.File. ^String p))) acc))
-                          [] (:tabs entry))))
-
-(defn- restore-session!
-  "Reopens the tabs sessions.edn holds for the tree's root, in order, and
-  selects the one that was active (session-entry! picks the entry and does
-  any re-root). Files that are gone (or can't be opened) are named on the
-  console. Does nothing when :reopen-tabs? is off."
-  [ctx opts]
-  (when-let [entry (session-entry! ctx opts)]
-    (reopen-entry! ctx entry))
-  nil)
-
-(def ^:private FIRST-FRAME-FALLBACK-MS
-  "How long after-first-frame! waits for a frame before running anyway (a
-  window that starts minimized may not paint)."
-  1000)
-
-(defn- after-first-frame!
-  "Runs f on a later main-loop turn, once win's first frame has been
-  painted, or after FIRST-FRAME-FALLBACK-MS when no frame comes. Call it
-  after gtk_window_present, since the frame clock exists only once the
-  window is realized."
-  [win f]
-  (let [done? (atom false)
-        handler (atom nil)
-        clock (g/gtk-widget-get-frame-clock win)
-        once! (fn [] (when (compare-and-set! done? false true) (on-gui! f)))]
-    (when-not (ffi/null? clock)
-      ;; Disconnected only from inside its own emission, where the clock is
-      ;; alive. After the timeout wins it stays connected and does nothing,
-      ;; since the timeout may fire after the window, and its clock, is gone.
-      (reset! handler (g/g-signal-connect-data clock "after-paint"
-                                               (callable (fn [clk _data]
-                                                           (when @handler (g/g-signal-handler-disconnect clk @handler))
-                                                           (once!)
-                                                           nil)
-                                                         [:pointer :pointer] :void)
-                                               ffi/null ffi/null g/CONNECT-DEFAULT)))
-    (g/g-timeout-add FIRST-FRAME-FALLBACK-MS (callable (fn [_data] (once!) 0) [:pointer] :int :on-throw 0) ffi/null)))
-
-(defn- reopen-later!
-  "Startup's reopen, once the window has painted its first frame: every
-  tab in one main-loop turn, so nothing the user does can land between
-  two of them. Then done! runs, even when the reopen threw (said on the
-  console). Does nothing if :session-restoring? went false first, which a
-  quit does."
-  [{:keys [cv win session-restoring?] :as ctx} entry done!]
-  (reset! session-restoring? true)
-  (after-first-frame!
-   win
-   (fn []
-     (when @session-restoring?
-       (reset! session-restoring? false)
-       (try
-         (reopen-entry! ctx entry)
-         (catch :default e
-           (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))))
-       (done!)))))
-
-;; --- file operations from the tree ---------------------------------------------
-;; The pane calls these inside its popover's own signal emission (the entry's
-;; activate, a button's clicked). The disk operation runs now, so an error
-;; string can go back to the entry; the tree rebuild and any tab opening wait
-;; for the next main-loop turn, since a rebuild inside the emission would
-;; tear down rows under it. ctx is the window's tab map (*tab-ctx), which
-;; carries :tree-pane.
-
-(defn- tree-later!
-  "Runs f on the next main-loop turn; a throw goes to the console under what."
-  [cv what f]
-  (on-gui! (fn [] (try (f) (catch :default e (cview/append! cv :error (str "; " what ": " (ex-message e) "\n")))))))
-
-(defn- tree-failed!
-  "Reports msg on the console under what, refreshes the tree next turn and
-  returns msg for the name entry."
-  [{:keys [cv tree-pane]} what msg]
-  (cview/append! cv :error (str "; " what ": " msg "\n"))
-  (tree-later! cv what (fn [] (file-tree-pane/refresh! tree-pane)))
-  msg)
-
-(defn- show-in-tree!
-  "Rebuilds the tree with path's folders expanded and selects its row."
-  [tree-pane path]
-  (file-tree-pane/show-model! tree-pane (ft/expand-to (ft/prune @(:state tree-pane)) path))
-  (file-tree-pane/select-path! tree-pane path))
-
-(defn- note-if-hidden!
-  "Says so on the console when the tree's filters hide the new entry at path."
-  [{:keys [cv tree-pane]} path dir?]
-  (let [n (.getName (java.io.File. ^String path))]
-    (when (ft/ignored? (:ignore @(:state tree-pane)) n dir?)
-      (cview/append! cv :system (ops/hidden-message n)))))
-
-(defn- stale-tab-problem
-  "The entry's problem when a tab not in except still holds path, or a path
-  under it (a tab left open on a trashed file), else nil. Making path again
-  would hand that tab a file it never had."
-  [tabs path except]
-  (when (some (fn [t] (and (not-any? (fn [x] (identical? x t)) except) (ops/retarget @(:path t) path path))) tabs)
-    (str (.getName (java.io.File. ^String path)) " is open in a tab; close that tab first.")))
-
-(defn- tree-new-file!
-  "New File... in dir: creates name, then shows and selects it and opens it
-  in a tab. nil, or the error string for the entry (a tab still on that
-  path is checked before the disk is touched)."
-  [{:keys [cv tree-pane tabs] :as ctx} dir name]
-  (let [target (.getAbsolutePath (java.io.File. ^String dir (str/trim (str name))))
-        {:keys [path error]} (if-let [p (stale-tab-problem @tabs target [])]
-                               {:error p}
-                               (ops/create-file! dir name))]
-    (if error
-      (tree-failed! ctx "new file" error)
-      (do (tree-later! cv "new file" (fn []
-                                       (show-in-tree! tree-pane path)
-                                       (win-tabs/open-file! ctx path)
-                                       (note-if-hidden! ctx path false)))
-          nil))))
-
-(defn- tree-new-folder!
-  "New Folder... in dir: creates name, then shows and selects it. nil, or
-  the error string for the entry."
-  [{:keys [cv tree-pane] :as ctx} dir name]
-  (let [{:keys [path error]} (ops/create-folder! dir name)]
-    (if error
-      (tree-failed! ctx "new folder" error)
-      (do (tree-later! cv "new folder" (fn []
-                                         (show-in-tree! tree-pane path)
-                                         (note-if-hidden! ctx path true)))
-          nil))))
-
-(defn- tree-rename!
-  "Rename...: renames old (the entry as listed: a symlink itself, never its
-  target) to new-name, then every tab on old (or under it, for a folder)
-  follows to the new listed path, keeping its text and dirty state. A tab on
-  a symlink's target doesn't move, since the target didn't. The rename runs
-  now; the tab paths (a path change rebuilds the tree through the tab's
-  watch), labels, title and tree wait for the next turn. Which tabs move is
-  decided before the move: a tab spelled differently from old (A.clj for
-  a.clj on a case-insensitive volume) resolves only while old exists.
-  Expanded folders at or under old stay expanded under the new name. A tab
-  still on the new path refuses the rename. nil, or the error string for the entry."
-  [{:keys [cv tree-pane tabs win active-tab] :as ctx} old new-name]
-  (let [new (.getAbsolutePath (java.io.File. (.getParentFile (java.io.File. ^String old)) (str/trim (str new-name))))
-        moves (vec (keep (fn [t] (when-let [p (ops/retarget @(:path t) old new)] [t p])) @tabs))
-        old-canon (.getCanonicalPath (java.io.File. ^String old))
-        {:keys [error path]} (if-let [p (stale-tab-problem @tabs new (map first moves))]
-                               {:error p}
-                               (ops/rename! old new-name))]
-    (if error
-      (tree-failed! ctx "rename" error)
-      (do (tree-later! cv "rename"
-                       (fn []
-                         ;; before the tab paths change, since a path change
-                         ;; rebuilds the tree (pruning the old folders)
-                         (swap! (:state tree-pane) update :expanded
-                                (fn [e] (set (map (fn [d] (cond
-                                                            (= d old-canon) path
-                                                            (str/starts-with? d (str old-canon "/")) (str path (subs d (count old-canon)))
-                                                            :else d))
-                                                  e))))
-                         (doseq [[t p] moves]
-                           (reset! (:path t) p))
-                         (win-tabs/refresh-labels! ctx)
-                         (let [t (active-tab)] (win-files/update-title! (:ed t) win (:path t)))
-                         (show-in-tree! tree-pane new)))
-          nil))))
-
-(defn- listed-dir?
-  "Whether path is a folder itself, not following a symlink: a link to a
-  folder is trashed as a link, so it isn't called a folder."
-  [path]
-  (java.nio.file.Files/isDirectory (.toPath (java.io.File. ^String path))
-                                   (into-array java.nio.file.LinkOption [java.nio.file.LinkOption/NOFOLLOW_LINKS])))
-
-(defn- trash-choice!
-  "The trash alert's decision for path (the entry as listed, so a symlink
-  goes to the Trash, not its target): index 0 moves it to the Trash and
-  says how many open tabs were on it (they stay open, text and all); any
-  other index or a dismissal does nothing. The count is taken before the
-  move, while the path still resolves. Rows call this with a synthetic
-  {:index n}, exactly as the alert's completion does."
-  [{:keys [cv tabs tree-pane]} path {:keys [index]}]
-  (when (= index 0)
-    (let [n-tabs (count (filter (fn [t] (ops/retarget @(:path t) path path)) @tabs))
-          dir? (listed-dir? path)
-          {:keys [error]} (trash/trash! path)]
-      (if error
-        (cview/append! cv :error (str "; trash: " error "\n"))
-        (cview/append! cv :system (ops/trash-message (.getName (java.io.File. ^String path)) n-tabs dir?)))
-      (tree-later! cv "trash" (fn [] (file-tree-pane/refresh! tree-pane))))))
-
-(defn- tree-trash!
-  "Move to Trash: asks first (Cancel is the default), sharing the close
-  alerts' alert-pending? guard, so a second alert never opens over one."
-  [{:keys [win cv] :as ctx} path]
-  (when-not @win-alerts/alert-pending?
-    (reset! win-alerts/alert-pending? true)
-    (try
-      (let [f (java.io.File. ^String path)]
-        (win-alerts/show-alert! win (ops/trash-alert (.getName f) (listed-dir? path)) win-alerts/TRASH-ALERT
-                     (fn [result] (trash-choice! ctx path result))))
-      (catch :default e
-        (reset! win-alerts/alert-pending? false)
-        (cview/append! cv :error (str "; trash: " (ex-message e) "\n")))))
-  nil)
 
 ;; --- activate ---------------------------------------------------------------
 
@@ -629,15 +376,8 @@
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action (:menu-group (first @tabs)) name ffi/null))
         ;; The tree on the left, its toggle first in the toolbar, and the
         ;; outer paned that holds it beside h-paned.
-        *open-folder (atom nil)
-        *folder-result (atom nil)
-        tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (win-tabs/open-file! @*tab-ctx p))
-                                             :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
-                                             :on-error (fn [msg] (win-status/set-status! status-label msg))
-                                             :on-new-file (fn [dir n] (tree-new-file! @*tab-ctx dir n))
-                                             :on-new-folder (fn [dir n] (tree-new-folder! @*tab-ctx dir n))
-                                             :on-rename (fn [p n] (tree-rename! @*tab-ctx p n))
-                                             :on-trash (fn [p] (tree-trash! @*tab-ctx p))})
+        {:keys [tree-pane] *open-folder :open-folder* *folder-result :folder-result*}
+        (win-tree-ops/build {:status-label status-label :tab-ctx* *tab-ctx})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
@@ -1007,7 +747,7 @@
       ;; re-root, come now, so the tree shows its folder from the first
       ;; frame. The files open after the window is up (reopen-later!).
       (let [entry (when-not file
-                    (try (session-entry! tab-ctx {:reroot? true})
+                    (try (win-reopen/session-entry! tab-ctx {:reroot? true})
                          (catch :default e
                            (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
                            nil)))
@@ -1033,7 +773,7 @@
           (g/gtk-window-present win)
           (editor/focus! (:ed t)))
         (if (seq (:tabs entry))
-          (reopen-later! tab-ctx entry
+          (win-reopen/reopen-later! tab-ctx entry
                          (fn []
                            (try
                              (let [t (active-tab)]
@@ -1073,7 +813,7 @@
                    :tree-press!* (fn [label] (file-tree-pane/press-item! tree-pane label))
                    :tree-submit!* (fn [text] (file-tree-pane/submit-name! tree-pane text))
                    :tree-menu-state* (fn [] (file-tree-pane/menu-state tree-pane))
-                   :trash-choice! (fn [path result] (trash-choice! @*tab-ctx path result))
+                   :trash-choice! (fn [path result] (win-tree-ops/trash-choice! @*tab-ctx path result))
                    :open-paths! (fn [paths] (@current-open-paths paths))
                    :app app
                    :active-tab* active-tab
@@ -1162,7 +902,7 @@
                  ;; What the real quit saves and
                  ;; what a launch with no file restores (without re-rooting).
                    :save-session!* (fn [] (win-session/save-session! @*tab-ctx))
-                   :restore-session!* (fn [] (restore-session! @*tab-ctx {:reroot? false}))
+                   :restore-session!* (fn [] (win-reopen/restore-session! @*tab-ctx {:reroot? false}))
                  ;; Live saving on or off, so a row can stand in for a quit
                  ;; and a new launch (off until that launch's restore).
                    :session-live!* (fn [on?] (reset! (:session-live? @*tab-ctx) on?))
