@@ -2,10 +2,10 @@
 ;; compiled. Each scope is an ORDERED vector: the first binding that matches
 ;; wins. :cmd is Control or Meta.
 ;;
-;; :window is the whole of jonquil.gtk.window/on-window-key, after one fixed
-;; stage (jonquil.command-registry/window-answer: while the rename popover's
-;; or the command palette's entry has focus, every key but Escape is the
-;; entry's). Shift-qualified bindings sit ahead of their plain forms, so
+;; :window is the whole of jonquil.gtk.window.keys/on-window-key, after one
+;; fixed stage (jonquil.command-registry/window-answer: while the rename
+;; popover's or the command palette's entry has focus, every key but Escape
+;; is the entry's). Shift-qualified bindings sit ahead of their plain forms, so
 ;; the plain one never sees them.
 {:window
  [;; F5 runs the buffer, whatever the modifiers
