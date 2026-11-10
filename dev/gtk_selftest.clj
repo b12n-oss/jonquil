@@ -2333,6 +2333,8 @@ b" text) eq (pos? @splices))
                 (cview/on-input-changed! cv (fn [] (throw (ex-info "bad" {}))))
                 (cview/clear-input! cv)
                 (g/gtk-text-buffer-insert-interactive-at-cursor buf "ab" -1 1)
+                ;; the insert itself fires the throwing fn; only the caret moves may satisfy the check
+                (reset! errors [])
                 (let [before (g/buffer-text buf)
                       end (g/gtk-text-buffer-get-char-count buf)]
                   (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))

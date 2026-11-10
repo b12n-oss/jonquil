@@ -431,6 +431,7 @@
          fallback)))
 
 (defn- style-match-tag!
+  "Colors the search-match tag from the default theme and adds it to the buffer's tag table."
   [tag table]
   (let [default-t (theme/theme theme/default-theme)]
     (g/set-string-property! tag "background" (:find-highlight default-t))
@@ -448,6 +449,7 @@
   )
 
 (defn- pack-bar!
+  "Packs the bar's widgets into its box and hides the box and the replace widgets until the bar opens."
   [{:keys [box query replacement replace-btn replace-all-btn count-label] :as fb}]
   (g/gtk-box-append box query)
   (g/gtk-box-append box replacement)
@@ -458,6 +460,7 @@
   (doseq [w (:replace-widgets fb)] (g/gtk-widget-set-visible w 0)))
 
 (defn- connect-edits!
+  "Connects the query's \"changed\" signal and the buffer's \"changed\" and \"mark-set\" signals to recompute the matches."
   [{:keys [query ed] :as fb}]
   (g/g-signal-connect-data query "changed"
                            (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(recompute-matches! fb))) [:pointer :pointer] :void)
@@ -472,6 +475,7 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
 (defn- connect-replace-btns!
+  "Connects the Replace and Replace All buttons' \"clicked\" signals to their actions."
   [{:keys [replace-btn replace-all-btn] :as fb}]
   (g/g-signal-connect-data replace-btn "clicked"
                            (callable (fn [_ _] (contained {:fb fb :where "replace" :fallback nil} #(replace-one! fb))) [:pointer :pointer] :void)
@@ -481,6 +485,7 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
 (defn- connect-preedit-and-keys!
+  "Connects both entries' preedit tracking and the capture-phase key controller, then adds the controller to the box."
   [{:keys [query replacement box] :as fb} keyctl]
   ;; Both entries delegate their GtkEditable
   ;; implementation to an internal GtkText (gtk_editable_get_delegate),

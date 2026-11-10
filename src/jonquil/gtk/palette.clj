@@ -85,6 +85,7 @@
       0)))
 
 (defn- pack-palette!
+  "Sizes the entry, list and scroller, then packs them into the box and sets the box as the popover's child."
   [{:keys [entry list-box scroll box pp]}]
   (g/gtk-widget-set-size-request entry WIDTH -1)
   (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
@@ -97,6 +98,7 @@
   (popover/set-child! pp box))
 
 (defn- connect-entry!
+  "Connects the entry's \"changed\" signal to refilter the list and its \"activate\" signal to run the selected command."
   [pal entry]
   (g/g-signal-connect-data entry "changed"
                            (callable (fn [_ _] (try (refilter! pal) (catch :default e (report! pal "palette" e))) nil)
@@ -108,6 +110,7 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
 (defn- connect-list-box!
+  "Connects the list's \"row-activated\" signal to select the clicked row and run it."
   [pal list-box]
   (g/g-signal-connect-data list-box "row-activated"
                            (callable (fn [_ row _]
@@ -120,6 +123,7 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
 (defn- connect-keys!
+  "Connects the key handler, the entry's preedit tracking and the capture-phase key controller."
   [pal entry keyctl]
   (g/g-signal-connect-data keyctl "key-pressed"
                            (callable (fn [_ctl keyval _keycode _state _data]
