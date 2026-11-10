@@ -1,5 +1,6 @@
 (ns jonquil.gtk.window.tabs-test
   (:require [clojure.test :refer [deftest is testing]]
+            [jonquil.changed :as changed]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks]
@@ -21,6 +22,7 @@
             [jonquil.gtk.window.session :as win-session]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.tabs :as win-tabs]
+            [jonquil.hints :as hints]
             [jonquil.parts :as parts]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.tabs :as tabs]
@@ -598,3 +600,62 @@
                   @log)))]
     (is (= [[:ranges ::gutter []]] (run false)))
     (is (= [] (run true)))))
+
+(deftest hint-tick-test
+  (let [log (atom []) l (fn [x] (swap! log conj x))
+        answer (atom "Tab: indent") throw? (atom false)
+        m (fn [over]
+            (merge {:n 1 :pending (atom 1) :failed? (atom false) :hints-on? (atom true)
+                    :active? (constantly true) :t ::t
+                    :ed {:buf ::buf :destroyed? (atom false)} :hint-label ::hint :cv ::cv}
+                   over))
+        tick (fn [mm] (reset! log []) [(#'win-tabs/hint-tick! mm) @log])]
+    (with-redefs [g/cursor-offset (constantly 5)
+                  g/gtk-text-buffer-get-char-count (constantly 20)
+                  g/buffer-text-range (fn [& _] (if @throw? (throw (ex-info "boom" {})) "(inc 1)"))
+                  hints/line-at (fn [_ p] ["l" p])
+                  hints/at-caret (fn [line a] [:at line a])
+                  hints/hint (fn [_] @answer)
+                  plugin-registry/editor-bindings (constantly {})
+                  plugin-registry/window-bindings (constantly {})
+                  g/gtk-label-set-text (fn [lab s] (l [:text lab s]))
+                  g/gtk-widget-set-visible (fn [wd v] (l [:visible wd v]))
+                  cview/append! (fn [_ kind text] (l [:append kind text]))]
+      (is (= [0 [[:text ::hint "Tab: indent"] [:visible ::hint 1]]] (tick (m {}))))
+      (reset! answer nil)
+      (is (= [0 [[:text ::hint ""] [:visible ::hint 0]]] (tick (m {}))))
+      (is (= [0 []] (tick (m {:pending (atom 2)}))))
+      (is (= [0 []] (tick (m {:hints-on? (atom false)}))))
+      (is (= [0 []] (tick (m {:active? (constantly false)}))))
+      (is (= [0 []] (tick (m {:ed {:buf ::buf :destroyed? (atom true)}}))))
+      (reset! throw? true)
+      (let [mm (m {})]
+        (is (= [0 [[:visible ::hint 0] [:append :error "; key hints: boom\n"]]] (tick mm)))
+        (is (= [0 [[:visible ::hint 0]]] (tick mm)))
+        (is (true? @(:failed? mm)))))))
+
+(deftest changed-marks-steps-test
+  (let [log (atom []) text* (atom "t") throw? (atom false)
+        ed {:destroyed? (atom false)}]
+    (with-redefs [jonquil.gtk.callbacks/on-gui! (fn [f] (f))
+                  gutter/set-ranges! (fn [g rs] (swap! log conj [:ranges g rs]))
+                  editor/editor-text (fn [_] @text*)
+                  changed/changed (fn [_ _] (if @throw? (throw (ex-info "boom" {})) [{:start 1 :end 3}]))]
+      (let [r #{:x} ran (atom r)
+            draw (fn [] (reset! log []) (#'win-tabs/draw-changed! {:ed ed :ran ran :gutter ::g :r r :text "t"}) @log)]
+        (is (= [[:ranges ::g [[1 3]]]] (draw)))
+        (reset! text* "u")
+        (is (= [] (draw)))
+        (reset! text* "t")
+        (reset! ran #{:y})
+        (is (= [] (draw)))
+        (reset! ran r)
+        (reset! throw? true)
+        (is (= [] (draw))))
+      (reset! throw? false)
+      (reset! log [])
+      (#'win-tabs/refresh-changed! {:ed ed :ran (atom nil) :gutter ::g})
+      (is (= [[:ranges ::g []]] @log))
+      (reset! log [])
+      (#'win-tabs/refresh-changed! {:ed {:destroyed? (atom true)} :ran (atom nil) :gutter ::g})
+      (is (= [] @log)))))
