@@ -21,7 +21,6 @@
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
-            [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -31,10 +30,10 @@
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
-            [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
+            [jonquil.gtk.window.console :as win-console]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.inspector :as win-inspector]
@@ -187,30 +186,8 @@
         ;; Self-test hooks only -- see close-request-fn's docstring.
         suppress-close? (atom false)
         closing? (atom false)
-        *cv (atom nil)
-        ;; LM1's ! commands at the prompt, installed once the palette's
-        ;; pieces exist (the command-palette part resets it at install)
-        bang* (atom (fn [_text]))
-        ;; :failure*, the last failed evaluation, for the restarts
-        cv (assoc
-            (cview/make-console-view {:on-submit (win-run/make-on-submit active-tab *cv ev* status-label bang*)
-                                     :history-prev (win-run/history-prev-fn ev*)
-                                     :history-next (win-run/history-next-fn ev*)
-                                     ;; The console reads busy/waiting state
-                                     ;; straight from the engine, never a mirror.
-                                     :evaluating? evaluating-fn
-                                     :waiting? (fn [] (ev/waiting-for-input? @ev*))})
-            :failure* (atom nil)
-            ;; a fn the window runs after every evaluation (the Trace panel's refresh)
-            :after-eval* (atom nil)
-            ;; LM7: the fn (record result) that files a finished evaluation
-            ;; in the project's record, and the replay tab as {:id :root},
-            ;; the root it was opened for (or nil)
-            :recorder* (atom nil)
-            ;; a fn returning the tree's root, read as an evaluation starts
-            :replay-root* (atom nil)
-            :replay-tab* (atom nil))
-        _ (reset! *cv cv)
+        {:keys [bang* cv]}
+        (win-console/build {:active-tab active-tab :ev* ev* :status-label status-label :evaluating-fn evaluating-fn})
         {:keys [provider theme-name theme-choice system-dark-fn* poll-armed? arm-count
                 zoom-fn theme-ctx set-theme-fn cycle-theme-fn]}
         (win-theme/build {:tabs tabs :cv cv :settings-path* settings-path* :status-label status-label
@@ -230,41 +207,9 @@
         {:keys [popovers close-popovers-fn register-popover-fn source-ctx server-ev completion-ns-fn completion-opts]}
         (win-help/build {:ev* ev* :status-label status-label :sp sp :sel* sel* :active? active? :active-tab active-tab
                          :open-file! win-tabs/open-file! :tab-ctx* *tab-ctx :right* *right})
-        ;; A second jonquil.gtk.completion instance, on the console's own
-        ;; input region -- :position :top (above the input line, vs. the
-        ;; editor's own :bottom), :snapshot-fn/:apply-op! overridden to
-        ;; cview/input-snapshot and cview/apply-input-op! so refine!/
-        ;; commit! read and write the input region instead of :ed's whole
-        ;; buffer (see jonquil.gtk.completion's ns docstring).
-        ;; close-others!/on-error are the SAME registry-wide fns the
-        ;; editor's instance uses, so opening either instance still closes
-        ;; any other open popover.
-        repl-completion (completion/make-completion
-                         (:view cv)
-                         ;; No :ed -- :snapshot-fn/:apply-op! below replace
-                         ;; every use the default closures would have made
-                         ;; of it, so there's no editor for this instance
-                         ;; to name.
-                         {:ns-fn completion-ns-fn
-                          :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
-                          :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
-                          :server-ev server-ev
-                          :close-others! close-popovers-fn
-                          :on-error (fn [msg] (win-status/set-status! status-label msg))
-                          :position :top
-                          :snapshot-fn (fn [] (cview/input-snapshot cv))
-                          :apply-op! (fn [result] (cview/apply-input-op! cv result))})
-        repl-complete-fn (fn [] (win-help/do-repl-complete! cv ev* repl-completion status-label))
-        ;; the console's completion is caret-anchored too: scrolling the
-        ;; Interactions pane follows or hides it, as a tab's editor does
-        ;; for its popovers (wire-tab!)
-        _ (let [follow (callable (fn [_adj _data]
-                                   (popover/follow-caret! repl-completion)
-                                   nil)
-                                 [:pointer :pointer] :void)]
-            (doseq [adj [(g/gtk-scrollable-get-vadjustment (:view cv))
-                         (g/gtk-scrollable-get-hadjustment (:view cv))]]
-              (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT)))
+        {:keys [repl-completion repl-complete-fn]}
+        (win-console/build-completion {:cv cv :ev* ev* :status-label status-label :completion-ns-fn completion-ns-fn
+                                       :server-ev server-ev :close-popovers-fn close-popovers-fn})
         {:keys [run-fn stop-fn run-selection-fn run-changed-fn]}
         (win-run/build {:active-tab active-tab :cv cv :ev* ev* :sel* sel* :status-label status-label})
         open-fn (fn [] (win-files/do-open! cv win (fn [p] (win-tabs/open-file! @*tab-ctx p))))
