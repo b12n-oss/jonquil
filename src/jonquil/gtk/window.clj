@@ -955,16 +955,6 @@
                 zoom-fn theme-ctx set-theme-fn cycle-theme-fn]}
         (win-theme/build {:tabs tabs :cv cv :settings-path* settings-path* :status-label status-label
                           :evaluating-fn evaluating-fn :closing? closing?})
-        ;; This window's own registry of popovers (completion, quick doc,
-        ;; rename register theirs via register-popover-fn as they're
-        ;; created); close-popovers-fn is what the window keymap's Escape
-        ;; binding and :close-popovers!* call.
-        ;; It takes an optional popover to skip -- a caller about to show
-        ;; or reposition ITS OWN popover passes it here, so that one is
-        ;; never hidden and reshown within the same frame.
-        popovers (atom [])
-        close-popovers-fn (fn [& [skip]] (win-help/close-popovers! popovers skip))
-        register-popover-fn (fn [p] (win-help/register-popover! popovers p))
         ;; The source panel is built before the tabs, whose
         ;; jump opens it; its root joins the right-hand slot once the
         ;; inspector exists (*right, reset below).
@@ -980,29 +970,9 @@
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
         *right (atom nil)
-        ;; Where each jump into a tab started, newest last, for Cmd/Ctrl+[
-        ;; (open-in-tab!, jump-back!).
-        jump-back* (atom [])
-        source-ctx (fn [t] {:ed (:ed t) :ev* ev* :status-label status-label :help-pop (:help-pop t)
-                            :close-popovers-fn close-popovers-fn :sp sp :right @*right
-                            :path (:path t) :sel* sel* :active? (fn [] (active? t))
-                            :open-file! (fn [p] (open-file! @*tab-ctx p))
-                            :active-tab active-tab :jump-back* jump-back*})
-        ;; The window's evaluator when its help asks a server
-        ;; (ev/ServerHelp): completion then asks off the GTK thread.
-        server-ev (fn [] (let [e @ev*] (when (ev/server-help? e) e)))
-        ;; Shared by every tab's completion and the console's: the running
-        ;; program's namespace, read fresh at every lookup.
-        completion-ns-fn (fn [] (ev/prompt-ns @ev*))
-        ;; What each tab's completion is built with (jonquil.gtk.tab adds
-        ;; its own :ed); close-others! is the registry-wide close, so
-        ;; opening completion closes any other open popover.
-        completion-opts {:ns-fn completion-ns-fn
-                         :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
-                         :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
-                         :server-ev server-ev
-                         :close-others! close-popovers-fn
-                         :on-error (fn [msg] (win-status/set-status! status-label msg))}
+        {:keys [popovers close-popovers-fn register-popover-fn source-ctx server-ev completion-ns-fn completion-opts]}
+        (win-help/build {:ev* ev* :status-label status-label :sp sp :sel* sel* :active? active? :active-tab active-tab
+                         :open-file! open-file! :tab-ctx* *tab-ctx :right* *right})
         ;; A second jonquil.gtk.completion instance, on the console's own
         ;; input region -- :position :top (above the input line, vs. the
         ;; editor's own :bottom), :snapshot-fn/:apply-op! overridden to
@@ -1068,16 +1038,10 @@
         inspect-form-fn (fn [] (win-inspector/inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
-        source-jump-fn (fn [] (win-help/do-source-jump! (source-ctx (active-tab))))
-        source-close-fn (fn [] (win-help/close-source-panel! right (:ed (active-tab))))
-        source-back-fn (fn [] (source-pane/back! sp))
-        source-open-fn (fn [] (win-help/do-source-open! {:sp sp :right right :active-tab active-tab
-                                                :open-file! (fn [p] (open-file! @*tab-ctx p))}))
-        jump-back-fn (fn [] (win-help/jump-back! (assoc (source-ctx (active-tab))
-                                               :select-tab! (fn [id] (select-tab! @*tab-ctx id))
-                                               :tab-open? (fn [id] (some? (tab-by-id tabs id))))))
-        source-keys {:focused? (fn [] (source-pane/focused? sp win)) :close! source-close-fn
-                     :back! source-back-fn :open! source-open-fn :jump-back! jump-back-fn}
+        {:keys [source-jump-fn source-close-fn source-back-fn source-open-fn jump-back-fn source-keys]}
+        (win-help/build-source-keys {:source-ctx source-ctx :active-tab active-tab :right right :sp sp :win win :tabs tabs
+                                     :open-file! open-file! :select-tab! select-tab! :tab-by-id tab-by-id
+                                     :tab-ctx* *tab-ctx})
         close-inspector-fn (fn [] (win-inspector/close-inspector-panel! right (:ed (active-tab))))
         toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv))
         clear-console-fn (fn [] (win-keys/do-clear-console! cv))

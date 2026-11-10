@@ -1,8 +1,10 @@
 (ns jonquil.gtk.window.help
   "The window's help: the popover registry that Escape closes, quick doc and
   full docs, jump to definition and the source panel with its way back,
-  rename, and completion in the editor and the console. Internal to the
-  window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window
+  rename, and completion in the editor and the console. build and
+  build-source-keys make activate!'s popover, source-ctx, completion and
+  source panel key bindings. Internal to the window, as
+  jonquil.gtk.window.status is. Moved out of jonquil.gtk.window
   unchanged; the lock caller rule in jonquil.gtk.window's docstring applies
   here."
   (:require [clojure.string :as str]
@@ -24,7 +26,7 @@
 
 ;; --- popovers: a registry so Escape can close whichever popover is open ----
 
-(defn register-popover!
+(defn- register-popover!
   "Adds p (a jonquil.gtk.popover map) to popovers, this window's own
   registry of every popover it has created. Completion, quick doc and
   rename each register their own popover once, at construction -- created
@@ -34,7 +36,7 @@
   (swap! popovers conj p)
   nil)
 
-(defn close-popovers!
+(defn- close-popovers!
   "Closes every OPEN popover in popovers (jonquil.gtk.popover/hide!) except
   skip, when given, and returns whether any OTHER one was open -- the
   window's own :close-popovers!*, which the window keymap's
@@ -231,7 +233,7 @@
         (win-status/set-status! status-label (str "Jumped to " symbol ".")))
       (show-source! ctx loc))))
 
-(defn jump-back!
+(defn- jump-back!
   "Cmd/Ctrl+[ in the editor after a jump into a tab: back to the tab and
   caret the newest jump started from, or that file reopened when its tab
   has closed since. Returns false, doing nothing, when no jump is left to
@@ -322,7 +324,7 @@
       :else
       (win-status/set-status! status-label (str "No definition found for " symbol ".")))))
 
-(defn do-source-jump!
+(defn- do-source-jump!
   "F12/Ctrl+B inside the source panel: the same lookup on the panel
   editor's own snapshot, so the namespace comes from the panel file's ns
   form. A definition in the panel's file moves the panel caret (history
@@ -364,7 +366,7 @@
       loc (show-source! ctx loc)
       :else (source-pane/report! sp (str "No source found for " symbol ".")))))
 
-(defn close-source-panel!
+(defn- close-source-panel!
   "Hides the source panel (its state kept) and focuses the editor;
   hide-right-panel! also cancels any re-scroll settling still in flight
   for it."
@@ -372,7 +374,7 @@
   (win-right-slot/hide-right-panel! right :source)
   (editor/focus! ed))
 
-(defn do-source-open!
+(defn- do-source-open!
   "Open in window: an editable panel file opens in a tab through open-file!
   (a new tab, or the tab already showing it), the caret goes to the panel
   caret's line, and the panel closes -- but only once that tab really
@@ -520,3 +522,58 @@
                  (catch :default e
                    (win-status/set-status! status-label (str "; complete: " (ex-message e)))))))
   (on-focus-lost! (fn [] (completion/close! completion))))
+
+(defn build
+  "activate!'s popover registry, source-ctx and completion bindings, in activate!'s order: the popovers atom with its close and register fns, jump-back* and source-ctx (the map quick doc, jump and the source panel take for a tab), and the evaluator fns and the opts every tab's completion is built with. w holds what they read: :ev* :status-label :sp :sel* :active? :active-tab, :open-file! (jonquil.gtk.window's open-file!, called with @*tab-ctx), and :tab-ctx* and :right* (activate!'s *tab-ctx and *right, read when source-ctx and its :open-file! run). Returns w with :popovers :close-popovers-fn :register-popover-fn :source-ctx :server-ev :completion-ns-fn and :completion-opts added."
+  [{:keys [ev* status-label sp sel* active? active-tab open-file!] *tab-ctx :tab-ctx* *right :right* :as w}]
+  (let [;; This window's own registry of popovers (completion, quick doc,
+        ;; rename register theirs via register-popover-fn as they're
+        ;; created); close-popovers-fn is what the window keymap's Escape
+        ;; binding and :close-popovers!* call.
+        ;; It takes an optional popover to skip -- a caller about to show
+        ;; or reposition ITS OWN popover passes it here, so that one is
+        ;; never hidden and reshown within the same frame.
+        popovers (atom [])
+        close-popovers-fn (fn [& [skip]] (close-popovers! popovers skip))
+        register-popover-fn (fn [p] (register-popover! popovers p))
+        ;; Where each jump into a tab started, newest last, for Cmd/Ctrl+[
+        ;; (open-in-tab!, jump-back!).
+        jump-back* (atom [])
+        source-ctx (fn [t] {:ed (:ed t) :ev* ev* :status-label status-label :help-pop (:help-pop t)
+                            :close-popovers-fn close-popovers-fn :sp sp :right @*right
+                            :path (:path t) :sel* sel* :active? (fn [] (active? t))
+                            :open-file! (fn [p] (open-file! @*tab-ctx p))
+                            :active-tab active-tab :jump-back* jump-back*})
+        ;; The window's evaluator when its help asks a server
+        ;; (ev/ServerHelp): completion then asks off the GTK thread.
+        server-ev (fn [] (let [e @ev*] (when (ev/server-help? e) e)))
+        ;; Shared by every tab's completion and the console's: the running
+        ;; program's namespace, read fresh at every lookup.
+        completion-ns-fn (fn [] (ev/prompt-ns @ev*))
+        ;; What each tab's completion is built with (jonquil.gtk.tab adds
+        ;; its own :ed); close-others! is the registry-wide close, so
+        ;; opening completion closes any other open popover.
+        completion-opts {:ns-fn completion-ns-fn
+                         :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
+                         :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
+                         :server-ev server-ev
+                         :close-others! close-popovers-fn
+                         :on-error (fn [msg] (win-status/set-status! status-label msg))}]
+    (assoc w :popovers popovers :close-popovers-fn close-popovers-fn :register-popover-fn register-popover-fn
+           :source-ctx source-ctx :server-ev server-ev :completion-ns-fn completion-ns-fn :completion-opts completion-opts)))
+
+(defn build-source-keys
+  "activate!'s source panel keys, in activate!'s order: the panel's F12, Close, Back and Open in window fns, jump-back-fn (Cmd/Ctrl+[ after a jump), and source-keys, the map the window keys read while the panel has focus. w holds what they read: :source-ctx :active-tab :right :sp :win :tabs, :open-file! :select-tab! and :tab-by-id (jonquil.gtk.window's own fns, as the parts' wctx passes them), and :tab-ctx* (activate!'s *tab-ctx, read when one of them runs). Returns w with :source-jump-fn :source-close-fn :source-back-fn :source-open-fn :jump-back-fn and :source-keys added."
+  [{:keys [source-ctx active-tab right sp win tabs open-file! select-tab! tab-by-id] *tab-ctx :tab-ctx* :as w}]
+  (let [source-jump-fn (fn [] (do-source-jump! (source-ctx (active-tab))))
+        source-close-fn (fn [] (close-source-panel! right (:ed (active-tab))))
+        source-back-fn (fn [] (source-pane/back! sp))
+        source-open-fn (fn [] (do-source-open! {:sp sp :right right :active-tab active-tab
+                                                :open-file! (fn [p] (open-file! @*tab-ctx p))}))
+        jump-back-fn (fn [] (jump-back! (assoc (source-ctx (active-tab))
+                                               :select-tab! (fn [id] (select-tab! @*tab-ctx id))
+                                               :tab-open? (fn [id] (some? (tab-by-id tabs id))))))
+        source-keys {:focused? (fn [] (source-pane/focused? sp win)) :close! source-close-fn
+                     :back! source-back-fn :open! source-open-fn :jump-back! jump-back-fn}]
+    (assoc w :source-jump-fn source-jump-fn :source-close-fn source-close-fn :source-back-fn source-back-fn
+           :source-open-fn source-open-fn :jump-back-fn jump-back-fn :source-keys source-keys)))

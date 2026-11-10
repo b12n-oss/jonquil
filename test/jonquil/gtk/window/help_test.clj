@@ -9,6 +9,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
+            [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.help :as help]
@@ -258,3 +259,105 @@
                                            :active-tab (fn [] {:path (atom nil)})
                                            :status-label ::l})))
         (is (= [[:open "/gone.clj"] [::l "Nothing to go back to: those tabs are closed."]] @log))))))
+
+(deftest build-adds-the-help-bindings-test
+  (let [ev* (atom #_{:clj-kondo/ignore [:missing-protocol-method]}
+             (reify ev/Evaluator
+               (prompt-ns [_] 'user.x)
+               (complete [_ p t pos x] [:complete p t pos x])
+               (lookup [_ s t p] [:lookup s t p])))
+        r (atom ::r1)
+        tc (atom ::tc1)
+        opened (atom [])
+        in {:ev* ev* :status-label ::l :sp ::sp :sel* ::sel
+            :active? (fn [t] [:active t]) :active-tab ::at
+            :open-file! (fn [c p] (swap! opened conj [c p]))
+            :tab-ctx* tc :right* r :x 1}
+        w (win-help/build in)]
+    (is (= (into (set (keys in))
+                 #{:popovers :close-popovers-fn :register-popover-fn :source-ctx
+                   :server-ev :completion-ns-fn :completion-opts})
+           (set (keys w))))
+    (is (= [] @(:popovers w)))
+    ((:register-popover-fn w) ::p)
+    (is (= [::p] @(:popovers w)))
+    (let [log (atom [])]
+      (with-redefs [popover/open? #(= % ::p)
+                    popover/hide! (fn [p] (swap! log conj [:hide p]))]
+        (is (true? ((:close-popovers-fn w))))
+        (is (= [[:hide ::p]] @log))
+        (is (false? ((:close-popovers-fn w) ::p)))))
+    (reset! r ::r2)
+    (reset! tc ::tc2)
+    (let [ctx ((:source-ctx w) {:ed ::ed :help-pop ::hp :path ::path})]
+      (is (= {:ed ::ed :ev* ev* :status-label ::l :help-pop ::hp
+              :close-popovers-fn (:close-popovers-fn w) :sp ::sp :right ::r2
+              :path ::path :sel* ::sel :active-tab ::at}
+             (dissoc ctx :active? :open-file! :jump-back*)))
+      (is (= [:active {:ed ::ed :help-pop ::hp :path ::path}] ((:active? ctx))))
+      ((:open-file! ctx) "/p")
+      (is (= [[::tc2 "/p"]] @opened))
+      (is (= [] @(:jump-back* ctx)))
+      (is (identical? (:jump-back* ctx) (:jump-back* ((:source-ctx w) {})))))
+    (is (= 'user.x ((:completion-ns-fn w))))
+    (is (nil? ((:server-ev w))))
+    (let [opts (:completion-opts w)
+          log (atom [])]
+      (is (= #{:ns-fn :candidates-fn :doc-fn :server-ev :close-others! :on-error}
+             (set (keys opts))))
+      (is (identical? (:completion-ns-fn w) (:ns-fn opts)))
+      (is (identical? (:server-ev w) (:server-ev opts)))
+      (is (identical? (:close-popovers-fn w) (:close-others! opts)))
+      (is (= [:complete "ma" "t" 1 "x"] ((:candidates-fn opts) "ma" "t" 1 "x")))
+      (is (= [:lookup "map" "t" 1] ((:doc-fn opts) "map" "t" 1)))
+      (with-redefs [win-status/set-status! (fn [l m] (swap! log conj [l m]))]
+        ((:on-error opts) "m"))
+      (is (= [[::l "m"]] @log)))))
+
+(deftest build-source-keys-wires-its-fns-test
+  (let [log (atom [])
+        lg (fn [e] (swap! log conj e))
+        at (fn [] {:ed ::ed :id 3})
+        tc (atom ::tc1)
+        in {:source-ctx (fn [t] {:ctx-of t}) :active-tab at :right ::right
+            :sp ::sp :win ::win :tabs ::tabs
+            :open-file! (fn [c p] (lg [:open c p]))
+            :select-tab! (fn [c id] (lg [:select c id]))
+            :tab-by-id (fn [ts id] (lg [:by-id ts id]) (= id 3))
+            :tab-ctx* tc :x 1}]
+    (with-redefs [win-help/do-source-jump! (fn [ctx] (lg [:jump ctx]))
+                  win-help/close-source-panel! (fn [r ed] (lg [:close r ed]))
+                  win-help/do-source-open! (fn [m]
+                                             (lg [:src-open (dissoc m :open-file!)])
+                                             ((:open-file! m) "/p"))
+                  win-help/jump-back! (fn [ctx]
+                                        (lg [:back (dissoc ctx :select-tab! :tab-open?)])
+                                        ((:select-tab! ctx) 3)
+                                        ((:tab-open? ctx) 3))
+                  source-pane/back! (fn [sp] (lg [:panel-back sp]))
+                  source-pane/focused? (fn [sp win] (lg [:focused sp win]))]
+      (let [w (win-help/build-source-keys in)]
+        (reset! tc ::tc2)
+        (is (= (into (set (keys in))
+                     #{:source-jump-fn :source-close-fn :source-back-fn
+                       :source-open-fn :jump-back-fn :source-keys})
+               (set (keys w))))
+        ((:source-jump-fn w))
+        ((:source-close-fn w))
+        ((:source-back-fn w))
+        ((:source-open-fn w))
+        ((:jump-back-fn w))
+        ((:focused? (:source-keys w)))
+        (is (= [[:jump {:ctx-of {:ed ::ed :id 3}}]
+                [:close ::right ::ed]
+                [:panel-back ::sp]
+                [:src-open {:sp ::sp :right ::right :active-tab at}]
+                [:open ::tc2 "/p"]
+                [:back {:ctx-of {:ed ::ed :id 3}}]
+                [:select ::tc2 3]
+                [:by-id ::tabs 3]
+                [:focused ::sp ::win]]
+               @log))
+        (is (= {:close! (:source-close-fn w) :back! (:source-back-fn w)
+                :open! (:source-open-fn w) :jump-back! (:jump-back-fn w)}
+               (dissoc (:source-keys w) :focused?)))))))
