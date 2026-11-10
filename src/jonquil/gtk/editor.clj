@@ -1373,7 +1373,7 @@
 (defn- connect-insert-text!
   "Connects the buffer's insert-text handler, which narrows the spans."
   [{:keys [buf] :as ed}]
-  ;; insert-text and delete-range narrow
+  ;; insert-text and delete-range (connect-delete-range!) narrow
   ;; :edit-bounds. Connected without G_CONNECT_AFTER, both run before
   ;; GTK's default handler, so the iters and the char count are pre-edit.
   ;; Probe 2026-10-14: inserting "XYé" at 3 into "abcdef" read offset
@@ -1394,7 +1394,8 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
 (defn- recovered-prev-text
-  "The pre-action text rebuilt from the cache plus one ranged read, or the full read when the lengths disagree."
+  "The pre-action text rebuilt from the cache plus one ranged read, or
+  the full read when the lengths disagree."
   [{:keys [buf cache os nc]}]
   (let [pt ^String (:text cache)
         m (g/gtk-text-buffer-get-char-count buf)
@@ -1406,7 +1407,8 @@
     (if (= (count rec) m) rec (g/buffer-text buf))))
 
 (defn- snapshot-prev!
-  "Records Parinfer's pre-action text and caret when Parinfer is on."
+  "Records Parinfer's pre-action text and caret when Parinfer is on,
+  and arms :parinfer-span at full length (no edit yet narrowed it)."
   [{:keys [buf] :as ed}]
   (when (parinfer-mode ed)
     (let [cache @(:parinfer-prev-cache ed)
@@ -1517,8 +1519,8 @@
   ;; editor's own window: a transient window (the source panel, F12's
   ;; jump target) can close while either is still running, and both read
   ;; buffer offsets computed against a buffer that no longer exists once
-  ;; the view is gone. Connected ONCE, here, like every other signal in
-  ;; this fn (mirrors jonquil.gtk.source-pane's own "destroy" backstop).
+  ;; the view is gone. Connected ONCE, here, like every other signal
+  ;; make-editor connects (mirrors jonquil.gtk.source-pane's own "destroy" backstop).
   (g/g-signal-connect-data view "destroy"
                            (callable (fn [_view _data] (reset! (:destroyed? ed) true) nil)
                                      [:pointer :pointer] :void)
