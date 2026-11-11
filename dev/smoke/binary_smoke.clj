@@ -874,7 +874,8 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-quit-with-unsaved!
-  "Cmd/Ctrl+Q with unsaved changes. window.clj's `quit-action` gives the
+  "Cmd/Ctrl+Q with unsaved changes. jonquil.gtk.window.quit's `quit-action`
+  gives the
   GtkApplication a \"quit\" action wired to `(gtk-window-close win)`, which
   is exactly the accelerator GTK's macOS delegate takes for Cmd+Q. A
   dirty, unconfirmed close re-enters close-request-fn the same way Cmd+W
@@ -1069,7 +1070,8 @@
             (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))))
 
 (defn- step-close-while-running!
-  "Closing while a program is running. window.clj's Cmd/Ctrl+W branch
+  "Closing while a program is running. jonquil.gtk.window.tabs's Cmd/Ctrl+W
+  branch
   calls gtk_window_close with no evaluating? guard, and the close-request
   handler calls g_application_quit unconditionally -- the eval worker may
   still call on-gui! (g_idle_add) after the window and widgets are gone,

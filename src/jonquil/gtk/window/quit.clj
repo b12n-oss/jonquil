@@ -3,9 +3,10 @@
   and otherwise saves the session, stops the runtime and quits; the close
   alert's choice and Save All; unparenting the popovers before the real quit;
   and connect!, which makes activate!'s close-request connect and its quit
-  action. Internal to the window, as jonquil.gtk.window.status is. Moved out of
-  jonquil.gtk.window unchanged, then close-request-fn's branches split into
-  named steps; connect! holds activate!'s own statements in their order."
+  action. build makes activate!'s close flags. Internal to the window, as
+  jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged,
+  then close-request-fn's branches split into named steps; connect! holds
+  activate!'s own statements in their order."
   (:require [jolt.ffi :as ffi]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [callable]]
@@ -254,3 +255,12 @@
                                        [:pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-action-map-add-action app quit-action)))
+
+(defn build
+  "activate!'s close flags, in activate!'s order: confirmed-close?, and the self-test hooks suppress-close? and closing? (close-request-fn's docstring). Reads nothing from w. Returns w with :confirmed-close? :suppress-close? and :closing? added."
+  [w]
+  (let [confirmed-close? (atom false)
+        ;; Self-test hooks only -- see close-request-fn's docstring.
+        suppress-close? (atom false)
+        closing? (atom false)]
+    (assoc w :confirmed-close? confirmed-close? :suppress-close? suppress-close? :closing? closing?)))

@@ -353,10 +353,11 @@
       (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
 
 (defn row-window-escape-yields-preedit-while-running
-  "With the find bar's own preedit flag set, window.clj's Escape clause
-  must yield (0) too, not just find-bar/handle-key! in isolation -- the
-  clause returns handle-key!'s OWN result directly, so this exercises
-  that through the WINDOW dispatch specifically, with a program running.
+  "With the find bar's own preedit flag set, the Escape clause in
+  jonquil.gtk.window.keys must yield (0) too, not just find-bar/handle-key!
+  in isolation -- the clause returns handle-key!'s OWN result directly, so
+  this exercises that through the WINDOW dispatch specifically, with a
+  program running.
   Starts a real running program, opens the bar, sets preedit-active?
   true, sends window Escape: must return 0, the bar must stay open, and
   the program must still be running."

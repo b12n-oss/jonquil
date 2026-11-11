@@ -1,5 +1,5 @@
 (ns jonquil.gtk.window.theme
-  "Theme and zoom for the window: the one shared GtkCssProvider's code CSS, applying a theme to every tab, the console and GTK's colour scheme, the auto appearance poll, and cycling and saving the choice. build makes activate!'s theme and zoom bindings. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; build holds activate!'s own bindings in their order."
+  "Theme and zoom for the window: the one shared GtkCssProvider's code CSS, applying a theme to every tab, the console and GTK's colour scheme, the auto appearance poll, and cycling and saving the choice. build makes activate!'s theme and zoom bindings, and connect! wires the console and the panels to the theme. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; build holds activate!'s own bindings in their order."
   (:require [jolt.ffi :as ffi]
             [jonquil.commands :as commands]
             [jonquil.gtk.appearance :as appearance]
@@ -9,6 +9,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.gutter :as gutter]
+            [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
@@ -173,3 +175,17 @@
            :system-dark-fn* system-dark-fn* :poll-armed? poll-armed? :arm-count arm-count
            :zoom-fn zoom-fn :theme-ctx theme-ctx :set-theme-fn set-theme-fn
            :cycle-theme-fn cycle-theme-fn)))
+
+(defn connect!
+  "activate!'s theme statements, in activate!'s order: the console view's code CSS class, the one shared provider added to the display, and the source and inspector panels themed now and on every theme change. Called once per window; activate! reads nothing it returns. m holds :cv :provider :theme-name :sp and :pane."
+  [{:keys [cv provider theme-name sp pane]}]
+  ;; One shared GtkCssProvider for the display, added once; both views
+  ;; get the jonquil-code CSS class so a single reload resizes both live.
+  ;; Each tab's view gets the class in jonquil.gtk.tab/make-tab!.
+  (g/gtk-widget-add-css-class (:view cv) "jonquil-code")
+  (g/gtk-style-context-add-provider-for-display
+   (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
+  (source-pane/apply-theme! sp (theme/theme @theme-name))
+  (add-watch theme-name ::source-pane (fn [_ _ _ k] (source-pane/apply-theme! sp (theme/theme k))))
+  (inspector-pane/apply-theme! pane (theme/theme @theme-name))
+  (add-watch theme-name ::inspector-pane (fn [_ _ _ k] (inspector-pane/apply-theme! pane (theme/theme k)))))

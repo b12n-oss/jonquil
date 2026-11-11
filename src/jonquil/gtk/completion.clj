@@ -2,9 +2,10 @@
   "The completion popover: a jonquil.gtk.popover carrying a
   GtkListBox of candidates over a doc-preview label (class jonquil-doc,
   same as jonquil.gtk.help-popover's), anchored to the editor's or the
-  console's view and built once per view by jonquil.gtk.window's activate!
-  -- open!/close!/refine! show, hide and update it for the rest of the
-  session, the popover itself is never rebuilt.
+  console's view and built once per view by jonquil.gtk.window.help (the
+  editor's) and jonquil.gtk.window.console (the console's) -- open!/close!/
+  refine! show, hide and update it for the rest of the session, the popover
+  itself is never rebuilt.
 
   A second instance lives on the console's input region. open!'s
   snapshot argument and refine!'s own :snapshot-fn opt are already generic
@@ -34,10 +35,11 @@
 
   ns-fn (opts, at construction) is only the default :candidates-fn/:doc-fn
   closures' own source of the running namespace, called at every lookup
-  by them, not captured once (same reasoning as window.clj's own
+  by them, not captured once (same reasoning as the window's own
   (ev/prompt-ns @ev*) call sites) -- render!/open!/refine! call
   :candidates-fn/:doc-fn themselves, never docs/candidates or
-  docs/symbol-doc directly, so window.clj can route both through
+  docs/symbol-doc directly, so jonquil.gtk.window.help and
+  jonquil.gtk.window.console can route both through
   jonquil.evaluator instead while ns-fn keeps its old meaning for any
   caller that still passes it.
 
@@ -47,7 +49,7 @@
   way Escape closes any of them -- through the registry, never a pairwise
   special case. It is NOT called from refine! (already-open, only its
   CONTENT changes) or from the single-candidate commit branch (no popover
-  ever shows). on-error (opts) is window.clj's own (fn [msg] ->
+  ever shows). on-error (opts) is the window's own (fn [msg] ->
   set-status!) -- handle-key!'s own try/catch (below) is the only caller.
 
   handle-key! wraps its whole cond in try/catch and still returns 1 on a
@@ -61,7 +63,7 @@
   was entered), the key is consumed regardless of what the owning branch
   does.
 
-  refine! is wired by jonquil.gtk.window into editor/on-cursor-moved!
+  refine! is wired by jonquil.gtk.window.help into editor/on-cursor-moved!
   (the Ln/Col mechanism), not a new editor.clj hook: that signal
   already fires for every insert, delete and mark-set on the insert mark
   (editor.clj's own on-cursor-moved! docstring), which covers BOTH

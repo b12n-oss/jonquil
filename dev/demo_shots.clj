@@ -13,7 +13,8 @@
   window) means a fresh session, a fresh window and an empty console every
   time: each image shows only its own scene, with no earlier scene's
   console history. Window size stays identical across scenes because
-  window.clj opens at a fixed 900x700 default size on every construction,
+  jonquil.gtk.window.layout sets a fixed 900x700 default size on every
+  construction,
   and every scene here still only ever builds one window for its one
   scene, never rebuilding.
 

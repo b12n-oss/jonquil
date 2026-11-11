@@ -226,7 +226,8 @@
 
 (defn row-console-history-down-empty
   "eval/history-next returns \"\" for both an empty history and a
-  not-currently-browsing index; the window.clj adapter must tell those
+  not-currently-browsing index; the jonquil.gtk.window.run adapter must tell
+  those
   apart from a real replacement, or Down erases whatever the user typed.
   Forces a fresh, empty history on THIS window's real session (not a stub)
   so the real adapter -- not console_view.clj's own nil handling, already

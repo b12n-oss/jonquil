@@ -144,7 +144,8 @@
       ;; row in this file. pp is REGISTERED (:register-popover!* above), and
       ;; unparenting a floating-ref GtkWidget drops its last reference and
       ;; finalizes it right there, which would leave a dangling pointer in
-      ;; the window's own registry for the rest of the run: window.clj's own
+      ;; the window's own registry for the rest of the run:
+      ;; jonquil.gtk.window.quit's
       ;; unparent-registered-popovers!, run once for real at close-request-
       ;; fn's real-quit branch, would then call gtk_widget_get_parent on
       ;; that freed pointer and hit "Gtk-CRITICAL: gtk_widget_get_parent:
@@ -237,8 +238,8 @@
   own `user`-missing fallback) and must read as not found -- and,
   since docs/symbol-doc memoises on [ns sym text] and this reuses the
   EXACT SAME key row-quick-doc-run-defined just cached with a real doc,
-  this also depends on window.clj's clear-doc-cache! running after the
-  second Run."
+  this also depends on jonquil.gtk.window.run's clear-doc-cache! running
+  after the second Run."
   [ui]
   (go-row :quick-doc-after-reset support/check
     (let [[defined1? _] (support/run-and-await ui "(defn greet \"Says hi.\" [name] name)" 3000
@@ -347,7 +348,8 @@
   console's Return uses (an interactive insert + handle-return!, never a
   synthesized key), then looks it up again with the IDENTICAL buffer
   text: the memo key ([ns sym text]) is the same both times, so this
-  fails if window.clj's clear-doc-cache! call after a completed REPL eval
+  fails if jonquil.gtk.window.run's clear-doc-cache! call after a completed
+  REPL eval
   is removed (quick-doc-after-reset above depends on the same call site
   for its own Run)."
   [ui]

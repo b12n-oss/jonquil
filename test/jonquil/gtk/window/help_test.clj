@@ -378,3 +378,24 @@
         (is (= {:close! (:source-close-fn w) :back! (:source-back-fn w)
                 :open! (:source-open-fn w) :jump-back! (:jump-back-fn w)}
                (dissoc (:source-keys w) :focused?)))))))
+
+(deftest connect-wires-the-help-test
+  (let [log (atom []) l (fn [x] (swap! log conj x))
+        jump (fn [] :jump) open (fn [] :open) close (fn [] :close) complete (fn [] :complete)]
+    (with-redefs [cview/set-error-fn! (fn [cv f] (l [:console-errors cv]) (f "; boom"))
+                  win-status/set-status! (fn [lab s] (l [:status lab s]))
+                  editor/set-jump-fn! (fn [ed f] (l [:jump ed (identical? f jump)]))
+                  editor/set-error-fn! (fn [ed f] (l [:source-errors ed]) (f "bad"))
+                  source-pane/report! (fn [sp m] (l [:report sp m]))
+                  source-pane/set-handlers! (fn [sp m] (l [:handlers sp (= {:on-open open :on-close close} m)]))
+                  cview/set-completion-fns! (fn [cv m] (l [:completion-fns cv (identical? complete (:complete! m))]))
+                  cview/on-input-changed! (fn [cv _] (l [:input-changed cv]))
+                  cview/on-focus-lost! (fn [cv _] (l [:focus-lost cv]))]
+      (win-help/connect! {:cv ::cv :status-label ::sl :sp {:editor ::sp-ed} :source-jump-fn jump
+                          :source-open-fn open :source-close-fn close
+                          :register-popover-fn (fn [p] (l [:register p])) :pane {:def-popover ::def}
+                          :repl-completion ::completion :repl-complete-fn complete}))
+    (is (= [[:console-errors ::cv] [:status ::sl "; boom"] [:jump ::sp-ed true] [:source-errors ::sp-ed]
+            [:report {:editor ::sp-ed} "bad"] [:handlers {:editor ::sp-ed} true] [:register ::def]
+            [:register ::completion] [:completion-fns ::cv true] [:input-changed ::cv] [:focus-lost ::cv]]
+           @log))))

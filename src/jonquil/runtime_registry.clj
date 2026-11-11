@@ -4,9 +4,10 @@
   still-starting one to finish before System/exit -- no window is left
   holding a child once the process itself is about to end.
 
-  window.clj adds an evaluator (jonquil.evaluator/make's result) as soon
-  as it makes one, and asks to remove it once ev/stop! has run on it,
-  whether that's a real window close (close-request-fn) or an evaluator
+  jonquil.gtk.window.startup/build adds an evaluator
+  (jonquil.evaluator/make's result) as soon as it makes one, and the window
+  asks to remove it once ev/stop! has run on it, whether that's a real
+  window close (close-request-fn) or an evaluator
   swap (opening a file from another runtime, via apply-selection!).
   unregister! only honours that once the evaluator has actually settled:
   ev/stop! (jonquil.nrepl.evaluator) can return while a

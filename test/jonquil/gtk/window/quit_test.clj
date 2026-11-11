@@ -214,3 +214,11 @@
             (on-choice {:index 0}))
           (is (= [[:save "/r/a.clj"] [:select "/r/a.clj"]] @log))
           (is (false? @(:confirmed-close? ctx))))))))
+
+(deftest build-makes-the-close-flags-test
+  (let [w (win-quit/build {:x 1})]
+    (is (= #{:x :confirmed-close? :suppress-close? :closing?} (set (keys w))))
+    (is (= [false false false] (map (comp deref w) [:confirmed-close? :suppress-close? :closing?])))
+    (is (not (identical? (:suppress-close? w) (:closing? w))))
+    (is (not (identical? (:confirmed-close? w) (:suppress-close? w))))
+    (is (not (identical? (:confirmed-close? w) (:closing? w))))))

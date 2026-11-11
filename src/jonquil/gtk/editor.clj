@@ -248,7 +248,7 @@
   "Registers f (fn [] -> nil), the ui's own :quick-doc!* action, to run
   for the editor's quick-doc chords (Ctrl+Q, Shift+F1). A single slot, not
   a list like on-dirty-changed!/on-cursor-moved!/on-focus-lost! above --
-  there is exactly one owner (jonquil.gtk.window's activate!), set once
+  there is exactly one owner (jonquil.gtk.window.tabs's wire-tab!), set once
   after the quick-doc popover and its status wiring exist; ed itself is
   built before those, so this is a late registration, same shape either
   way."
