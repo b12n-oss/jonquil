@@ -116,13 +116,13 @@
 (defn build-console-menu
   "activate!'s console context menu, in activate!'s order: the menu,
   whose items call the same fns their keys do (Complete, Clear Last and
-  the live-results part's four result fns), and the fn that fires one of
+  the live-results part's five result fns), and the fn that fires one of
   its items by name. w holds what they read: :cv :repl-complete-fn
   :clear-last-fn :part-contribution :status-label. Returns w with
   :repl-activate-menu-action-fn added."
   [{:keys [cv repl-complete-fn clear-last-fn part-contribution status-label] :as w}]
   (let [;; The console's context menu is built here, after the parts, because
-      ;; the live-results part answers the four result fns its items call;
+      ;; the live-results part answers the five result fns its items call;
       ;; built earlier those keys were nil.
         console-menu-group
         (win-keys/install-context-menu! (:view cv)
@@ -130,7 +130,7 @@
                                                                  (merge {:complete! repl-complete-fn :clear-last-fn clear-last-fn}
                                                                         (select-keys (:fns part-contribution)
                                                                                      [:result-inspect-fn :result-copy-fn
-                                                                                      :result-define-fn :result-jump-fn])))
+                                                                                      :result-define-fn :result-jump-fn :result-doc-fn])))
                                         (fn [msg] (win-status/set-status! status-label msg)))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))]

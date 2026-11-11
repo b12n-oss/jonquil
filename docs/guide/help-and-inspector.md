@@ -291,10 +291,13 @@ it, and the console's menu and the palette act on that result:
   argument names the runtime that kept it.
 - **Jump to This Var**, for a var such as `#'demo.core/area`, opens its
   definition as F12 does.
+- **Quick Doc for This Var**, for a var, prints the doc quick doc would
+  show into the console, as `;` comment lines under the result, so it
+  stays there to scroll back to.
 
 The kinds are a value, a var, a namespace and an exception. Each verb asks a
-table of what each kind offers before it acts, so Jump to This Var on a
-number says the result isn't a var. The last 100 results are kept; an older
+table of what each kind offers before it acts, so Jump to This Var or Quick
+Doc for This Var on a number says the result isn't a var. The last 100 results are kept; an older
 one, or one kept by a runtime that has since restarted, says it's gone, and
 Define's form throws "That result is gone." for it rather than defining a
 placeholder. Live results come from Jolt, in process or in a

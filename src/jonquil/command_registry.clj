@@ -212,7 +212,8 @@
    {:label (results/label :inspect) :action "result-inspect" :command :result/inspect}
    {:label (results/label :copy) :action "result-copy" :command :result/copy}
    {:label (results/label :define) :action "result-define" :command :result/define}
-   {:label (results/label :jump) :action "result-jump" :command :result/jump}])
+   {:label (results/label :jump) :action "result-jump" :command :result/jump}
+   {:label (results/label :doc) :action "result-doc" :command :result/doc}])
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named

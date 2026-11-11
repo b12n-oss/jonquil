@@ -167,6 +167,30 @@
                                   :input input :none none? :none-status none-status})))
         (finally (on-gtk (cview/clear-input! cv) (to-prompt!)))))))
 
+(defn row-result-quick-doc
+  "The quick-doc verb on a var result prints that var's doc in the console
+  as comment lines; on a value it says the result isn't a var."
+  [ui]
+  (go-row :result-quick-doc support/check
+    (let [cv (:console ui)
+          fire! (:repl-activate-menu-action!* ui)
+          to-prompt! (fn [] (console-caret! ui (g/gtk-text-buffer-get-char-count (:buf cv))))]
+      (try
+        (let [m (enter! ui "#'clojure.core/inc")
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> #'clojure.core/inc")))
+              at (offset-in ui "=> #'clojure.core/inc")
+              d (on-gtk (support/out-end-offset ui))
+              _ (on-gtk (console-caret! ui at) (fire! "result-doc"))
+              printed? (await-until 5000 20 #(re-find #"(?m)^; .*one greater than num" (support/since ui d)))
+              m2 (enter! ui "(+ 40 2)")
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m2) "=> 42")))
+              _ (on-gtk (console-caret! ui (offset-in ui "=> 42")) (fire! "result-doc"))
+              not-var? (await-until 3000 20 #(= "; That result isn't a var." (status ui)))]
+          (on-gtk (support/check :result-quick-doc (and printed? not-var?)
+                                 {:printed printed? :not-var not-var? :since (support/since ui d)
+                                  :status (status ui)})))
+        (finally (on-gtk (cview/clear-input! cv) (to-prompt!)))))))
+
 (defn- widget-xy
   "The console view's widget coordinates of offset's character."
   [ui offset]
