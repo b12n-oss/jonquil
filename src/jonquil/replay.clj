@@ -17,6 +17,13 @@
             [jonquil.last-session :as last-session]
             [jonquil.world :as world]))
 
+(defn remember-session?
+  "Whether a project's evaluations are recorded: the project's own
+  .jonquil.edn :remember-session? when it holds a boolean, else the
+  settings file's, which is on unless it says false."
+  [project global]
+  (if (boolean? project) project (not (false? global))))
+
 (defn empty-record
   "A record with nothing in it."
   []

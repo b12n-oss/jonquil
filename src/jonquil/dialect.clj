@@ -315,6 +315,11 @@
     (str ".jonquil.edn :format-style should be :paren-stable or :plain, not "
          (pr-str fs) ", so it is ignored")))
 
+(defn- remember-session-warning [rs]
+  (when-not (or (nil? rs) (boolean? rs))
+    (str ".jonquil.edn :remember-session? should be true or false, not "
+         (pr-str rs) ", so it is ignored")))
+
 (defn- cljs-warning [cl]
   (when-not (or (nil? cl) (map? cl))
     ".jonquil.edn :cljs should be a map, like {:shadow-build :app}"))
@@ -331,17 +336,20 @@
         pi (get m :parinfer)
         piw (parinfer-warning pi)
         fs (get m :format-style)
-        fsw (format-style-warning fs)]
-    (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw fsw])) nrw)}
+        fsw (format-style-warning fs)
+        rs (get m :remember-session?)
+        rsw (remember-session-warning rs)]
+    (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw fsw rsw])) nrw)}
       ar (assoc :auto-require ar)
       (map? cl) (assoc :cljs cl)
       nr (assoc :nrepl nr)
       (contains? parinfer-modes pi) (assoc :parinfer pi)
-      (contains? format-styles fs) (assoc :format-style fs))))
+      (contains? format-styles fs) (assoc :format-style fs)
+      (boolean? rs) (assoc :remember-session? rs))))
 
 (defn parse-config
   "{:dialect k? :runtime k? :auto-require [sym]? :cljs map? :nrepl map?
-  :warnings [str]}
+  :remember-session? bool? :warnings [str]}
   from .jonquil.edn's text. Never throws: unreadable text, a non-map, a
   non-keyword value, a malformed :auto-require or a non-map :cljs is a
   warning, and the bad part is ignored. :auto-require is present only when
@@ -359,6 +367,16 @@
           (nil? m) {:warnings []}
           (not (map? m)) (bad "should hold a map, like {:dialect :jolt}")
           :else (config-from-map m))))))
+
+(defn project-remember-session
+  "The :remember-session? that the project holding the folder root asks
+  for in its .jonquil.edn, or nil when it names none (or an unusable one),
+  so the settings file decides. The project is the nearest one at or above
+  root, found as a file inside root would find it."
+  [root]
+  (when root
+    (when-let [p (find-project profiles (str (io/file root "_")))]
+      (:remember-session? (parse-config (:config p) (:config-error p))))))
 
 (defn extension
   "The file's extension, lower case, without the dot; nil for none."
