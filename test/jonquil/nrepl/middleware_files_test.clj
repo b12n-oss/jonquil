@@ -92,3 +92,19 @@
   (is (= "/home/u/.cache/jonquil/nrepl-middleware" (files/cache-base {} "/home/u")))
   (is (= "/home/u/.cache/jonquil/nrepl-middleware" (files/cache-base {"XDG_CACHE_HOME" "relative"} "/home/u"))
       "a relative XDG path is invalid, as settings treats one"))
+
+(deftest every-jonquil-require-is-embedded
+  ;; The child loads only these files, so a jonquil namespace one of them
+  ;; requires has to be here too, or the child's load fails.
+  (let [ns-file (fn [sym] (str (-> (name sym) (str/replace "-" "_") (str/replace "." "/")) ".clj"))
+        required (for [[_ text] files/sources
+                       :let [form (read-string text)]
+                       clause (rest form)
+                       :when (and (seq? clause) (= :require (first clause)))
+                       spec (rest clause)
+                       :let [sym (if (vector? spec) (first spec) spec)]
+                       :when (and (symbol? sym) (str/starts-with? (name sym) "jonquil."))]
+                   (ns-file sym))]
+    (is (seq required) "the files do require jonquil namespaces")
+    (is (empty? (remove (set (keys files/sources)) required))
+        (str "required but not embedded: " (vec (distinct (remove (set (keys files/sources)) required)))))))

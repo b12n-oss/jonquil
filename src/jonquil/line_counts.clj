@@ -4,7 +4,8 @@
   file's hits beside its lines. The in-process calls answer a map, never
   a throw, so a Jolt without jolt.profile just says so; the Jolt child
   runs the same calls through its middleware (jonquil-line-counts)."
-  (:require [clojure.java.io :as io]))
+  (:require [clojure.java.io :as io]
+            [jonquil.instrument-lock :as instrument-lock]))
 
 (def NO-API "Line counts need a Jolt with jolt.profile.")
 
@@ -47,19 +48,22 @@
   (if-not (available?)
     {:error NO-API}
     (try
-      (let [was ((requiring-resolve 'jolt.profile/instrument-mode))]
-        ((requiring-resolve 'jolt.profile/instrument!) (if on? :counts false))
-        (cond-> {:on? (boolean on?)}
-          (and on? (= :debug was)) (assoc :was-debug? true)))
+      (locking instrument-lock/lock
+        (let [was ((requiring-resolve 'jolt.profile/instrument-mode))]
+          ((requiring-resolve 'jolt.profile/instrument!) (if on? :counts false))
+          (cond-> {:on? (boolean on?)}
+            (and on? (= :debug was)) (assoc :was-debug? true))))
       (catch Throwable e (err e)))))
 
 (defn toggle!
   "Flips counting, read from the runtime's own mode: on unless it is
-  :counts now. As set-counting!."
+  :counts now. As set-counting!. The read and the set hold
+  jonquil.instrument-lock's lock, so two toggles at once flip it twice."
   []
   (if-not (available?)
     {:error NO-API}
-    (try (set-counting! (not= :counts ((requiring-resolve 'jolt.profile/instrument-mode))))
+    (try (locking instrument-lock/lock
+           (set-counting! (not= :counts ((requiring-resolve 'jolt.profile/instrument-mode)))))
          (catch Throwable e (err e)))))
 
 (defn off-if-counting!
@@ -68,9 +72,10 @@
   calls it: the mode is the whole process's, so it would go on counting
   everything Jonquil compiles."
   []
-  (when (and (available?)
-             (= :counts (try ((requiring-resolve 'jolt.profile/instrument-mode)) (catch Throwable _ nil))))
-    (set-counting! false)))
+  (when (available?)
+    (locking instrument-lock/lock
+      (when (= :counts (try ((requiring-resolve 'jolt.profile/instrument-mode)) (catch Throwable _ nil)))
+        (set-counting! false)))))
 
 (defn clear!
   "Zeroes every counter. {:ok true} or {:error s}."
