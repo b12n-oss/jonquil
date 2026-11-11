@@ -2,7 +2,7 @@
  jonquil.live.jank-live-test
   "Drives jonquil.nrepl.jank against a REAL jank: each evaluator launches
   its own `jank repl` in a private run dir, over one temp project. Run with
-  `bb test:jank`, not `bb test`: it needs a jank binary (JONQUIL_JANK, PATH,
+  `jolt test:jank`, not `jolt test`: it needs a jank binary (JONQUIL_JANK, PATH,
   /opt/homebrew/bin or ~/.local/bin). The runner skips with exit 0 when
   there is none.
 

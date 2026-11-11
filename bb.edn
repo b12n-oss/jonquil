@@ -1,9 +1,8 @@
 ;; Task runner for Jonquil -- a DrRacket-style Clojure IDE written in Jolt.
 ;;
-;; Run these with EITHER `bb <task>` or `jolt <task>`; jolt reads this file
-;; as well as deps.edn, so both runners see the same task list. `bb info`
-;; (or `jolt info`) prints the grouped cheat-sheet; `bb tasks` lists
-;; everything alphabetically.
+;; Run these with `jolt <task>`: jolt reads this file as well as deps.edn,
+;; so the name bb.edn stays though babashka isn't needed. `jolt info` prints
+;; the grouped cheat-sheet; `jolt tasks` lists everything alphabetically.
 ;;
 ;; NOTE: task bodies are EDN-parsed. No #"regex", no @deref, no #(...) --
 ;; use (re-pattern "...") , (deref ...) and (fn [x] ...) instead.
@@ -13,10 +12,6 @@
 
   :init
   (do
-    ;; bb sets babashka.version, jolt sets jolt.version. Only `info` needs
-    ;; this, to print the command the reader actually typed.
-    (def runner (if (System/getProperty "babashka.version") "bb" "jolt"))
-
     (defn lsp-filenames
       "The --filenames scope for clojure-lsp's format and clean-ns commands:
        src, test, and every real dev/*.clj entry, joined with a comma (NOT
@@ -159,6 +154,20 @@
           (str/starts-with? (first in) "--arch=") (recur (next in) out)
           :else (recur (next in) (conj out (first in))))))
 
+    (defn linux-run-split
+      "linux:run's args as [arch-args command]: a leading `--arch A` or
+       `--arch=A`, then an optional `--`, then the command. The `--` is
+       optional because jolt drops the first standalone `--` from a task's
+       args (POSIX end-of-options) where bb keeps it."
+      [args]
+      (loop [in (vec args) opts []]
+        (let [a (first in)]
+          (cond
+            (= a "--arch") (recur (subvec in (min 2 (count in))) (into opts (take 2 in)))
+            (and a (str/starts-with? a "--arch=")) (recur (subvec in 1) (conj opts a))
+            (= a "--") [opts (subvec in 1)]
+            :else [opts in]))))
+
     (defn sh-quote
       "s as one single-quoted word for a POSIX shell."
       [s]
@@ -225,7 +234,9 @@
       "Runs one of the engine's tasks against this project."
       [task & args]
       (if-let [engine (docs-engine-dir)]
-        (let [argv (into ["bb" task (str (fs/cwd))] (remove nil? args))
+        ;; jolt has its own build and run commands, so `jolt run <task>` reaches
+        ;; the engine's task of that name
+        (let [argv (into ["jolt" "run" task (str (fs/cwd))] (remove nil? args))
               res  (apply shell {:dir (str engine) :continue true} argv)]
           (when-not (zero? (:exit res)) (System/exit (:exit res))))
         (do
@@ -242,10 +253,9 @@
    (let [esc (str (char 27) "[")
          col (fn [c s] (str esc c "m" s esc "0m"))
          hdr (fn [s] (println (str "\n" (col "35" (str "── " s " ──")))))
-         row (fn [t d] (println (str "  " (col "36" (format "%-32s" (str runner " " t))) d)))]
+         row (fn [t d] (println (str "  " (col "36" (format "%-32s" (str "jolt " t))) d)))]
      (println (col "1;35" "\nJonquil: a DrRacket-style Clojure IDE written in Jolt"))
-     (println (col "2" (str "  runner: " runner "   ·   both `bb <task>` and `jolt <task>` work")))
-     (hdr "Verify")
+      (hdr "Verify")
      (row "check" "require every project namespace headlessly, exit 0")
      (row "test" "run the unit suite; pass namespace names to run a subset")
      (row "test:nrepl" "live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)")
@@ -295,25 +305,25 @@
      (row "site:clean" "delete the _site/ build output")
      (hdr "Linux (local Docker, no CI)")
      (row "linux:image [--arch A]" "build the jonquil-linux:<arm64|amd64> image (host arch by default)")
-     (row "linux:test [--arch A] [ns...]" "bb test inside the image, on a copy of the checkout")
-     (row "linux:selftest [--arch A]" "bb gtk:selftest inside the image, under Xvfb")
-     (row "linux:build [--arch A]" "bb app:build inside the image; binary lands in target/linux/<A>/")
-     (row "linux:run [--arch A] -- cmd" "run any command in the copied tree inside the image")
+     (row "linux:test [--arch A] [ns...]" "jolt test inside the image, on a copy of the checkout")
+     (row "linux:selftest [--arch A]" "jolt gtk:selftest inside the image, under Xvfb")
+     (row "linux:build [--arch A]" "jolt app:build inside the image; binary lands in target/linux/<A>/")
+     (row "linux:run [--arch A] [--] cmd" "run any command in the copied tree inside the image")
      (row "linux:vnc [--arch A] [--port P]" "a Linux desktop with Jonquil installed, in your browser via noVNC")
      (row "linux:clean" "remove both jonquil-linux images and target/linux")
      (row "clean:tmp [--dry-run]" "delete temp dirs earlier test runs left in java.io.tmpdir")
      (hdr "Upstream")
      (row "upstream:diff" "list upstream DrClojure commits since the pin, touching src/test")
-     (println (str "\n" (col "2" (str "first run: " runner " check, then " runner " test, then " runner " app:run")))))}
+     (println (str "\n" (col "2" "first run: jolt check, then jolt test, then jolt app:run"))))}
 
   test  {:doc "Run tests; pass namespace names to run a subset"
          :task (apply shell "jolt" "-M:test" *command-line-args*)}
   test:nrepl {:doc "Live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)"
               :task (shell "jolt" "-M:test" "--live")}
   test:debugger {:doc "The debugger's tests on a Jolt with jolt.debug (JONQUIL_JOLT_DEBUG, jolt-debug or jolt; skips without one); --no-window leaves out the window self-test"
-                 :task (apply shell "bb" "dev/debugger_check.clj" *command-line-args*)}
+                 :task (apply shell "jolt" "dev/debugger_check.clj" *command-line-args*)}
   test:nightly {:doc "test:nrepl against Jolt's nightly build (downloaded and checked into ~/.cache/jonquil/jolt-nightly; --offline reuses it)"
-                :task (apply shell "bb" "dev/jolt_nightly.clj" *command-line-args*)}
+                :task (apply shell "jolt" "dev/jolt_nightly.clj" *command-line-args*)}
   test:clj {:doc "Live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)"
             :task (shell "jolt" "-M:test" "--live-clj")}
   test:bb {:doc "Live nREPL-dialect tests: start a real bb nrepl-server (need bb on PATH; skips without one)"
@@ -432,16 +442,16 @@
              (finally (fs/delete-tree tmp))))}
   smoke:binary
   {:doc "Automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
-   :task (apply shell "bb" "dev/smoke/binary_smoke.clj" *command-line-args*)}
+   :task (apply shell "jolt" "dev/smoke/binary_smoke.clj" *command-line-args*)}
   mcp:smoke
   {:doc "Smoke of `jonquil --mcp` over real stdio (a checkout; pass --bin PATH for the built binary)"
-   :task (apply shell "bb" "dev/smoke/mcp_smoke.clj" *command-line-args*)}
+   :task (apply shell "jolt" "dev/smoke/mcp_smoke.clj" *command-line-args*)}
   smoke:cljd
   {:doc "Automated smoke of the ClojureDart attach dialect against your running ClojureDart app (dev/smoke/cljd_app.local.edn names it) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
-   :task (apply shell "bb" "dev/smoke/cljd_smoke.clj" *command-line-args*)}
+   :task (apply shell "jolt" "dev/smoke/cljd_smoke.clj" *command-line-args*)}
   smoke:cljs
   {:doc "Smokes the ClojureScript attach dialect against your running shadow-cljs app (dev/smoke/cljs_app.local.edn names it; start the watch and the node script first) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
-   :task (apply shell "bb" "dev/smoke/cljs_smoke.clj" *command-line-args*)}
+   :task (apply shell "jolt" "dev/smoke/cljs_smoke.clj" *command-line-args*)}
   upstream:diff
   {:doc "List upstream DrClojure commits since the pin that touch src or test"
    :task (let [blank->nil (fn [s] (when-not (clojure.string/blank? s) s))
@@ -553,15 +563,15 @@
            (hook-preflight!)
            (spit hook (str "#!/bin/bash\n"
                            "# Jonquil pre-commit (FAST -- clj-kondo errors-only + clojure-lsp format --dry).\n"
-                           "# Full (+ test suite): bb hooks:install:full\n"
-                           "# The format step runs `bb lsp:format-check`, so its file list (lsp-filenames\n"
+                           "# Full (+ test suite): jolt hooks:install:full\n"
+                           "# The format step runs `jolt lsp:format-check`, so its file list (lsp-filenames\n"
                            "# in bb.edn) is computed fresh on every commit.\n"
                            "echo 'pre-commit 1/2: clj-kondo (errors only)'\n"
                            "clj-kondo --lint src test dev\n"
                            "LINT_EXIT=$?\n"
                            "if [ \"$LINT_EXIT\" = \"3\" ]; then echo 'pre-commit: lint errors found'; exit 1; fi\n"
                            "echo 'pre-commit 2/2: clojure-lsp format --dry'\n"
-                           "bb lsp:format-check >/dev/null || { echo 'run bb lsp:format'; exit 1; }\n"
+                           "jolt lsp:format-check >/dev/null || { echo 'run jolt lsp:format'; exit 1; }\n"
                            "exit 0\n"))
            (shell "chmod" "+x" hook)
            (println "OK fast pre-commit hook installed")
@@ -572,13 +582,13 @@
    :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))]
            (hook-preflight!)
            (spit hook (str "#!/bin/bash\n"
-                           "# Jonquil pre-commit (FULL). Fast: bb hooks:install\n"
+                           "# Jonquil pre-commit (FULL). Fast: jolt hooks:install\n"
                            "echo 'pre-commit 1/3: clj-kondo (errors only)'\n"
                            "clj-kondo --lint src test dev\n"
                            "LINT_EXIT=$?\n"
                            "if [ \"$LINT_EXIT\" = \"3\" ]; then echo 'pre-commit: lint errors found'; exit 1; fi\n"
                            "echo 'pre-commit 2/3: clojure-lsp format --dry'\n"
-                           "bb lsp:format-check >/dev/null || { echo 'run bb lsp:format'; exit 1; }\n"
+                           "jolt lsp:format-check >/dev/null || { echo 'run jolt lsp:format'; exit 1; }\n"
                            "echo 'pre-commit 3/3: unit tests'\n"
                            "jolt -M:test\n"
                            "exit $?\n"))
@@ -604,7 +614,7 @@
                port  (or asked (free-port 3000))]
            (if port
              (site-task "serve" (str port))
-             (do (println "No free port in 3000-3020 on 127.0.0.1; pass one: bb site:serve PORT")
+             (do (println "No free port in 3000-3020 on 127.0.0.1; pass one: jolt site:serve PORT")
                  (System/exit 1))))}
 
   site:clean
@@ -617,13 +627,13 @@
            (shell "docker" "build" "--platform" (str "linux/" arch)
                   "-t" (str "jonquil-linux:" arch) "dev/linux"))}
   linux:test
-  {:doc "Run bb test [ns...] in the Linux image on a copy of the checkout (--arch arm64|amd64)"
+  {:doc "Run jolt test [ns...] in the Linux image on a copy of the checkout (--arch arm64|amd64)"
    :task (let [arch (linux-arch *command-line-args*)
                nss  (linux-strip-arch *command-line-args*)]
            (linux-docker {:arch arch
-                          :command (str/join " " (cons "bb test" (map sh-quote nss)))}))}
+                          :command (str/join " " (cons "jolt test" (map sh-quote nss)))}))}
   linux:selftest
-  {:doc "Run bb gtk:selftest under Xvfb in the Linux image (--arch arm64|amd64)"
+  {:doc "Run jolt gtk:selftest under Xvfb in the Linux image (--arch arm64|amd64)"
    :task (let [arch (linux-arch *command-line-args*)
                ;; Another arch than the host's runs under emulation, several
                ;; times slower; rows with a time budget widen it (see
@@ -633,22 +643,20 @@
                           :command (str (when emulated? "JONQUIL_SELFTEST_EMULATED=1 ")
                                         "GDK_BACKEND=x11 xvfb-run -a -s "
                                         (sh-quote "-screen 0 1600x1200x24")
-                                        " bb gtk:selftest")}))}
+                                        " jolt gtk:selftest")}))}
   linux:build
   {:doc "Build the Linux jonquil binary in the image; it lands in target/linux/<arch>/ (--arch arm64|amd64)"
    :task (let [arch (linux-arch *command-line-args*)
                out  (str (fs/absolutize (str "target/linux/" arch)))]
            (fs/create-dirs out)
            (linux-docker {:arch arch :out out
-                          :command "bb app:build && cp jonquil /out/jonquil"}))}
+                          :command "jolt app:build && cp jonquil /out/jonquil"}))}
   linux:run
-  {:doc "Run a command in the copied tree in the Linux image: bb linux:run [--arch A] -- <command...>"
-   :task (let [args (vec *command-line-args*)
-               [before after] (split-with (fn [a] (not= a "--")) args)
-               cmd  (rest after)
-               arch (linux-arch (vec before))]
+  {:doc "Run a command in the copied tree in the Linux image: jolt linux:run [--arch A] [--] <command...>"
+   :task (let [[opts cmd] (linux-run-split *command-line-args*)
+               arch (linux-arch opts)]
            (if (empty? cmd)
-             (do (println "usage: bb linux:run [--arch arm64|amd64] -- <command...>")
+             (do (println "usage: jolt linux:run [--arch arm64|amd64] [--] <command...>")
                  (System/exit 1))
              (linux-docker {:arch arch :command (str/join " " (map sh-quote cmd))})))}
   linux:vnc
@@ -670,7 +678,7 @@
                        :else (do (println (str "--port needs a number, got: " asked)) (System/exit 1)))]
            (if port
              (linux-vnc {:arch arch :port port})
-             (do (println "No free port in 6080-6100; pass one: bb linux:vnc --port P")
+             (do (println "No free port in 6080-6100; pass one: jolt linux:vnc --port P")
                  (System/exit 1))))}
   linux:clean
   {:doc "Remove the jonquil-linux images (both arches) and delete target/linux"

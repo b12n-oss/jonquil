@@ -1,7 +1,7 @@
-;; Runs the live nREPL suite (`jolt -M:test --live`, what `bb test:nrepl`
+;; Runs the live nREPL suite (`jolt -M:test --live`, what `jolt test:nrepl`
 ;; runs) against Jolt's nightly build, the `vnightly` pre-release built daily
 ;; from jolt-lang/jolt main, so a change on Jolt main that breaks Jonquil
-;; shows up before it reaches a release. Run via `bb test:nightly`.
+;; shows up before it reaches a release. Run via `jolt test:nightly`.
 ;;
 ;; The archive is checked against its published .sha256 and unpacked under
 ;; $XDG_CACHE_HOME/jonquil/jolt-nightly/<platform>, or

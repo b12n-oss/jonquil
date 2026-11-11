@@ -2,7 +2,7 @@
   "The nREPL dialect against a real Basilisp nREPL server, which each test
   starts in its own temp project and stops again. Measured against
   Basilisp 0.5.1 (2026-10-18). Run with
-  `bb test:basilisp`; it skips when there's no basilisp (JONQUIL_BASILISP,
+  `jolt test:basilisp`; it skips when there's no basilisp (JONQUIL_BASILISP,
   else basilisp on PATH)."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]

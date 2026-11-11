@@ -8,9 +8,9 @@
 - **GTK4 and pango**. On macOS, `brew install gtk4` pulls in `pango` and
   `glib`. Jonquil loads them at startup rather than linking against them.
   On Linux they come from your distribution; see [Linux](#linux).
-- **[babashka](https://babashka.org)** (`bb`), to run the tasks below
-  (`bb app:run`, `bb app:build`, the tests). The built binary doesn't
-  need it.
+
+Jolt runs the tasks below (`jolt app:run`, `jolt app:build`, the tests) from
+`bb.edn`, so you don't need babashka.
 
 Each other dialect needs one more thing, only when you use it:
 
@@ -36,26 +36,26 @@ Each other dialect needs one more thing, only when you use it:
 ## Running
 
 ```bash
-bb app:run                # opens an empty window
-bb app:run file.clj       # opens file.clj in the Definitions editor
-bb app:run ~/dev/project  # opens a folder: the file tree shows it, ready to pick a file
+jolt app:run                # opens an empty window
+jolt app:run file.clj       # opens file.clj in the Definitions editor
+jolt app:run ~/dev/project  # opens a folder: the file tree shows it, ready to pick a file
 ```
 
 ## Building
 
 ```bash
-bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from the system at startup
+jolt app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from the system at startup
 ```
 
 Then `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` (one tab
-each) and `./jonquil <folder>` work like `bb app:run`, without babashka.
+each) and `./jonquil <folder>` work like `jolt app:run`.
 Jolt is needed only for a project that runs Jolt as a child (one with a
 `deps.edn`), and Jonquil looks for it on your login shell's `PATH`; a
 loose file runs inside the binary itself.
 
 ### The macOS quarantine note
 
-The binary is unsigned on macOS. `bb app:build` prints the fix if you
+The binary is unsigned on macOS. `jolt app:build` prints the fix if you
 need to hand it to someone else:
 
 ```
@@ -68,21 +68,21 @@ Building and running it on the same machine needs neither step.
 ## The macOS app
 
 ```bash
-bb app:bundle    # builds ./jonquil, then ./Jonquil.app from it
-bb app:install   # the same, then moves it to ~/Applications/Jonquil.app and registers it
+jolt app:bundle    # builds ./jonquil, then ./Jonquil.app from it
+jolt app:install   # the same, then moves it to ~/Applications/Jonquil.app and registers it
 ```
 
-`bb app:bundle` writes `./Jonquil.app` (gitignored) with the icon and
+`jolt app:bundle` writes `./Jonquil.app` (gitignored) with the icon and
 identifier `net.b12n.jonquil`. It declares Clojure source and Folder
 document types as Alternate, so Jonquil shows under Open With and as a Dock
-drop target but is never the default app. `bb app:install` replaces an
+drop target but is never the default app. `jolt app:install` replaces an
 existing `~/Applications/Jonquil.app` only if it is a Jonquil bundle.
 
 The app still loads GTK4 and pango from Homebrew, so `brew install gtk4`
 stays a requirement. It isn't notarized either, so the quarantine note
 applies when you copy `Jonquil.app` to another Mac.
 
-After a plain `bb app:bundle`, the checkout's `./Jonquil.app` may show in
+After a plain `jolt app:bundle`, the checkout's `./Jonquil.app` may show in
 Open With next to the installed one. Delete it or run
 `lsregister -u ./Jonquil.app` (it lives under
 `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`).
@@ -126,15 +126,15 @@ Docker on arm64 and amd64, see
 ### Build and install
 
 ```bash
-bb app:build       # writes ./jonquil
-bb app:install     # the same build, then installs it for your user
-bb app:uninstall   # takes it out again
+jolt app:build       # writes ./jonquil
+jolt app:install     # the same build, then installs it for your user
+jolt app:uninstall   # takes it out again
 ```
 
 `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` and
 `./jonquil <folder>` behave as they do on macOS.
 
-`bb app:install` writes four paths, all under `~/.local/share`:
+`jolt app:install` writes four paths, all under `~/.local/share`:
 
 | Path | What it is |
 |---|---|

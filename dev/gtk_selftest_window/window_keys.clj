@@ -201,7 +201,7 @@
   adds a third. Nothing here can catch the GTK-CRITICAL a regression
   would print on its own (it's a log line, not a thrown exception) --
   that's still the gates' own stderr grep -- but this makes sure the
-  exact call sequence actually happens inside a real bb gtk:selftest
+  exact call sequence actually happens inside a real jolt gtk:selftest
   run."
   [ui]
   (go-row :command-chord-close support/check

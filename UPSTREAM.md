@@ -2,7 +2,7 @@
 
 **Repository:** https://github.com/kimtg/DrClojure-Neo  
 **Pinned commit:** [`7056c61`](https://github.com/kimtg/DrClojure-Neo/commit/7056c61e09f8e9ad3c63fc4b1bd9ac35d15ad3ed) (2026-09-28), also in `UPSTREAM_PIN`  
-**Checking for new commits:** `bb upstream:diff` (see [Porting and attribution](docs/guide/porting-and-attribution.md#staying-in-sync))
+**Checking for new commits:** `jolt upstream:diff` (see [Porting and attribution](docs/guide/porting-and-attribution.md#staying-in-sync))
 
 ## Lifted code
 
@@ -48,7 +48,7 @@ and the auto-bracket handlers do, per form instead of whole-buffer (see
 
 To stay current with upstream developments:
 
-1. Run `bb upstream:diff` to list upstream commits that touch `src/` or `test/` since the pin.
+1. Run `jolt upstream:diff` to list upstream commits that touch `src/` or `test/` since the pin.
 2. Review each commit; port what matters to Jonquil.
 3. Bump `UPSTREAM_PIN` to the new commit SHA in the same commit that lands the port.
 
@@ -59,7 +59,7 @@ For the Parinfer engine, a sync is mechanical:
    `line-col->offset`), and nothing else.
 2. `cmp` each `test-resources/parinfer/*.json` against upstream's copy;
    the fixtures are byte-identical on purpose.
-3. Run `bb test jonquil.upstream.parinfer-test`: `run-case` is upstream's
+3. Run `jolt test jonquil.upstream.parinfer-test`: `run-case` is upstream's
    check, and the strict checks beside it compare tab stops, paren trails
    and error positions wherever a fixture states them.
 4. The `array-slice` delta leaves when Jonquil's minimum Jolt reaches a

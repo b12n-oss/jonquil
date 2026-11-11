@@ -661,7 +661,7 @@
 ;; row-command-chord-close is the only way out of the run, so a REGRESSION in
 ;; the close chord (on-window-key stops matching KEY-W, close-fn stops
 ;; being wired, etc.) would leave the g_application main loop running
-;; forever with nothing to stop it -- hanging `bb gtk:selftest` instead of
+;; forever with nothing to stop it -- hanging `jolt gtk:selftest` instead of
 ;; failing it. window-destroyed? is set by a "destroy" signal this file
 ;; connects on the window itself (-main, below), independent of
 ;; jonquil.gtk.window.quit's close-request wiring: a plain Clojure atom
@@ -673,7 +673,7 @@
 ;; reached the end of row-fns. An early g_application_quit (a row that
 ;; really closes or quits) ends g_application_run with the remaining rows
 ;; never run and no SUMMARY, and every result recorded so far can still be
-;; a PASS and -main would exit 0, while `bb gtk:selftest` reads only
+;; a PASS and -main would exit 0, while `jolt gtk:selftest` reads only
 ;; exit codes.
 (defonce ^:private finished? (atom false))
 

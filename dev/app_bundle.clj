@@ -1,7 +1,7 @@
 (ns app-bundle
   "Builds ./Jonquil.app from the ./jonquil binary and installs it.
 
-  Run as `jolt -M:bundle -m app-bundle <bundle|install>` (the bb tasks
+  Run as `jolt -M:bundle -m app-bundle <bundle|install>` (the jolt tasks
   app:bundle and app:install do, after rebuilding ./jonquil). The bundle is
   not re-signed: `jolt build` appends the program image after the launcher's
   Mach-O, which makes `codesign --force` fail strict validation, and the
@@ -102,7 +102,7 @@
 
 (defn bundle! []
   (when-not (.isFile (io/file "jonquil"))
-    (fail! "./jonquil is missing; run `bb app:build` first (or use `bb app:bundle`)"))
+    (fail! "./jonquil is missing; run `jolt app:build` first (or use `jolt app:bundle`)"))
   (p/sh "rm" "-rf" bundle-dir)
   (copy! "jonquil" (str bundle-dir "/Contents/MacOS/jonquil"))
   (.setExecutable (io/file bundle-dir "Contents/MacOS/jonquil") true)
@@ -119,7 +119,7 @@
   (let [dest (str (System/getProperty "user.home") "/Applications/" bundle-dir)
         existing (io/file dest)]
     (when-not (.isDirectory (io/file bundle-dir))
-      (fail! "./Jonquil.app is missing; run `bb app:bundle` first"))
+      (fail! "./Jonquil.app is missing; run `jolt app:bundle` first"))
     (when (.exists existing)
       (let [r (p/sh "plutil" "-convert" "xml1" "-o" "-" (str dest "/Contents/Info.plist"))]
         (when-not (and (zero? (:exit r)) (replaceable? (:out r)))
@@ -145,7 +145,7 @@
 (defn -main [& args]
   (case (or (first args) "bundle")
     "bundle" (if (linux?)
-               (fail! "app:bundle builds a macOS .app; on Linux use bb app:install")
+               (fail! "app:bundle builds a macOS .app; on Linux use jolt app:install")
                (bundle!))
     "install" (if (linux?)
                 (let [status (app-linux/install! {:home (System/getProperty "user.home")

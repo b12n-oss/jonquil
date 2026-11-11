@@ -18,8 +18,8 @@
     (let [dir (temp-dirs/temp-dir! "jonquil-mcp-test-")
           settings-path (str (io/file (temp-dirs/temp-dir! "jonquil-mcp-test-") "settings.edn"))]
       (spit (io/file dir "deps.edn") "{}")
-      ;; In process, so bb test starts no Jolt child (a deps.edn project
-      ;; otherwise runs out of process; bb mcp:smoke covers that path).
+      ;; In process, so jolt test starts no Jolt child (a deps.edn project
+      ;; otherwise runs out of process; jolt mcp:smoke covers that path).
       (spit (io/file dir ".jonquil.edn") "{:runtime :in-process}")
       {:dir dir
        :t (tools/make-tools {:dir dir :settings-path settings-path})})))

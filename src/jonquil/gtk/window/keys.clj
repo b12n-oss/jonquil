@@ -23,7 +23,7 @@
   "F6 (Jonquil's own key): moves focus between the editor and
   console panes. Compares gtk_root_get_focus's FOCUS WIDGET pointer, not
   gtk_widget_has_focus -- measured: has_focus reads false on a window that isn't the OS key window, which a
-  self-test window (and bb gtk:selftest's own window) usually isn't. When
+  self-test window (and jolt gtk:selftest's own window) usually isn't. When
   the console gets focus, cview/focus! also places its cursor at the end
   of the input."
   [win ed cv]

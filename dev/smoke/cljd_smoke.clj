@@ -1,7 +1,7 @@
 ;; Drives the BUILT Jonquil binary, via cgevent --pid, to
 ;; smoke the ClojureDart attach dialect against the user's REAL, running
-;; ClojureDart app (named by dev/smoke/cljd_app.local.edn). Run via `bb smoke:cljd` (see
-;; bb.edn); a plain babashka script, not a jolt namespace, exactly like
+;; ClojureDart app (named by dev/smoke/cljd_app.local.edn). Run via `jolt smoke:cljd` (see
+;; bb.edn); a plain jolt script, not a Jonquil namespace, exactly like
 ;; dev/smoke/binary_smoke.clj -- it never touches the app or Jonquil from
 ;; the inside, only from outside via cgevent, a raw TCP connect check, and
 ;; the filesystem (read-only against the app's own files).

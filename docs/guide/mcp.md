@@ -96,7 +96,7 @@ The window serves its launch project. Run on another project's tab is
 refused, though `jonquil_run_selection` still moves the visible selection.
 
 When the client disconnects (EOF on stdin) the window closes and unsaved edits
-are discarded, so have the agent `jonquil_save` first. `bb mcp:smoke --window`
+are discarded, so have the agent `jonquil_save` first. `jolt mcp:smoke --window`
 exercises all of this end to end.
 
 The trust boundary is the headless server's, plus the files the window can
@@ -183,7 +183,7 @@ A window registers the folder it opened on; Open Folder re-roots both.
 Detaching leaves the window running with its tabs and unsaved edits, unlike
 `--window`, where EOF closes it. If the relay loses its connection it writes a
 line to stderr and exits. A crashed window's leftover entry is recognized by
-its dead pid and skipped. `bb mcp:smoke --attach` exercises all of this end to
+its dead pid and skipped. `jolt mcp:smoke --attach` exercises all of this end to
 end.
 
 </details>

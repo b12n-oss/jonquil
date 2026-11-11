@@ -71,7 +71,7 @@
 
 (defn- fresh-settings-path
   "A settings.edn under a fresh temp directory (one per
-  process -- bb docs:shots launches a fresh `jolt -M:shots <scene-id>`
+  process -- jolt docs:shots launches a fresh `jolt -M:shots <scene-id>`
   process per scene, so this is also one per scene), never the user's real
   $XDG_CONFIG_HOME/jonquil. No file exists there yet, so activate!'s
   startup load defaults to :light -- every scene starts in :light."
@@ -550,7 +550,7 @@
 ;; -main starts through dev/clj_server.clj before the window opens, in a
 ;; temp project with .jonquil.edn {:dialect :clj}, and stops after the
 ;; window closes. They need Java 17+ and the clojure CLI, the same as
-;; bb test:clj. Each scene sets its own buffer text (set-text! never marks
+;; jolt test:clj. Each scene sets its own buffer text (set-text! never marks
 ;; the buffer dirty, so the window still closes without a prompt), and
 ;; Run loads that text into the server.
 
@@ -850,7 +850,7 @@
 ;; --- nREPL dialect scene (babashka) -----------------------------------------
 ;; Runs against a REAL `bb nrepl-server`, started by -main on a free port in a
 ;; temp project whose .jonquil.edn names that port (bb writes no port file),
-;; and stopped once the window closes, the same way bb test:bb does it.
+;; and stopped once the window closes, the same way jolt test:bb does it.
 
 (def ^:private nrepl-bb-demo-text
   "(ns demo.core)

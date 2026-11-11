@@ -33,7 +33,7 @@ works, the languages Jonquil runs, and how it's put together.
    - [Lisp Machine ideas, and Emacs](lisp-machine.md): where Describe
      Key, the locations list and timing a form come from, and how Jonquil
      compares with Emacs.
-3. **[Development](development.md)**: the task groups `bb info` prints,
+3. **[Development](development.md)**: the task groups `jolt info` prints,
    the unit suite, the self-test and binary-smoke harnesses, screenshots,
    and lint, format, and the git hooks.
 4. **[Architecture](architecture/index.md)**: the namespace layers, why GTK is
