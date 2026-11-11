@@ -26,6 +26,7 @@
             [jonquil.gtk.parts.worlds :as worlds-part]
             [jonquil.palette :as palette]
             [jonquil.plugin-registry :as plugin-registry]
+            [jonquil.replay :as replay]
             [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
 
@@ -79,15 +80,15 @@
 (deftest registry-tables-hold-the-specs
   (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
-            :panel/processes :processes/show
-          :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
-          :result/inspect :result/copy :result/define :result/jump
-          :panel/locations :locations/uses :locations/definitions :locations/matches
-          :locations/usages-in-project :locations/next :locations/previous
-          :compare/disk :compare/head :compare/take
-          :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
-          :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
-          :palette/open :help/describe-key :help/key-bindings :help/recent-keys}
+           :panel/processes :processes/show
+           :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
+           :result/inspect :result/copy :result/define :result/jump
+           :panel/locations :locations/uses :locations/definitions :locations/matches
+           :locations/usages-in-project :locations/next :locations/previous
+           :compare/disk :compare/head :compare/take
+           :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
+           :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
+           :palette/open :help/describe-key :help/key-bindings :help/recent-keys}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -245,6 +246,82 @@
     (is (some? (first @seen)))
     (is (= 1 (count (distinct @seen))) "every scheduled save reuses one callable")))
 
+(defn- record-env
+  "ctx for record-eval! with window state st, replay tab rt and the
+  evaluator's history items; log collects the stubbed effects."
+  [st rt items]
+  (let [h (atom {:items items})]
+    {:cv {:replay-tab* (atom rt)}
+     :ev* (atom #_{:clj-kondo/ignore [:missing-protocol-method]}
+           (reify ev/Evaluator (history [_] h)))
+     :sel* (atom {:profile {:id :jolt :name "Jolt"}})
+     :settings-path* (atom "settings.edn")
+     :replay* (atom st)}))
+
+(defn- run-record!
+  "Runs record-eval! with remember-session? answering remember?, the save
+  schedule and append-to-root! logged. Returns [ret log]."
+  [ctx remember? record result]
+  (let [log (atom [])]
+    (with-redefs-fn {#'replay-part/remember-session? (fn [_] remember?)
+                     #'replay-part/schedule-replay-save! (fn [_] (swap! log conj [:schedule]) nil)
+                     #'replay-part/append-to-root! (fn [_ root es opts]
+                                                     (swap! log conj [:append root (mapv :text es) opts])
+                                                     nil)}
+      (fn [] [(@#'replay-part/record-eval! ctx record result) @log]))))
+
+(defn- texts [st k] (mapv :text (get-in st [:record k])))
+
+(def ^:private prev-es
+  (replay/entries {:source :repl :code "(+ 1 2) (f)" :at 1 :dialect "Jolt"}))
+
+(deftest record-eval-off-does-nothing
+  (let [st {:root "/r/a" :path "p" :record (replay/empty-record) :dirty? false}
+        ctx (record-env st nil ["(a)"])
+        [ret log] (run-record! ctx false {:source :repl :root "/r/a" :code "(x)"} {:status :ok})]
+    (is (nil? ret))
+    (is (= [] log))
+    (is (= st @(:replay* ctx)))))
+
+(deftest record-eval-files-in-the-window
+  (let [ctx (record-env {:root "/r/a" :path "p" :record (replay/empty-record) :dirty? false} nil ["(a)" "(b)"])
+        [_ log] (run-record! ctx true {:source :repl :root "/r/a" :code "(x) (y)"} {:status :ok})
+        st @(:replay* ctx)]
+    (is (= [[:schedule]] log))
+    (is (= ["(x)" "(y)"] (texts st :current)))
+    (is (= ["(a)" "(b)"] (get-in st [:record :history])))
+    (is (true? (:dirty? st)))))
+
+(deftest record-eval-other-root-appends
+  (let [st {:root "/r/b" :path "p" :record (replay/empty-record) :dirty? false}
+        ctx (record-env st nil [])
+        [_ log] (run-record! ctx true {:source :repl :root "/r/a" :code "(x)"} {:status :error})]
+    (is (= [[:append "/r/a" [] {:forget? false :run-text "(x)"}]] log))
+    (is (= st @(:replay* ctx)) "an error files nothing and leaves the window's record")))
+
+(deftest record-eval-replay-run-forgets-its-own-root
+  (let [ctx (record-env {:root "/r/a" :path "p" :dirty? false
+                         :record (assoc (replay/empty-record) :previous prev-es)}
+                        {:id 1 :root "/r/a"} [])
+        [_ log] (run-record! ctx true {:source :run :tab-id 1 :root "/r/a" :code "#_(f) (def x 1)"}
+                             {:status :ok})
+        st @(:replay* ctx)]
+    (is (= [[:schedule]] log))
+    (is (= [] (texts st :previous)))
+    (is (= ["(f)" "(def x 1)"] (texts st :current)) "the skipped form is carried ahead of the run's own")))
+
+(deftest record-eval-replay-run-forgets-the-tab-root
+  (let [ctx (record-env {:root "/r/b" :path "p" :dirty? false
+                         :record (assoc (replay/empty-record) :previous prev-es)}
+                        {:id 1 :root "/r/b"} [])
+        [_ log] (run-record! ctx true {:source :run :tab-id 1 :root "/r/a" :code "#_(f) (def x 1)"}
+                             {:status :ok})
+        st @(:replay* ctx)]
+    (is (= [[:append "/r/a" ["(def x 1)"] {:forget? false :run-text "#_(f) (def x 1)"}] [:schedule]] log))
+    (is (= [] (texts st :previous)))
+    (is (= ["(f)"] (texts st :current)))
+    (is (true? (:dirty? st)))))
+
 (deftest replay-is-the-last-part
   (is (= :replay (:id (last parts/specs)))))
 
@@ -393,7 +470,7 @@
 (deftest palette-labels-hold-the-core-panels
   (is (= "Processes" (:processes palette/PANEL-LABELS)))
   (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
-            :debugger "Frames" :plugins "Plugins" :messages "Messages"
+          :debugger "Frames" :plugins "Plugins" :messages "Messages"
           :processes "Processes" :trace "Trace"}
          palette/PANEL-LABELS)))
 

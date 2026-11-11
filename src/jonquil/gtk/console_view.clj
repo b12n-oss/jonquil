@@ -909,6 +909,130 @@
       (g/gtk-text-buffer-create-mark buf mark-name it (if left-gravity? 1 0))
       (finally (ffi/free it)))))
 
+(defn- set-up-view!
+  "Gives the console its read-only tag, margins, wrapping and scroller."
+  [{:keys [view buf scroll readonly-tag]}]
+  (g/set-bool-property! readonly-tag "editable" false)
+  (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) readonly-tag)
+  (g/gtk-text-view-set-editable view 1)
+  (g/gtk-text-view-set-monospace view 1)
+  (g/gtk-text-view-set-left-margin view 8)
+  (g/gtk-text-view-set-top-margin view 4)
+  ;; GTK_WRAP_NONE let any line wider than
+  ;; the view open a horizontal scroll range, and scroll-to-end!'s xalign
+  ;; 0.0 then scrolled right past the prompt on every drain, clipping
+  ;; every later line by its width. Word-char wrap removes the range
+  ;; outright, so xalign has nothing left to move. The editor stays
+  ;; unwrapped -- code editing expects that -- so this is console-only.
+  (g/gtk-text-view-set-wrap-mode view g/GTK-WRAP-WORD-CHAR)
+  (g/gtk-scrolled-window-set-child scroll view))
+
+(defn- insert-default-prompt!
+  "Writes the default prompt, tags it, and parks the caret after it."
+  [buf readonly-tag tags]
+  (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a default-prompt -1)))
+  (g/with-iters* buf 0 (count default-prompt)
+    (fn [a b]
+      (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
+      (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
+  (g/with-iters* buf (count default-prompt) (count default-prompt)
+    (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+
+(defn- console-state
+  "The console's state map: its marks, queues and registrations."
+  [{:keys [view buf scroll tags readonly-tag on-submit history-prev history-next
+           evaluating? waiting?]}]
+  {:view view
+   :buf buf
+   :scroll scroll
+   :tags tags
+   :readonly-tag readonly-tag
+   :prompt-text (atom default-prompt)
+   :out-end (create-mark! buf "jonquil-console-out-end" 0 false)
+   :input-start (create-mark! buf "jonquil-console-input-start" (count default-prompt) true)
+   :end-mark (create-mark! buf "jonquil-console-scroll-end" (count default-prompt) false)
+   ;; Cmd/Ctrl+Shift+L: left gravity, like input-start -- text
+   ;; inserted at its own position (this entry's own output,
+   ;; landing right where it sits) must end up AFTER it, so the
+   ;; mark stays fixed at the entry's start throughout its own
+   ;; lifetime. :last-entry-active? is false until mark-entry-
+   ;; start! first arms it; see that fn's own docstring.
+   :last-entry-start (create-mark! buf "jonquil-console-last-entry-start" 0 true)
+   :last-entry-active? (atom false) :prev-entry (atom nil)
+   :queue (atom [])
+   ;; live results (LM1): [{:start :end :ref :text}], oldest first
+   :results (atom [])
+   :drain-scheduled? (atom false)
+   :waiting? waiting?
+   :evaluating? evaluating?
+   :busy-hint-shown? (atom false)
+   :run-start-input (atom "")
+   :leftover (atom nil)
+   :preedit-active? (atom false)
+   :on-submit on-submit
+   :history-prev history-prev
+   :history-next history-next
+   ;; Single-slot completion registration (set-
+   ;; completion-fns!) plus the on-input-changed!/on-focus-
+   ;; lost! registration lists -- see the ns docstring.
+   :completion-fns (atom nil)
+   :on-input-fns (atom [])
+   :on-focus-fns (atom [])
+   ;; Single-slot registration for error reporting -- see
+   ;; set-error-fn!. nil until jonquil.gtk.window wires it.
+   :on-error-fn (atom nil)})
+
+(defn- connect-input!
+  "Connects the key controller (capture phase) and the preedit signal."
+  [{:keys [view] :as cv} keyctl]
+  (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
+  (g/g-signal-connect-data keyctl "key-pressed"
+                           (callable (on-key cv) [:pointer :uint :uint :uint :pointer] :int)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller view keyctl)
+  ;; Same GtkTextView::preedit-changed signal as editor.clj (see
+  ;; that namespace's citation for the exact gir/header sourcing).
+  (g/g-signal-connect-data view "preedit-changed"
+                           (callable (fn [_view preedit _data]
+                                       (reset! (:preedit-active? cv) (not (empty? preedit)))
+                                       nil)
+                                     [:pointer :string :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-notify!
+  "Connects the cursor-position notify and the focus controller's leave."
+  [{:keys [view buf] :as cv} focusctl]
+  ;; The buffer's own "notify::cursor-position" property notify
+  ;; (covers typing, deletion and every mark-set case in one signal)
+  ;; drives on-input-
+  ;; changed!'s registrants -- the console's own refine!/close! trigger
+  ;; for its REPL completion popup.
+  (g/g-signal-connect-data buf "notify::cursor-position"
+                           (callable (fn [_buf _pspec _data]
+                                       (doseq [f @(:on-input-fns cv)]
+                                         (try
+                                           (f)
+                                           (catch :default e
+                                             (when-let [ef @(:on-error-fn cv)]
+                                               (ef (str "; cursor: " (ex-message e)))))))
+                                       nil)
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  ;; Mirrors jonquil.gtk.editor/make-editor's own focusctl wiring
+  ;; -- see on-focus-lost!'s own docstring.
+  (g/g-signal-connect-data focusctl "leave"
+                           (callable (fn [_ctl _data]
+                                       (doseq [f @(:on-focus-fns cv)]
+                                         (try
+                                           (f)
+                                           (catch :default e
+                                             (when-let [ef @(:on-error-fn cv)]
+                                               (ef (str "; focus: " (ex-message e)))))))
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller view focusctl))
+
 (defn make-console-view
   "Builds the console: an editable, monospace GtkTextView with an 8px left /
   4px top margin, inside a GtkScrolledWindow, starting as a bare
@@ -935,107 +1059,12 @@
         focusctl (g/gtk-event-controller-focus-new)
         tags (make-tags! buf)
         readonly-tag (g/gtk-text-tag-new "console-readonly")]
-    (g/set-bool-property! readonly-tag "editable" false)
-    (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) readonly-tag)
-    (g/gtk-text-view-set-editable view 1)
-    (g/gtk-text-view-set-monospace view 1)
-    (g/gtk-text-view-set-left-margin view 8)
-    (g/gtk-text-view-set-top-margin view 4)
-    ;; GTK_WRAP_NONE let any line wider than
-    ;; the view open a horizontal scroll range, and scroll-to-end!'s xalign
-    ;; 0.0 then scrolled right past the prompt on every drain, clipping
-    ;; every later line by its width. Word-char wrap removes the range
-    ;; outright, so xalign has nothing left to move. The editor stays
-    ;; unwrapped -- code editing expects that -- so this is console-only.
-    (g/gtk-text-view-set-wrap-mode view g/GTK-WRAP-WORD-CHAR)
-    (g/gtk-scrolled-window-set-child scroll view)
-    (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a default-prompt -1)))
-    (g/with-iters* buf 0 (count default-prompt)
-      (fn [a b]
-        (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
-        (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
-    (g/with-iters* buf (count default-prompt) (count default-prompt)
-      (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
-    (let [cv {:view view
-              :buf buf
-              :scroll scroll
-              :tags tags
-              :readonly-tag readonly-tag
-              :prompt-text (atom default-prompt)
-              :out-end (create-mark! buf "jonquil-console-out-end" 0 false)
-              :input-start (create-mark! buf "jonquil-console-input-start" (count default-prompt) true)
-              :end-mark (create-mark! buf "jonquil-console-scroll-end" (count default-prompt) false)
-              ;; Cmd/Ctrl+Shift+L: left gravity, like input-start -- text
-              ;; inserted at its own position (this entry's own output,
-              ;; landing right where it sits) must end up AFTER it, so the
-              ;; mark stays fixed at the entry's start throughout its own
-              ;; lifetime. :last-entry-active? is false until mark-entry-
-              ;; start! first arms it; see that fn's own docstring.
-              :last-entry-start (create-mark! buf "jonquil-console-last-entry-start" 0 true)
-              :last-entry-active? (atom false) :prev-entry (atom nil)
-              :queue (atom [])
-              ;; live results (LM1): [{:start :end :ref :text}], oldest first
-              :results (atom [])
-              :drain-scheduled? (atom false)
-              :waiting? waiting?
-              :evaluating? evaluating?
-              :busy-hint-shown? (atom false)
-              :run-start-input (atom "")
-              :leftover (atom nil)
-              :preedit-active? (atom false)
-              :on-submit on-submit
-              :history-prev history-prev
-              :history-next history-next
-              ;; Single-slot completion registration (set-
-              ;; completion-fns!) plus the on-input-changed!/on-focus-
-              ;; lost! registration lists -- see the ns docstring.
-              :completion-fns (atom nil)
-              :on-input-fns (atom [])
-              :on-focus-fns (atom [])
-              ;; Single-slot registration for error reporting -- see
-              ;; set-error-fn!. nil until jonquil.gtk.window wires it.
-              :on-error-fn (atom nil)}]
-      (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
-      (g/g-signal-connect-data keyctl "key-pressed"
-                               (callable (on-key cv) [:pointer :uint :uint :uint :pointer] :int)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      (g/gtk-widget-add-controller view keyctl)
-      ;; Same GtkTextView::preedit-changed signal as editor.clj (see
-      ;; that namespace's citation for the exact gir/header sourcing).
-      (g/g-signal-connect-data view "preedit-changed"
-                               (callable (fn [_view preedit _data]
-                                           (reset! (:preedit-active? cv) (not (empty? preedit)))
-                                           nil)
-                                         [:pointer :string :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      ;; The buffer's own "notify::cursor-position" property notify
-      ;; (covers typing, deletion and every mark-set case in one signal)
-      ;; drives on-input-
-      ;; changed!'s registrants -- the console's own refine!/close! trigger
-      ;; for its REPL completion popup.
-      (g/g-signal-connect-data buf "notify::cursor-position"
-                               (callable (fn [_buf _pspec _data]
-                                           (doseq [f @(:on-input-fns cv)]
-                                             (try
-                                               (f)
-                                               (catch :default e
-                                                 (when-let [ef @(:on-error-fn cv)]
-                                                   (ef (str "; cursor: " (ex-message e)))))))
-                                           nil)
-                                         [:pointer :pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      ;; Mirrors jonquil.gtk.editor/make-editor's own focusctl wiring
-      ;; -- see on-focus-lost!'s own docstring.
-      (g/g-signal-connect-data focusctl "leave"
-                               (callable (fn [_ctl _data]
-                                           (doseq [f @(:on-focus-fns cv)]
-                                             (try
-                                               (f)
-                                               (catch :default e
-                                                 (when-let [ef @(:on-error-fn cv)]
-                                                   (ef (str "; focus: " (ex-message e)))))))
-                                           nil)
-                                         [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT)
-      (g/gtk-widget-add-controller view focusctl)
+    (set-up-view! {:view view :buf buf :scroll scroll :readonly-tag readonly-tag})
+    (insert-default-prompt! buf readonly-tag tags)
+    (let [cv (console-state {:view view :buf buf :scroll scroll :tags tags
+                             :readonly-tag readonly-tag :on-submit on-submit
+                             :history-prev history-prev :history-next history-next
+                             :evaluating? evaluating? :waiting? waiting?})]
+      (connect-input! cv keyctl)
+      (connect-notify! cv focusctl)
       cv)))

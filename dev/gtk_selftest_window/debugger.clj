@@ -57,6 +57,36 @@
                           {:rows rows :title title :rows2 rows2 :calls @calls :cleared cleared?})))
         (finally (on-gtk (g/gtk-window-close win)))))))
 
+(defn row-debugger-pane-wiring
+  "Each restart button reaches :on-restart with its id, Close reaches
+  :on-close, and a throw in a handler lands on the footer."
+  [_ui]
+  (go-row :debugger-pane-wiring support/check
+    (let [{:keys [win pane]} (on-gtk (let [win (g/gtk-window-new)
+                                           pane (dpane/make-pane)]
+                                       (g/gtk-window-set-child win (:root pane))
+                                       (g/gtk-window-present win)
+                                       {:win win :pane pane}))
+          calls (atom [])]
+      (try
+        (await-until 2000 20 #(pos? (g/gtk-widget-get-width (:root pane))))
+        (on-gtk
+         (reset! (:on-restart pane) (fn [id] (swap! calls conj [:restart id])))
+         (doseq [id [:retry :edit :define :continue]]
+           (g/g-signal-emit-by-name (get (:restart-btns pane) id) "clicked"))
+         (dpane/set-handlers! pane {:on-close (fn [] (swap! calls conj [:close]))})
+         (g/g-signal-emit-by-name (:close-btn pane) "clicked")
+         (dpane/set-handlers! pane {:on-close (fn [] (throw (ex-info "boom" {})))})
+         (g/g-signal-emit-by-name (:close-btn pane) "clicked")
+         (let [footer (dpane/footer-text pane)]
+           (support/check :debugger-pane-wiring
+                          (and (= [[:restart :retry] [:restart :edit] [:restart :define]
+                                   [:restart :continue] [:close]]
+                                  @calls)
+                               (= "; boom" footer))
+                          {:calls @calls :footer footer})))
+        (finally (on-gtk (g/gtk-window-close win)))))))
+
 ;; --- the real window -----------------------------------------------------
 
 (defn- run-palette!

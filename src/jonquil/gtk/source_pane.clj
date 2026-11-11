@@ -62,8 +62,9 @@
 (defn- rect-visible?
   "True when rect (g/caret-window-rect's own [x y w h], TEXT-window
   coordinates) falls entirely inside a view of view-height pixels. The
-  one shared check behind caret-visible?, below, and make-pane's own
-  pre-pane scroll-settle-cb (which closes over the editor directly, not
+  one shared check behind caret-visible?, below, and the pre-pane
+  scroll-settle callback built in make-pane (the body is
+  scroll-settle-callback, which closes over the editor directly, not
   pane -- see its own comment)."
   [[_ y _ h] view-height]
   (and (>= y 0) (<= (+ y h) view-height)))
@@ -94,13 +95,13 @@
   through hide-right-panel!, not by calling this a second time. Takes the
   pane's own scroll-cancelled? atom directly, not pane itself, since two
   of its callers -- the scroll controller's handler and the cursor-moved
-  hook, both wired in make-pane -- are built before pane exists (same
-  reasoning as scroll-settle-cb closing over ed instead of pane); the
-  panel editor view's own \"destroy\" handler (also make-pane) and
-  jonquil.gtk.window both reach it through the pane's public
-  :scroll-cancelled? key instead. arm-scroll-settle! resets it back to
-  false on every fresh jump, so a later place-caret! isn't short-circuited
-  by an earlier cancel."
+  hook, both wired in connect-scroll-cancels! -- are built before pane
+  exists (same reasoning as scroll-settle-cb closing over ed instead of
+  pane); the panel editor view's own \"destroy\" handler (also
+  connect-scroll-cancels!) and jonquil.gtk.window both reach it through
+  the pane's public :scroll-cancelled? key instead. arm-scroll-settle!
+  resets it back to false on every fresh jump, so a later place-caret!
+  isn't short-circuited by an earlier cancel."
   [cancelled?-atom]
   (reset! cancelled?-atom true)
   nil)
@@ -234,6 +235,88 @@
          (catch :default e (report! pane (str "; " (ex-message e)))))
     nil))
 
+(defn- scroll-settle-callback
+  "The scroll-settle timer's callable, built once per pane over its editor,
+  footer and the shared atoms."
+  [{:keys [ed footer scroll-deadline scroll-armed? scroll-cancelled?]}]
+  (callable (fn [_data]
+              (try
+                (if (or @scroll-cancelled?
+                        (rect-visible? (g/caret-window-rect (:view ed)) (g/gtk-widget-get-height (:view ed)))
+                        (>= (System/nanoTime) @scroll-deadline))
+                  (do (reset! scroll-armed? false) 0) ;; G_SOURCE_REMOVE
+                  (do (rescroll! ed) 1)) ;; G_SOURCE_CONTINUE
+                (catch :default e
+                  (reset! scroll-armed? false)
+                  (g/gtk-label-set-text footer (str "; " (ex-message e)))
+                  0)))
+            [:pointer] :int :on-throw 0))
+
+(defn- user-scroll-fn
+  "The plain fn behind the panel's \"scroll\" signal: a person's own scroll
+  cancels the settling, and a throw lands on the footer."
+  [footer scroll-cancelled?]
+  (fn [_ctl _dx _dy _data]
+    (try (cancel-scroll-settle! scroll-cancelled?)
+         (catch :default e (g/gtk-label-set-text footer (str "; " (ex-message e)))))
+    0)) ;; FALSE: GTK still performs the real scroll
+
+(defn- lay-out!
+  "Makes the editor read-only, styles the labels and packs the widgets into
+  the root."
+  [{:keys [root header footer open-btn close-btn] ed :editor} bar]
+  (editor/set-read-only! ed true)
+  (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
+  (g/gtk-label-set-xalign header 0.0)
+  (g/gtk-label-set-ellipsize header g/PANGO-ELLIPSIZE-START)
+  (g/gtk-label-set-xalign footer 0.0)
+  (g/gtk-widget-set-vexpand (:scroll ed) 1)
+  (g/gtk-widget-set-sensitive open-btn 0)
+  (g/gtk-box-append bar open-btn)
+  (g/gtk-box-append bar close-btn)
+  (g/gtk-box-append root header)
+  (g/gtk-box-append root (:scroll ed))
+  (g/gtk-box-append root bar)
+  (g/gtk-box-append root footer)
+  (g/gtk-widget-set-size-request root WIDTH-REQUEST -1))
+
+(defn- connect-scroll-cancels!
+  "Wires the ways a person's own scroll, caret move or the view's
+  destruction cancel the re-scroll settling."
+  [{ed :editor :keys [scroll-cancelled? on-user-scroll!]} scroll-ctl]
+  ;; A person's own scroll or caret move over the panel cancels any
+  ;; re-scroll settling in flight (cancel-scroll-settle!), so arm-
+  ;; scroll-settle! never fights them (a single call never did, so the
+  ;; re-scroll timeout must not break that). on-cursor-moved! is
+  ;; editor/make-editor's own existing hook
+  ;; (fires on the buffer's notify::cursor-position, which a key press
+  ;; or a click in a read-only view both still trigger): the smallest
+  ;; way to cover "the person moves the caret themselves" without a
+  ;; second key controller alongside the scroll one below.
+  (g/g-signal-connect-data scroll-ctl "scroll"
+                           (callable on-user-scroll! [:pointer :double :double :pointer] :int :on-throw 0)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/gtk-widget-add-controller (:view ed) scroll-ctl)
+  (editor/on-cursor-moved! ed (fn [_line-col] (cancel-scroll-settle! scroll-cancelled?)))
+  ;; A backstop for when the view is destroyed
+  ;; without the panel having been hidden first (hide-right-panel!/
+  ;; close-source-panel! already cancel on every ordinary hide, well
+  ;; before the view ever goes away) -- a transient window closing out
+  ;; from under the panel, as dev/gtk_selftest_window/source_pane.clj's
+  ;; with-source-pane does between rows. Connected ONCE, here.
+  (g/g-signal-connect-data (:view ed) "destroy"
+                           (callable (fn [_view _data] (cancel-scroll-settle! scroll-cancelled?) nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-buttons!
+  "Open in window and Close run the handlers registered on the pane."
+  [{:keys [open-btn close-btn] :as pane}]
+  (g/g-signal-connect-data open-btn "clicked" (callable (handler-click pane :on-open) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data close-btn "clicked" (callable (handler-click pane :on-close) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
 (defn make-pane
   "Builds the panel. Returns {:root :header :editor :footer :open-btn
   :close-btn :state (atom {:loc nil :history []}) :handlers (atom {})}
@@ -246,8 +329,8 @@
   editor is read-only and carries the jonquil-code CSS class, so the
   window's zoom reaches it.
 
-  The panel editor view's own \"destroy\" signal
-  is connected ONCE, here, to a callable that cancels scroll-settle (sets
+  The panel editor view's own \"destroy\" signal is connected ONCE, in
+  connect-scroll-cancels!, to a callable that cancels scroll-settle (sets
   scroll-cancelled? true) so scroll-settle-cb's next tick sees it and
   removes itself (G_SOURCE_REMOVE) before touching the now-gone view --
   rather than finding out the hard way, via a GTK_IS_TEXT_VIEW/
@@ -277,29 +360,15 @@
         scroll-armed? (atom false)
         scroll-cancelled? (atom false)
         scroll-settle-cb
-        (callable (fn [_data]
-                    (try
-                      (if (or @scroll-cancelled?
-                              (rect-visible? (g/caret-window-rect (:view ed)) (g/gtk-widget-get-height (:view ed)))
-                              (>= (System/nanoTime) @scroll-deadline))
-                        (do (reset! scroll-armed? false) 0) ;; G_SOURCE_REMOVE
-                        (do (rescroll! ed) 1)) ;; G_SOURCE_CONTINUE
-                      (catch :default e
-                        (reset! scroll-armed? false)
-                        (g/gtk-label-set-text footer (str "; " (ex-message e)))
-                        0)))
-                  [:pointer] :int :on-throw 0)
+        (scroll-settle-callback {:ed ed :footer footer :scroll-deadline scroll-deadline
+                                 :scroll-armed? scroll-armed? :scroll-cancelled? scroll-cancelled?})
         ;; The real "scroll" signal's own 4-arg shape (controller, dx, dy,
         ;; data); dx/dy are never read, since ANY scroll at all means the
         ;; person is driving the view themselves. Plain fn, not yet
         ;; wrapped in callable, so it can also be called directly (no FFI
-        ;; marshaling) by a self-test row, and wrapped once below for the
-        ;; real GTK connection.
-        on-user-scroll!
-        (fn [_ctl _dx _dy _data]
-          (try (cancel-scroll-settle! scroll-cancelled?)
-               (catch :default e (g/gtk-label-set-text footer (str "; " (ex-message e)))))
-          0) ;; FALSE: GTK still performs the real scroll
+        ;; marshaling) by a self-test row, and wrapped once, in
+        ;; connect-scroll-cancels!, for the real GTK connection.
+        on-user-scroll! (user-scroll-fn footer scroll-cancelled?)
         pane {:root root :header header :editor ed :footer footer
               :open-btn open-btn :close-btn close-btn
               :state (atom {:loc nil :history []})
@@ -310,47 +379,7 @@
               :scroll-settle-cb scroll-settle-cb
               :on-user-scroll! on-user-scroll!}
         scroll-ctl (g/gtk-event-controller-scroll-new g/EVENT-CONTROLLER-SCROLL-BOTH-AXES)]
-    (editor/set-read-only! ed true)
-    (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
-    (g/gtk-label-set-xalign header 0.0)
-    (g/gtk-label-set-ellipsize header g/PANGO-ELLIPSIZE-START)
-    (g/gtk-label-set-xalign footer 0.0)
-    (g/gtk-widget-set-vexpand (:scroll ed) 1)
-    (g/gtk-widget-set-sensitive open-btn 0)
-    (g/gtk-box-append bar open-btn)
-    (g/gtk-box-append bar close-btn)
-    (g/gtk-box-append root header)
-    (g/gtk-box-append root (:scroll ed))
-    (g/gtk-box-append root bar)
-    (g/gtk-box-append root footer)
-    (g/gtk-widget-set-size-request root WIDTH-REQUEST -1)
-    ;; A person's own scroll or caret move over the panel cancels any
-    ;; re-scroll settling in flight (cancel-scroll-settle!), so arm-
-    ;; scroll-settle! never fights them (a single call never did, so the
-    ;; re-scroll timeout must not break that). on-cursor-moved! is
-    ;; editor/make-editor's own existing hook
-    ;; (fires on the buffer's notify::cursor-position, which a key press
-    ;; or a click in a read-only view both still trigger): the smallest
-    ;; way to cover "the person moves the caret themselves" without a
-    ;; second key controller alongside the scroll one below.
-    (g/g-signal-connect-data scroll-ctl "scroll"
-                             (callable on-user-scroll! [:pointer :double :double :pointer] :int :on-throw 0)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller (:view ed) scroll-ctl)
-    (editor/on-cursor-moved! ed (fn [_line-col] (cancel-scroll-settle! scroll-cancelled?)))
-    ;; A backstop for when the view is destroyed
-    ;; without the panel having been hidden first (hide-right-panel!/
-    ;; close-source-panel! already cancel on every ordinary hide, well
-    ;; before the view ever goes away) -- a transient window closing out
-    ;; from under the panel, as dev/gtk_selftest_window/source_pane.clj's
-    ;; with-source-pane does between rows. Connected ONCE, here, like
-    ;; every other signal in this fn.
-    (g/g-signal-connect-data (:view ed) "destroy"
-                             (callable (fn [_view _data] (cancel-scroll-settle! scroll-cancelled?) nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data open-btn "clicked" (callable (handler-click pane :on-open) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data close-btn "clicked" (callable (handler-click pane :on-close) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (lay-out! pane bar)
+    (connect-scroll-cancels! pane scroll-ctl)
+    (connect-buttons! pane)
     pane))

@@ -163,6 +163,7 @@
    find-replace/row-find-editor-next-then-replace
    find-replace/row-window-find-keys-editor-focused
    find-replace/row-find-preedit-ends-at-close
+   find-replace/row-find-bar-buttons
    close-prerun/row-line-col-typing
    close-prerun/row-close-dismissed
    close-prerun/row-close-save-failed
@@ -267,6 +268,7 @@
    palette-rows/row-palette-arrow-keys
    palette-rows/row-palette-closes-its-own-tab
    palette-rows/row-palette-entry-keeps-window-keys
+   palette-rows/row-palette-entry-signals
    palette-rows/row-describe-key-consumes
    palette-rows/row-describe-key-skips-modifier
    palette-rows/row-key-bindings-lists
@@ -277,6 +279,7 @@
    palette-rows/row-time-form-alert-pending
    palette-rows/row-time-form-clears-status
    locations-rows/row-locations-pane-shows
+   locations-rows/row-locations-pane-wiring
    locations-rows/row-locations-uses-step
    locations-rows/row-locations-survive-edit
    locations-rows/row-locations-gone
@@ -375,6 +378,7 @@
    inspector/row-pane-measure
    inspector/row-pane-ready-wait-survives-measure-throw
    inspector/row-pane-note-clears
+   inspector/row-pane-buttons-reach-their-steps
    inspector/row-inspect-focus-after-open
    inspector/row-inspect-last-after-repl
    inspector/row-inspect-in-out
@@ -460,6 +464,7 @@
    gutter-rows/row-line-counts-went-off
    gutter-rows/row-key-hints-follow-the-caret
    debugger-rows/row-debugger-pane-shows
+   debugger-rows/row-debugger-pane-wiring
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default
    debugger-rows/row-break-flag-ends-with-its-eval
@@ -499,6 +504,7 @@
    source-pane/row-source-pane-history
    source-pane/row-source-pane-back-deleted-file
    source-pane/row-source-pane-same-file-no-reload
+   source-pane/row-source-pane-wiring
    tab-widget/row-tab-widget-builds
    tab-widget/row-tab-widget-dispose-unparents
    file-tree-pane/row-tree-pane-shows-rows
@@ -519,6 +525,7 @@
    file-tree-pane/row-tree-pane-stale-menu-actions
    file-tree-pane/row-tree-pane-menu-focus-and-anchor
    file-tree-pane/row-tree-pane-error-row-no-menu
+   file-tree-pane/row-tree-pane-header-buttons
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    tabs/row-tab-new-shows-strip

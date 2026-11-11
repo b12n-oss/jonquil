@@ -51,6 +51,33 @@
                           {:rows rows :selected selected :footer footer :title title})))
         (finally (on-gtk (g/gtk-window-close win)))))))
 
+(defn row-locations-pane-wiring
+  "Unticking a filter button reaches :on-hows, Close reaches :on-close, and
+  a throw in a handler lands on the footer."
+  [_ui]
+  (go-row :locations-pane-wiring support/check
+    (let [{:keys [win pane]} (on-gtk (let [win (g/gtk-window-new)
+                                           pane (lpane/make-pane)]
+                                       (g/gtk-window-set-child win (:root pane))
+                                       (g/gtk-window-present win)
+                                       {:win win :pane pane}))
+          calls (atom [])]
+      (try
+        (await-until 2000 20 #(pos? (g/gtk-widget-get-width (:root pane))))
+        (on-gtk
+         (lpane/set-handlers! pane {:on-hows (fn [shown] (swap! calls conj [:hows shown]))
+                                    :on-close (fn [] (swap! calls conj [:close]))})
+         (g/gtk-check-button-set-active (second (first (:filter-btns pane))) 0)
+         (g/g-signal-emit-by-name (:close-btn pane) "clicked")
+         (lpane/set-handlers! pane {:on-close (fn [] (throw (ex-info "boom" {})))})
+         (g/g-signal-emit-by-name (:close-btn pane) "clicked")
+         (let [footer (lpane/footer-text pane)]
+           (support/check :locations-pane-wiring
+                          (and (= [[:hows #{:value :definition :ns}] [:close]] @calls)
+                               (= "; boom" footer))
+                          {:calls @calls :footer footer})))
+        (finally (on-gtk (g/gtk-window-close win)))))))
+
 ;; --- the real window: making a list, F8 and Shift+F8 ----------------------
 
 (def ^:private KEY-F8 0xffc5)
