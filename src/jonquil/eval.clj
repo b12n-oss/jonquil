@@ -306,8 +306,8 @@
   (let [{:keys [value printed]}
         (jolt.host/run-interruptible
          token (fn []
-                ((or wrap-eval (fn [thunk] (thunk)))
-                 (fn []
+                 ((or wrap-eval (fn [thunk] (thunk)))
+                  (fn []
                    ;; Printed inside the same
                    ;; interruptible thunk, under
                    ;; the same binding, as the
@@ -319,10 +319,10 @@
                    ;; during that realization
                    ;; yields :interrupted like
                    ;; any other Stop.
-                   (let [v (eval-string (str code "\n") source-path)]
-                     {:value v
-                      :printed (binding [*print-length* 1000]
-                                 (pr-str v))})))))]
+                    (let [v (eval-string (str code "\n") source-path)]
+                      {:value v
+                       :printed (binding [*print-length* 1000]
+                                  (pr-str v))})))))]
     {:status :ok :value value :printed printed}))
 
 (defn- evaluate-code

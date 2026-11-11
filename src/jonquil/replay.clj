@@ -154,10 +154,10 @@
   (when arg
     (let [t (strip-meta arg)]
       (if (= "ns" head)
-          (when (plain-symbol? t) t)
-          (when (str/starts-with? t "'")
-            (let [sym (strip-meta (subs t 1))]
-              (when (plain-symbol? sym) sym)))))))
+        (when (plain-symbol? t) t)
+        (when (str/starts-with? t "'")
+          (let [sym (strip-meta (subs t 1))]
+            (when (plain-symbol? sym) sym)))))))
 
 (defn- absolute-path? [p]
   (boolean (or (str/starts-with? p "/") (re-find #"^[A-Za-z]:[\\/]" p))))

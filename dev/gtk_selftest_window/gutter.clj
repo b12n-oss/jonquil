@@ -290,7 +290,6 @@
                              {:on on? :said said? :on-again on-again? :off off? :status (status ui)})
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
-
 ;; --- what keys do at the caret (LM6) ----------------------------------------
 
 (defn- hint [ui]

@@ -184,10 +184,10 @@
   is well."
   ([bindings command-ids] (problems bindings command-ids #{}))
   ([bindings command-ids condition-ids]
-  (vec
-   (for [[i b] (map-indexed vector bindings)
-         p (binding-problems b command-ids condition-ids)]
-     (str "binding " i " " p)))))
+   (vec
+    (for [[i b] (map-indexed vector bindings)
+          p (binding-problems b command-ids condition-ids)]
+      (str "binding " i " " p)))))
 
 (defmacro ^:private embedded-text
   "The text of classpath file path, read when this form is compiled (the

@@ -154,7 +154,7 @@
         b {:key "Escape" :command :b}]
     (testing ":next moves on to the next matching binding"
       (is (= :handled (km/dispatch [a b] esc 0 {:holds? (constantly true)
-                                                 :run! (run! {:a :next :b :handled})})))
+                                                :run! (run! {:a :next :b :handled})})))
       (is (= [:a :b] @ran)))
     (testing "a fixed outcome answers without running anything after it"
       (reset! ran [])
@@ -164,17 +164,17 @@
     (testing ":to-gtk from a command stops the walk"
       (reset! ran [])
       (is (= :to-gtk (km/dispatch [a b] esc 0 {:holds? (constantly true)
-                                                :run! (run! {:a :to-gtk :b :handled})})))
+                                               :run! (run! {:a :to-gtk :b :handled})})))
       (is (= [:a] @ran)))
     (testing "no match is :unmatched"
       (reset! ran [])
       (is (= :unmatched (km/dispatch [a b] 0x72 0 {:holds? (constantly true)
-                                                    :run! (run! {:a :handled})})))
+                                                   :run! (run! {:a :handled})})))
       (is (= [] @ran)))
     (testing "an unregistered command (run! answers nil) moves on"
       (reset! ran [])
       (is (= :handled (km/dispatch [a b] esc 0 {:holds? (constantly true)
-                                                 :run! (run! {:b :handled})})))
+                                                :run! (run! {:b :handled})})))
       (is (= [:a :b] @ran)))
     (testing "a :when that doesn't hold skips the binding without running it"
       (reset! ran [])

@@ -164,10 +164,10 @@
   [view {:keys [ed ns-fn candidates-fn doc-fn close-others! on-error position snapshot-fn apply-op! server-ev]
          :or {position :bottom
               candidates-fn (fn [prefix text pos extra] (docs/candidates (ns-fn) prefix text pos extra))
-              doc-fn (fn [sym text pos] (docs/symbol-doc (ns-fn) sym text pos))
-              snapshot-fn (fn [] (editor/snapshot ed))
-              apply-op! (fn [result] (editor/apply-op! ed result))}}]
-  (let [list-box (g/gtk-list-box-new)
+              doc-fn (fn [sym text pos] (docs/symbol-doc (ns-fn) sym text pos))}}]
+  (let [snapshot-fn (or snapshot-fn (fn [] (editor/snapshot ed)))
+        apply-op! (or apply-op! (fn [result] (editor/apply-op! ed result)))
+        list-box (g/gtk-list-box-new)
         list-scroll (g/gtk-scrolled-window-new)
         {doc-label :label doc-scroll :scroll} (popover/make-doc-scroll DOC-WIDTH DOC-HEIGHT)
         box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)

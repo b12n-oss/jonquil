@@ -480,7 +480,7 @@
   (let [srv (fake/start! {:fail-setup? true})
         killed (atom [])
         {:keys [ev]} (make-test-node srv {:launch (fn [_] {:port (:port srv) :pid -1 :log "/fake/log"
-                                                            :run-dir "/fake/run"})
+                                                           :run-dir "/fake/run"})
                                           :kill (fn [c] (swap! killed conj c))})]
     (try
       (let [r (:result (run ev "(+ 1 2)" {:run? false}))]

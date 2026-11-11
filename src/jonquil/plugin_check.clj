@@ -31,7 +31,7 @@
   os as given."
   [{:keys [commands conditions keymap os]}]
   {:registered (into {} (map (fn [[id c]] [id (cond-> {:scope (:scope c) :passes? (true? (:passes? c))}
-                                                 (:plugin c) (assoc :plugin (:plugin c)))]))
+                                                (:plugin c) (assoc :plugin (:plugin c)))]))
                      commands)
    ;; a set (any scope), or {:window #{...} :editor #{...}}, so a binding's
    ;; :when is checked against its own scope's conditions

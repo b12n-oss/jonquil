@@ -298,14 +298,14 @@
   ocr-text!/ocr-rows! separately (two cgevent calls per tick, from two
   different OCR passes that could disagree with each other)."
   [pid deadline-ms needle]
-  (let [last (atom "")]
-    (let [ok (wait-for! deadline-ms 300
-                        (fn []
-                          (let [rows (ocr-rows! pid)
-                                joined (str/join "\n" (keep :text rows))]
-                            (reset! last joined)
-                            (ocr-matches? rows joined needle))))]
-      {:ok ok :last @last})))
+  (let [last (atom "")
+        ok (wait-for! deadline-ms 300
+                      (fn []
+                        (let [rows (ocr-rows! pid)
+                              joined (str/join "\n" (keep :text rows))]
+                          (reset! last joined)
+                          (ocr-matches? rows joined needle))))]
+    {:ok ok :last @last}))
 
 (defn- wait-for-ocr-count!
   "Polls until re matches at least n times (non-overlapping, via re-seq)
@@ -324,15 +324,15 @@
   for the loose join) still matches here when it lands on its own line,
   since re's own leading group is optional -- see the two call sites."
   [pid deadline-ms re n]
-  (let [last-count (atom 0) last-text (atom "")]
-    (let [ok (wait-for! deadline-ms 300
-                        (fn []
-                          (let [t (str/join "\n" (keep :text (ocr-rows! pid)))
-                                c (count (re-seq re t))]
-                            (reset! last-count c)
-                            (reset! last-text t)
-                            (>= c n))))]
-      {:ok ok :count @last-count :last @last-text})))
+  (let [last-count (atom 0) last-text (atom "")
+        ok (wait-for! deadline-ms 300
+                      (fn []
+                        (let [t (str/join "\n" (keep :text (ocr-rows! pid)))
+                              c (count (re-seq re t))]
+                          (reset! last-count c)
+                          (reset! last-text t)
+                          (>= c n))))]
+    {:ok ok :count @last-count :last @last-text}))
 
 ;; --- launching and stopping the binary under test ------------------------
 

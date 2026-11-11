@@ -5,7 +5,7 @@
    Lifted from DrClojure.syntax at 41c56b8; see UPSTREAM.md."
   (:require [clojure.string :as str]
             [jonquil.dialect :as dialect])
-  (:import (java.util.regex Pattern Matcher)))
+  (:import (java.util.regex Pattern)))
 
 ;; --- Token Definitions ---
 
@@ -22,16 +22,16 @@
 
 (def token-pattern
   (Pattern/compile
-    (str
-      "(;[^\n]*)"                                                  ;; Group 1: comment
-      "|(#[?@]?\"(?>\\\\.|[^\"\\\\])*\"?)"                         ;; Group 2: regex literal
-      "|(\"(?>\\\\.|[^\"\\\\])*\"?)"                               ;; Group 3: string literal
-      "|(\\\\(?:newline|space|tab|backspace|formfeed|return|u[0-9a-fA-F]{4}|o[0-3]?[0-7]{1,2}|.))" ;; Group 4: character
-      "|(::?[-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#]+)"             ;; Group 5: keyword
-      "|([+-]?(?:0x[0-9a-fA-F]+|\\d+(?:/\\d+|\\.\\d+)?(?:[eE][+-]?\\d+)?[MN]?)(?=[\\s()\\[\\]{}\",]|$))" ;; Group 6: number
-      "|([()\\[\\]{}])"                                            ;; Group 7: bracket / delimiter
-      "|(\\^[-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#:]+)"            ;; Group 8: metadata tag
-      "|([-_a-zA-Z\\p{L}.!$%&*+/<=>?][-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#]*)"))) ;; Group 9: symbol
+   (str
+    "(;[^\n]*)"                                                  ;; Group 1: comment
+    "|(#[?@]?\"(?>\\\\.|[^\"\\\\])*\"?)"                         ;; Group 2: regex literal
+    "|(\"(?>\\\\.|[^\"\\\\])*\"?)"                               ;; Group 3: string literal
+    "|(\\\\(?:newline|space|tab|backspace|formfeed|return|u[0-9a-fA-F]{4}|o[0-3]?[0-7]{1,2}|.))" ;; Group 4: character
+    "|(::?[-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#]+)"             ;; Group 5: keyword
+    "|([+-]?(?:0x[0-9a-fA-F]+|\\d+(?:/\\d+|\\.\\d+)?(?:[eE][+-]?\\d+)?[MN]?)(?=[\\s()\\[\\]{}\",]|$))" ;; Group 6: number
+    "|([()\\[\\]{}])"                                            ;; Group 7: bracket / delimiter
+    "|(\\^[-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#:]+)"            ;; Group 8: metadata tag
+    "|([-_a-zA-Z\\p{L}.!$%&*+/<=>?][-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#]*)"))) ;; Group 9: symbol
 
 (defn- tokenize*
   [^String text]
@@ -81,12 +81,10 @@
 
 ;; --- Style Definitions ---
 
-
 ;; --- Rainbow Parentheses (7 Levels) & Bracket Stack ---
 
 (def open->close {\( \), \[ \], \{ \}})
 (def close->open {\) \(, \] \[, \} \{})
-
 
 (defn- compute-brackets*
   [^String text]
@@ -123,7 +121,6 @@
       {:bracket-tokens (vec bracket-tokens)
        :matches (into {} matches)
        :unmatched (into #{} unmatched)})))
-
 
 ;; One entry, [text result], for the last text analysed. Matched by identity.
 (def ^:private compute-brackets-last (atom nil))
@@ -190,58 +187,58 @@
    which would otherwise push out the editor's whole-buffer entry."
   ([text pos] (symbol-at-pos text pos false))
   ([^String text pos uncached?]
-  (when (and (string? text) (pos? (.length text)))
-    (let [len (.length text)
-          pos (min len (max 0 (int (or pos 0))))
-          tokens (if uncached? (tokenize* text) (tokenize text))
-          in-literal? (some (fn [[tok-type s e]]
-                              (when (contains? #{:comment :string :regex :char} tok-type)
-                                (if (= tok-type :comment)
-                                  (<= s pos e)
-                                  (and (<= s pos) (<= pos e)))))
-                            tokens)]
-      (when-not in-literal?
-        (let [sym-tokens (filter #(contains? #{:symbol :special-form :builtin :constant} (first %)) tokens)]
-          (when (seq sym-tokens)
+   (when (and (string? text) (pos? (.length text)))
+     (let [len (.length text)
+           pos (min len (max 0 (int (or pos 0))))
+           tokens (if uncached? (tokenize* text) (tokenize text))
+           in-literal? (some (fn [[tok-type s e]]
+                               (when (contains? #{:comment :string :regex :char} tok-type)
+                                 (if (= tok-type :comment)
+                                   (<= s pos e)
+                                   (and (<= s pos) (<= pos e)))))
+                             tokens)]
+       (when-not in-literal?
+         (let [sym-tokens (filter #(contains? #{:symbol :special-form :builtin :constant} (first %)) tokens)]
+           (when (seq sym-tokens)
             ;; 1. Direct match: pos is inside or at boundary of a symbol token
-            (if-let [exact (or (first (filter (fn [[_ s e]] (and (<= s pos) (< pos e))) sym-tokens))
-                               (first (filter (fn [[_ s e]] (<= s pos e)) sym-tokens)))]
-              (let [[tok-type s e] exact]
-                {:symbol (.substring text s e) :start s :end e :type tok-type})
+             (if-let [exact (or (first (filter (fn [[_ s e]] (and (<= s pos) (< pos e))) sym-tokens))
+                                (first (filter (fn [[_ s e]] (<= s pos e)) sym-tokens)))]
+               (let [[tok-type s e] exact]
+                 {:symbol (.substring text s e) :start s :end e :type tok-type})
 
               ;; 2. Proximity match: pos is on a delimiter/prefix/space immediately adjacent to a symbol
-              (let [ch (when (< pos len) (.charAt text pos))
-                    prev-ch (when (pos? pos) (.charAt text (dec pos)))
-                    candidates
-                    (keep (fn [[tok-type s e]]
-                            (let [dist (cond
-                                         (< pos s) (- s pos)
-                                         (> pos e) (- pos e)
-                                         :else 0)]
-                              (when (<= dist 2)
-                                (let [intervening (if (< pos s)
-                                                    (.substring text pos s)
-                                                    (.substring text e pos))]
-                                  (when (and (not (re-find #"[\r\n]" intervening))
-                                             (re-matches #"^[()\[\]{}@'~`^#, ]*$" intervening)
-                                             (or (<= dist 1)
-                                                 (re-find #"[()\[\]{}@'~`^#,]" intervening)))
-                                    (let [score (cond
+               (let [ch (when (< pos len) (.charAt text pos))
+                     prev-ch (when (pos? pos) (.charAt text (dec pos)))
+                     candidates
+                     (keep (fn [[tok-type s e]]
+                             (let [dist (cond
+                                          (< pos s) (- s pos)
+                                          (> pos e) (- pos e)
+                                          :else 0)]
+                               (when (<= dist 2)
+                                 (let [intervening (if (< pos s)
+                                                     (.substring text pos s)
+                                                     (.substring text e pos))]
+                                   (when (and (not (re-find #"[\r\n]" intervening))
+                                              (re-matches #"^[()\[\]{}@'~`^#, ]*$" intervening)
+                                              (or (<= dist 1)
+                                                  (re-find #"[()\[\]{}@'~`^#,]" intervening)))
+                                     (let [score (cond
                                                   ;; Opening delimiters and reader prefixes bind forward to next symbol
-                                                  (and (< pos s) (#{\( \[ \{ \@ \' \~ \^ \` \#} ch))
-                                                  (- dist 0.5)
+                                                   (and (< pos s) (#{\( \[ \{ \@ \' \~ \^ \` \#} ch))
+                                                   (- dist 0.5)
 
                                                   ;; Closing delimiters bind backward to preceding symbol
-                                                  (and (> pos e) (or (#{\) \] \}} ch)
-                                                                     (#{\) \] \}} prev-ch)))
-                                                  (- dist 0.5)
+                                                   (and (> pos e) (or (#{\) \] \}} ch)
+                                                                      (#{\) \] \}} prev-ch)))
+                                                   (- dist 0.5)
 
-                                                  :else (double dist))]
-                                      {:tok [tok-type s e] :score score :dist dist}))))))
-                          sym-tokens)]
-                (when-let [best (first (sort-by :score candidates))]
-                  (let [[tok-type s e] (:tok best)]
-                    {:symbol (.substring text s e) :start s :end e :type tok-type})))))))))))
+                                                   :else (double dist))]
+                                       {:tok [tok-type s e] :score score :dist dist}))))))
+                           sym-tokens)]
+                 (when-let [best (first (sort-by :score candidates))]
+                   (let [[tok-type s e] (:tok best)]
+                     {:symbol (.substring text s e) :start s :end e :type tok-type})))))))))))
 
 (defn find-symbol-occurrences
   "Returns a vector of `[start end]` positions for all occurrences of `sym-name`
@@ -250,11 +247,11 @@
   (when (and (string? text) (not (str/blank? sym-name)))
     (let [tokens (tokenize text)]
       (vec
-        (keep (fn [[tok-type s e]]
-                (when (and (contains? #{:symbol :special-form :builtin :constant} tok-type)
-                           (= (.substring text s e) sym-name))
-                  [s e]))
-              tokens)))))
+       (keep (fn [[tok-type s e]]
+               (when (and (contains? #{:symbol :special-form :builtin :constant} tok-type)
+                          (= (.substring text s e) sym-name))
+                 [s e]))
+             tokens)))))
 
 (defn find-definition
   "Finds the definition position of `sym-name` in `text`.
@@ -267,47 +264,47 @@
           n (count tokens)]
       ;; 1. Search top-level def* forms
       (or
-        (loop [i 0]
-          (if (< i n)
-            (let [[tok-type s _] (nth tokens i)]
-              (if (and (= tok-type :bracket) (= (.charAt text s) \())
-                (if (< (inc i) n)
-                  (let [[next-type next-s next-e] (nth tokens (inc i))
-                        sym-form (.substring text next-s next-e)]
-                    (if (def-forms sym-form)
+       (loop [i 0]
+         (if (< i n)
+           (let [[tok-type s _] (nth tokens i)]
+             (if (and (= tok-type :bracket) (= (.charAt text s) \())
+               (if (< (inc i) n)
+                 (let [[_ next-s next-e] (nth tokens (inc i))
+                       sym-form (.substring text next-s next-e)]
+                   (if (def-forms sym-form)
                       ;; Scan forward past metadata to find defined symbol
-                      (let [def-target (loop [j (+ i 2)]
-                                         (when (< j n)
-                                           (let [[t-type ts te] (nth tokens j)]
-                                             (cond
-                                               (= t-type :metatag) (recur (inc j))
-                                               (= t-type :symbol) (when (= (.substring text ts te) sym-name)
-                                                                    {:symbol sym-name
-                                                                     :start ts
-                                                                     :end te
-                                                                     :line (line-number-at-offset text ts)
-                                                                     :kind :def})
-                                               :else nil))))]
-                        (if def-target
-                          def-target
-                          (recur (inc i))))
-                      (recur (inc i))))
-                  (recur (inc i)))
-                (recur (inc i))))
-            nil))
+                     (let [def-target (loop [j (+ i 2)]
+                                        (when (< j n)
+                                          (let [[t-type ts te] (nth tokens j)]
+                                            (cond
+                                              (= t-type :metatag) (recur (inc j))
+                                              (= t-type :symbol) (when (= (.substring text ts te) sym-name)
+                                                                   {:symbol sym-name
+                                                                    :start ts
+                                                                    :end te
+                                                                    :line (line-number-at-offset text ts)
+                                                                    :kind :def})
+                                              :else nil))))]
+                       (if def-target
+                         def-target
+                         (recur (inc i))))
+                     (recur (inc i))))
+                 (recur (inc i)))
+               (recur (inc i))))
+           nil))
         ;; 2. Search local bindings if pos is provided
-        (when (number? pos)
-          (let [prior-tokens (filter (fn [[_ s _]] (< s pos)) tokens)]
-            (when-let [target (last (filter (fn [[tok-type s e]]
-                                              (and (= tok-type :symbol)
-                                                   (= (.substring text s e) sym-name)))
-                                            prior-tokens))]
-              (let [[_ s e] target]
-                 {:symbol sym-name
-                  :start s
-                  :end e
-                  :line (line-number-at-offset text s)
-                  :kind :local}))))))))
+       (when (number? pos)
+         (let [prior-tokens (filter (fn [[_ s _]] (< s pos)) tokens)]
+           (when-let [target (last (filter (fn [[tok-type s e]]
+                                             (and (= tok-type :symbol)
+                                                  (= (.substring text s e) sym-name)))
+                                           prior-tokens))]
+             (let [[_ s e] target]
+               {:symbol sym-name
+                :start s
+                :end e
+                :line (line-number-at-offset text s)
+                :kind :local}))))))))
 
 ;; --- Smart Indentation, Search & Quick Documentation ---
 
@@ -387,8 +384,7 @@
           leading-suffix-close (count (take-while (fn [[tok-type s _]]
                                                     (and (= tok-type :bracket)
                                                          (close->open (.charAt line-suffix s))))
-                                                  suffix-tokens))
-]
+                                                  suffix-tokens))]
       (cond
         ;; 1. Line-prefix closed more brackets than it opened: Auto-dedent
         (neg? unclosed)
@@ -600,7 +596,7 @@
   (if (or (nil? doc-info) (= (:status doc-info) :not-found))
     (let [sym (or symbol (:symbol doc-info) "")]
       (str sym "\n\n(No documentation found)"))
-    (let [{:keys [status ns name arglists doc line kind special-form macro?]} doc-info
+    (let [{:keys [status ns name arglists doc line special-form macro?]} doc-info
           sym-name (or name symbol (:symbol doc-info) "")
           header (cond
                    special-form (str sym-name "  [special form]")
@@ -608,18 +604,16 @@
                    macro? (str (if ns (str ns "/" sym-name) sym-name) "  [macro]")
                    (= status :buffer-def) (str sym-name "  [buffer def" (if line (str ", line " line) "") "]")
                    ns (str ns "/" sym-name)
-                   :else sym-name)
-          parts (transient [header])]
-      (when (and arglists (not (str/blank? arglists)))
-        (conj! parts (str "\n" arglists)))
-      (conj! parts "\n----------------------------------------\n")
-      (if (and doc (not (str/blank? doc)))
-        (conj! parts (str/trim doc))
-        (conj! parts "(No documentation string)"))
-      (apply str (persistent! parts)))))
+                   :else sym-name)]
+      (str header
+           (when (and arglists (not (str/blank? arglists)))
+             (str "\n" arglists))
+           "\n----------------------------------------\n"
+           (if (and doc (not (str/blank? doc)))
+             (str/trim doc)
+             "(No documentation string)")))))
 
 ;; --- Background Worker & Autocomplete Candidate Caching ---
-
 
 (defn- prune-cache [m max-size]
   (if (<= (count m) max-size)
@@ -663,7 +657,6 @@
                             all-vec)]
       {:all all-vec
        :by-char by-char})))
-
 
 (defn- find-span-at-pos
   "Binary search for span [sym start end] containing `pos` (start <= pos <= end).
@@ -750,7 +743,6 @@
         (let [computed (assoc (extract-text-symbols text) :timestamp now)]
           (swap! buffer-symbols-cache (fn [m] (prune-cache (assoc m h computed) 32)))
           computed)))))
-
 
 (defn find-buffer-definitions
   "Extracts all symbols defined in `text` via top-level definition forms
@@ -891,12 +883,12 @@
                  (remove #(contains? user-syms-set (:symbol %))
                          (:all @static-candidates)))))
        (vec
-         (sort-by (fn [{:keys [symbol category]}]
-                    [(if (str/starts-with? symbol prefix) 0 1)
-                     (case category :user 0 :special 1 :builtin 2 3)
-                     (str/lower-case symbol)
-                     symbol])
-                  combined))))))
+        (sort-by (fn [{:keys [symbol category]}]
+                   [(if (str/starts-with? symbol prefix) 0 1)
+                    (case category :user 0 :special 1 :builtin 2 3)
+                    (str/lower-case symbol)
+                    symbol])
+                 combined))))))
 
 ;; --- Clojure Code Formatter ---
 
@@ -990,8 +982,8 @@
                                              :first-child-col nil}))
                             (#{\) \] \}} ch)
                             (let [match-idx (first (keep-indexed
-                                                     (fn [i frame] (when (= (:close-char frame) ch) i))
-                                                     (reverse st)))]
+                                                    (fn [i frame] (when (= (:close-char frame) ch) i))
+                                                    (reverse st)))]
                               (recur (inc ti)
                                      (if match-idx
                                        (subvec st 0 (- (count st) (inc match-idx)))
@@ -1015,47 +1007,47 @@
                                 (recur (inc ti) st)))))
 
                         :else
-                        (recur (inc ti) st)))))]
-            ;; Calculate indentation for line-idx
-            (let [line-indent
-                  (cond
-                    (multiline-string-lines line-idx) :verbatim
-                    (nil? first-non-ws) 0
-                    (empty? new-stack) 0
-                    :else
-                    (let [first-char (.charAt line first-non-ws)
-                          top (peek new-stack)]
-                      (if (and (= first-char (:close-char top))
-                               (not= line-idx (:line top)))
-                        (:col top)
-                        (case (:type top)
-                          :vector (if (:first-child-col top)
-                                    (:first-child-col top)
-                                    (+ (:col top) 2))
-                          :map (if (:first-child-col top)
-                                 (:first-child-col top)
-                                 (+ (:col top) 2))
-                          :list (cond
-                                  (body-form? (:operator top))
-                                  (+ (:col top) 2)
+                        (recur (inc ti) st)))))
+                ;; Calculate indentation for line-idx
+                line-indent
+                (cond
+                  (multiline-string-lines line-idx) :verbatim
+                  (nil? first-non-ws) 0
+                  (empty? new-stack) 0
+                  :else
+                  (let [first-char (.charAt line first-non-ws)
+                        top (peek new-stack)]
+                    (if (and (= first-char (:close-char top))
+                             (not= line-idx (:line top)))
+                      (:col top)
+                      (case (:type top)
+                        :vector (if (:first-child-col top)
+                                  (:first-child-col top)
+                                  (+ (:col top) 2))
+                        :map (if (:first-child-col top)
+                               (:first-child-col top)
+                               (+ (:col top) 2))
+                        :list (cond
+                                (body-form? (:operator top))
+                                (+ (:col top) 2)
 
-                                  (contains? #{"->" "->>" "as->" "cond->" "cond->>" "some->" "some->>"}
-                                             (:operator top))
-                                  (if (:first-arg-col top)
-                                    (:first-arg-col top)
-                                    (+ (:col top) 2))
+                                (contains? #{"->" "->>" "as->" "cond->" "cond->>" "some->" "some->>"}
+                                           (:operator top))
+                                (if (:first-arg-col top)
+                                  (:first-arg-col top)
+                                  (+ (:col top) 2))
 
-                                  :else
-                                  (if (:first-arg-col top)
-                                    (:first-arg-col top)
-                                    (+ (:col top) 2)))))))
-                  old-indent (or first-non-ws 0)
-                  delta (if (= line-indent :verbatim) 0 (- line-indent old-indent))]
-              (recur (inc line-idx)
-                     new-tok-idx
-                     new-stack
-                     (conj deltas delta)
-                     (conj indents line-indent)))))))))
+                                :else
+                                (if (:first-arg-col top)
+                                  (:first-arg-col top)
+                                  (+ (:col top) 2)))))))
+                old-indent (or first-non-ws 0)
+                delta (if (= line-indent :verbatim) 0 (- line-indent old-indent))]
+            (recur (inc line-idx)
+                   new-tok-idx
+                   new-stack
+                   (conj deltas delta)
+                   (conj indents line-indent))))))))
 
 (defn format-code
   "Formats Clojure `text` by re-indenting lines according to syntactic nesting
@@ -1099,16 +1091,16 @@
           start-line (offset->line start-offset)
           end-line (offset->line (max start-offset (dec end-offset)))
           formatted-lines (map-indexed
-                            (fn [idx line]
-                              (if (<= start-line idx end-line)
-                                (let [indent (nth indents idx)]
-                                  (cond
-                                    (= indent :verbatim) line
-                                    (str/blank? line) ""
-                                    :else
-                                    (let [trimmed (str/triml line)
-                                          clean (str/replace trimmed #"[ \t]+$" "")]
-                                      (str (apply str (repeat indent " ")) clean))))
-                                line))
-                            lines)]
+                           (fn [idx line]
+                             (if (<= start-line idx end-line)
+                               (let [indent (nth indents idx)]
+                                 (cond
+                                   (= indent :verbatim) line
+                                   (str/blank? line) ""
+                                   :else
+                                   (let [trimmed (str/triml line)
+                                         clean (str/replace trimmed #"[ \t]+$" "")]
+                                     (str (apply str (repeat indent " ")) clean))))
+                               line))
+                           lines)]
       (str/join "\n" formatted-lines))))

@@ -97,37 +97,37 @@
   write, before the move (a failure to set that never fails the write)."
   ([path text] (write-atomically! path text nil))
   ([path text opts]
-  (let [tmp (atom nil)]
-    (try
-      (let [target (resolved-target path)]
-        (reset! tmp (str target ".tmp-" (System/nanoTime)))
-        (io/make-parents target)
-        (let [private? (and (:owner-only? opts) (create-owner-only! @tmp))]
-          (if private?
+   (let [tmp (atom nil)]
+     (try
+       (let [target (resolved-target path)]
+         (reset! tmp (str target ".tmp-" (System/nanoTime)))
+         (io/make-parents target)
+         (let [private? (and (:owner-only? opts) (create-owner-only! @tmp))]
+           (if private?
             ;; not spit: on Linux, Jolt's spit replaces the file, dropping the
             ;; rw------- it was created with; Files/write keeps the inode
-            (java.nio.file.Files/write
-             (.toPath (java.io.File. ^String @tmp))
-             (.getBytes ^String text "UTF-8")
-             (into-array java.nio.file.OpenOption
-                         [java.nio.file.StandardOpenOption/WRITE
-                          java.nio.file.StandardOpenOption/TRUNCATE_EXISTING]))
-            (spit @tmp text))
-          (when (and (:owner-only? opts) (not private?))
-            (try (java.nio.file.Files/setPosixFilePermissions
-                  (.toPath (java.io.File. ^String @tmp))
-                  (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
-                 (catch Exception _ nil))))
-        (java.nio.file.Files/move
-         (.toPath (java.io.File. ^String @tmp))
-         (.toPath (java.io.File. ^String target))
-         (into-array java.nio.file.CopyOption
-                     [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                      java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-        nil)
-      (catch Exception e
-        (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))
-        (str "couldn't save " path ": " (.getMessage e)))))))
+             (java.nio.file.Files/write
+              (.toPath (java.io.File. ^String @tmp))
+              (.getBytes ^String text "UTF-8")
+              (into-array java.nio.file.OpenOption
+                          [java.nio.file.StandardOpenOption/WRITE
+                           java.nio.file.StandardOpenOption/TRUNCATE_EXISTING]))
+             (spit @tmp text))
+           (when (and (:owner-only? opts) (not private?))
+             (try (java.nio.file.Files/setPosixFilePermissions
+                   (.toPath (java.io.File. ^String @tmp))
+                   (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
+                  (catch Exception _ nil))))
+         (java.nio.file.Files/move
+          (.toPath (java.io.File. ^String @tmp))
+          (.toPath (java.io.File. ^String target))
+          (into-array java.nio.file.CopyOption
+                      [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                       java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+         nil)
+       (catch Exception e
+         (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))
+         (str "couldn't save " path ": " (.getMessage e)))))))
 
 (defn save-sessions!
   "Writes {:version 1 :sessions sessions} to path atomically, rewriting a

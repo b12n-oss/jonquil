@@ -151,8 +151,6 @@
          ;; when it asks for a local or evaluates (stale?)
          :error-id (error-id e)))
 
-
-
 (defn- jolt-error [e] {:error (str "Debug mode: " (or (ex-message e) (str (class e))))})
 
 (defn set-debug-mode!

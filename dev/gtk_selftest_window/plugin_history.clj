@@ -96,7 +96,7 @@
         (v1-then-v2! ui "ph-j")
         (open! ui "ph-j")
         (let [lines ((:plugin-revert!* ui) 1 "kept"
-                     #(plugin-history-pane/set-reason! (:plugin-history-pane ui) "changed"))
+                                           #(plugin-history-pane/set-reason! (:plugin-history-pane ui) "changed"))
               row (first (:rows (shown ui)))]
           (support/check :plugin-history-revert-keeps-the-reason-at-the-click
                          (str/ends-with? (str row) "): revert to v1: kept")

@@ -31,7 +31,7 @@
 (deftest newest-save-test
   (testing "Restore World's pick: the newest save you made, never one made before a restore"
     (is (= "s2" (:path (world/newest-save [{:path "a1" :kind :before-restore} {:path "s2" :kind :save}
-                                            {:path "s1" :kind :save}]))))
+                                           {:path "s1" :kind :save}]))))
     (is (= "old" (:path (world/newest-save [{:path "old"}]))) "an entry with no record counts as a save")
     (is (nil? (world/newest-save [{:path "a1" :kind :before-restore}])))))
 
