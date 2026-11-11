@@ -337,7 +337,7 @@ port.
   over the repo and prints its Markdown report: a refactoring queue worst
   first, git hotspots, unused requires and functions nothing mentions, then
   per-file numbers and coupling. `jolt metrics:edn` gives every finding as
-  data, `jolt metrics:json` a lean JSON report for tools, and `bb
+  data, `jolt metrics:json` a lean JSON report for tools, and `jolt
   metrics:html` one self-contained page (`target/metrics.html` unless a
   file comes first). Extra arguments go to its CLI (an output file, whose
   extension picks the format, `--top N`, `--no-git`, `--exclude GLOB`). Findings never fail it; only bad usage
