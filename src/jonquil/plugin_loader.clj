@@ -102,6 +102,22 @@
   (try (protocol/run-protocol {:where :in-process :source text :file-id id :request (request-for reg id os)})
        (catch Throwable e {:ok? false :problems [(str "checking it threw: " (ex-message e))]})))
 
+(defn- recheck-one
+  "recheck-later's step over one live plugin [k entry]: [reg' lines'
+  removed']."
+  [[reg lines removed] [k {:keys [definition]}] {:keys [changed os]}]
+  (let [id (name k)
+        r (try (plugin-check/validate (assoc (request-for reg id os) :definitions [definition] :file-id id))
+               (catch Throwable e {:ok? false :problems [(ex-message e)]}))]
+    (cond
+      (not (:ok? r))
+      [(plugin-registry/remove-plugin reg k)
+       (into lines (map #(str "plugin " id " removed: " %) (:problems r)))
+       (conj removed k)]
+      ;; a plugin this pass loaded already printed its warnings
+      (contains? changed k) [reg lines removed]
+      :else [reg (into lines (map #(str "plugin " id ": " %) (:warnings r))) removed])))
+
 (defn- recheck-later
   "After a reload changed the plugins in changed (ids, installed, replaced
   or removed), every live plugin sorting after the first of them is
@@ -114,58 +130,85 @@
   [reg changed os]
   (if (empty? changed)
     [reg [] #{}]
-    (let [first-changed (first (sort (map name changed)))]
-      (reduce (fn [[reg lines removed] [k {:keys [definition]}]]
-                (let [id (name k)]
-                  (if (neg? (compare id first-changed))
-                    [reg lines removed]
-                    (let [r (try (plugin-check/validate (assoc (request-for reg id os)
-                                                               :definitions [definition] :file-id id))
-                                 (catch Throwable e {:ok? false :problems [(ex-message e)]}))]
-                      (cond
-                        (not (:ok? r))
-                        [(plugin-registry/remove-plugin reg k)
-                         (into lines (map #(str "plugin " id " removed: " %) (:problems r)))
-                         (conj removed k)]
-                        ;; a plugin this pass loaded already printed its warnings
-                        (contains? changed k) [reg lines removed]
-                        :else [reg (into lines (map #(str "plugin " id ": " %) (:warnings r))) removed])))))
+    (let [first-changed (first (sort (map name changed)))
+          later (drop-while #(neg? (compare (name (key %)) first-changed)) (sort-by key (:plugins reg)))]
+      (reduce (fn [acc entry] (recheck-one acc entry {:changed changed :os os}))
               [reg [] #{}]
-              (sort-by key (:plugins reg))))))
+              later))))
 
 (defn- passed-lines [id d warnings]
   (let [n (count (filter #(or (fn? (:edit %)) (fn? (:run %))) (:commands d)))]
     (into [(str "plugin " id " loaded (" n (if (= 1 n) " command)" " commands)"))]
           (map #(str "plugin " id ": " %) warnings))))
 
+(defn- install-checked
+  "id's text after the protocol, r its result: [reg' lines]. A pass installs
+  it; a fail keeps old (the live entry, or nil) and loads its accepted source
+  again, so its namespace is what it was."
+  [reg {:keys [id path text old]} r]
+  (if (:ok? r)
+    (let [d (:definition r)]
+      [(plugin-registry/install reg (:id d) {:definition d :source text :file path :layer :user})
+       (passed-lines id d (:warnings r))])
+    (let [restored (when old
+                     (:problems (protocol/load-candidate {:source (:source old) :file-id id})))]
+      [reg (cond-> (mapv #(str "plugin " id " skipped: " %) (:problems r))
+             old (conj (str "plugin " id ": the previous version stays live"))
+             (seq restored) (into (map #(str "plugin " id ": putting the previous version back: " %)
+                                       restored)))])))
+
 (defn- reload-one
-  "One file [id path] against reg: [reg' lines]. Disabled: removed. Text
-  (texts' entry for id, else the file's) equal to the live entry's: left
-  alone. New or changed: the protocol; a pass installs it, a fail keeps
-  the old entry and loads its accepted source again, so its namespace is
-  what it was."
-  [reg [id path] os disabled texts]
+  "One file [id path] against reg: [reg' lines]. ctx holds :os, :disabled
+  and :texts. Disabled: removed. Text (texts' entry for id, else the
+  file's) equal to the live entry's: left alone. New or changed: the
+  protocol, through install-checked."
+  [reg [id path] {:keys [os disabled texts]}]
   (let [k (keyword id)
-        old (get-in reg [:plugins k])]
-    (if (contains? disabled k)
+        old (get-in reg [:plugins k])
+        text (when-not (contains? disabled k)
+               (or (get texts id) (try (slurp path) (catch Throwable e e))))]
+    (cond
+      (contains? disabled k)
       [(plugin-registry/remove-plugin reg k)
        (if old [(str "plugin " id " is disabled (settings.edn :plugins :disabled)")] [])]
-      (let [text (or (get texts id) (try (slurp path) (catch Throwable e e)))]
-        (cond
-          (instance? Throwable text) [reg [(str "plugin " id " skipped: " (ex-message text))]]
-          (and old (= text (:source old))) [reg []]
-          :else
-          (let [r (check reg id text os)]
-            (if (:ok? r)
-              (let [d (:definition r)]
-                [(plugin-registry/install reg (:id d) {:definition d :source text :file path :layer :user})
-                 (passed-lines id d (:warnings r))])
-              (let [restored (when old
-                               (:problems (protocol/load-candidate {:source (:source old) :file-id id})))]
-                [reg (cond-> (mapv #(str "plugin " id " skipped: " %) (:problems r))
-                       old (conj (str "plugin " id ": the previous version stays live"))
-                       (seq restored) (into (map #(str "plugin " id ": putting the previous version back: " %)
-                                                 restored)))]))))))))
+      (instance? Throwable text) [reg [(str "plugin " id " skipped: " (ex-message text))]]
+      (and old (= text (:source old))) [reg []]
+      :else (install-checked reg {:id id :path path :text text :old old} (check reg id text os)))))
+
+(defn- selected-files
+  "The [id path] files reload goes through: every one, the one at only, or,
+  with text too, only itself when it names a plugin file (it need not
+  exist)."
+  [{:keys [dir files only text]}]
+  (cond
+    (and only text) (if (plugin-file? dir only)
+                      (let [n (.getName (io/file only))] [[(subs n 0 (- (count n) 4)) only]])
+                      [])
+    only (let [c (.getCanonicalPath (io/file only))]
+           (filter (fn [[_ p]] (= c (.getCanonicalPath (io/file p)))) files))
+    :else files))
+
+(defn- drop-gone
+  "acc ({:registry :lines}) without every live plugin whose id isn't in
+  on-disk, each named."
+  [acc on-disk]
+  (reduce (fn [acc k]
+            (-> acc
+                (update :registry plugin-registry/remove-plugin k)
+                (update :lines conj (str "plugin " (name k) " removed: its file is gone"))))
+          acc
+          (remove on-disk (keys (:plugins (:registry acc))))))
+
+(defn- revive-later
+  "A saved plugin that changed may revive the files after it that a
+  recheck removed earlier (they bind its commands): tries those that
+  aren't live, as a fresh start would. [reg' lines']."
+  [[reg lines] {:keys [saved files os disabled]}]
+  (reduce (fn [[r ls] [id _ :as f]]
+            (if (and (pos? (compare id saved)) (not (contains? (:plugins r) (keyword id))))
+              (let [[r' more] (reload-one r f {:os os :disabled disabled})] [r' (into ls more)])
+              [r ls]))
+          [reg lines] files))
 
 (defn reload
   "The next registry from reg and the plugin files in dir: {:registry reg'
@@ -175,47 +218,26 @@
   text, and the file need not exist (a revert). disabled is the set of ids
   settings.edn turns off. Never throws."
   [{:keys [dir os registry disabled only text]}]
-  (let [{:keys [files skipped]} (plugin-files dir)
+  (let [{all-files :files skipped :skipped} (plugin-files dir)
         disabled (set disabled)
-        all-files files
-        files (cond
-                (and only text)
-                (if (plugin-file? dir only)
-                  (let [n (.getName (io/file only))] [[(subs n 0 (- (count n) 4)) only]])
-                  [])
-                only
-                (let [c (.getCanonicalPath (io/file only))]
-                  (filter (fn [[_ p]] (= c (.getCanonicalPath (io/file p)))) files))
-                :else files)
+        files (selected-files {:dir dir :files all-files :only only :text text})
         texts (when (and text (seq files)) {(first (first files)) text})
-        on-disk (set (map (comp keyword first) files))
-        start {:registry registry
-               :lines (if only [] (mapv #(str "plugins/" % ": not a plugin id, skipped") skipped))}
-        gone (when-not only (remove on-disk (keys (:plugins registry))))
-        start (reduce (fn [acc k]
-                        (-> acc
-                            (update :registry plugin-registry/remove-plugin k)
-                            (update :lines conj (str "plugin " (name k) " removed: its file is gone"))))
-                      start gone)
+        start (if only
+                {:registry registry :lines []}
+                (drop-gone {:registry registry
+                            :lines (mapv #(str "plugins/" % ": not a plugin id, skipped") skipped)}
+                           (set (map (comp keyword first) files))))
         {reg :registry lines :lines} (reduce (fn [{reg :registry lines :lines} file]
-                                               (let [[reg' more] (reload-one reg file os disabled texts)]
+                                               (let [[reg' more] (reload-one reg file {:os os :disabled disabled :texts texts})]
                                                  {:registry reg' :lines (into lines more)}))
                                              start files)
         changed-in (fn [r] (set (filter #(not (identical? (get-in registry [:plugins %]) (get-in r [:plugins %])))
                                         (into (set (keys (:plugins registry))) (keys (:plugins r))))))
-        ;; a saved plugin that changed may revive the files after it that a
-        ;; recheck removed earlier (they bind its commands): try those that
-        ;; aren't live, as a fresh start would
         [reg lines] (if (and only (seq files) (seq (changed-in reg)))
-                      (let [saved (first (first files))]
-                        (reduce (fn [[r ls] [id _ :as f]]
-                                  (if (and (pos? (compare id saved)) (not (contains? (:plugins r) (keyword id))))
-                                    (let [[r' more] (reload-one r f os disabled nil)] [r' (into ls more)])
-                                    [r ls]))
-                                [reg lines] all-files))
+                      (revive-later [reg lines] {:saved (first (first files)) :files all-files
+                                                 :os os :disabled disabled})
                       [reg lines])
-        changed (changed-in reg)
-        [reg more removed] (recheck-later reg changed os)
+        [reg more removed] (recheck-later reg (changed-in reg) os)
         ;; a plugin loaded this pass and then removed isn't reported loaded
         lines (remove (fn [l] (some #(str/starts-with? l (str "plugin " (name %) " loaded (")) removed)) lines)]
     {:registry reg :lines (into (vec lines) more)}))
@@ -508,6 +530,63 @@
 
 (def ^:private summary-keys [:id :doc :effects :commands :bindings :hooks :mcp-tools])
 
+(defn- accept-blocked
+  "Why id's pending version n can't be accepted before anything loads: the
+  console line, or nil."
+  [live {:keys [dir id n disabled]} hdir proposal]
+  (cond
+    (not (and proposal (= n (:n proposal)))) (str "plugin " id " has no pending v" n)
+    (contains? (set disabled) (keyword id)) (str "plugin " id " is disabled, so v" n " wasn't accepted")
+    ;; with no source, reload would check the file on disk
+    (nil? (history/version-source hdir n))
+    (str "plugin " id ": v" n " wasn't accepted: its source is missing from its history")
+    :else (when-let [why (disk-changed dir @live id)]
+            (str "plugin " id ": v" n " wasn't accepted: " why))))
+
+(defn- summary-differences
+  "The summary keys where what loaded (installed, the registry entry) differs
+  from what proposal's check reported; nil when nothing was installed or
+  the proposal was never checked."
+  [installed proposal]
+  (when (and installed (not (get-in proposal [:check :unchecked?])))
+    (let [reported (get-in proposal [:check :plugin])
+          loaded (some-> installed :definition checker/summary)]
+      (filterv #(not= (get loaded %) (get reported %)) summary-keys))))
+
+(defn- go-live!
+  "Writes src to path, resets live to registry and records v n :accepted
+  and any other plugin the reload changed: the console lines. A failed
+  write leaves live as old, putting the namespace back."
+  [live {:keys [dir id n now path src old registry lines]}]
+  (if-let [why (history/write-atomic! path src)]
+    (conj (vec (restore-ns! old id)) (str "plugin " id ": v" n " wasn't accepted: " why))
+    (let [_ (reset! live registry)
+          why (history/record-status! {:plugins-dir dir :id id :n n :status :accepted :now now})
+          others (record-changed! dir old (update registry :plugins dissoc (keyword id)) now)]
+      (-> (vec lines) (into others)
+          (conj (str "plugin " id ": v" n " accepted"
+                     (when why (str ", but its status wasn't recorded: " why))))))))
+
+(defn- accept-version!
+  "accept-step! past its guards: reloads with v n's source in place of the
+  file and goes live when the source installed as it is and its summary
+  matches the check's. The console lines."
+  [live {:keys [dir id n hdir proposal] :as opts}]
+  (let [src (history/version-source hdir n)
+        old @live
+        path (str dir "/" id ".clj")
+        {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))
+        installed (get-in registry [:plugins (keyword id)])
+        differ (summary-differences installed proposal)]
+    (cond
+      (or (nil? src) (not= src (:source installed)))
+      (conj (vec lines) (str "plugin " id ": v" n " wasn't accepted and stays pending"))
+      (seq differ)
+      (conj (vec (restore-ns! old id))
+            (str "plugin " id ": v" n " wasn't accepted: what loaded here isn't what its check reported ("
+                 (str/join ", " differ) ")"))
+      :else (go-live! live (assoc opts :path path :src src :old old :registry registry :lines lines)))))
+
 (defn accept-step!
   "Accepts id's pending version n, on the plugin agent like revert-step!
   (opts as load-step!'s, plus :id and :n): its source goes through reload,
@@ -518,48 +597,16 @@
   Then <id>.clj is written, live reset and v<n> recorded :accepted. A
   refusal leaves the file, live and the status as they were, putting the
   namespace back. The console lines. Never throws."
-  [live {:keys [id n now] :as opts}]
+  [live {:keys [id n] :as opts}]
   (if (false? (:plugins? opts))
     (plugins-off (str "plugin " id ": v" n " wasn't accepted"))
     (try
       (let [[warn opts] (step-opts opts)
-            dir (:dir opts)
-            k (keyword id)
-            hdir (history/history-dir dir id)
+            hdir (history/history-dir (:dir opts) id)
             proposal (history/pending (:entries (history/read-entries hdir)))]
-        (cond
-          (not (and proposal (= n (:n proposal)))) (conj warn (str "plugin " id " has no pending v" n))
-          (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so v" n " wasn't accepted"))
-          ;; with no source, reload would check the file on disk
-          (nil? (history/version-source hdir n))
-          (conj warn (str "plugin " id ": v" n " wasn't accepted: its source is missing from its history"))
-          (disk-changed dir @live id) (conj warn (str "plugin " id ": v" n " wasn't accepted: " (disk-changed dir @live id)))
-          :else
-          (let [src (history/version-source hdir n)
-                old @live
-                path (str dir "/" id ".clj")
-                {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))
-                installed (get-in registry [:plugins k])
-                reported (get-in proposal [:check :plugin])
-                loaded (some-> installed :definition checker/summary)
-                differ (when (and installed (not (get-in proposal [:check :unchecked?])))
-                         (filterv #(not= (get loaded %) (get reported %)) summary-keys))]
-            (cond
-              (or (nil? src) (not= src (:source installed)))
-              (-> warn (into lines) (conj (str "plugin " id ": v" n " wasn't accepted and stays pending")))
-              (seq differ)
-              (-> warn (into (restore-ns! old id))
-                  (conj (str "plugin " id ": v" n " wasn't accepted: what loaded here isn't what its check reported ("
-                             (str/join ", " differ) ")")))
-              :else
-              (if-let [why (history/write-atomic! path src)]
-                (-> warn (into (restore-ns! old id)) (conj (str "plugin " id ": v" n " wasn't accepted: " why)))
-                (let [_ (reset! live registry)
-                      why (history/record-status! {:plugins-dir dir :id id :n n :status :accepted :now now})
-                      others (record-changed! dir old (update registry :plugins dissoc k) now)]
-                  (-> warn (into lines) (into others)
-                      (conj (str "plugin " id ": v" n " accepted"
-                                 (when why (str ", but its status wasn't recorded: " why)))))))))))
+        (if-let [why (accept-blocked live opts hdir proposal)]
+          (conj warn why)
+          (into warn (accept-version! live (assoc opts :hdir hdir :proposal proposal)))))
       (catch Throwable e
         [(str "accepting plugin " id " failed: " (or (ex-message e) (str e)))]))))
 
