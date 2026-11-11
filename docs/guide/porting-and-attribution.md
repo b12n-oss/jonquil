@@ -42,12 +42,12 @@ text on 2026-10-29.
 
 ## Staying in sync
 
-`bb upstream:diff` lists the upstream commits since `UPSTREAM_PIN` that
+`jolt upstream:diff` lists the upstream commits since `UPSTREAM_PIN` that
 touch `src` or `test`. It fetches `main` from
 https://github.com/kimtg/DrClojure-Neo each time, so it needs no setup:
 
 ```sh
-bb upstream:diff
+jolt upstream:diff
 ```
 
 The first run clones upstream into `~/.cache/jonquil/drclojure-neo` (under
@@ -59,7 +59,7 @@ uses your SSH setup, and `GIT_SSH_COMMAND` picks the key:
 
 ```sh
 GIT_SSH_COMMAND='ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes' \
-  DRCLOJURE_URL=git@github.com:kimtg/DrClojure-Neo.git bb upstream:diff
+  DRCLOJURE_URL=git@github.com:kimtg/DrClojure-Neo.git jolt upstream:diff
 ```
 
 Review each commit, port what matters, and bump `UPSTREAM_PIN` to the new

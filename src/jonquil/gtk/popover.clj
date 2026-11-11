@@ -10,7 +10,7 @@
   GtkTextView\" every iteration, and never actually detaches it, so the
   main thread pins at 100% CPU in gtk_text_view_dispose ->
   gtk_text_view_remove -> g_log_structured_standard forever (measured via
-  `sample <pid> 3` on a hung bb gtk:selftest). It only shows when the
+  `sample <pid> 3` on a hung jolt gtk:selftest). It only shows when the
   window is really destroyed: a process that ends with System/exit skips
   GTK's own dispose cascade entirely. A plain GtkScrolledWindow (the view's actual parent
   in both the editor and the console -- GTK4's GtkTextView implements

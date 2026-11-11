@@ -149,7 +149,7 @@
     (cond
       (not (replaceable? (slurp-or-nil desktop))) (refuse desktop "replace")
       (not (.isFile (io/file source)))
-      (err! (str source " is missing; run `bb app:build` first"))
+      (err! (str source " is missing; run `jolt app:build` first"))
       :else
       (let [tmp (str (:binary paths) ".new")
             written (atom [])
@@ -158,7 +158,7 @@
                    (java.nio.file.Files/deleteIfExists (.toPath (io/file tmp)))
                    (err! (str msg (when (seq @written)
                                     (str "; already written: " (str/join ", " @written)
-                                         " (re-run bb app:install, or run bb app:uninstall)")))))]
+                                         " (re-run jolt app:install, or run jolt app:uninstall)")))))]
         (try
           (write-file! (:mime paths) #(spit % (mime-xml)))
           (note! (:mime paths))

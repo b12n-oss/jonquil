@@ -18,7 +18,7 @@
 
  ;; clojure.core.async is built into Jolt (dev/gtk_async.clj and the harness
  ;; rows use it). The project's .clj-kondo/.cache holds an analysis of a
- ;; different core.async, so with the cache (how `bb lint` and the pre-commit
+ ;; different core.async, so with the cache (how `jolt lint` and the pre-commit
  ;; hook run) the vars Jonquil uses read as unresolved; with `--cache false`
  ;; they don't. Measured 2026-09-27 without this entry: 32 warnings with the
  ;; cache, 13 with --cache false. This keeps both at 13.

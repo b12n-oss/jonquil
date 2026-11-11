@@ -119,7 +119,7 @@
   nil)
 
 ;; The install half. Still GTK-free: an install fn is handed in, so
-;; bb test runs all of this headless.
+;; jolt test runs all of this headless.
 
 (defn- part-id
   "An install fn's :part/id metadata, else its index in the installs."

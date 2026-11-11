@@ -1,50 +1,50 @@
 # Development
 
-`bb info` (or `jolt info`, since jolt reads the same `bb.edn`) prints the
-full task list grouped by purpose. This page adds what each harness drives
-and the traps that catch first-time runners.
+`jolt info` prints the full task list grouped by purpose. Jolt reads the
+tasks from `bb.edn`, so babashka isn't needed. This page adds what each
+harness drives and the traps that catch first-time runners.
 
 ## Verify: check, test, and the pre-commit gate
 
-- `bb check` requires every project namespace headlessly and exits 0. It's
+- `jolt check` requires every project namespace headlessly and exits 0. It's
   the fastest way to catch a namespace that doesn't compile.
-- `bb test` runs the unit suite: 1270 tests, 7560 assertions on macOS, 7529
+- `jolt test` runs the unit suite: 1270 tests, 7560 assertions on macOS, 7529
   on Linux (some asserts are gated by OS, such as `desktop-file-validate`
   and `plutil`). Nothing outside the process runs; the attach evaluators
   use in-process fake servers. Pass namespaces for a subset:
-  `bb test jonquil.edit-test`.
-- `bb verify` is the pre-commit gate: clj-kondo in report mode, then
-  `bb test` and `bb test:nrepl`, both of which must pass.
+  `jolt test jonquil.edit-test`.
+- `jolt verify` is the pre-commit gate: clj-kondo in report mode, then
+  `jolt test` and `jolt test:nrepl`, both of which must pass.
 
 <details>
 <summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code>, <code>test:basilisp</code>, <code>test:plugins</code> and <code>test:cljs-node</code></strong></summary>
 
-`bb test` never touches a child process or a real server, on purpose, so
+`jolt test` never touches a child process or a real server, on purpose, so
 the live suites are separate tasks. `test:jank`, `test:bb`, `test:basilisp`,
 `test:plugins` and `test:cljs-node` print a message and skip, exiting 0,
 when their tool is missing.
 
 | Task | Runs against | Needs |
 |---|---|---|
-| `bb test:nrepl` | a real Jolt child per test, over `jonquil.nrepl.child` | the jolt-lang/nrepl checkout ([where it comes from](dialects/index.md#where-the-nrepl-middleware-comes-from)) |
-| `bb test:nightly` | the same suite on Jolt's `vnightly` build | `curl`; macOS (arm64, x86_64) or Linux x86_64 |
-| `bb test:debugger` | the debugger's unit tests, the live Jolt-child break test and the window self-test, on a Jolt with `jolt.debug` | `JONQUIL_JOLT_DEBUG`, else `jolt-debug` on `PATH`, else `jolt` once it has `jolt.debug`; skips without one |
-| `bb test:clj` | a real `clojure -M:serve`, started by `dev/clj_server.clj` | Java 17+, `clojure` CLI, network on a first run |
-| `bb test:jank` | a real `jank repl` via the app's launcher | `JONQUIL_JANK`, else `jank` found as the app does; skips without |
-| `bb test:bb` | a real `bb nrepl-server` in a temp project | `bb` on `PATH`; skips without |
-| `bb test:basilisp` | a real `basilisp nrepl-server` | `JONQUIL_BASILISP`, else `basilisp` on `PATH`; skips without |
-| `bb test:plugins` | real isolated plugin checks in throwaway `jolt` children | `jolt` on the login `PATH`; skips without |
-| `bb test:cljs-node` | a real `clojure` plus `node`, via the app's launcher | `clojure` and `node`; skips without; a first run can download ClojureScript and the Closure Compiler |
+| `jolt test:nrepl` | a real Jolt child per test, over `jonquil.nrepl.child` | the jolt-lang/nrepl checkout ([where it comes from](dialects/index.md#where-the-nrepl-middleware-comes-from)) |
+| `jolt test:nightly` | the same suite on Jolt's `vnightly` build | `curl`; macOS (arm64, x86_64) or Linux x86_64 |
+| `jolt test:debugger` | the debugger's unit tests, the live Jolt-child break test and the window self-test, on a Jolt with `jolt.debug` | `JONQUIL_JOLT_DEBUG`, else `jolt-debug` on `PATH`, else `jolt` once it has `jolt.debug`; skips without one |
+| `jolt test:clj` | a real `clojure -M:serve`, started by `dev/clj_server.clj` | Java 17+, `clojure` CLI, network on a first run |
+| `jolt test:jank` | a real `jank repl` via the app's launcher | `JONQUIL_JANK`, else `jank` found as the app does; skips without |
+| `jolt test:bb` | a real `bb nrepl-server` in a temp project | `bb` on `PATH`; skips without |
+| `jolt test:basilisp` | a real `basilisp nrepl-server` | `JONQUIL_BASILISP`, else `basilisp` on `PATH`; skips without |
+| `jolt test:plugins` | real isolated plugin checks in throwaway `jolt` children | `jolt` on the login `PATH`; skips without |
+| `jolt test:cljs-node` | a real `clojure` plus `node`, via the app's launcher | `clojure` and `node`; skips without; a first run can download ClojureScript and the Closure Compiler |
 
-`bb test:nightly` unpacks the build under
+`jolt test:nightly` unpacks the build under
 `$XDG_CACHE_HOME/jonquil/jolt-nightly` (or `~/.cache/jonquil/jolt-nightly`),
 checks it against the published `.sha256`, and leaves the `jolt` on `PATH`
 alone. Later runs download again only when the `.sha256` changes, and
 `--offline` reuses the cache. The nightly goes first on `PATH`, so the Jolt
 children use it too.
 
-`bb test:cljs-node` has one test that opens a real browser tab; it runs
-only with `JONQUIL_BROWSER_LIVE=1 bb test:cljs-node`.
+`jolt test:cljs-node` has one test that opens a real browser tab; it runs
+only with `JONQUIL_BROWSER_LIVE=1 jolt test:cljs-node`.
 
 `JONQUIL_JOLT`, set to an executable, is the Jolt program the Jolt child
 runs, in place of the `jolt` on the login `PATH`.
@@ -52,7 +52,7 @@ runs, in place of the `jolt` on the login `PATH`.
 The released Jolt (v0.8.23) has no `jolt.debug`, so on it the debugger's
 tests (frames, Break on error, evaluating in a frame) take their "not
 available" path and pass without testing anything: a window self-test row
-reads `break-pauses PASS {:available false}`. `bb test:debugger` runs them on
+reads `break-pauses PASS {:available false}`. `jolt test:debugger` runs them on
 a Jolt that has it, sets `JONQUIL_JOLT` for the live child test, and fails
 when one of them skipped or a debugger row took that path. Run it before
 merging a change that touches the debugger, the evaluators or the child's
@@ -65,15 +65,15 @@ quicker pass.
 </details>
 
 <details>
-<summary><strong><code>bb mcp:smoke</code>: what it checks, headless, with <code>--window</code> and with <code>--attach</code></strong></summary>
+<summary><strong><code>jolt mcp:smoke</code>: what it checks, headless, with <code>--window</code> and with <code>--attach</code></strong></summary>
 
-`bb mcp:smoke` runs `jonquil --mcp` over real stdio from the checkout,
-speaks JSON-RPC from babashka, and prints a PASS or FAIL line per check
+`jolt mcp:smoke` runs `jonquil --mcp` over real stdio from the checkout,
+speaks JSON-RPC from a jolt script, and prints a PASS or FAIL line per check
 (11): handshake, tools, an evaluation, a background `println` that must not
 reach stdout, a bracket check, a `{:runtime :nrepl}` project starting a
 real Jolt child, and a clean exit once stdin closes. Responses have
 deadlines, so a hang fails a check. `--bin ./jonquil` runs it against the
-binary `bb app:build` made, which proves `jolt build` links the MCP
+binary `jolt app:build` made, which proves `jolt build` links the MCP
 namespaces. The nREPL step uses a jolt-lang/nrepl checkout if present,
 otherwise fetches v0.4.2 as a git dependency (git and network, first time).
 
@@ -97,7 +97,7 @@ bridge attaches. It ends with SIGTERM to the window, which must exit within
 
 Five harnesses drive the real GTK front end.
 
-**`bb gtk:selftest`** opens ten real GTK windows in turn and runs the rows
+**`jolt gtk:selftest`** opens ten real GTK windows in turn and runs the rows
 against them, calling the same button and key handlers a person would use.
 The full application window alone has over 400 rows. The windows run in the
 navy theme, easier on the eyes while they flash past; set
@@ -153,19 +153,19 @@ window stays open.
 
 </details>
 
-**`bb smoke:binary`** builds `target/smoke/jonquil` (skip with
+**`jolt smoke:binary`** builds `target/smoke/jonquil` (skip with
 `--no-build`), launches it as a subprocess, and drives it with
 `cgevent key --pid`, so no keystroke goes to other windows or `--global`.
 It checks file bytes, window titles, and screen pixels (OCR through
 `cgevent ocr-inspect`, plus a colour check of the theme's text and prompt).
 Every process it starts is killed on every exit path.
 
-`bb smoke:binary`, `smoke:cljd`, `smoke:cljs` and `bb docs:shots` drive the
+`jolt smoke:binary`, `smoke:cljd`, `smoke:cljs` and `jolt docs:shots` drive the
 macOS `cgevent` tool, which is private for now, so they run only where it
-is installed. The unit suite, the self-tests and `bb linux:test` never need
+is installed. The unit suite, the self-tests and `jolt linux:test` never need
 it.
 
-**`bb smoke:cljd`** drives a built `./jonquil` against a real, running
+**`jolt smoke:cljd`** drives a built `./jonquil` against a real, running
 ClojureDart app built on the nREPL fork (private for now). The gitignored
 `dev/smoke/cljd_app.local.edn` names it: `:dir` (absolute path), `:main-ns`
 (the namespace Run loads), and optionally `:fork-sha` (a prefix the app's
@@ -189,7 +189,7 @@ sample under `target/smoke/`.
 
 </details>
 
-**`bb smoke:cljs`** drives a built `./jonquil` against a real, running
+**`jolt smoke:cljs`** drives a built `./jonquil` against a real, running
 shadow-cljs app. Start the watch and a JS runtime first (`npx shadow-cljs
 watch <build>`, then the browser tab or node script); the task never starts
 or stops them. The gitignored `dev/smoke/cljs_app.local.edn` holds
@@ -197,7 +197,7 @@ or stops them. The gitignored `dev/smoke/cljs_app.local.edn` holds
 it. With several builds it writes a temporary untracked `.jonquil.edn` into
 the app directory to name one, removed on every exit path. 18 checks.
 
-**`bb docs:shots`** self-captures every `docs/images/*.png` and the GIFs
+**`jolt docs:shots`** self-captures every `docs/images/*.png` and the GIFs
 the guide pages embed, launching a fresh `jolt -M:shots <scene-id>` per
 scene (32 scenes). Retake one image with that command directly. First runs
 can download dependencies (ClojureScript and shadow-cljs scenes, and the
@@ -213,9 +213,9 @@ prints a line and exits 0 without an image.
 | `cljs-node`, `cljs-browser` | `clojure` CLI (`JONQUIL_CLOJURE` or login `PATH`); `cljs-node` also `node`; `cljs-browser` writes `{:cljs {:target :browser}}` and opens a real tab |
 | `nrepl-bb` | `bb` on the login `PATH`; starts `bb nrepl-server` on a free loopback port and names it in `.jonquil.edn` as `{:dialect :nrepl}` |
 | `cljs-shadow` | `clojure` CLI, `node`, `npm`; runs a real shadow-cljs 3.2.0 watch with a `:node-script` build, after `npm install ws` |
-| `clj-attach`, `clj-quick-doc`, `clj-full-doc`, `clj-inspector`, `clj-source` | Java 17+ and `clojure`; a real `clojure -M:serve` started as `bb test:clj` does |
+| `clj-attach`, `clj-quick-doc`, `clj-full-doc`, `clj-inspector`, `clj-source` | Java 17+ and `clojure`; a real `clojure -M:serve` started as `jolt test:clj` does |
 
-`bb docs:shots` sets `JONQUIL_CLOJURE` to the bare name `clojure` for the
+`jolt docs:shots` sets `JONQUIL_CLOJURE` to the bare name `clojure` for the
 two cljs scenes (unless you set it) so no home directory lands in the
 image. Retake one with `JONQUIL_CLOJURE=clojure jolt -M:shots cljs-node`.
 
@@ -227,8 +227,8 @@ smokes point `XDG_CONFIG_HOME` at a fresh temp directory per process.
 Nothing touches `~/.config/jonquil/settings.edn`.
 
 Temp directories come from `dev/temp_dirs.clj`, which deletes them when the
-tests or driver finish. `bb clean:tmp` removes what older runs left (only
-names these harnesses make); `bb clean:tmp --dry-run` lists them first.
+tests or driver finish. `jolt clean:tmp` removes what older runs left (only
+names these harnesses make); `jolt clean:tmp --dry-run` lists them first.
 
 ### Traps
 
@@ -239,10 +239,10 @@ names these harnesses make); `bb clean:tmp --dry-run` lists them first.
   `system_profiler SPDisplaysDataType`.
 - Never use `cgevent type` against this app: GTK's macOS backend reads the
   key code, not the Unicode string, so text arrives mangled.
-- **An interrupted `bb test:nrepl` or `bb gtk:selftest` can leave a Jolt
+- **An interrupted `jolt test:nrepl` or `jolt gtk:selftest` can leave a Jolt
   child.** Check `pgrep -fl "jolt.nrepl/start 79"` and kill only pids from
   your interrupted run.
-- **An interrupted `bb test:clj` can leave a JVM.** Check
+- **An interrupted `jolt test:clj` can leave a JVM.** Check
   `pgrep -fl clojure-cli.repl.server`, and kill only a pid that run started.
 
 ## Adding a feature as a window part
@@ -254,21 +254,21 @@ The design is in [Window parts](architecture/index.md#window-parts). In short:
 3. Take everything the part needs from `wctx`, never by requiring `jonquil.gtk.window`.
 4. For a right-hand panel, declare it in the spec's `:panels` with a label, add a `:panel/<id>` command whose `:call` is `[:panel-focus-fn :<id>]`, and answer it under `:panels` from the install: `{:<id> {:root widget :focus! f :open! f}}`. Don't use `:review` or `:history`, which are core ids.
 5. For keys, a new feature's keys may go in the spec's `:bindings` (`{:window [...] :editor [...]}`, entries shaped like `keymap.edn`). Keys of existing features stay in `keymap.edn`. A binding with Alt needs `:physical? true` to fire on macOS. Spec bindings come after the shipped ones, so a shipped key wins, and the `unreachable-bindings` test fails if one is shadowed.
-6. Test the spec in `bb test`, and add a row to a window self-test for the install. `specs-and-installs-name-the-same-parts` fails if only one list has the part.
+6. Test the spec in `jolt test`, and add a row to a window self-test for the install. `specs-and-installs-name-the-same-parts` fails if only one list has the part.
 7. For per-tab state, add `:on-tab-removed`, `:on-tab-wired` and `:on-switch` hooks to `:hooks`; each is called `(f ctx tab)`. Wire-time hooks run before the changed-form gutter's handler connects, and removal hooks run while the tab's buffer is still alive, and switch hooks run when a tab becomes the active one. A throwing hook is reported on the status line and the close or wiring goes on.
-8. Run `bb verify`.
+8. Run `jolt verify`.
 
 ## The macOS app: bundle, install, icon
 
-- `bb app:bundle` rebuilds `./jonquil` and makes `./Jonquil.app`, printing
+- `jolt app:bundle` rebuilds `./jonquil` and makes `./Jonquil.app`, printing
   a `check` line for `plutil -lint` on the `Info.plist`, the executable
   bit, and `codesign -dv` showing the linker's ad-hoc signature. A failed
   check exits non-zero naming it.
-- `bb app:install` bundles, moves the result to
+- `jolt app:install` bundles, moves the result to
   `~/Applications/Jonquil.app` (replacing an existing one only if its plist
   names `net.b12n.jonquil`), and runs `lsregister -f`. The checkout's copy
   is unregistered and removed, so Open With lists Jonquil once.
-- `bb app:icon` regenerates `resources/Jonquil.icns` and
+- `jolt app:icon` regenerates `resources/Jonquil.icns` and
   `resources/icon/jonquil-256.png` from `resources/icon/icon.swift`. It
   needs Swift, and you run it only after changing the icon.
 
@@ -277,9 +277,9 @@ image after the launcher's Mach-O, so `codesign --force` fails strict
 validation. macOS checks the linker's ad-hoc signature, which the task
 verifies.
 
-On Linux, `bb app:install` runs `bb app:build` and copies the binary, a
+On Linux, `jolt app:install` runs `jolt app:build` and copies the binary, a
 launcher, the icon and the MIME types under `~/.local/share`
-(`dev/app_linux.clj`); `bb app:uninstall` removes them. On macOS it only
+(`dev/app_linux.clj`); `jolt app:uninstall` removes them. On macOS it only
 says to drag the app to the Trash.
 
 ## Linux checks in Docker
@@ -290,34 +290,34 @@ manual. Docker is the only requirement beyond the usual tools.
 
 | Task | What it does |
 |---|---|
-| `bb linux:image` | builds `jonquil-linux:<arch>` (Ubuntu 26.04, GTK 4, Xvfb, Jolt v0.8.23, babashka) |
-| `bb linux:test [ns...]` | `bb test` on a copy of the checkout |
-| `bb linux:selftest` | `bb gtk:selftest` under Xvfb |
-| `bb linux:build` | `bb app:build`; the binary lands in `target/linux/<arch>/` |
-| `bb linux:run -- cmd...` | any command in the copied tree |
-| `bb linux:vnc` | a desktop in the browser for the hand check |
-| `bb linux:clean` | removes both images and `target/linux` |
+| `jolt linux:image` | builds `jonquil-linux:<arch>` (Ubuntu 26.04, GTK 4, Xvfb, Jolt v0.8.24) |
+| `jolt linux:test [ns...]` | `jolt test` on a copy of the checkout |
+| `jolt linux:selftest` | `jolt gtk:selftest` under Xvfb |
+| `jolt linux:build` | `jolt app:build`; the binary lands in `target/linux/<arch>/` |
+| `jolt linux:run -- cmd...` | any command in the copied tree |
+| `jolt linux:vnc` | a desktop in the browser for the hand check |
+| `jolt linux:clean` | removes both images and `target/linux` |
 
 Tasks take `--arch arm64|amd64` (default: the host's), except
 `linux:clean`. The arm64 image compiles Jolt and Chez Scheme from source
 because Jolt publishes no Linux arm64 binary, so it's slow to build (about
 11 minutes); amd64 uses the pinned release tarball but still takes
 about 6.5 minutes, its `apt` step emulated. Pulling the base image
-needs Docker Hub, so run the first `bb linux:image` from a normal terminal.
+needs Docker Hub, so run the first `jolt linux:image` from a normal terminal.
 
 The checkout is mounted read-only and copied to `~/jonquil` in the
 container, skipping `jonquil`, `jonquil.build`, `Jonquil.app`, `_site` and
 `target`. Only `target/linux/<arch>/` is written in your tree.
 
 A non-host arch runs under emulation, several times slower.
-`bb linux:selftest` then sets `JONQUIL_SELFTEST_EMULATED=1`, widening the
+`jolt linux:selftest` then sets `JONQUIL_SELFTEST_EMULATED=1`, widening the
 paint-async row's budget from 150 to 750 ms. The 20 s wait for a Jolt nREPL
 child can still run out on a busy host (parked in the ROADMAP).
 
 ### The noVNC hand check
 
-`bb linux:vnc` starts a container with Xvfb, openbox, pcmanfm, x11vnc and
-noVNC, installs Jonquil with `bb app:install`, and prints a URL such as
+`jolt linux:vnc` starts a container with Xvfb, openbox, pcmanfm, x11vnc and
+noVNC, installs Jonquil with `jolt app:install`, and prints a URL such as
 `http://localhost:6080/vnc.html?autoconnect=true&resize=scale`. The port is
 the first free one from 6080; `--port P` asks for one and is refused when
 busy. In pcmanfm, open `~/smoke` (`hello.clj`, `hello.jank`,
@@ -329,15 +329,15 @@ port.
 
 ## Quality: lint, format, and the git hooks
 
-- `bb lint` runs clj-kondo over `src`, `test` and `dev` in report mode.
-  `bb lint:strict` exits non-zero on any finding (2 for warnings, 3 for
+- `jolt lint` runs clj-kondo over `src`, `test` and `dev` in report mode.
+  `jolt lint:strict` exits non-zero on any finding (2 for warnings, 3 for
   errors); the manual CI workflow gates on it. The git hooks block only on
   clj-kondo errors.
-- `bb metrics` runs [jolt-metrics](https://github.com/jlt-commons/jolt-metrics)
+- `jolt metrics` runs [jolt-metrics](https://github.com/jlt-commons/jolt-metrics)
   over the repo and prints its Markdown report: a refactoring queue worst
   first, git hotspots, unused requires and functions nothing mentions, then
-  per-file numbers and coupling. `bb metrics:edn` gives every finding as
-  data, `bb metrics:json` a lean JSON report for tools, and `bb
+  per-file numbers and coupling. `jolt metrics:edn` gives every finding as
+  data, `jolt metrics:json` a lean JSON report for tools, and `bb
   metrics:html` one self-contained page (`target/metrics.html` unless a
   file comes first). Extra arguments go to its CLI (an output file, whose
   extension picks the format, `--top N`, `--no-git`, `--exclude GLOB`). Findings never fail it; only bad usage
@@ -347,29 +347,29 @@ port.
   `src/jonquil/parinfer.clj` and `test/jonquil/upstream/`) is left out too,
   since it follows DrClojure's source and is tracked in `UPSTREAM.md`. The
   `:metrics` alias pins the library's version.
-- `bb lsp:format` / `bb lsp:format-check` and `bb lsp:clean-ns` /
-  `bb lsp:clean-ns-check` reformat (or dry-run) code and `ns` forms with
-  clojure-lsp; `bb lsp:check` runs both dry-run checks.
+- `jolt lsp:format` / `jolt lsp:format-check` and `jolt lsp:clean-ns` /
+  `jolt lsp:clean-ns-check` reformat (or dry-run) code and `ns` forms with
+  clojure-lsp; `jolt lsp:check` runs both dry-run checks.
 - The LSP tasks cover `src`, `test` and `dev`, skipping
   `dev/smoke/fixtures/*.clj` (deliberately invalid Clojure that aborts
   clojure-lsp's parser), `dev/smoke/PixelAt.java`, and the two files lifted
   from DrClojure-Neo (`src/jonquil/syntax.clj`,
   `test/jonquil/upstream/syntax_test.clj`) so re-syncs diff cleanly.
-- `bb hooks:install` writes a fast pre-commit hook (clj-kondo errors plus a
-  format dry-run). `bb hooks:install:full` adds the full test suite.
-  `bb hooks:uninstall` removes either. Installing runs the checks first and
+- `jolt hooks:install` writes a fast pre-commit hook (clj-kondo errors plus a
+  format dry-run). `jolt hooks:install:full` adds the full test suite.
+  `jolt hooks:uninstall` removes either. Installing runs the checks first and
   warns if the tree doesn't pass yet.
 
 ### The manual lint workflow
 
-`.github/workflows/lint.yml` runs `bb lint:strict` and `bb lsp:format-check`
+`.github/workflows/lint.yml` runs `jolt lint:strict` and `jolt lsp:format-check`
 on `ubuntu-latest` with no Jolt involved. It has no push, pull request or
 schedule trigger (Jonquil is private for now); run it from the Actions tab
 or with `gh workflow run lint.yml`.
 
 ## Benchmark
 
-`bb bench:edit [sizes...]` times what typing costs in a large file. For
+`jolt bench:edit [sizes...]` times what typing costs in a large file. For
 each size (default 200, 2000, 8000 and 20000 lines of Jonquil's own source)
 it opens a real GTK window, so leave the keyboard alone. It prints
 `bench <measure> lines=<n> ms=<x>` lines:
@@ -388,14 +388,14 @@ of the buffer text on the GTK thread, about 50 ms.
 
 ## Upstream
 
-`bb upstream:diff` lists upstream DrClojure-Neo commits since
+`jolt upstream:diff` lists upstream DrClojure-Neo commits since
 `UPSTREAM_PIN` that touch `src` or `test`. It needs no setup: it keeps
 its own clone under `~/.cache/jonquil/`. See
 [Porting and attribution](porting-and-attribution.md#staying-in-sync).
 
 ## Docs
 
-`bb site:build`, `bb site:serve [port]` and `bb site:clean` build and
+`jolt site:build`, `jolt site:serve [port]` and `jolt site:clean` build and
 preview this documentation site (`docs/guide/`) using a sibling checkout of
 [jlt-commons/docs-engine](https://github.com/jlt-commons/docs-engine),
 looked up as `$JLT_DOCS_ENGINE`, then `~/dev/jlt-commons/docs-engine`, then

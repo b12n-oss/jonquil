@@ -1,7 +1,7 @@
 (ns clj-server
   "A real clojure -M:serve nREPL server (clojure-cli.repl-server 0.1.0 on
   nREPL 1.7.0, or 1.8.0 for the one end-of-input test, via start!'s
-  {:nrepl \"1.8.0\"}) in a fresh temp project, for bb test:clj's live
+  {:nrepl \"1.8.0\"}) in a fresh temp project, for jolt test:clj's live
   suite against jonquil.nrepl.jvm. Mirrors jonquil.nrepl.child's shape for a
   Jolt child, but launches the real JVM Clojure CLI instead: Jonquil
   itself never starts, stops or signals this JVM (the global

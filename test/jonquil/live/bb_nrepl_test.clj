@@ -1,7 +1,7 @@
 (ns jonquil.live.bb-nrepl-test
   "The nREPL dialect against a real babashka nREPL server, which each test
   starts on a free port in its own temp project and stops again. Run with
-  `bb test:bb`; it skips when no bb is on PATH."
+  `jolt test:bb`; it skips when no bb is on PATH."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]

@@ -1,4 +1,4 @@
-;; A plain JVM Clojure script, run by jonquil.live.cljs-node-live-test (bb test:cljs-node):
+;; A plain JVM Clojure script, run by jonquil.live.cljs-node-live-test (jolt test:cljs-node):
 ;;   clojure -M this.clj <path to cljs_node_launch.clj> scenarios|mismatch|missing
 ;; It stands in fake cljs.repl.server vars (lock, connq, promiseq, connection)
 ;; and real loopback sockets, loads the launcher, runs its private

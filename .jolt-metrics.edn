@@ -1,4 +1,4 @@
-;; jolt-metrics config for `bb metrics` (report only, never a gate).
+;; jolt-metrics config for `jolt metrics` (report only, never a gate).
 ;; test and dev are measured but kept out of the refactoring queue.
 ;; Left out: build output (target, the app build's jonquil.build),
 ;; clj-kondo's cache, the deliberately broken smoke fixtures and the

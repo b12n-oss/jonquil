@@ -10,8 +10,8 @@
 ;; quick doc (Ctrl+Q), jump (F12), rename (F2) and the context menu
 ;; (Shift+F10) -- see this file's help-keys section below.
 ;;
-;; Run via `bb smoke:binary` (see bb.edn); this file is a plain babashka
-;; script, not a jolt namespace -- it never touches the jolt/GTK process
+;; Run via `jolt smoke:binary` (see bb.edn); this file is a plain jolt
+;; script, not a Jonquil namespace -- it never touches the jolt/GTK process
 ;; from the inside, only from outside via cgevent and the filesystem.
 ;;
 ;; Hard safety rules:
@@ -53,7 +53,8 @@
 ;; light's :text, "#24292f" (console colours come from the theme). See dev/smoke/
 ;; PixelAt.java's own docstring for the full measurement and the
 ;; darkest-cluster fix.
-;; babashka itself can't do this sampling -- `bb -e '(import (javax.imageio
+;; This script ran under babashka when it was written, and babashka
+;; couldn't do this sampling -- `bb -e '(import (javax.imageio
 ;; ImageIO)) ...)'` fails with "Unable to resolve classname", because
 ;; babashka is a GraalVM native image with a curated class list that
 ;; doesn't include AWT/ImageIO -- so this shells out to a full JDK's
@@ -91,7 +92,7 @@
 
 (defn- kill-all-launched!
   "Destroys every process this run started (destroy-tree, since babashka.
-  process falls back to plain destroy pre-JDK9 but this project's own JDK
+  process, built into jolt, falls back to plain destroy pre-JDK9 but this project's own JDK
   is 25, verified via `java -version`). Safe to
   call more than once -- destroying an already-dead process is a no-op in
   babashka.process (measured: alive? false after destroy, no exception on

@@ -17,7 +17,7 @@
 ;; is a runtime builtin, not a resolved dependency) and no :local/root sibling checkout, so the default
 ;; classpath heuristic resolves cleanly on its own.
 ;;
-;; Not set here, because neither `bb lsp:*` task nor this file can fix it:
+;; Not set here, because neither `jolt lsp:*` task nor this file can fix it:
 ;; dev/smoke/fixtures/*.clj are deliberately invalid or minimal Clojure
 ;; (binary_smoke.clj feeds them to the built jonquil binary to exercise
 ;; unclosed-paren recovery, completion, find, etc.). clojure-lsp's `format`

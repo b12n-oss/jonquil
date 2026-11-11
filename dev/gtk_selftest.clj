@@ -617,7 +617,7 @@
   first frame after set-text! of 8,000 lines holds the GTK thread 101-167 ms
   with no paint at all, and timing from set-text! charged that to the paint
   (the row missed on most runs). Measured after that settle,
-  the paint's own worst gap was 86-94 ms. Under CPU emulation (JONQUIL_SELFTEST_EMULATED, set by bb linux:selftest
+  the paint's own worst gap was 86-94 ms. Under CPU emulation (JONQUIL_SELFTEST_EMULATED, set by jolt linux:selftest
   for another arch than the host's) the budget is 5x: x86_64 emulated on
   arm64 measured 194 ms and 481 ms worst cases, which time the emulator."
   [_ed]

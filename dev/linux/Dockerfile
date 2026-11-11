@@ -1,4 +1,5 @@
-# A Linux box for checking Jonquil locally (no CI): `bb linux:image` builds it.
+# A Linux box for checking Jonquil locally (no CI): `jolt linux:image` builds it.
+# Jolt runs the tasks too (it reads bb.edn), so there is no babashka here.
 #
 #   arm64  Jolt publishes no Linux arm64 binary, so it is built from its release
 #          tag here (it provisions its own pinned Chez Scheme).
@@ -19,9 +20,6 @@ RUN apt-get update \
 
 ARG JOLT_VERSION=v0.8.24
 ARG JOLT_SHA256_AMD64=8f5dc27988830c7cf1780fd877e2b35ae6a5aa2acce79760194ff007ed3447d7
-ARG BB_VERSION=1.13.225
-ARG BB_SHA256_AMD64=ab0e98307405ba19e7c5ba0c3c7cd17a6f90aa90577a72709055f120796d6bfe
-ARG BB_SHA256_ARM64=7fd4ce2c6ac9975bfd6f20a42a49f5d6f95d8ac0b2c4d9336dc6afc67ad11ce2
 
 # Downloads use curl --retry 5 --retry-all-errors because GitHub drops the odd
 # connection from inside a build. The Jolt archive is unpacked with bsdtar, not
@@ -31,19 +29,14 @@ RUN set -eu; cd /tmp; get() { curl -fsSL --retry 5 --retry-all-errors -o "$1" "$
       amd64) \
         get jolt.tgz https://github.com/jolt-lang/jolt/releases/download/${JOLT_VERSION}/jolt-${JOLT_VERSION}-x86_64-linux.tar.gz; \
         echo "${JOLT_SHA256_AMD64}  jolt.tgz" | sha256sum -c -; \
-        bsdtar xzf jolt.tgz; install -m 755 jolt-${JOLT_VERSION}-x86_64-linux/jolt /usr/local/bin/jolt; \
-        get bb.tgz https://github.com/babashka/babashka/releases/download/v${BB_VERSION}/babashka-${BB_VERSION}-linux-amd64-static.tar.gz; \
-        echo "${BB_SHA256_AMD64}  bb.tgz" | sha256sum -c - ;; \
+        bsdtar xzf jolt.tgz; install -m 755 jolt-${JOLT_VERSION}-x86_64-linux/jolt /usr/local/bin/jolt ;; \
       arm64) \
         git -c advice.detachedHead=false clone -q --depth 1 --branch ${JOLT_VERSION} \
             --recurse-submodules --shallow-submodules https://github.com/jolt-lang/jolt.git jolt-src; \
         make -C jolt-src build > /tmp/jolt-build.log 2>&1 || { tail -30 /tmp/jolt-build.log; exit 1; }; \
-        install -m 755 jolt-src/target/release/jolt /usr/local/bin/jolt; \
-        get bb.tgz https://github.com/babashka/babashka/releases/download/v${BB_VERSION}/babashka-${BB_VERSION}-linux-aarch64-static.tar.gz; \
-        echo "${BB_SHA256_ARM64}  bb.tgz" | sha256sum -c - ;; \
+        install -m 755 jolt-src/target/release/jolt /usr/local/bin/jolt ;; \
       *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
-    bsdtar xzf bb.tgz; install -m 755 bb /usr/local/bin/bb; \
     cd /; rm -rf /tmp/*
 
 # jonquil.nrepl.child looks for this checkout at ~/dev/jolt-lang/nrepl, which
@@ -58,4 +51,4 @@ RUN useradd -m dev \
 USER dev
 WORKDIR /home/dev
 
-RUN jolt --version && bb --version
+RUN jolt --version

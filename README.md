@@ -41,9 +41,9 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 
 - [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`. Counting how often each line runs needs v0.8.24, which added `jolt.profile`, and says so on an older Jolt
 - GTK4 and pango: Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
-- `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.2 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `bb test:nrepl` needs it
+- `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.2 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `jolt test:nrepl` needs it
 - A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork is private for now
-- Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
+- Java 17+ and the `clojure` CLI, only for `jolt test:clj` and a JVM project's own server
 - A shadow-cljs project (`shadow-cljs.edn`) with a running watch, only for the ClojureScript dialect when it attaches: Jonquil never starts it
 - The `clojure` CLI and `node` on `PATH` (or `JONQUIL_CLOJURE`), only for ClojureScript on node: Jonquil starts ClojureScript itself, and the first start can download the Closure Compiler
 - A web browser, only for ClojureScript in the browser (`.jonquil.edn {:cljs {:target :browser}}`, which also needs the `clojure` CLI but not `node`): Jonquil opens the page in your default browser
@@ -52,23 +52,23 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 ## Running
 
 ```bash
-bb app:run           # opens an empty window
-bb app:run file.clj  # opens file.clj in the Definitions editor
-bb app:run ~/dev/my-talk  # opens a window on a project folder, with the file tree showing it
+jolt app:run           # opens an empty window
+jolt app:run file.clj  # opens file.clj in the Definitions editor
+jolt app:run ~/dev/my-talk  # opens a window on a project folder, with the file tree showing it
 ```
 
 ## Building
 
 ```bash
-bb app:build     # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
-bb app:bundle    # builds ./jonquil, then ./Jonquil.app (macOS)
-bb app:install   # the same, then moves it to ~/Applications and registers it (macOS)
-                 # on Linux: builds, then installs under ~/.local/share (launcher, icon, MIME types); bb app:uninstall removes it
+jolt app:build     # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
+jolt app:bundle    # builds ./jonquil, then ./Jonquil.app (macOS)
+jolt app:install   # the same, then moves it to ~/Applications and registers it (macOS)
+                 # on Linux: builds, then installs under ~/.local/share (launcher, icon, MIME types); jolt app:uninstall removes it
 ```
 
-Jonquil also builds and runs on Linux (tested on Ubuntu 26.04 with GTK 4.22): the same `bb app:build`, and `bb app:install` puts a launcher, icon and MIME types under `~/.local/share`. See [Getting started](docs/guide/getting-started.md#linux).
+Jonquil also builds and runs on Linux (tested on Ubuntu 26.04 with GTK 4.22): the same `jolt app:build`, and `jolt app:install` puts a launcher, icon and MIME types under `~/.local/share`. See [Getting started](docs/guide/getting-started.md#linux).
 
-The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:
+The binary is unsigned on macOS. `jolt app:build` itself prints the fix if you need to hand it to someone else:
 
 ```
 jolt build: note — on macOS this binary is unsigned; to share it,
@@ -77,7 +77,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-11-07, 1559 tests pass (8892 assertions on macOS; 8837 on Linux, measured with `bb linux:test` the same day).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-07, 1559 tests pass (8892 assertions on macOS; 8837 on Linux, measured with `jolt linux:test` the same day).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>
@@ -98,59 +98,59 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.project-roots`: A project kept in process: its `deps.edn` `:paths` and `:deps` as Jolt's roots, after Jolt's own.
 - `jonquil.dialect`: Dialect profiles and the per-project choice between them, from `.jonquil.edn`, a project marker, the file's extension, or settings.
 - `jonquil.evaluator`: The `Evaluator` protocol every dialect's runtime implements, so a window doesn't care which one it's talking to.
-- `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `bb test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).
+- `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `jolt test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).
 - `jonquil.nrepl.middleware-files`, `jonquil.nrepl.inspect-middleware`, `jonquil.nrepl.stdin-middleware` and `jonquil.nrepl.info-middleware`: Jonquil's own nREPL middleware, embedded when Jonquil is compiled, written under `~/.cache/jonquil/nrepl-middleware` and loaded by the Jolt child, which gives out-of-process Jolt the inspector, `read-line` and jump to definition into other files.
-- `jonquil.cljd` and `jonquil.nrepl.attach`: the ClojureDart dialect, attached to a running app over its own nREPL server. `bb test` runs its tests against an in-process fake server, so there's still no child process and nothing outside the repo.
-- `jonquil.cljs` and `jonquil.nrepl.shadow`: the ClojureScript dialect (experimental), attached to a shadow-cljs nREPL server you started yourself. `bb test` runs its tests against an in-process fake server.
-- `jonquil.cljs-node`, `jonquil.cljs-node-launch`, `jonquil.nrepl.cljs-node`, `jonquil.nrepl.cljs-child`, `jonquil.nrepl.cljs-node-files` and `jonquil.nrepl.prepl`: ClojureScript on node, or in a browser tab with `{:cljs {:target :browser}}` (experimental). Jonquil launches a `clojure` process per window that serves a prepl on loopback and runs ClojureScript's node REPL, and talks to it over line-delimited EDN. `bb test` runs these against a fake prepl and `bb test:cljs-node` runs a live suite against real `clojure` and `node`, plus browser checks that open no tab.
-- `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.
-- `jonquil.nrepl.generic`: the nREPL dialect, attached to any nREPL server you started (babashka, Basilisp, one on another host), through the JVM attach evaluator with nothing JVM-specific assumed. `bb test:bb` and `bb test:basilisp` run live suites against a real `bb nrepl-server` and `basilisp nrepl-server`.
+- `jonquil.cljd` and `jonquil.nrepl.attach`: the ClojureDart dialect, attached to a running app over its own nREPL server. `jolt test` runs its tests against an in-process fake server, so there's still no child process and nothing outside the repo.
+- `jonquil.cljs` and `jonquil.nrepl.shadow`: the ClojureScript dialect (experimental), attached to a shadow-cljs nREPL server you started yourself. `jolt test` runs its tests against an in-process fake server.
+- `jonquil.cljs-node`, `jonquil.cljs-node-launch`, `jonquil.nrepl.cljs-node`, `jonquil.nrepl.cljs-child`, `jonquil.nrepl.cljs-node-files` and `jonquil.nrepl.prepl`: ClojureScript on node, or in a browser tab with `{:cljs {:target :browser}}` (experimental). Jonquil launches a `clojure` process per window that serves a prepl on loopback and runs ClojureScript's node REPL, and talks to it over line-delimited EDN. `jolt test` runs these against a fake prepl and `jolt test:cljs-node` runs a live suite against real `clojure` and `node`, plus browser checks that open no tab.
+- `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `jolt test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `jolt test:clj` runs a second suite against a real `clojure -M:serve`.
+- `jonquil.nrepl.generic`: the nREPL dialect, attached to any nREPL server you started (babashka, Basilisp, one on another host), through the JVM attach evaluator with nothing JVM-specific assumed. `jolt test:bb` and `jolt test:basilisp` run live suites against a real `bb nrepl-server` and `basilisp nrepl-server`.
 - `jonquil.plugin` and `jonquil.plugin-*`: plugins. The API a plugin file calls (`plugin`), the checks every version goes through (`plugin-check`, `plugin-protocol`), the live registry and loading (`plugin-registry`, `plugin-loader`, `plugin-hooks`), the throwaway Jolt an agent's proposal is checked in (`plugin-isolated`, `plugin-checker`, `plugin-checker-files`), each plugin's history (`plugin-history`), the list and the review (`plugin-list`, `plugin-review`) and the plugin MCP tools (`plugin-mcp`). `jonquil.gtk.plugin-list-pane`, `jonquil.gtk.plugin-history-pane` and `jonquil.gtk.review-pane` show the list, a plugin's history and a proposal's review.
 - `jonquil.mcp` and `jonquil.mcp.*`: the MCP server behind `jonquil --mcp`: the six headless tools (`tools`), the nineteen over a live window (`window`), the listener `--mcp-attach` reaches (`listen`), and its JSON (`json`).
-- `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`: the jank dialect (experimental). Jonquil launches its own `jank repl` per window from a private temp folder and talks to it over nREPL. `bb test` runs these against an in-process fake server, and `bb test:jank` runs a live suite against a real jank.
+- `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`: the jank dialect (experimental). Jonquil launches its own `jank repl` per window from a private temp folder and talks to it over nREPL. `jolt test` runs these against an in-process fake server, and `jolt test:jank` runs a live suite against a real jank.
 
 </details>
 
 ## Commands
 
 ```bash
-bb check                  # require every namespace, exit 0
-bb test                   # all test namespaces; exits 1 on any failure or error
-bb test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)
-bb test:nightly           # test:nrepl against Jolt's nightly build, cached under ~/.cache/jonquil/jolt-nightly (--offline reuses it)
-bb test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
-bb test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
-bb test:bb                # live nREPL-dialect tests: start a real bb nrepl-server (bb on PATH; skips without one)
-bb test:basilisp          # the same against a real basilisp nrepl-server (JONQUIL_BASILISP or basilisp on PATH)
-bb test:plugins           # live isolated plugin checks: run real jolt checker children (skips without jolt)
-bb test:cljs-node         # live ClojureScript-on-node tests: launch a real clojure + node prepl (need the clojure CLI and node; skips without them)
-bb test jonquil.edit-test # one namespace (the TDD loop)
-bb linux:test             # bb test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; no CI)
-bb gtk:selftest           # real-window self-tests, opens ten windows (don't type while it runs)
-bb docs:shots             # re-capture docs/images/*.png, one process per scene
-bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows; cgevent is private for now)
-bb smoke:cljd             # drive the built binary against a running ClojureDart app (start your ClojureDart app first; see the development guide)
-bb smoke:cljs             # drive the built binary against a running shadow-cljs app (start its watch and open the app first; see the development guide)
-bb bench:edit             # time editing stalls on large files (opens a real window per size)
-bb mcp:smoke              # the MCP server end to end (also --window and --attach)
-bb clean:tmp              # delete temp dirs earlier test runs left behind
+jolt check                  # require every namespace, exit 0
+jolt test                   # all test namespaces; exits 1 on any failure or error
+jolt test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)
+jolt test:nightly           # test:nrepl against Jolt's nightly build, cached under ~/.cache/jonquil/jolt-nightly (--offline reuses it)
+jolt test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
+jolt test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
+jolt test:bb                # live nREPL-dialect tests: start a real bb nrepl-server (bb on PATH; skips without one)
+jolt test:basilisp          # the same against a real basilisp nrepl-server (JONQUIL_BASILISP or basilisp on PATH)
+jolt test:plugins           # live isolated plugin checks: run real jolt checker children (skips without jolt)
+jolt test:cljs-node         # live ClojureScript-on-node tests: launch a real clojure + node prepl (need the clojure CLI and node; skips without them)
+jolt test jonquil.edit-test # one namespace (the TDD loop)
+jolt linux:test             # jolt test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; no CI)
+jolt gtk:selftest           # real-window self-tests, opens ten windows (don't type while it runs)
+jolt docs:shots             # re-capture docs/images/*.png, one process per scene
+jolt smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows; cgevent is private for now)
+jolt smoke:cljd             # drive the built binary against a running ClojureDart app (start your ClojureDart app first; see the development guide)
+jolt smoke:cljs             # drive the built binary against a running shadow-cljs app (start its watch and open the app first; see the development guide)
+jolt bench:edit             # time editing stalls on large files (opens a real window per size)
+jolt mcp:smoke              # the MCP server end to end (also --window and --attach)
+jolt clean:tmp              # delete temp dirs earlier test runs left behind
 ```
 
-`bb info` (or `jolt info`, since jolt reads this same `bb.edn`) prints the full task list grouped by what it's for, including the quality and git-hook tasks below.
+`jolt info` prints the full task list grouped by what it's for, including the quality and git-hook tasks below.
 
 ## Quality and git hooks
 
 ```bash
-bb lint                 # clj-kondo over src, test and dev (report only)
-bb lint:strict          # the same, but exit non-zero if there are any findings
-bb metrics              # jolt-metrics: refactoring queue, hotspots, cleanup (report only)
-bb lsp:format-check     # clojure-lsp format, dry run
-bb lsp:clean-ns-check   # clojure-lsp clean-ns, dry run
-bb lsp:check            # the two dry runs together
-bb verify               # lint (report) + test + test:nrepl (must pass): the pre-commit gate
-bb hooks:install        # a fast pre-commit hook: lint errors + format --dry
-bb hooks:install:full   # the same, plus the test suite (slower)
-bb hooks:uninstall      # remove the git pre-commit hook
+jolt lint                 # clj-kondo over src, test and dev (report only)
+jolt lint:strict          # the same, but exit non-zero if there are any findings
+jolt metrics              # jolt-metrics: refactoring queue, hotspots, cleanup (report only)
+jolt lsp:format-check     # clojure-lsp format, dry run
+jolt lsp:clean-ns-check   # clojure-lsp clean-ns, dry run
+jolt lsp:check            # the two dry runs together
+jolt verify               # lint (report) + test + test:nrepl (must pass): the pre-commit gate
+jolt hooks:install        # a fast pre-commit hook: lint errors + format --dry
+jolt hooks:install:full   # the same, plus the test suite (slower)
+jolt hooks:uninstall      # remove the git pre-commit hook
 ```
 
 `.github/workflows/lint.yml` runs the same lint and format check on GitHub

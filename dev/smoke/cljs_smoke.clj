@@ -1,7 +1,7 @@
 ;; Drives the BUILT Jonquil binary, via cgevent --pid, to smoke the
 ;; ClojureScript (shadow-cljs) attach dialect against the user's REAL,
 ;; already-running shadow-cljs app (named by dev/smoke/cljs_app.local.edn).
-;; Run via `bb smoke:cljs` (see bb.edn); a plain babashka script, not a jolt
+;; Run via `jolt smoke:cljs` (see bb.edn); a plain jolt script, not a Jonquil
 ;; namespace, shaped like dev/smoke/cljd_smoke.clj: its helpers are private
 ;; there, so the ones needed here are copied rather than shared.
 ;;
@@ -421,7 +421,7 @@
   (let [made-config? (and build-kw (not (fs/exists? jonquil-edn)))]
     (when made-config?
       (spit jonquil-edn (pr-str {:cljs {:shadow-build build-kw}})))
-    ;; A SIGINT/SIGTERM to bb skips the finally below, so the JVM's shutdown
+    ;; A SIGINT/SIGTERM to jolt skips the finally below, so the shutdown
     ;; hook removes the same files (deleting one that's gone is a no-op).
     (.addShutdownHook (Runtime/getRuntime)
                       (Thread. (fn []

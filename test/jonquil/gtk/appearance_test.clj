@@ -1,5 +1,5 @@
 (ns jonquil.gtk.appearance-test
-  "Under `bb test` GTK isn't initialised, so only the contract is checked
+  "Under `jolt test` GTK isn't initialised, so only the contract is checked
   here: a boolean or nil, never a throw. The window self-test asserts a
   real boolean."
   (:require [clojure.test :refer [deftest is]]
