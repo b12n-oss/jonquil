@@ -663,10 +663,10 @@
 ;; being wired, etc.) would leave the g_application main loop running
 ;; forever with nothing to stop it -- hanging `bb gtk:selftest` instead of
 ;; failing it. window-destroyed? is set by a "destroy" signal this file
-;; connects on the window itself (-main, below), independent of window.clj's
-;; own close-request->quit wiring: a plain Clojure atom flip, safe to read
-;; from the driver's go block without ever touching the (possibly
-;; already-destroyed) widget pointer directly.
+;; connects on the window itself (-main, below), independent of
+;; jonquil.gtk.window.quit's close-request wiring: a plain Clojure atom
+;; flip, safe to read from the driver's go block without ever touching the
+;; (possibly already-destroyed) widget pointer directly.
 (defonce ^:private window-destroyed? (atom false))
 
 ;; Set only where SUMMARY prints, i.e. when the driver

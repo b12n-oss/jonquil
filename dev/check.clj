@@ -165,6 +165,7 @@
     jonquil.gtk.window.status-bar
     jonquil.gtk.window.runtime
     jonquil.gtk.window.quit
+    jonquil.gtk.window.layout
     jonquil.gtk.window.run
     jonquil.gtk.window.inspector
     jonquil.gtk.window.help
@@ -172,6 +173,7 @@
     jonquil.gtk.window.console
     jonquil.gtk.window.reopen
     jonquil.gtk.window.tree-ops
+    jonquil.gtk.window.context
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen

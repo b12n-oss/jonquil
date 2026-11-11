@@ -2,8 +2,9 @@
   "The file tree's behaviour as a window part (the command is
   jonquil.parts.file-tree/spec): Show/Hide Files, its saved width and
   visibility, its Escape keys' context, its highlight on a tab switch and its
-  width save at quit. Moved out of jonquil.gtk.window; the tree's widgets
-  (tree-pane, tree-paned, files-btn) stay in the window and come in wctx."
+  width save at quit. Moved out of jonquil.gtk.window. The tree's widgets come
+  in wctx: tree-pane is made by jonquil.gtk.window.tree-ops's build, and
+  files-btn and tree-paned by jonquil.gtk.window.layout's build."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.console-view :as cview]

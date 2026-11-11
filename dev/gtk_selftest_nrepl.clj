@@ -23,11 +23,11 @@
   Quit AppleEvent takes -- so finish (below) is a close-forced
   FALLBACK only, the same shape as the window group's own finish
   (dev/gtk_selftest_window.clj): it polls window-destroyed? (a \"destroy\"
-  signal this file connects in -main, independent of window.clj's own
-  close-request->quit wiring) and forces the close through gtk-async/
-  close-window-bounded! only if the real quit action somehow didn't
-  already close it, recording a FAIL if so, and a second FAIL plus a
-  process exit if even the forced close is stuck. Nothing here needs the
+  signal this file connects in -main, independent of
+  jonquil.gtk.window.quit's close-request wiring) and forces the close
+  through gtk-async/close-window-bounded! only if the real quit action
+  somehow didn't already close it, recording a FAIL if so, and a second
+  FAIL plus a process exit if even the forced close is stuck. Nothing here needs the
   alert-dialog path close-request-fn also has to guard, since row-nrepl-
   close-kills-child leaves the editor clean (set-text! never marks it
   dirty) right before quitting, so the real close always takes close-

@@ -17,7 +17,6 @@
   GTK thread, so it calls GTK directly."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
-            [jonquil.command-registry :as cmd-registry]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
@@ -25,22 +24,20 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
-            [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.source-pane :as source-pane]
-            [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.console :as win-console]
+            [jonquil.gtk.window.context :as win-context]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.help :as win-help]
             [jonquil.gtk.window.inspector :as win-inspector]
-            [jonquil.gtk.window.keys :as win-keys]
+            [jonquil.gtk.window.layout :as win-layout]
             [jonquil.gtk.window.quit :as win-quit]
             [jonquil.gtk.window.reopen :as win-reopen]
-            [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.run :as win-run]
             [jonquil.gtk.window.runtime :as win-runtime]
@@ -212,9 +209,6 @@
                                        :server-ev server-ev :close-popovers-fn close-popovers-fn})
         {:keys [run-fn stop-fn run-selection-fn run-changed-fn]}
         (win-run/build {:active-tab active-tab :cv cv :ev* ev* :sel* sel* :status-label status-label})
-        open-fn (fn [] (win-files/do-open! cv win (fn [p] (win-tabs/open-file! @*tab-ctx p))))
-        save-fn (fn [] (let [t (active-tab)] (win-files/do-save! (:ed t) cv win (:path t))))
-        save-as-fn (fn [] (let [t (active-tab)] (win-files/do-save-as! (:ed t) cv win (:path t))))
         {:keys [close-fn new-tab-fn step-tab-fn digit-tab-fn]}
         (win-tabs/build {:tabs tabs :active-id active-id :active-tab active-tab :tab-ctx* *tab-ctx})
         {:keys [h-paned inspector-state inspecting? inspect-queued inspector-last-args on-view on-inspector-close pane]}
@@ -223,26 +217,19 @@
         (win-right-slot/build {:win win :h-paned h-paned :pane pane :sp sp :rp rp :lp lp :hp hp
                                :settings-path* settings-path* :status-label status-label})
         _ (reset! *right right)
-        inspect-last-ctx {:ev* ev* :right right :pane pane :inspector-state inspector-state
-                          :inspecting? inspecting? :inspector-last-args inspector-last-args
-                          :on-view on-view :status-label status-label :start [:start {}]}
-        inspect-last-fn (fn [] (win-inspector/inspect-last! inspect-last-ctx))
-        inspect-form-fn (fn [] (win-inspector/inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
-                                               :inspecting? inspecting? :inspect-queued inspect-queued
-                                               :inspect-last-fn inspect-last-fn}))
         {:keys [source-jump-fn source-close-fn source-back-fn source-open-fn jump-back-fn source-keys]}
         (win-help/build-source-keys {:source-ctx source-ctx :active-tab active-tab :right right :sp sp :win win :tabs tabs
                                      :open-file! win-tabs/open-file! :select-tab! win-tabs/select-tab! :tab-by-id win-tabs/tab-by-id
                                      :tab-ctx* *tab-ctx})
-        close-inspector-fn (fn [] (win-inspector/close-inspector-panel! right (:ed (active-tab))))
-        toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv))
-        clear-console-fn (fn [] (win-keys/do-clear-console! cv))
-        clear-last-fn (fn [] (win-keys/do-clear-last-output! cv))
         {:keys [parinfer-mode* update-parinfer-label! parinfer-status-fn parinfer-fn]}
         (win-status-bar/build-parinfer {:settings-path* settings-path* :active-tab active-tab :parinfer-label parinfer-label
                                         :evaluating-fn evaluating-fn :status-label status-label :cv cv})
-        open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
-        open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
+        {:keys [open-fn save-fn save-as-fn inspect-last-ctx inspect-last-fn inspect-form-fn close-inspector-fn
+                toggle-focus-fn clear-console-fn clear-last-fn open-find-fn open-replace-fn]}
+        (win-context/build-key-fns {:cv cv :win win :active-tab active-tab :ev* ev* :sel* sel* :status-label status-label
+                                    :right right :pane pane :inspector-state inspector-state :inspecting? inspecting?
+                                    :inspect-queued inspect-queued :inspector-last-args inspector-last-args
+                                    :on-view on-view :tab-ctx* *tab-ctx})
         ;; The editor's and the console's own context menus -- each item
         ;; calls the EXACT SAME fn its key does, through its command in
         ;; jonquil.command-registry. install-context-menu! returns the GSimpleActionGroup, so :activate-
@@ -251,169 +238,45 @@
         ;; The ui's editor-menu hook fires the FIRST tab's menu
         ;; (tabs are built after this let), as the other per-tab ui keys do.
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action (:menu-group (first @tabs)) name ffi/null))
-        ;; The tree on the left, its toggle first in the toolbar, and the
-        ;; outer paned that holds it beside h-paned.
+        ;; win-tree-ops/build makes the tree's pane, and win-layout/build the
+        ;; Files toggle, the tree's outer paned, the editor and console
+        ;; paned, the toolbar and its buttons, the column and the key
+        ;; controller.
         {:keys [tree-pane] *open-folder :open-folder* *folder-result :folder-result*}
         (win-tree-ops/build {:status-label status-label :tab-ctx* *tab-ctx})
-        files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
-        tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
-        ;; Window parts (jonquil.gtk.parts): each install fn reads the core
-        ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
-        ;; :exports. A part's error is said on the status line, not thrown.
-        part-error! (fn [id ex]
-                      (win-status/set-status! status-label (str "; part " id ": " (or (ex-message ex) (str ex)))))
-        part-contribution (parts/install gtk-parts/installs
-                                         {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
-                                          :tabs tabs :active-tab active-tab :settings-path* settings-path*
-                                          :tab-ctx* *tab-ctx
-                                          :tab-by-id win-tabs/tab-by-id :select-tab! win-tabs/select-tab! :new-tab! win-tabs/new-tab!
-                                          :bang* bang* :recent-tabs recent-tabs
-                                          :contain-click (fn [where f] (win-status/contain-click status-label where f))
-                                          :set-status! (fn [text] (win-status/set-status! status-label text))
-                                          :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
-                                          :files-btn files-btn :panel-focus-fn panel-focus-fn
-                                          :showing-panel win-right-slot/showing-panel :show-right-panel! win-right-slot/show-right-panel!
-                                          :hide-right-panel! win-right-slot/hide-right-panel!
-                                          :alert-pending? win-alerts/alert-pending? :show-alert! win-alerts/show-alert!
-                                          :make-eval-opts win-run/make-eval-opts :refuse-foreign! win-run/refuse-foreign!
-                                          :unread-label unread-label
-                                          :register-status-log! (fn [log!] (win-status/register-status-log! status-label log!))
-                                          :plugin-step! win-plugin-agent/plugin-step!
-                                          :plugins-on* plugins-on* :review-pane rp
-                                          :plugin-list-pane lp :plugin-history-pane hp
-                                          :pending-label pending-label
-                                          :open-file! (fn [p] (win-tabs/open-file! @*tab-ctx p))
-                                          :plugin-history-shown win-plugin-agent/plugin-history-shown
-                                          :plugin-reviews-changed win-plugin-agent/plugin-reviews-changed
-                                          :plugin-console win-plugin-agent/plugin-console
-                                          :on-saved win-files/on-saved
-                                          :mcp-eval! win-run/mcp-eval!
-                                          :refresh-labels! (fn [] (win-tabs/refresh-labels! @*tab-ctx))
-                                          :inspect! (fn [start]
-                                                      (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
-                                          :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to!
-                                          :source-ctx source-ctx
-                                          :place-caret-and-scroll! win-help/place-caret-and-scroll! :file-name win-files/file-name
-                                          :open-in-tab! win-help/open-in-tab! :show-source! win-help/show-source!
-                                          :rerun-failure! (fn [f t]
-                                                            (win-run/rerun-failure! {:failure f :tab t :cv cv :ev* ev* :sel* sel*
-                                                                             :status-label status-label}))}
-                                         part-error!
-                                         {:specs parts/specs})
-        _ (reset! part-panels* (:panels part-contribution))
-        ;; The console's context menu is built here, after the parts, because
-        ;; the live-results part answers the four result fns its items call;
-        ;; built earlier those keys were nil.
-        console-menu-group
-        (win-keys/install-context-menu! (:view cv)
-                               (cmd-registry/menu-items cmd-registry/console-menu
-                                                        (merge {:complete! repl-complete-fn :clear-last-fn clear-last-fn}
-                                                               (select-keys (:fns part-contribution)
-                                                                            [:result-inspect-fn :result-copy-fn
-                                                                             :result-define-fn :result-jump-fn])))
-                               (fn [msg] (win-status/set-status! status-label msg)))
-        repl-activate-menu-action-fn
-        (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
-        ;; named, so each tab's palette can build the same per-key ctx
-        ;; (window-key-ctx) a window chord gets
-        window-key-args (parts/merge-with-core
-                         :fns
-                         {:panel-focus-fn panel-focus-fn
-                         :hints-toggle-fn hints-toggle-fn
-                         :run-changed-fn run-changed-fn
-                         ;; switching tabs: a palette tab entry, and Go back
-                         :switch-tab-fn (fn [id] (when (win-tabs/tab-by-id tabs id) (win-tabs/select-tab! @*tab-ctx id)))
-                         :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
-                                               (win-tabs/select-tab! @*tab-ctx id)
-                                               (win-status/set-status! status-label "; Only one tab is open.")))
-                         :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
-                                      :save-as-fn save-as-fn :close-fn close-fn
-                                      :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
-                                      :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn
-                                      :zoom-fn zoom-fn :evaluating? evaluating-fn
-                                      :win win :active-tab active-tab :open-find-fn open-find-fn
-                                      :open-replace-fn open-replace-fn :theme-cycle-fn cycle-theme-fn
-                                      :close-popovers-fn close-popovers-fn
-                                      :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn
-                                      :pane pane :close-inspector-fn close-inspector-fn
-                                      :status-label status-label :source-keys source-keys
-                                      :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
-                                      :digit-tab-fn digit-tab-fn
-                                      :parinfer-fn parinfer-fn}
-                         part-contribution)
-        window-key-fn (win-keys/on-window-key window-key-args)
-        toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        run-btn (g/gtk-button-new-with-label "Run (F5)")
-        stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
-        open-btn (g/gtk-button-new-with-label "Open…")
-        save-btn (g/gtk-button-new-with-label "Save…")
-        reset-chk (g/gtk-check-button-new-with-label "Reset on Run")
-        ;; The tick an attach runtime took down (dialect/reset-toggle).
-        reset-state (atom {})
-        vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        keyctl (g/gtk-event-controller-key-new)]
-    (g/gtk-box-append toolbar files-btn)
-    (g/gtk-box-append toolbar run-btn)
-    (g/gtk-box-append toolbar stop-btn)
-    (g/gtk-box-append toolbar open-btn)
-    (g/gtk-box-append toolbar save-btn)
-    (g/gtk-box-append toolbar reset-chk)
-    (g/gtk-check-button-set-active reset-chk 1)
-    (g/gtk-widget-set-vexpand paned 1)
-    ;; A notebook of tabs is the paned's start child; each page is a tab's
-    ;; own find bar over its editor (jonquil.gtk.tab). The strip stays
-    ;; hidden while there's one tab.
-    (g/gtk-notebook-set-show-tabs notebook 0)
-    (g/gtk-notebook-set-show-border notebook 0)
-    (g/gtk-notebook-set-scrollable notebook 1)
-    (g/gtk-widget-set-vexpand notebook 1)
-    (g/gtk-paned-set-start-child paned notebook)
-    (g/gtk-paned-set-end-child paned (:scroll cv))
-    (g/gtk-paned-set-position paned 430)
-    ;; The editor/console paned is h-paned's start child; the
-    ;; inspector panel is its end child, hidden until the first open
-    ;; (show-inspector-panel!), and kept at a fixed width when the window
-    ;; resizes (never grows/shrinks with it, never squeezed below its own
-    ;; WIDTH-REQUEST).
-    (g/gtk-widget-set-vexpand h-paned 1)
-    (g/gtk-paned-set-start-child h-paned paned)
-    (g/gtk-widget-set-vexpand (:root pane) 1)
-    (g/gtk-widget-set-vexpand (:root sp) 1)
-    (g/gtk-box-append slot (:root pane))
-    (g/gtk-box-append slot (:root sp))
-    (g/gtk-widget-set-vexpand (:root rp) 1)
-    (g/gtk-box-append slot (:root rp))
-    (g/gtk-widget-set-vexpand (:root lp) 1)
-    (g/gtk-box-append slot (:root lp))
-    (g/gtk-widget-set-vexpand (:root hp) 1)
-    (g/gtk-box-append slot (:root hp))
-    (doseq [[_ p] @part-panels*]
-      (g/gtk-widget-set-vexpand (:root p) 1)
-      (g/gtk-box-append slot (:root p)))
-    (g/gtk-paned-set-end-child h-paned slot)
-    (g/gtk-paned-set-resize-end-child h-paned 0)
-    (g/gtk-paned-set-shrink-end-child h-paned 0)
-    (g/gtk-widget-set-visible (:root pane) 0)
-    (g/gtk-widget-set-visible (:root sp) 0)
-    (g/gtk-widget-set-visible (:root rp) 0)
-    (g/gtk-widget-set-visible (:root lp) 0)
-    (doseq [[_ p] @part-panels*]
-      (g/gtk-widget-set-visible (:root p) 0))
-    (g/gtk-widget-set-visible (:root hp) 0)
-    (g/gtk-widget-set-visible slot 0)
-    (g/gtk-box-append vbox toolbar)
-    (g/gtk-paned-set-start-child tree-paned (:root tree-pane))
-    (g/gtk-paned-set-end-child tree-paned h-paned)
-    (g/gtk-paned-set-resize-start-child tree-paned 0)
-    (g/gtk-paned-set-shrink-start-child tree-paned 0)
-    (g/gtk-widget-set-vexpand tree-paned 1)
-    (g/gtk-box-append vbox tree-paned)
-    (win-status-bar/place! {:vbox vbox :status-label status-label :hint-label hint-label :pending-label pending-label
-                            :unread-label unread-label :dialect-label dialect-label :parinfer-label parinfer-label
-                            :line-col-label line-col-label :update-parinfer-label! update-parinfer-label!})
-    (g/gtk-window-set-child win vbox)
-    (g/gtk-window-set-default-size win 900 700)
+        {:keys [files-btn tree-paned paned toolbar run-btn stop-btn open-btn save-btn reset-chk reset-state vbox keyctl]}
+        (win-layout/build {})
+        {:keys [part-error! part-contribution]}
+        (win-context/build-parts {:win win :status-label status-label :cv cv :ev* ev* :sel* sel* :tabs tabs
+                                  :active-tab active-tab :settings-path* settings-path* :bang* bang*
+                                  :recent-tabs recent-tabs :right right :tree-pane tree-pane :tree-paned tree-paned
+                                  :paned paned :files-btn files-btn :panel-focus-fn panel-focus-fn
+                                  :unread-label unread-label :plugins-on* plugins-on* :rp rp :lp lp :hp hp
+                                  :pending-label pending-label :inspect-last-ctx inspect-last-ctx
+                                  :source-ctx source-ctx :part-panels* part-panels* :tab-ctx* *tab-ctx})
+        {:keys [repl-activate-menu-action-fn]}
+        (win-context/build-console-menu {:cv cv :repl-complete-fn repl-complete-fn :clear-last-fn clear-last-fn
+                                         :part-contribution part-contribution :status-label status-label})
+        {:keys [window-key-args window-key-fn]}
+        (win-context/build-keys {:panel-focus-fn panel-focus-fn :hints-toggle-fn hints-toggle-fn :run-changed-fn run-changed-fn
+                                 :tabs tabs :recent-tabs recent-tabs :status-label status-label :run-fn run-fn
+                                 :stop-fn stop-fn :open-fn open-fn :save-fn save-fn :save-as-fn save-as-fn
+                                 :close-fn close-fn :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
+                                 :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn :zoom-fn zoom-fn
+                                 :evaluating-fn evaluating-fn :win win :active-tab active-tab :open-find-fn open-find-fn
+                                 :open-replace-fn open-replace-fn :cycle-theme-fn cycle-theme-fn
+                                 :close-popovers-fn close-popovers-fn :inspect-last-fn inspect-last-fn
+                                 :inspect-form-fn inspect-form-fn :pane pane :close-inspector-fn close-inspector-fn
+                                 :source-keys source-keys :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
+                                 :digit-tab-fn digit-tab-fn :parinfer-fn parinfer-fn
+                                 :part-contribution part-contribution :tab-ctx* *tab-ctx})]
+    (win-layout/place! {:toolbar toolbar :files-btn files-btn :run-btn run-btn :stop-btn stop-btn :open-btn open-btn
+                        :save-btn save-btn :reset-chk reset-chk :paned paned :notebook notebook :cv cv
+                        :h-paned h-paned :pane pane :sp sp :slot slot :rp rp :lp lp :hp hp :part-panels* part-panels*
+                        :vbox vbox :tree-paned tree-paned :tree-pane tree-pane :win win :status-label status-label
+                        :hint-label hint-label :pending-label pending-label :unread-label unread-label
+                        :dialect-label dialect-label :parinfer-label parinfer-label :line-col-label line-col-label
+                        :update-parinfer-label! update-parinfer-label!})
     ;; One shared GtkCssProvider for the display, added once; both views
     ;; get the jonquil-code CSS class so a single reload resizes both live.
     ;; Each tab's view gets the class in jonquil.gtk.tab/make-tab!.
@@ -424,31 +287,9 @@
     (add-watch theme-name ::source-pane (fn [_ _ _ k] (source-pane/apply-theme! sp (theme/theme k))))
     (inspector-pane/apply-theme! pane (theme/theme @theme-name))
     (add-watch theme-name ::inspector-pane (fn [_ _ _ k] (inspector-pane/apply-theme! pane (theme/theme k))))
-    (g/g-signal-connect-data run-btn "clicked"
-                             (callable (win-status/contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data stop-btn "clicked"
-                             (callable (win-status/contain-click status-label "stop" (fn [_] (stop-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data open-btn "clicked"
-                             (callable (win-status/contain-click status-label "open" (fn [_] (open-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data save-btn "clicked"
-                             (callable (win-status/contain-click status-label "save" (fn [_] (save-fn))) [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data reset-chk "toggled"
-                             (callable (win-status/contain-click status-label "reset on run"
-                                                      (fn [btn]
-                                                        (ev/set-mode! @ev*
-                                                                      (if (zero? (g/gtk-check-button-get-active btn))
-                                                                        :accumulate :reset))))
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
-    (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable window-key-fn [:pointer :uint :uint :uint :pointer] :int)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/gtk-widget-add-controller win keyctl)
+    (win-layout/connect! {:run-btn run-btn :stop-btn stop-btn :open-btn open-btn :save-btn save-btn :reset-chk reset-chk
+                          :keyctl keyctl :win win :status-label status-label :run-fn run-fn :stop-fn stop-fn
+                          :open-fn open-fn :save-fn save-fn :ev* ev* :window-key-fn window-key-fn})
     (win-quit/connect! {:tabs tabs :select! (fn [t] (win-tabs/select-tab! @*tab-ctx (:id t)))
                         :cv cv :win win :app app
                         :confirmed-close? confirmed-close?
