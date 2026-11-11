@@ -85,6 +85,18 @@
           (recur (rest ts) stack spans))
         spans))))
 
+(defn- use-kind
+  "How the use spanning [s e) is made: :ns inside an ns form's span,
+  :definition as a def's name, :call right after an open paren, else
+  :value. prev is the token before it, or nil."
+  [{:keys [^String text spans defs prev]} s e]
+  (let [[pk ps pe] prev]
+    (cond
+      (some (fn [[a b]] (and (<= a s) (< e b))) spans) :ns
+      (contains? defs [s e]) :definition
+      (and (= :bracket pk) (= "(" (subs text ps pe))) :call
+      :else :value)))
+
 (defn hits
   "Every use of name in text as code, in order: [{:start :end :how}], how
   one of :ns (inside an ns form, ns-spans), :definition (the name of a def form),
@@ -102,13 +114,10 @@
               (keep-indexed
                (fn [i [kind s e]]
                  (when (and (contains? code-kinds kind) (names? (subs text s e) name))
-                   (let [[pk ps pe] (when (pos? i) (nth tokens (dec i)))]
-                     {:start s :end e
-                      :how (cond
-                             (some (fn [[a b]] (and (<= a s) (< e b))) spans) :ns
-                             (contains? defs [s e]) :definition
-                             (and (= :bracket pk) (= "(" (subs text ps pe))) :call
-                             :else :value)}))))
+                   {:start s :end e
+                    :how (use-kind {:text text :spans spans :defs defs
+                                    :prev (when (pos? i) (nth tokens (dec i)))}
+                                   s e)})))
               tokens)))))
 
 (defn project-files
