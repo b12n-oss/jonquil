@@ -182,6 +182,13 @@
 
 (defn- counts-of [ui] (mapv second @(:counts (:gutter (:changed (active-ed ui))))))
 
+(def ^:private TOGGLE-WAIT-MS
+  "How long a row waits for the status a line-counts toggle or clear sets.
+  The answer comes back from the runtime off the GTK thread. In two gate
+  runs under load it hadn't come within 3 s, and the row after failed as
+  well, so these waits match the 8 s a Run gets."
+  8000)
+
 (defn row-line-counts-after-run
   "Count how often each line runs, then a Run of a saved file: the gutter
   labels each line that ran with its hits (the loop's test 6 times); an
@@ -193,16 +200,16 @@
           _ (spit f code)
           _ (on-gtk ((:open-file! ui) (.getPath f)))
           _ (on-gtk (run-palette! ui "count how often each line runs"))
-          on? (await-until 3000 20 #(= "; Line counts on: Run your file to count its lines." (status ui)))
+          on? (await-until TOGGLE-WAIT-MS 20 #(= "; Line counts on: Run your file to count its lines." (status ui)))
           _ (on-gtk ((:run!* ui)))
           counted? (await-until 8000 20 #(some #{"6"} (counts-of ui)))
           labels (on-gtk (counts-of ui))
           _ (on-gtk (let [buf (:buf (active-ed ui))] (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a " " -1)))))
           hidden? (await-until 3000 20 #(empty? (counts-of ui)))
           _ (on-gtk (editor/set-text! (active-ed ui) code) (run-palette! ui "clear line counts"))
-          cleared? (await-until 3000 20 #(= "; Line counts cleared." (status ui)))
+          cleared? (await-until TOGGLE-WAIT-MS 20 #(= "; Line counts cleared." (status ui)))
           _ (on-gtk (run-palette! ui "count how often each line runs"))
-          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+          off? (await-until TOGGLE-WAIT-MS 20 #(= "; Line counts off." (status ui)))]
       (on-gtk (support/check :line-counts-after-run
                              (and on? counted? hidden? cleared? off?)
                              {:on on? :counted counted? :labels labels :hidden hidden? :cleared cleared? :off off?
@@ -215,14 +222,14 @@
   [ui]
   (go-row :line-counts-unsaved support/check
     (let [_ (on-gtk ((:new-tab!* ui)) (run-palette! ui "count how often each line runs"))
-          on? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          on? (await-until TOGGLE-WAIT-MS 20 #(str/starts-with? (status ui) "; Line counts on"))
           mark (on-gtk (let [m (support/out-end-offset ui)]
                          (editor/set-text! (active-ed ui) "(+ 1 2)")
                          ((:run!* ui))
                          m))
           said? (await-until 5000 20 #(str/includes? (support/since ui mark) "; Line counts show for a saved file."))
           _ (on-gtk (run-palette! ui "count how often each line runs"))
-          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+          off? (await-until TOGGLE-WAIT-MS 20 #(= "; Line counts off." (status ui)))]
       (on-gtk (support/check :line-counts-unsaved (and on? said? off?)
                              {:on on? :said said? :off off? :status (status ui)
                               :path @(:path ((:active-tab* ui)))})
@@ -247,7 +254,7 @@
           code2 (str ";; a\n;; b\n" code)
           _ (spit f code)
           _ (on-gtk ((:open-file! ui) (.getPath f)) (run-palette! ui "count how often each line runs"))
-          on? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          on? (await-until TOGGLE-WAIT-MS 20 #(str/starts-with? (status ui) "; Line counts on"))
           _ (on-gtk ((:run!* ui)))
           first? (await-until 8000 20 #(= "6" (get (labels-by-line ui) 3)))
           _ (spit f code2)
@@ -255,11 +262,11 @@
           second? (await-until 8000 20 #(= "6" (get (labels-by-line ui) 5)))
           by-line (on-gtk (labels-by-line ui))
           _ (on-gtk (run-palette! ui "count how often each line runs"))
-          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+          off? (await-until TOGGLE-WAIT-MS 20 #(= "; Line counts off." (status ui)))]
       (on-gtk (support/check :line-counts-second-run
                              (and on? first? second? off? (nil? (get by-line 0)) (nil? (get by-line 1))
                                   (= "1" (get by-line 7)))
-                             {:on on? :first first? :second second? :by-line by-line :off off?})
+                             {:on on? :first first? :second second? :by-line by-line :off off? :status (status ui)})
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
 (defn row-line-counts-went-off
@@ -271,14 +278,14 @@
     (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-lc3-") "lc3.clj")
           _ (spit f "(ns lc-row3)\n(+ 1 2)\n")
           _ (on-gtk ((:open-file! ui) (.getPath f)) (run-palette! ui "count how often each line runs"))
-          on? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          on? (await-until TOGGLE-WAIT-MS 20 #(str/starts-with? (status ui) "; Line counts on"))
           _ ((requiring-resolve 'jonquil.line-counts/set-counting!) false)
           mark (on-gtk (let [m (support/out-end-offset ui)] ((:run!* ui)) m))
           said? (await-until 8000 20 #(str/includes? (support/since ui mark) "; Line counts went off (the runtime restarted)."))
           _ (on-gtk (run-palette! ui "count how often each line runs"))
-          on-again? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          on-again? (await-until TOGGLE-WAIT-MS 20 #(str/starts-with? (status ui) "; Line counts on"))
           _ (on-gtk (run-palette! ui "count how often each line runs"))
-          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+          off? (await-until TOGGLE-WAIT-MS 20 #(= "; Line counts off." (status ui)))]
       (on-gtk (support/check :line-counts-went-off (and on? said? on-again? off?)
                              {:on on? :said said? :on-again on-again? :off off? :status (status ui)})
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))

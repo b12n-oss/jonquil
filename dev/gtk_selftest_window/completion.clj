@@ -705,7 +705,11 @@
                                     (g/label-text (g/gtk-list-box-row-get-child (g/gtk-list-box-get-row-at-index lb i)))))))
           ;; ready? says when the height is this list's: the scrolled window
           ;; keeps its last height while closed, so the second open read
-          ;; the first list's 46 px before GTK resized it (2 runs of 4)
+          ;; the first list's 46 px before GTK resized it (2 runs of 4).
+          ;; The first open had the same trap the other way: an earlier
+          ;; row's long list left it at the full height, and pos? took that
+          ;; 160 px. So it waits for a height under the full one.
+          full-h @#'completion/LIST-HEIGHT
           open-on (fn [text caret ready?]
                     (on-gtk (let [ed (:editor ui)]
                               (editor/set-text! ed text)
@@ -716,7 +720,7 @@
                       (on-gtk (completion/close! c))
                       r))
           text "(defn zzq-a [] 1)\n(defn zzq-b [] 2)\n(zzq"
-          few (open-on text (count text) pos?)
+          few (open-on text (count text) #(< 0 % full-h))
           many (open-on "(ma" 3 #(< (* 2 (:h few)) %))]
       (on-gtk (support/check :completion-sized-to-rows-and-labelled
                              (and (= ["zzq-a  buffer" "zzq-b  buffer"] (:rows few))
