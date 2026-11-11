@@ -209,6 +209,28 @@
               (support/check :palette-throw-contained (and status-ok? (= "(+ 1 2)" text))
                              {:status (g/label-text status) :text text})))))
 
+(defn row-palette-entry-signals
+  "The entry's \"changed\" reaches refilter! and its \"activate\" reaches
+  run-selected!; a throw from the run is reported in the status bar as
+  \"; palette: ...\"."
+  [ui]
+  (go-row :palette-entry-signals support/check
+    (let [p (:palette ui) status (:status-label ui)
+          calls (atom [])
+          _ (on-gtk ((:open-palette!* ui))
+                    (with-redefs-fn {#'palette/refilter! (fn [_] (swap! calls conj :refilter))
+                                     #'palette/run-selected! (fn [_] (swap! calls conj :run))}
+                      (fn []
+                        (g/gtk-editable-set-text (:entry p) "zz")
+                        (g/g-signal-emit-by-name (:entry p) "activate"))))
+          _ (on-gtk (with-redefs-fn {#'palette/run-selected! (fn [_] (throw (ex-info "boom" {})))}
+                      (fn [] (g/g-signal-emit-by-name (:entry p) "activate"))))
+          status-ok? (await-until 1000 20 #(str/includes? (g/label-text status) "; palette: boom"))]
+      (on-gtk (close! ui)
+              (support/check :palette-entry-signals
+                             (and (= [:refilter :run] @calls) status-ok?)
+                             {:calls @calls :status (g/label-text status)})))))
+
 (defn row-palette-closes-its-own-tab
   "Running Close the tab from a second tab's palette frees
   that tab's editor view while the palette's posted refocus is still

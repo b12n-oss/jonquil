@@ -588,3 +588,30 @@
                 (finally
                   (reset! (:preedit-active? fb) false)
                   (find-bar/close! fb)))))))
+
+(defn row-find-bar-buttons
+  "Replace and Replace All reach replace-one! and replace-all!; a throw
+  from each is reported in the status bar as \"; replace: ...\" and
+  \"; replace all: ...\"."
+  [ui]
+  (go-row :find-bar-buttons support/check
+    (let [fb (:find-bar ui) status (:status-label ui)
+          calls (atom [])
+          _ (on-gtk (find-bar/open! fb :replace)
+                    (with-redefs-fn {#'find-bar/replace-one! (fn [_] (swap! calls conj :one))
+                                     #'find-bar/replace-all! (fn [_] (swap! calls conj :all))}
+                      (fn []
+                        (g/g-signal-emit-by-name (:replace-btn fb) "clicked")
+                        (g/g-signal-emit-by-name (:replace-all-btn fb) "clicked"))))
+          _ (on-gtk (with-redefs-fn {#'find-bar/replace-one! (fn [_] (throw (ex-info "boom" {})))
+                                     #'find-bar/replace-all! (fn [_] (throw (ex-info "boom" {})))}
+                      (fn [] (g/g-signal-emit-by-name (:replace-btn fb) "clicked"))))
+          one-ok? (await-until 1000 20 #(str/includes? (g/label-text status) "; replace: boom"))
+          _ (on-gtk (with-redefs-fn {#'find-bar/replace-one! (fn [_] (throw (ex-info "boom" {})))
+                                     #'find-bar/replace-all! (fn [_] (throw (ex-info "boom" {})))}
+                      (fn [] (g/g-signal-emit-by-name (:replace-all-btn fb) "clicked"))))
+          all-ok? (await-until 1000 20 #(str/includes? (g/label-text status) "; replace all: boom"))]
+      (on-gtk (find-bar/close! fb)
+              (support/check :find-bar-buttons
+                             (and (= [:one :all] @calls) one-ok? all-ok?)
+                             {:calls @calls :one one-ok? :all all-ok? :status (g/label-text status)})))))

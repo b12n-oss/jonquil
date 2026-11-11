@@ -284,3 +284,32 @@
           (on-gtk (support/check :source-pane-same-file-no-reload
                                  (and (= (:gen-before v) (:gen-after v)) (= 30 (:line v)))
                                  v)))))))
+
+(defn row-source-pane-wiring
+  "Open in window and Close reach the registered :on-open and :on-close
+  (the Open button is insensitive here, but the signal doesn't check), a
+  throw in a handler lands on the footer, and so does a throw in the
+  panel's own scroll handler."
+  [_ui]
+  (go-row :source-pane-wiring support/check
+    (with-source-pane
+      (fn [pane]
+        (let [calls (atom [])]
+          (try
+            (on-gtk
+             (source-pane/set-handlers! pane {:on-open (fn [] (swap! calls conj :open))
+                                              :on-close (fn [] (swap! calls conj :close))})
+             (g/g-signal-emit-by-name (:open-btn pane) "clicked")
+             (g/g-signal-emit-by-name (:close-btn pane) "clicked")
+             (source-pane/set-handlers! pane {:on-close (fn [] (throw (ex-info "boom" {})))})
+             (g/g-signal-emit-by-name (:close-btn pane) "clicked")
+             (let [boom (g/label-text (:footer pane))
+                   scrolled (with-redefs-fn {#'source-pane/cancel-scroll-settle!
+                                             (fn [_] (throw (ex-info "late" {})))}
+                              (fn [] ((:on-user-scroll! pane) nil 0.0 0.0 nil)))
+                   late (g/label-text (:footer pane))]
+               (support/check :source-pane-wiring
+                              (and (= [:open :close] @calls) (= "; boom" boom)
+                                   (= 0 scrolled) (= "; late" late))
+                              {:calls @calls :boom boom :scrolled scrolled :late late})))
+            (finally (on-gtk (source-pane/set-handlers! pane {})))))))))

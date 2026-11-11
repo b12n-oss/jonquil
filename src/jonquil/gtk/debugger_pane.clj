@@ -133,6 +133,62 @@
   (g/gtk-widget-grab-focus (:list pane))
   nil)
 
+(defn- connect-restart-btns!
+  "Adds each restart button to the restart row and connects its clicked
+  signal to press-restart!."
+  [pane restart-box restart-btns]
+  (doseq [id RESTART-IDS]
+    (let [btn (get restart-btns id)]
+      (g/gtk-box-append restart-box btn)
+      (g/g-signal-connect-data btn "clicked"
+                               (callable (fn [_button _data]
+                                           (try (press-restart! pane id)
+                                                (catch :default e (report! pane (str "; " (ex-message e)))))
+                                           nil)
+                                         [:pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT))))
+
+(defn- lay-out!
+  "Hides the restart row, sets up the list, the field and the labels, and
+  packs the widgets into the root."
+  [{:keys [root title restart-box scroll field close-btn footer] lb :list}]
+  (g/gtk-widget-set-visible restart-box 0)
+  (g/gtk-entry-set-placeholder-text field "Evaluate in the selected frame")
+  (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
+  (g/gtk-scrolled-window-set-child scroll lb)
+  (g/gtk-widget-set-vexpand scroll 1)
+  (doseq [l [title footer]]
+    (g/gtk-label-set-xalign l 0.0)
+    (g/gtk-label-set-wrap l 1))
+  (doseq [w [title restart-box scroll field close-btn footer]] (g/gtk-box-append root w))
+  (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
+
+(defn- connect-list-field-close!
+  "Connects the list's row-activated, the field's activate and the Close
+  button's clicked to their handlers."
+  [{lb :list :keys [field close-btn] :as pane}]
+  (g/g-signal-connect-data lb "row-activated"
+                           (callable (fn [_box row _data]
+                                       (try (activate! pane (g/gtk-list-box-row-get-index row))
+                                            (catch :default e (report! pane (str "; " (ex-message e)))))
+                                       nil)
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data field "activate"
+                           (callable (fn [_entry _data]
+                                       (try (evaluate-field! pane)
+                                            (catch :default e (report! pane (str "; " (ex-message e)))))
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data close-btn "clicked"
+                           (callable (fn [_button _data]
+                                       (try (when-let [f (:on-close @(:handlers pane))] (f))
+                                            (catch :default e (report! pane (str "; " (ex-message e)))))
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
 (defn make-pane
   "Builds the panel: {:root :title :restart-box :restart-btns :list :scroll
   :field :close-btn :footer :rows
@@ -153,45 +209,7 @@
               :field field :footer footer :rows (atom []) :handlers (atom {})
               :restart-box restart-box :restart-btns restart-btns :restarts (atom [])
               :on-restart (atom nil)}]
-    (doseq [id RESTART-IDS]
-      (let [btn (get restart-btns id)]
-        (g/gtk-box-append restart-box btn)
-        (g/g-signal-connect-data btn "clicked"
-                                 (callable (fn [_button _data]
-                                             (try (press-restart! pane id)
-                                                  (catch :default e (report! pane (str "; " (ex-message e)))))
-                                             nil)
-                                           [:pointer :pointer] :void)
-                                 ffi/null ffi/null g/CONNECT-DEFAULT)))
-    (g/gtk-widget-set-visible restart-box 0)
-    (g/gtk-entry-set-placeholder-text field "Evaluate in the selected frame")
-    (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
-    (g/gtk-scrolled-window-set-child scroll lb)
-    (g/gtk-widget-set-vexpand scroll 1)
-    (doseq [l [title footer]]
-      (g/gtk-label-set-xalign l 0.0)
-      (g/gtk-label-set-wrap l 1))
-    (doseq [w [title restart-box scroll field close-btn footer]] (g/gtk-box-append root w))
-    (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
-    (g/g-signal-connect-data lb "row-activated"
-                             (callable (fn [_box row _data]
-                                         (try (activate! pane (g/gtk-list-box-row-get-index row))
-                                              (catch :default e (report! pane (str "; " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data field "activate"
-                             (callable (fn [_entry _data]
-                                         (try (evaluate-field! pane)
-                                              (catch :default e (report! pane (str "; " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data close-btn "clicked"
-                             (callable (fn [_button _data]
-                                         (try (when-let [f (:on-close @(:handlers pane))] (f))
-                                              (catch :default e (report! pane (str "; " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (connect-restart-btns! pane restart-box restart-btns)
+    (lay-out! pane)
+    (connect-list-field-close! pane)
     pane))
