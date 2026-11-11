@@ -109,6 +109,21 @@
         (recur (skip-past toks (inc j) (matches (long s))))
         :else j))))
 
+(defn- ns-form-at
+  "ns-form's answer when token i opens the buffer's ns form, else nil.
+  scan holds the text, its non-comment tokens, bracket matches, top-level
+  open parens and comment spans."
+  [{:keys [^String text toks matches top-opens comment-spans]} i]
+  (let [[t s] (nth toks i)
+        word (fn [j] (when-let [[_ ws we] (get toks j)] (subs text ws we)))]
+    (when (and (= :bracket t) (contains? top-opens (long s)) (= "ns" (word (inc i)))
+               (not (discard-or-quoted? text (long s) comment-spans)))
+      (when-let [close (get matches (long s))]
+        (let [[nt ns-start ns-end] (get toks (skip-ns-metadata text toks matches (+ i 2)))]
+          (when (#{:symbol :special-form :builtin} nt)
+            {:name (subs text ns-start ns-end)
+             :text (subs text s (inc close))}))))))
+
 (defn ns-form
   "The buffer's first top-level (ns ...) form as {:name str :text str}, or
   nil when there's none, or it's never closed. Brackets inside strings and
@@ -126,18 +141,8 @@
                                       (when (and (= :open kind) (zero? depth) (= \( (.charAt ^String text (int s))))
                                         (long s))))
                           bracket-tokens)
-          word (fn [i] (when-let [[_ s e] (get toks i)] (subs text s e)))]
-      (some (fn [i]
-              (let [[t s] (nth toks i)]
-                (when (and (= :bracket t) (contains? top-opens (long s)) (= "ns" (word (inc i)))
-                           (not (discard-or-quoted? text (long s) comment-spans)))
-                  (when-let [close (get matches (long s))]
-                    (let [name-i (skip-ns-metadata text toks matches (+ i 2))
-                          [nt ns-start ns-end] (get toks name-i)]
-                      (when (#{:symbol :special-form :builtin} nt)
-                        {:name (subs text ns-start ns-end)
-                         :text (subs text s (inc close))}))))))
-            (range (count toks))))))
+          scan {:text text :toks toks :matches matches :top-opens top-opens :comment-spans comment-spans}]
+      (some #(ns-form-at scan %) (range (count toks))))))
 
 (defn target-ns
   "What Run Selection and Run Form evaluate in: the buffer's ns form, or
