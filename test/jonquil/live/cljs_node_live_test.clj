@@ -2,7 +2,7 @@
  jonquil.live.cljs-node-live-test
   "Drives jonquil.nrepl.cljs-node against REAL ClojureScript on node: each
   evaluator launches its own clojure + node prepl in a private run dir, over
-  one temp project. Run with `bb test:cljs-node`, not `bb test`: it needs the
+  one temp project. Run with `jolt test:cljs-node`, not `jolt test`: it needs the
   clojure CLI and node (ClojureScript comes from ~/.m2 or the network). The
   runner skips with exit 0 when either is missing.
 

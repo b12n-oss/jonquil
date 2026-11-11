@@ -1,7 +1,7 @@
 ;; Runs the debugger's tests on a Jolt that has jolt.debug, which the
 ;; released Jolt (v0.8.23) lacks: on it the frames, Break on error and
 ;; evaluate-in-a-frame tests take their "not available" path and pass
-;; without testing anything. Run via `bb test:debugger`.
+;; without testing anything. Run via `jolt test:debugger`.
 ;;
 ;; The Jolt is JONQUIL_JOLT_DEBUG when set, else `jolt-debug` on PATH, else
 ;; the `jolt` on PATH once it has jolt.debug; each is asked to require

@@ -563,7 +563,7 @@
         ;; reply shape. For the nREPL dialect only names with the prefix are
         ;; merged: babashka's answers are fuzzy from either op, and it
         ;; doesn't always offer the same ones (measured, both v1.13.220: one
-        ;; describe listed only complete, bb test:bb's connection
+        ;; describe listed only complete, jolt test:bb's connection
         ;; also lists completions; why isn't known). JVM
         ;; Clojure keeps every name, compliment's c.s/jo ->
         ;; clojure.string/join among them.

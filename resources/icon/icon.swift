@@ -1,4 +1,4 @@
-// Generates the 1024px Jonquil icon PNG; run through `bb app:icon`.
+// Generates the 1024px Jonquil icon PNG; run through `jolt app:icon`.
 // Draws Jonquil's app icon at 1024x1024: a jonquil (six petals around a
 // trumpet) on a rounded square. Usage: swift icon.swift out.png
 import AppKit

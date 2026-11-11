@@ -29,7 +29,7 @@
   ;; Headless compile-check: requires every project namespace and exits.
   :check {:extra-paths ["dev"]
           :main-opts ["-m" "check"]}
-  ;; Code metrics report (bb metrics): jolt-metrics' CLI. Report only.
+  ;; Code metrics report (jolt metrics): jolt-metrics' CLI. Report only.
   :metrics {:extra-deps {io.github.jlt-commons/jolt-metrics
                          {:git/url "https://github.com/jlt-commons/jolt-metrics"
                           :git/tag "v0.2.2" :git/sha "8568d4c"}}
@@ -66,7 +66,7 @@
   ;; A fake prepl as a stand-in `clojure` (dev/fake-cljs-clojure).
   :fake-cljs {:extra-paths ["dev"]}
   ;; A jank window against the fake jank process. Run it
-  ;; with JONQUIL_JANK pointing at dev/fake-jank (bb gtk:selftest sets it).
+  ;; with JONQUIL_JANK pointing at dev/fake-jank (jolt gtk:selftest sets it).
   :selftest-jank {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-jank"]}
   ;; The ClojureScript-on-node window rows: dev/fake-cljs-clojure as JONQUIL_CLOJURE.
@@ -83,7 +83,7 @@
   ;; A launch with file and folder arguments (jonquil.main/gtk-argv).
   :selftest-args {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-args"]}
-  ;; bb bench:edit [sizes...]: editing-stall benchmark on large files (opens
+  ;; jolt bench:edit [sizes...]: editing-stall benchmark on large files (opens
   ;; a real window per size).
   :bench {:extra-paths ["dev"]
           :main-opts ["-m" "bench-edit"]}

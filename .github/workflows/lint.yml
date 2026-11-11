@@ -14,19 +14,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Clojure CLI, Babashka, clj-kondo and clojure-lsp
+      - name: Set up the Clojure CLI, clj-kondo and clojure-lsp
         uses: DeLaGuardo/setup-clojure@13.6.1
         with:
           cli: latest
-          bb: latest
           clj-kondo: latest
           clojure-lsp: latest
 
-      # Neither of these needs Jolt: clj-kondo lints source text with its
-      # own analysis, and clojure-lsp's format check reformats source text
-      # with cljfmt/rewrite-clj. Both run on plain Clojure files.
-      - name: clj-kondo lint (bb lint:strict)
-        run: bb lint:strict
+      # jolt runs the tasks (it reads bb.edn). clj-kondo lints source text
+      # with its own analysis, and clojure-lsp's format check reformats
+      # source text with cljfmt/rewrite-clj, so neither needs more than that.
+      - name: Install jolt
+        uses: jlt-commons/setup-jolt@v1
 
-      - name: clojure-lsp format check (bb lsp:format-check)
-        run: bb lsp:format-check
+      - name: clj-kondo lint (jolt lint:strict)
+        run: jolt lint:strict
+
+      - name: clojure-lsp format check (jolt lsp:format-check)
+        run: jolt lsp:format-check

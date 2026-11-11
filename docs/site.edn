@@ -1,7 +1,7 @@
 ;; Configuration for the documentation site, read by the docs-engine
 ;; (https://github.com/jlt-commons/docs-engine).
 ;;
-;; Build it locally with `bb site:serve` (or `jolt site:serve`). There is
+;; Build it locally with `jolt site:serve`. There is
 ;; deliberately NO GitHub Pages site (`.github/workflows/site.yml` only builds
 ;; it, run by hand): this repo is private
 ;; and staying that way for now. Publishing is two separate decisions, taken

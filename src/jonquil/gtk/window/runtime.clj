@@ -117,7 +117,7 @@
 ;; start-and-report! sits here, before apply-selection! (below), which
 ;; calls it: Jolt resolves an unqualified symbol at compile time, not
 ;; lazily, so a forward reference to it from earlier in the file fails
-;; bb check with "Unable to resolve symbol".
+;; jolt check with "Unable to resolve symbol".
 (defn start-and-report!
   "Starts an out-of-process evaluator on a future and says so on the
   console: pid, port and project, then each limitation, or why it couldn't

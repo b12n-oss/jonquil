@@ -2,7 +2,7 @@
   "Drives jonquil.nrepl.jvm against a REAL clojure -M:serve nREPL server
   (clojure-cli.repl-server 0.1.0 on nREPL 1.7.0), started once for this
   namespace by dev/clj_server.clj, plus one test (eof-live-1-8) on its own
-  nREPL 1.8.0 server. Run with `bb test:clj`, not `bb test`:
+  nREPL 1.8.0 server. Run with `jolt test:clj`, not `jolt test`:
   it needs Java 17+, the clojure CLI and, on a first run
   that hasn't cached clojure-cli.repl-server yet, the network.
 

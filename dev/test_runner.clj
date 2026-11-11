@@ -154,41 +154,41 @@
 
 (def live-namespaces
   ;; Tests that spawn real Jolt nREPL children and need the jolt-lang/nrepl
-  ;; checkout. Run with `bb test:nrepl`, not `bb test`.
+  ;; checkout. Run with `jolt test:nrepl`, not `jolt test`.
   '[jonquil.nrepl.child-test
     jonquil.nrepl.evaluator-test
     jonquil.runtime-registry-test])
 
 (def live-clj-namespaces
   ;; The :clj dialect's live suite: starts a real clojure -M:serve nREPL
-  ;; server (dev/clj_server.clj) instead of a Jolt child. Run with `bb
-  ;; test:clj`, not `bb test` or `bb test:nrepl`: needs Java
+  ;; server (dev/clj_server.clj) instead of a Jolt child. Run with `jolt
+  ;; test:clj`, not `jolt test` or `jolt test:nrepl`: needs Java
   ;; 17+, the clojure CLI and, on a first run, the network.
   '[jonquil.live.clj-attach-test])
 
 (def live-jank-namespaces
   ;; The :jank dialect's live suite: launches a real `jank repl` per test.
-  ;; Run with `bb test:jank`, not `bb test`. JONQUIL_JANK picks the binary.
+  ;; Run with `jolt test:jank`, not `jolt test`. JONQUIL_JANK picks the binary.
   '[jonquil.live.jank-live-test])
 
 (def live-cljs-node-namespaces
   ;; The :cljs dialect's launch runtime against real ClojureScript on node.
-  ;; Run with `bb test:cljs-node`. Skips without the clojure CLI or node.
+  ;; Run with `jolt test:cljs-node`. Skips without the clojure CLI or node.
   '[jonquil.live.cljs-node-live-test])
 
 (def live-bb-namespaces
   ;; The :nrepl dialect's live suite: starts a real `bb nrepl-server` per
-  ;; test. Run with `bb test:bb`, not `bb test`. Skips without bb on PATH.
+  ;; test. Run with `jolt test:bb`, not `jolt test`. Skips without bb on PATH.
   '[jonquil.live.bb-nrepl-test])
 
 (def live-plugins-namespaces
   ;; The isolated plugin check against real jolt checker children. Run with
-  ;; `bb test:plugins`, not `bb test`. Skips without jolt on the login PATH.
+  ;; `jolt test:plugins`, not `jolt test`. Skips without jolt on the login PATH.
   '[jonquil.live.plugin-isolated-live-test])
 
 (def live-basilisp-namespaces
   ;; The :nrepl dialect against Basilisp: starts a real `basilisp
-  ;; nrepl-server` per test. Run with `bb test:basilisp`. Skips without
+  ;; nrepl-server` per test. Run with `jolt test:basilisp`. Skips without
   ;; JONQUIL_BASILISP or a basilisp on PATH.
   '[jonquil.live.basilisp-nrepl-test])
 

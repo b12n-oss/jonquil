@@ -1,5 +1,5 @@
 (ns jonquil.registry-test
-  "Every namespace on disk is registered with bb check and bb test. Both
+  "Every namespace on disk is registered with jolt check and jolt test. Both
   lists are hand-maintained, and a namespace missing from them is skipped
   silently."
   (:require [check]
@@ -22,7 +22,7 @@
        set))
 
 (def ^:private jvm-only
-  "Source files run only inside a JVM child, never loaded by Jolt, so bb check
+  "Source files run only inside a JVM child, never loaded by Jolt, so jolt check
   can't load them."
   '#{jonquil.cljs-node-launch})
 

@@ -1,7 +1,7 @@
 (ns jonquil.live.plugin-isolated-live-test
   "The isolated check against real jolt children: each test runs check! on
   a candidate, with the checker's files and the check folder under temp
-  folders. Run with `bb test:plugins`; it skips when no jolt is on the
+  folders. Run with `jolt test:plugins`; it skips when no jolt is on the
   login PATH."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]

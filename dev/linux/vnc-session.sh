@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs inside the jonquil-linux container, from the copied tree (~/jonquil):
 # a desktop on Xvfb, Jonquil installed under ~/.local/share, and the screen
-# served on port 6080 through x11vnc and noVNC. Started by `bb linux:vnc`.
+# served on port 6080 through x11vnc and noVNC. Started by `jolt linux:vnc`.
 set -eu
 
 export DISPLAY=:1 GDK_BACKEND=x11
@@ -21,7 +21,7 @@ Xvfb :1 -screen 0 1600x1000x24 &
 wait_for "the X socket" test -S /tmp/.X11-unix/X1
 
 # A failing install stops the script here, with its output on the terminal.
-bb app:install
+jolt app:install
 
 openbox &
 wait_for openbox xprop -root _NET_SUPPORTING_WM_CHECK

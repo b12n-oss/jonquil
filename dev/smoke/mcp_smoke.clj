@@ -1,7 +1,7 @@
-;; Smoke of `jonquil --mcp` over real stdio. A babashka script (cheshire and
-;; babashka.process are built in); it never touches the jolt process from the
-;; inside. Run via `bb mcp:smoke` (a checkout, `jolt -M -m jonquil.main --mcp
-;; DIR`) or `bb mcp:smoke --bin ./jonquil` (the built binary). With --attach it
+;; Smoke of `jonquil --mcp` over real stdio. A jolt script (babashka.process
+;; is built into jolt, and clojure.data.json comes from deps.edn); it never
+;; touches the jolt process from the inside. Run via `jolt mcp:smoke` (a checkout, `jolt -M -m jonquil.main --mcp
+;; DIR`) or `jolt mcp:smoke --bin ./jonquil` (the built binary). With --attach it
 ;; starts a normal window with the listener on plus `--mcp-attach` bridges to
 ;; it (two processes, both destroyed on every exit path). With --window it
 ;; drives `--mcp --window` instead: a REAL window opens and takes focus, so
@@ -13,7 +13,7 @@
 (ns mcp-smoke
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
-            [cheshire.core :as json]
+            [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
@@ -61,8 +61,13 @@
             (finally (.put q ::eof))))
      {:proc proc :q q :in (io/writer (:in proc)) :id (atom 0) :lines (atom []) :notes (atom [])})))
 
+(defn- json-line?
+  "Whether l reads as one JSON value."
+  [l]
+  (not= ::bad (try (json/read-str l) (catch Exception _ ::bad))))
+
 (defn- send! [{:keys [^java.io.Writer in]} msg]
-  (.write in (str (json/generate-string msg) "\n"))
+  (.write in (str (json/write-str msg) "\n"))
   (.flush in))
 
 (defn- next-line
@@ -84,7 +89,7 @@
     (loop []
       (let [l (next-line srv (max 1 (- deadline (System/currentTimeMillis))))
             m (when (string? l)
-                (try (json/parse-string l)
+                (try (json/read-str l)
                      (catch Exception _ {:fail (str "not JSON: " l)})))]
         (cond
           (not (string? l)) {:fail l}
@@ -103,7 +108,7 @@
         (>= (System/currentTimeMillis) deadline) false
         :else (let [l (next-line srv (min 500 (max 1 (- deadline (System/currentTimeMillis)))))]
                 (when (string? l)
-                  (let [m (try (json/parse-string l) (catch Exception _ nil))]
+                  (let [m (try (json/read-str l) (catch Exception _ nil))]
                     (when (and (map? m) (not (contains? m "id"))) (swap! (:notes srv) conj m))))
                 (if (= ::eof l) false (recur)))))))
 
@@ -158,7 +163,7 @@
               r2 (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 30000)]
           (check! "background println does not reach stdout"
                   (and (not (:fail r1)) (string? (:text r2)) (str/includes? (:text r2) "=> 4")
-                       (every? (fn [l] (try (json/parse-string l) true (catch Exception _ false)))
+                       (every? json-line?
                                @(:lines srv)))
                   {:r1 r1 :r2 r2 :lines @(:lines srv)}))
         (let [r (tool! srv "jonquil_check_brackets" {"text" "(+ 1"} 20000)]
@@ -334,7 +339,7 @@
           (check! "the discard really discarded: bytes on disk unchanged"
                   (= before (slurp a) "(def z 9) z") {:before before :after (slurp a)}))
         (check! "every stdout line is JSON"
-                (every? (fn [l] (try (json/parse-string l) true (catch Exception _ false)))
+                (every? json-line?
                         @(:lines srv))
                 @(:lines srv))
         (finally (p/destroy-tree (:proc srv)))))
@@ -347,7 +352,7 @@
 (defn- alive? [^java.lang.Process jp] (.isAlive jp))
 
 (defn- json-lines? [srv]
-  (every? (fn [l] (try (json/parse-string l) true (catch Exception _ false)))
+  (every? json-line?
           @(:lines srv)))
 
 (defn- bridge-exit!

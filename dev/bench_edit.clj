@@ -1,5 +1,5 @@
 (ns bench-edit
-  "Benchmark for editing large files: bb bench:edit [sizes...]. Opens a real
+  "Benchmark for editing large files: jolt bench:edit [sizes...]. Opens a real
   GTK window per size, so keep your hands off the keyboard while it runs.
 
   Per size (default 200 2000 8000 20000 lines of this repo's own source,
@@ -241,7 +241,7 @@
   (let [sizes (try (if (seq args) (mapv parse-long args) [200 2000 8000 20000])
                    (catch Exception _ nil))]
     (when (or (nil? sizes) (some (fn [n] (not (and n (pos? n)))) sizes))
-      (println (str "usage: bb bench:edit [sizes...]  (positive line counts, got: " (str/join " " args) ")"))
+      (println (str "usage: jolt bench:edit [sizes...]  (positive line counts, got: " (str/join " " args) ")"))
       (System/exit 2))
     (gtk-init*)
     (warmup!)

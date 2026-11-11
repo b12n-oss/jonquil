@@ -112,7 +112,7 @@ Launch Jonquil on a folder and you get a tree of it on the left:
 
 ```bash
 jonquil ~/dev/my-talk          # the built binary
-bb app:run ~/dev/my-talk       # from a checkout
+jolt app:run ~/dev/my-talk       # from a checkout
 ```
 
 The window runs that folder's project (its `deps.edn`, `pubspec.yaml` or
