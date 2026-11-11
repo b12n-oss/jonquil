@@ -290,14 +290,16 @@
   supplied the single candidate that committed."
   [ui]
   (go-row :nrepl-completion-from-child support/check
-    (let [_ (run-and-await ui fixture-core 5000 (constantly true))]
+    ;; waits for greet's var: an idle check alone could pass before the
+    ;; Run started, and then the child had no greet to offer (one gate run)
+    (let [[ran? _] (run-and-await ui fixture-core 5000 #(str/includes? % "#'demo.core/greet"))]
       (on-gtk (let [ed (:editor ui)]
                 (editor/set-text! ed "(gre")
                 (support/place-cursor! (:buf ed) 4)
                 ((:complete!* ui))
                 (support/check :nrepl-completion-from-child
-                               (= "(greet" (editor/editor-text ed))
-                               {:text (editor/editor-text ed)}))))))
+                               (and ran? (= "(greet" (editor/editor-text ed)))
+                               {:ran ran? :text (editor/editor-text ed)}))))))
 
 (defn row-nrepl-jump-to-another-file
   "F12 on demo.util/helper after the child has required demo.util: the
