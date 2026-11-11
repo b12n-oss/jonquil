@@ -111,7 +111,8 @@
 (def ^:private drive-file
   (str app-dir "/dev/" (str/replace (str/replace main-ns "." "/") "-" "_") ".cljd"))
 (def ^:private nrepl-lock (str app-dir "/NREPL.lock"))
-;; window.clj's own title format for a clean buffer, "<filename> - Jonquil"
+;; jonquil.gtk.window.files's own title format for a clean buffer,
+;; "<filename> - Jonquil"
 ;; (a dirty one gets a leading "* "); this script only ever opens drive-file,
 ;; so this is the one exact string title-clean? trusts.
 (def ^:private clean-window-title "drive.cljd - Jonquil")

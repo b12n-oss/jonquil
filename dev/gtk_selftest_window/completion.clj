@@ -355,7 +355,8 @@
   DOES reach the call completion.clj makes through its own `editor`
   alias (without completion/handle-key!'s own catch, this exact
   with-redefs, run through editor/handle-key!, crashes the whole selftest
-  process: window.clj's :handle-key! wrapper catches the first throw and
+  process: jonquil.gtk.window.help's :handle-key! wrapper catches the
+  first throw and
   returns 0, so editor.clj's own handle-key! falls through to
   plain-return? -> handle-return!, whose OWN apply-op! call has no
   try/catch and hits the SAME redefined throw uncaught). With its own

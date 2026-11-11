@@ -70,7 +70,8 @@
     (is (= [] (ev/limitations e)) "the jump, stdin and inspector lines only when a live child lacks them")))
 
 (deftest a-run-of-an-unclosed-form-gets-the-eof-hint-test
-  ;; window.clj's Run hint keys on "EOF while reading" in the result's text,
+  ;; jonquil.gtk.window.run's Run hint keys on "EOF while reading" in the
+  ;; result's text,
   ;; so this pins that a child's reader error still says so over nREPL.
   (let [e (make (temp-project))
         code "(defn f [x]\n  (+ x 1)"]

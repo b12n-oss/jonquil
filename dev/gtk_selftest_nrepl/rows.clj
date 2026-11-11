@@ -563,8 +563,9 @@
   "The deliberately LAST row: records the live child's own pid, leaves the
   editor clean (set-text! never marks it dirty, so the real close below
   takes close-request-fn's immediate real-quit branch, no alert), and
-  fires the exact action a Quit AppleEvent activates (window.clj's own
-  quit-action handler) -- ev/stop! then runs on the GTK thread inside
+  fires the exact action a Quit AppleEvent activates (the quit
+  action jonquil.gtk.window.quit connects) -- ev/stop! then runs on the
+  GTK thread inside
   close-request-fn, same as the window self-test's own row-command-chord-
   close. after-close-checks! (below), called once the GTK loop is
   actually gone, is where this row's own pass/fail is recorded."

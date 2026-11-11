@@ -358,10 +358,10 @@
 
 (defn row-theme-save-failure-reported
   "Test hook: :settings-path!* (a self-test-only hook in
-  window.clj) repoints the window's own settings-path atom -- here at an
-  IMPOSSIBLE path (a regular file used as the would-be parent directory,
-  so io/make-parents can't create it and the temp-file spit inside it
-  throws). :cycle-theme!* must still advance the theme and report the
+  jonquil.gtk.window.ui) repoints the window's own settings-path atom --
+  here at an IMPOSSIBLE path (a regular file used as the would-be parent
+  directory, so io/make-parents can't create it and the temp-file spit
+  inside it throws). :cycle-theme!* must still advance the theme and report the
   save failure on the console (jonquil.settings/save-settings!'s own
   'couldn't save <path>: ...' message, prefixed with '; settings: ')."
   [ui]

@@ -1,6 +1,9 @@
 (ns jonquil.gtk.window.theme-test
   (:require [clojure.test :refer [deftest is]]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.window.theme :as win-theme]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.settings :as settings]
@@ -50,3 +53,21 @@
             [:choice :auto] [:save "/s.edn" {:theme :auto}] [:status ::label "Theme: auto (dark)"]
             [:choice :light] [:save "/s.edn" {:theme :light}] [:append ::cv :system "; settings: disk full\n"]]
            @got))))
+
+(deftest connect-themes-the-console-and-the-panels-test
+  (let [log (atom []) l (fn [x] (swap! log conj x))
+        theme-name (atom :light)]
+    (with-redefs [g/gtk-widget-add-css-class (fn [o c] (l [:css-class o c]))
+                  g/gdk-display-get-default (fn [] ::display)
+                  g/gtk-style-context-add-provider-for-display (fn [d p prio] (l [:provider d p prio]))
+                  source-pane/apply-theme! (fn [sp t] (l [:source sp t]))
+                  inspector-pane/apply-theme! (fn [pane t] (l [:inspector pane t]))
+                  theme/theme (fn [k] [:theme k])]
+      (win-theme/connect! {:cv {:view ::view} :provider ::provider :theme-name theme-name :sp ::sp :pane ::pane})
+      (is (= [[:css-class ::view "jonquil-code"] [:provider ::display ::provider g/STYLE-PROVIDER-PRIORITY-APPLICATION]
+              [:source ::sp [:theme :light]] [:inspector ::pane [:theme :light]]]
+             @log))
+      (reset! log [])
+      (reset! theme-name :dark))
+    (is (= #{[:source ::sp [:theme :dark]] [:inspector ::pane [:theme :dark]]} (set @log)))
+    (is (= 2 (count @log)))))

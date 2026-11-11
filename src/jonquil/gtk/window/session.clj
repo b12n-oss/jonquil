@@ -33,7 +33,7 @@
 (defn session-changed!
   "Saves the tab list as it changes, not only at quit, so a crash or a
   force quit keeps it. Does nothing until :session-live? is set, which
-  activate! does once the launch's own tabs are open: before that the
+  startup! does once the launch's own tabs are open: before that the
   first Untitled tab would overwrite the list it's about to reopen. Writes
   only when the snapshot differs from the last one written (or the state
   startup ended in), so a label refresh for a dirty mark costs no I/O. With

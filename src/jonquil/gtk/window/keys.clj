@@ -210,8 +210,9 @@
 
   Every item's own \"activate\" callback runs inside try/catch, reporting
   a throw through on-error (fn [msg] -> nil, set-status! as
-  jonquil.gtk.window.tabs wires the editor's menu and window.clj the
-  console's) rather than letting it escape: an uncaught throw from a
+  jonquil.gtk.window.tabs wires the editor's menu and
+  jonquil.gtk.window.context the console's) rather than letting it escape:
+  an uncaught throw from a
   GSimpleAction \"activate\" callback goes through Jolt's foreign-callable
   and kills the process (exit 1), measured live -- the same failure mode
   do-complete!/handle-key! guard against, here at the one call site every
