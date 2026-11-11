@@ -185,6 +185,16 @@
 
 ;; --- keys ---------------------------------------------------------------
 
+(def ^:private key-steps
+  "The keys that go through step!, each to its jonquil.inspect/key-step
+  step."
+  {KEY-UP :up KEY-DOWN :down
+   KEY-RETURN :in KEY-RIGHT :in
+   KEY-LEFT :out KEY-BACKSPACE :out
+   KEY-PAGE-UP :page-up KEY-PAGE-DOWN :page-down
+   KEY-M :meta KEY-V :table
+   KEY-BRACKETLEFT :earlier KEY-BRACKETRIGHT :later})
+
 (defn handle-key!
   "The rows view's own key dispatch (bubble phase, attached to the
   rows view itself, not the window). Up/Down/Return/Right/Left/BackSpace/
@@ -193,20 +203,12 @@
   otherwise (a self-test row can call this directly with a synthetic
   keyval, exactly as jonquil.gtk.editor/handle-key! is called elsewhere)."
   [pane keyval]
-  (cond
-    (= keyval KEY-ESCAPE) (do ((:on-close pane)) 1)
-    (= keyval KEY-UP) (do (step! pane :up) 1)
-    (= keyval KEY-DOWN) (do (step! pane :down) 1)
-    (or (= keyval KEY-RETURN) (= keyval KEY-RIGHT)) (do (step! pane :in) 1)
-    (or (= keyval KEY-LEFT) (= keyval KEY-BACKSPACE)) (do (step! pane :out) 1)
-    (= keyval KEY-PAGE-UP) (do (step! pane :page-up) 1)
-    (= keyval KEY-PAGE-DOWN) (do (step! pane :page-down) 1)
-    (= keyval KEY-M) (do (step! pane :meta) 1)
-    (= keyval KEY-V) (do (step! pane :table) 1)
-    (= keyval KEY-BRACKETLEFT) (do (step! pane :earlier) 1)
-    (= keyval KEY-BRACKETRIGHT) (do (step! pane :later) 1)
-    (= keyval KEY-D) (do (open-def-prompt! pane) 1)
-    :else 0))
+  (if-let [k (key-steps keyval)]
+    (do (step! pane k) 1)
+    (cond
+      (= keyval KEY-ESCAPE) (do ((:on-close pane)) 1)
+      (= keyval KEY-D) (do (open-def-prompt! pane) 1)
+      :else 0)))
 
 (defn dispatch-key!
   "Wraps handle-key! so a throw is reported into pane's own footer and the
