@@ -294,7 +294,7 @@ manual. Docker is the only requirement beyond the usual tools.
 | `jolt linux:test [ns...]` | `jolt test` on a copy of the checkout |
 | `jolt linux:selftest` | `jolt gtk:selftest` under Xvfb |
 | `jolt linux:build` | `jolt app:build`; the binary lands in `target/linux/<arch>/` |
-| `jolt linux:run -- cmd...` | any command in the copied tree |
+| `jolt linux:run [--] cmd...` | any command in the copied tree (the `--` is optional, since jolt drops the first one) |
 | `jolt linux:vnc` | a desktop in the browser for the hand check |
 | `jolt linux:clean` | removes both images and `target/linux` |
 

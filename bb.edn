@@ -154,6 +154,20 @@
           (str/starts-with? (first in) "--arch=") (recur (next in) out)
           :else (recur (next in) (conj out (first in))))))
 
+    (defn linux-run-split
+      "linux:run's args as [arch-args command]: a leading `--arch A` or
+       `--arch=A`, then an optional `--`, then the command. The `--` is
+       optional because jolt drops the first standalone `--` from a task's
+       args (POSIX end-of-options) where bb keeps it."
+      [args]
+      (loop [in (vec args) opts []]
+        (let [a (first in)]
+          (cond
+            (= a "--arch") (recur (subvec in (min 2 (count in))) (into opts (take 2 in)))
+            (and a (str/starts-with? a "--arch=")) (recur (subvec in 1) (conj opts a))
+            (= a "--") [opts (subvec in 1)]
+            :else [opts in]))))
+
     (defn sh-quote
       "s as one single-quoted word for a POSIX shell."
       [s]
@@ -294,7 +308,7 @@
      (row "linux:test [--arch A] [ns...]" "jolt test inside the image, on a copy of the checkout")
      (row "linux:selftest [--arch A]" "jolt gtk:selftest inside the image, under Xvfb")
      (row "linux:build [--arch A]" "jolt app:build inside the image; binary lands in target/linux/<A>/")
-     (row "linux:run [--arch A] -- cmd" "run any command in the copied tree inside the image")
+     (row "linux:run [--arch A] [--] cmd" "run any command in the copied tree inside the image")
      (row "linux:vnc [--arch A] [--port P]" "a Linux desktop with Jonquil installed, in your browser via noVNC")
      (row "linux:clean" "remove both jonquil-linux images and target/linux")
      (row "clean:tmp [--dry-run]" "delete temp dirs earlier test runs left in java.io.tmpdir")
@@ -638,13 +652,11 @@
            (linux-docker {:arch arch :out out
                           :command "jolt app:build && cp jonquil /out/jonquil"}))}
   linux:run
-  {:doc "Run a command in the copied tree in the Linux image: jolt linux:run [--arch A] -- <command...>"
-   :task (let [args (vec *command-line-args*)
-               [before after] (split-with (fn [a] (not= a "--")) args)
-               cmd  (rest after)
-               arch (linux-arch (vec before))]
+  {:doc "Run a command in the copied tree in the Linux image: jolt linux:run [--arch A] [--] <command...>"
+   :task (let [[opts cmd] (linux-run-split *command-line-args*)
+               arch (linux-arch opts)]
            (if (empty? cmd)
-             (do (println "usage: jolt linux:run [--arch arm64|amd64] -- <command...>")
+             (do (println "usage: jolt linux:run [--arch arm64|amd64] [--] <command...>")
                  (System/exit 1))
              (linux-docker {:arch arch :command (str/join " " (map sh-quote cmd))})))}
   linux:vnc
