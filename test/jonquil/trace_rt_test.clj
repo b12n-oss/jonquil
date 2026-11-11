@@ -127,7 +127,9 @@
     (is (re-find #"redefined" (:error r))))
   (is (= 2 (tredef 1)) "the new definition is untouched"))
 
-(defn tthrows-string [] (throw "plain"))
+;; Jolt can throw a value that isn't a Throwable, and this pins how a trace
+;; reads one; clj-kondo checks throw against the JVM's rule.
+(defn tthrows-string [] #_{:clj-kondo/ignore [:type-mismatch]} (throw "plain"))
 
 (deftest a-non-exception-throw-reads-its-text-test
   (trace/trace! 'tthrows-string here)

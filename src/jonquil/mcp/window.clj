@@ -536,13 +536,13 @@
                              (log-call! log! {:tool tname :args args :client (:client @session*)
                                               :threw (str "Unknown tool: " tname)}))
                :call (fn [tname args]
-                         (let [base {:tool tname :args args :client (:client @session*)}
-                               r (try (call tname args)
-                                      (catch Throwable e
-                                        (log-call! log! (assoc base :threw (or (ex-message e) (str e))))
-                                        (throw e)))]
-                           (log-call! log! (assoc base :result r))
-                           r)))))
+                       (let [base {:tool tname :args args :client (:client @session*)}
+                             r (try (call tname args)
+                                    (catch Throwable e
+                                      (log-call! log! (assoc base :threw (or (ex-message e) (str e))))
+                                      (throw e)))]
+                         (log-call! log! (assoc base :result r))
+                         r)))))
     tables-fn))
 
 (defn serve-window!

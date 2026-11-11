@@ -212,16 +212,16 @@
   the specs a part's id is looked up in."
   ([installs wctx on-error] (install installs wctx on-error {}))
   ([installs wctx on-error {:keys [specs]}]
-  (reduce (fn [acc [i install-fn]]
-            (let [id (part-id install-fn i)
-                  contribution (try (let [c (install-fn (merge wctx (:exports acc)))]
-                                      (check-contribution id wctx specs c)
-                                      c)
-                                    (catch :default ex (on-error id ex) nil))]
-              (add-contribution acc id contribution)))
-          {:fns {} :ui {} :hooks {} :exports {} :panels {}
-           :owners {:fns {} :ui {} :exports {} :panels {} :hooks {}}}
-          (map-indexed vector installs))))
+   (reduce (fn [acc [i install-fn]]
+             (let [id (part-id install-fn i)
+                   contribution (try (let [c (install-fn (merge wctx (:exports acc)))]
+                                       (check-contribution id wctx specs c)
+                                       c)
+                                     (catch :default ex (on-error id ex) nil))]
+               (add-contribution acc id contribution)))
+           {:fns {} :ui {} :hooks {} :exports {} :panels {}
+            :owners {:fns {} :ui {} :exports {} :panels {} :hooks {}}}
+           (map-indexed vector installs))))
 
 (defn merge-with-core
   "core (a map of kind's keys) with the contribution's kind keys added.

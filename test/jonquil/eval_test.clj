@@ -209,11 +209,11 @@
 
 (deftest s1g-out-err-ordering
   (let [ctx (sut/make-eval-context)
-        [r out] (run-sync ctx "(println \"o1\") (binding [*out* *err*] (println \"e1\")) (println \"o2\") (.write *err* \"e2\\n\") (println \"o3\")")]
-    (let [seq' (->> @out (remove (fn [[_ s]] (= "\n" s))) (mapv (fn [[k s]] [k (str/trim s)])))]
-      (println "S1g stream:" seq')
-      (is (= :ok (:status r)))
-      (is (= [[:out "o1"] [:err "e1"] [:out "o2"] [:err "e2"] [:out "o3"]] seq')))))
+        [r out] (run-sync ctx "(println \"o1\") (binding [*out* *err*] (println \"e1\")) (println \"o2\") (.write *err* \"e2\\n\") (println \"o3\")")
+        seq' (->> @out (remove (fn [[_ s]] (= "\n" s))) (mapv (fn [[k s]] [k (str/trim s)])))]
+    (println "S1g stream:" seq')
+    (is (= :ok (:status r)))
+    (is (= [[:out "o1"] [:err "e1"] [:out "o2"] [:err "e2"] [:out "o3"]] seq'))))
 
 (deftest s1i-read-from-stdin
   (let [ctx (sut/make-eval-context) done (promise)]

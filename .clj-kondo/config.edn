@@ -22,4 +22,7 @@
  ;; hook run) the vars Jonquil uses read as unresolved; with `--cache false`
  ;; they don't. Measured 2026-09-27 without this entry: 32 warnings with the
  ;; cache, 13 with --cache false. This keeps both at 13.
- :linters {:unresolved-var {:exclude [clojure.core.async]}}}
+ :linters {:unresolved-var {:exclude [clojure.core.async]}
+           ;; jolt.host is built into Jolt and loaded before any program, so
+           ;; Jonquil calls it without a require, as Jolt's own code does
+           :unresolved-namespace {:exclude [jolt.host]}}}

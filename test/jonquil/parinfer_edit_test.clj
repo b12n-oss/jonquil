@@ -63,8 +63,8 @@
   (testing "a form longer than :max-lines answers ::pe/too-long, so the
            editor can say why nothing happened"
     (is (= ::pe/too-long (pe/adjust {:mode :smart :max-lines 1
-                          :prev-text "(z)\n(a\n  b)\n(y)" :prev-caret 9
-                          :text "(z)\n(a\nb)\n(y)" :caret 7})))
+                                     :prev-text "(z)\n(a\n  b)\n(y)" :prev-caret 9
+                                     :text "(z)\n(a\nb)\n(y)" :caret 7})))
     (is (some? (pe/adjust {:mode :smart :max-lines 2
                            :prev-text "(z)\n(a\n  b)\n(y)" :prev-caret 9
                            :text "(z)\n(a\nb)\n(y)" :caret 7})))))

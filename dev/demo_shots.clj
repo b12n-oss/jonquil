@@ -1269,7 +1269,7 @@
                                                  ffi/null ffi/null g/CONNECT-DEFAULT)
                         (go (<! (timeout 300))
                             (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))]
-                             (if (cljs-scenes scene-id) CLJS-SCENE-MS PER-SCENE-MS) check!))
+                                             (if (cljs-scenes scene-id) CLJS-SCENE-MS PER-SCENE-MS) check!))
                             (<! (timeout 50))
                           ;; scene-close-prompt (or any scene) could leave
                           ;; the buffer dirty with an alert pending if its own

@@ -462,17 +462,17 @@
   is conj'd onto the optional seen atom."
   ([url held stop?] (fake-page! url held stop? (atom [])))
   ([url held stop? seen]
-  (future
-    (try
-      (loop [sock (page-post! url held (pr-str {:repl "main" :type :ready :content nil :order 0}))
-             order 1]
-        (swap! seen conj (slurp (io/reader (.getInputStream ^java.net.Socket sock))))
-        (.close ^java.net.Socket sock)
-        (when-not @stop?
-          (recur (page-post! url held (pr-str {:repl "main" :type :result :order order
-                                          :content (pr-str {:status :success :value "nil"})}))
-                 (inc order))))
-      (catch Throwable _ nil)))))
+   (future
+     (try
+       (loop [sock (page-post! url held (pr-str {:repl "main" :type :ready :content nil :order 0}))
+              order 1]
+         (swap! seen conj (slurp (io/reader (.getInputStream ^java.net.Socket sock))))
+         (.close ^java.net.Socket sock)
+         (when-not @stop?
+           (recur (page-post! url held (pr-str {:repl "main" :type :result :order order
+                                                :content (pr-str {:status :success :value "nil"})}))
+                  (inc order))))
+       (catch Throwable _ nil)))))
 
 (deftest browser-stale-token-gate-live
   ;; A page request carrying another window's token gets the script-free

@@ -999,7 +999,6 @@
                  {:first-chunk first? :old-only (count old-only) :stale stale
                   :settled settled? :mismatches bad}))))))
 
-
 ;; --- Parinfer rows --------------------------------------------
 ;; Each row turns the mode on through editor/set-parinfer-fns! (what
 ;; jonquil.gtk.window.tabs wires per tab) and makes the edit the way GTK's own
@@ -1140,7 +1139,6 @@
                                  (= (str "(a\n  xb\n" (apply str (repeat 300 "  b\n")) ")") text))
                             {:status @status}))
                    (finally (parinfer-off! ed)))))))
-
 
 (defn- row-parinfer-paren-mode-keeps-pairs [ed]
   (go-row :parinfer-paren-mode-keeps-pairs check
@@ -1381,7 +1379,7 @@
                  ;; a cache miss; each sequence below primes with one
                  ;; throwaway action, then measures a HIT action, counting
                  ;; the ranged reads to prove the splice really ran
-                                  (let [splices (atom 0)
+                 (let [splices (atom 0)
                        real g/buffer-text-range
                        eqs (atom [])]
                    (with-redefs-fn {#'g/buffer-text-range
@@ -1745,7 +1743,7 @@ b" text) eq (pos? @splices))
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; stepping over a closing quote is a user action that
                  ;; changes nothing; it must not mark the form consistent
-                                  (editor/set-text! ed "(q)\n(fn [a b]\n     (h \"a\"))")
+                 (editor/set-text! ed "(q)\n(fn [a b]\n     (h \"a\"))")
                  (caret! ed 24)                      ; just before the closing quote
                  (editor/handle-key! ed 0x022 0)     ; quote over the closer: step past
                  (type-str! ed "x")

@@ -36,22 +36,22 @@
   closer is Parinfer's to manage, as upstream's handle-smart-enter! has it."
   ([snap] (smart-enter snap {}))
   ([{:keys [text sel-start sel-end]} {:keys [between-pair?] :or {between-pair? true}}]
-  (let [text' (str (subs text 0 sel-start) (subs text sel-end))
-        pos sel-start
-        line-start (inc (or (str/last-index-of text' "\n" (dec pos)) -1))
-        line-prefix (subs text' line-start pos)
-        prev-ch (when (pos? pos) (nth text' (dec pos)))
-        next-ch (when (< pos (count text')) (nth text' pos))
-        base-indent (or (re-find #"^[ ]+" line-prefix) "")]
-    (if (and between-pair? prev-ch next-ch (= (open->close prev-ch) next-ch))
-      (let [inner (str base-indent "  ")]
-        {:edits [[sel-start sel-end (str "\n" inner "\n" base-indent)]]
-         :caret (+ pos 1 (count inner))
-         :sel nil})
-      (let [ins (str "\n" (syntax/compute-smart-indent text' pos))]
-        {:edits [[sel-start sel-end ins]]
-         :caret (+ pos (count ins))
-         :sel nil})))))
+   (let [text' (str (subs text 0 sel-start) (subs text sel-end))
+         pos sel-start
+         line-start (inc (or (str/last-index-of text' "\n" (dec pos)) -1))
+         line-prefix (subs text' line-start pos)
+         prev-ch (when (pos? pos) (nth text' (dec pos)))
+         next-ch (when (< pos (count text')) (nth text' pos))
+         base-indent (or (re-find #"^[ ]+" line-prefix) "")]
+     (if (and between-pair? prev-ch next-ch (= (open->close prev-ch) next-ch))
+       (let [inner (str base-indent "  ")]
+         {:edits [[sel-start sel-end (str "\n" inner "\n" base-indent)]]
+          :caret (+ pos 1 (count inner))
+          :sel nil})
+       (let [ins (str "\n" (syntax/compute-smart-indent text' pos))]
+         {:edits [[sel-start sel-end ins]]
+          :caret (+ pos (count ins))
+          :sel nil})))))
 
 ;; --- Line ranges shared by indent, unindent and toggle-comment ---
 ;;
