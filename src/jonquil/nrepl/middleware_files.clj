@@ -23,6 +23,7 @@
    "jonquil/fibers_rt.clj" (embedded-text "jonquil/fibers_rt.clj")
    "jonquil/world_rt.clj" (embedded-text "jonquil/world_rt.clj")
    "jonquil/line_counts.clj" (embedded-text "jonquil/line_counts.clj")
+   "jonquil/instrument_lock.clj" (embedded-text "jonquil/instrument_lock.clj")
    "jonquil/results_rt.clj" (embedded-text "jonquil/results_rt.clj")
    "jonquil/nrepl/inspect_middleware.clj" (embedded-text "jonquil/nrepl/inspect_middleware.clj")
    "jonquil/nrepl/info_middleware.clj" (embedded-text "jonquil/nrepl/info_middleware.clj")

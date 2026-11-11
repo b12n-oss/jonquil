@@ -49,6 +49,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Two presses of the line counts toggle at once, or a line counts toggle at the same moment as the debug-mode toggle, no longer lose one. Each toggle read Jolt's instrumentation mode and then set it, so both could read the old mode and the status bar could disagree with the runtime. Every read-then-set of the mode now holds one lock, in process and in the Jolt child.
 - A plugin's `p/eval!` of code that throws reports the error's own message again on newer Jolt, where `load-string` wraps a runtime throw in a CompilerException ("Syntax error macroexpanding at (1:1).") the way JVM Clojure does. The wrapper is unwrapped only when it marks the throw as raised while running, so a cause the code gave its own throw stays hidden.
 - ClojureScript on node: when the launcher made its `read-line` pipe but couldn't open it, the whole session failed to start (the launcher exited before its ready line). It now opens the pipe up front, so that failure takes the same path as a failed `mkfifo`: the session runs, and `read-line` throws "read-line isn't available" with one console line saying so.
 - jank: Stop returns at once instead of holding the window while jank dies. ClojureScript on node: output the program prints while quick docs are fetched goes to the console instead of the doc popup.

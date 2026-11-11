@@ -38,6 +38,7 @@
     jonquil.fibers-rt
     jonquil.hints
     jonquil.layouts
+    jonquil.instrument-lock
     jonquil.line-counts
     jonquil.messages
     jonquil.mcp.describe

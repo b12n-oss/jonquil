@@ -5,8 +5,10 @@
   has no frames, so every use goes through frames-fn, looked up when
   called. The out-of-process Jolt child loads this namespace too, from
   Jonquil's embedded middleware files, so it requires nothing but
-  clojure.string. No GTK here."
-  (:require [clojure.string :as str])
+  clojure.string and jonquil.instrument-lock, which is embedded too. No GTK
+  here."
+  (:require [clojure.string :as str]
+            [jonquil.instrument-lock :as instrument-lock])
   (:import (java.util.concurrent LinkedBlockingQueue)))
 
 (def ^:private TEXT-MAX
@@ -160,7 +162,8 @@
   and turn line counting on), or when it throws."
   [on?]
   (if (available?)
-    (try ((requiring-resolve 'jolt.profile/instrument!) (if on? :debug false))
+    (try (locking instrument-lock/lock
+           ((requiring-resolve 'jolt.profile/instrument!) (if on? :debug false)))
          {:on? (boolean on?)}
          (catch Throwable e (jolt-error e)))
     {:error NO-API}))
@@ -169,10 +172,13 @@
   "Flips the runtime's own debug mode, read from jolt.profile/instrument-mode
   (on any Jolt with jolt.debug), so a restarted runtime or another window
   that changed it is never contradicted: on unless it is :debug now, off
-  when it is. {:on? b} or {:error s}, as set-debug-mode!."
+  when it is. {:on? b} or {:error s}, as set-debug-mode!. The read and the
+  set hold jonquil.instrument-lock's lock, so two toggles at once flip it
+  twice."
   []
   (if (available?)
-    (try (set-debug-mode! (not= :debug ((requiring-resolve 'jolt.profile/instrument-mode))))
+    (try (locking instrument-lock/lock
+           (set-debug-mode! (not= :debug ((requiring-resolve 'jolt.profile/instrument-mode)))))
          (catch Throwable e (jolt-error e)))
     {:error NO-API}))
 

@@ -320,3 +320,19 @@
         (is (identical? boom (deref fut 3000 :blocked)) "the original throw comes out")
         (is (= [{:continued? true}] @resumed))
         (is (nil? @(:paused brk)))))))
+
+(deftest debug-toggles-at-once-test
+  ;; As line-counts' toggles: a toggle reads the process's mode before it
+  ;; sets it, so two at once must not both read off.
+  (when (debugger/available?)
+    (try
+      (let [answers (vec (for [_ (range 200)]
+                           (do (debugger/set-debug-mode! false)
+                               (let [go (promise)
+                                     a (future @go (debugger/toggle-debug-mode!))
+                                     b (future @go (debugger/toggle-debug-mode!))]
+                                 (deliver go true)
+                                 [(:on? @a) (:on? @b)]))))]
+        (is (every? #{[true false] [false true]} answers)
+            (str "lost presses: " (count (remove #{[true false] [false true]} answers)))))
+      (finally (debugger/set-debug-mode! false)))))
