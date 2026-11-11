@@ -200,14 +200,14 @@
   [ui]
   (go-row :plugin-removed-file support/check
     (with-plugins ui {"p4-gone.clj" (source "p4-gone")}
-      (fn [_]
+      (fn [loaded]
         (let [j0 (wraps-on? ui KEY-J)
               _ (io/delete-file (io/file ((:plugins-dir* ui)) "p4-gone.clj"))
               lines ((:reload-plugins!* ui))
               j1 (wraps-on? ui KEY-J)]
           (support/check :plugin-removed-file
                          (and j0 (not j1) (some #(= "plugin p4-gone removed: its file is gone" %) lines))
-                         {:j-before j0 :j-after j1 :lines lines}))))))
+                         {:j-before j0 :j-after j1 :loaded loaded :lines lines}))))))
 
 ;; --- :run commands and their effects ----------------------------
 
