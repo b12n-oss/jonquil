@@ -3,7 +3,10 @@
   Jolt child like jonquil.trace-rt): Jolt's jolt.fibers keeps no list of
   live fibers, so this wraps jolt.fibers/spawn (as Trace wraps a var, so
   code compiled earlier goes through it too) and records each fiber spawned
-  from then on. Every answer is a map, never a throw."
+  from then on. core.async's io-thread, :fiber go blocks and flow processes
+  spawn below jolt.fibers/spawn, so they are never recorded; a Jolt-side
+  list of live fibers is jolt-lang/jolt#1606. Every answer is a map, never
+  a throw."
   (:require [clojure.string :as str]))
 
 (def NO-API "Processes need a Jolt with jolt.fibers.")
