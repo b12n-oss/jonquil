@@ -233,9 +233,10 @@
       (set-status! "; Nothing to list: open Find, or select some text.")
       (make-locations! ctx (loc/matches (:text snap) q)))))
 
-;; LM3: the tab against another version of its file, or against another
-;; tab, its differences in the Locations list. compare-state is {:tab-id
-;; :label :other}, plus :other-tab-id when the other version is a tab, for
+;; LM3: the tab against another version of its file, another tab or its
+;; last Run, its differences in the Locations list. compare-state is {:tab-id
+;; :label :other}, plus :other-tab-id when the other version is a tab or
+;; :last-run? when it is the last Run, for
 ;; Take, which works out the difference at the caret afresh.
 (defn- compare-list!
   [{:keys [compare-state state locp right hide-right-panel! set-status!] :as ctx} t label other extra]
@@ -292,6 +293,19 @@
       :else (compare-list! ctx t (g/label-text (:label o)) (editor/editor-text (:ed o))
                            {:other-tab-id other-id}))))
 
+(def ^:private last-run-label "the last Run")
+
+(defn- last-run-text [t] (some-> t :ed :changed :last-run deref))
+
+(defn- compare-last-run!
+  "Compare with the last Run: the active tab against the text its last
+  whole Run sent, when that Run ended well."
+  [{:keys [active-tab set-status!] :as ctx}]
+  (let [t (active-tab)]
+    (if-let [text (last-run-text t)]
+      (compare-list! ctx t last-run-label text {:last-run? true})
+      (set-status! "; This tab hasn't had a whole Run that ended well yet."))))
+
 (defn- take-hunk!
   "Takes other's lines for the difference at the caret of t, as one undo
   step. extra is what compare-state keeps beside the label, kept again."
@@ -317,11 +331,12 @@
         ;; compare; a tab closed since then gives the text it had
         other (cond
                 other-tab-id (or (some-> (tab-by-id tabs other-tab-id) :ed editor/editor-text) (:other st))
+                (:last-run? st) (or (last-run-text t) (:other st))
                 (= "disk" label) (or (:text (some-> @(:path t) read-disk)) (:other st))
                 :else (:other st))]
     (if (not= tab-id (:id t))
-      (set-status! "; Compare this tab first: with the file on disk, git HEAD or another tab.")
-      (take-hunk! ctx t label other (select-keys st [:other-tab-id])))))
+      (set-status! "; Compare this tab first: with the file on disk, git HEAD, another tab or the last Run.")
+      (take-hunk! ctx t label other (select-keys st [:other-tab-id :last-run?])))))
 
 (defn- set-handlers!
   [{:keys [state locp right hide-right-panel! set-status!] :as ctx}]
@@ -373,11 +388,12 @@
   {:compare-disk-fn (fn [] (compare-with! ctx "disk" read-disk))
    :compare-head-fn (fn [] (compare-with! ctx "HEAD" read-head))
    :compare-take-fn (fn [] (compare-take! ctx))
-   :compare-tab-fn (fn [id] (compare-tab! ctx id))})
+   :compare-tab-fn (fn [id] (compare-tab! ctx id))
+   :compare-last-run-fn (fn [] (compare-last-run! ctx))})
 
 (defn- install
   "The Locations part for one window: builds the pane, wires its handlers and
-  answers the nine list and compare fns and the tab-removed hook.
+  answers the ten list and compare fns and the tab-removed hook.
 
   state is the locations list, or nil. A buffer list is {:tab-id :list
   :marks}, its marks in that tab's buffer. A project list (:scope

@@ -222,6 +222,12 @@ reads that tab again, so an edit made there after the compare is what
 comes back. If the tab has closed since, Take uses the text it had at the
 compare.
 
+**Compare with the last Run** compares the tab with what its last whole Run
+sent, so you can see what you've changed since the code that's running was
+loaded. Only a Run of the whole tab that ended without an error counts; Run
+Form and Run Selection don't move it. Before the first such Run the status
+bar says there's nothing to compare with yet.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System
