@@ -261,8 +261,8 @@
   element except & itself and :as's own marker (its target is still
   walked, via the recursive binding-names call, same as any other
   element)."
-  [text tokens matches s e]
-  (mapcat (fn [c] (binding-names text tokens matches (first c) (second c)))
+  [{:keys [^String text tokens matches] :as src} s e]
+  (mapcat (fn [c] (binding-names src (first c) (second c)))
           (remove (fn [[cs ce]] (contains? #{"&" ":as"} (subs text cs ce)))
                   (form-children tokens matches s e))))
 
@@ -270,7 +270,7 @@
   "Names bound by a {:keys [...] :strs [...] :syms [...] :as x} or a plain
   {sym :key ...} destructuring pattern. :or's own map is skipped -- its
   keys reference already-bound names, not new ones."
-  [text tokens matches s e]
+  [{:keys [^String text tokens matches]} s e]
   (loop [cs (form-children tokens matches s e) acc []]
     (if (or (empty? cs) (nil? (second cs)))
       acc
@@ -300,18 +300,18 @@
   "The names a destructuring pattern spanning [s e) binds, recursively
   through vector and map patterns; a plain symbol span is itself the one
   bound name."
-  [^String text tokens matches s e]
+  [{:keys [^String text] :as src} s e]
   (let [ch (.charAt text s)]
     (cond
-      (= ch \[) (vector-pattern-names text tokens matches s e)
-      (= ch \{) (map-pattern-names text tokens matches s e)
+      (= ch \[) (vector-pattern-names src s e)
+      (= ch \{) (map-pattern-names src s e)
       :else [{:symbol (subs text s e) :start s :end e}])))
 
 (defn- bindings-vector-names
   "Plain alternating [pattern val pattern val ...] bindings, as let/loop/
   binding use."
-  [text tokens matches vs ve]
-  (mapcat (fn [[ps pe]] (binding-names text tokens matches ps pe))
+  [{:keys [tokens matches] :as src} vs ve]
+  (mapcat (fn [[ps pe]] (binding-names src ps pe))
           (pairwise-patterns (form-children tokens matches vs ve))))
 
 (defn- for-doseq-names
@@ -319,7 +319,7 @@
   A :let modifier's own vector binds exactly as let's does (destructuring
   included); :when and :while bind nothing, and their one following form
   is skipped."
-  [^String text tokens matches vs ve]
+  [{:keys [^String text tokens matches] :as src} vs ve]
   (loop [cs (form-children tokens matches vs ve) acc []]
     (if (or (empty? cs) (nil? (second cs)))
       acc
@@ -329,17 +329,17 @@
           (= ":let" modifier)
           (recur (drop 2 cs)
                  (let [[ls le] (second cs)]
-                   (into acc (bindings-vector-names text tokens matches ls le))))
+                   (into acc (bindings-vector-names src ls le))))
           (contains? #{":when" ":while"} modifier)
           (recur (drop 2 cs) acc)
           :else
-          (recur (drop 2 cs) (into acc (binding-names text tokens matches c0s c0e))))))))
+          (recur (drop 2 cs) (into acc (binding-names src c0s c0e))))))))
 
 (defn- letfn-names
   "letfn's own bindings vector: a list of (name [params] body) per entry --
   only the names here; each entry binds its own params as its own
   ancestor (letfn-entry?, in ancestor-names)."
-  [text tokens matches vs ve]
+  [{:keys [^String text tokens matches]} vs ve]
   (mapcat (fn [[ls le]]
             (when-let [[ns ne] (first (form-children tokens matches ls le))]
               [{:symbol (subs text ns ne) :start ns :end ne}]))
@@ -366,7 +366,7 @@
   entries, (name [params] body) or (name ([a] ...) ...): its innermost
   enclosing '(' is a letfn form and [open close] sits inside that form's
   bindings vector."
-  [^String text tokens matches open close]
+  [{:keys [^String text tokens matches]} open close]
   (boolean
    (when-let [[popen pclose] (first (enclosing-parens text matches open))]
      (let [pchildren (form-children tokens matches popen pclose)]
@@ -387,43 +387,43 @@
   among a fn-like form's own name/docstring/attr-map prefix (none of
   those are '(' forms), so once the parent is confirmed multi-arity, open
   is necessarily one of its arity-clause lists."
-  [^String text tokens matches open]
+  [{:keys [^String text tokens matches] :as src} open]
   (when-let [[popen pclose] (first (enclosing-parens text matches open))]
     (let [pchildren (form-children tokens matches popen pclose)]
       (when-let [[h0s h0e] (first pchildren)]
         (and (or (contains? fn-like-forms (subs text h0s h0e))
                  ;; a letfn entry in multi-arity mode: its clause lists
                  ;; are bare arity clauses too
-                 (letfn-entry? text tokens matches popen pclose))
+                 (letfn-entry? src popen pclose))
              (nil? (fn-arity-params text (rest pchildren))))))))
 
 (defn- operator-names
   "The names bound by a '(' form whose first child is the operator op
   (the symbol text), or nil when it binds nothing. children are the
   form's own children, open and close its span."
-  [{:keys [^String text tokens matches span op children]}]
+  [{:keys [^String text span op children] :as src}]
   (let [[open close] span
         vector-span (fn [] (second children))
         arity-params (fn [] (fn-arity-params text (rest children)))]
     (cond
       (contains? let-like-forms op)
-      (when-let [[vs ve] (vector-span)] (bindings-vector-names text tokens matches vs ve))
+      (when-let [[vs ve] (vector-span)] (bindings-vector-names src vs ve))
 
       (contains? #{"for" "doseq"} op)
-      (when-let [[vs ve] (vector-span)] (for-doseq-names text tokens matches vs ve))
+      (when-let [[vs ve] (vector-span)] (for-doseq-names src vs ve))
 
       (= "letfn" op)
-      (when-let [[vs ve] (vector-span)] (letfn-names text tokens matches vs ve))
+      (when-let [[vs ve] (vector-span)] (letfn-names src vs ve))
 
       (contains? fn-like-forms op)
       (when-let [[vs ve] (arity-params)]
-        (params-vector-names text tokens matches vs ve))
+        (params-vector-names src vs ve))
 
       ;; a letfn entry (name [params] body): its params bind in its
       ;; body; a multi-arity entry's clauses are bare arity clauses
-      (letfn-entry? text tokens matches open close)
+      (letfn-entry? src open close)
       (when-let [[vs ve] (arity-params)]
-        (params-vector-names text tokens matches vs ve))
+        (params-vector-names src vs ve))
 
       :else nil)))
 
@@ -437,19 +437,18 @@
   quoted/literal data whose first child happens to be a
   vector (e.g. `'([q] q)`) is never mistaken for one, since its immediate
   parent isn't a fn-like form in multi-arity mode."
-  [^String text tokens matches open close]
+  [{:keys [^String text tokens matches] :as src} open close]
   (let [children (form-children tokens matches open close)]
     (when-let [[h0s h0e] (first children)]
-      (if (and (= \[ (.charAt text h0s)) (bare-arity-clause? text tokens matches open))
-        (params-vector-names text tokens matches h0s h0e)
-        (operator-names {:text text :tokens tokens :matches matches :span [open close]
-                         :op (subs text h0s h0e) :children children})))))
+      (if (and (= \[ (.charAt text h0s)) (bare-arity-clause? src open))
+        (params-vector-names src h0s h0e)
+        (operator-names (assoc src :span [open close] :op (subs text h0s h0e) :children children))))))
 
 (defn- params-vector-names
   "Names bound by a fn/defn param vector or a bare multi-arity clause's own
   vector: every element except a lone & (its target is still walked)."
-  [text tokens matches s e]
-  (mapcat (fn [[cs ce]] (binding-names text tokens matches cs ce))
+  [{:keys [^String text tokens matches] :as src} s e]
+  (mapcat (fn [[cs ce]] (binding-names src cs ce))
           (remove (fn [[cs ce]] (= "&" (subs text cs ce))) (form-children tokens matches s e))))
 
 (defn- scoped-for?
@@ -460,7 +459,7 @@
   if-some's binding covers only the THEN branch (children index 2), never
   the else. Every other ancestor (let-like, for/doseq, letfn, fn-like, or
   anything unrecognised) is always in scope, same as before this item."
-  [^String text tokens matches open close pos]
+  [{:keys [^String text tokens matches]} open close pos]
   (let [children (form-children tokens matches open close)]
     (if-let [[h0s h0e] (first children)]
       (if (contains? if-let-like-forms (subs text h0s h0e))
@@ -480,7 +479,7 @@
   binding doesn't reach pos (the ELSE branch)."
   [text pos sym-name]
   (let [{:keys [matches]} (syntax/compute-brackets text)
-        tokens (non-comment-tokens text)]
+        src {:text text :tokens (non-comment-tokens text) :matches matches}]
     (or
      ;; #()'s own args have no textual binding site: the innermost
      ;; enclosing #( binds them (the reader rewrites % inside #(), so it
@@ -492,9 +491,9 @@
              (enclosing-parens text matches pos)))
      ;; outside any #(), % is an ordinary name and walks like one
      (some (fn [[open close]]
-             (when (scoped-for? text tokens matches open close pos)
+             (when (scoped-for? src open close pos)
                (last (filter #(= sym-name (:symbol %))
-                             (ancestor-names text tokens matches open close)))))
+                             (ancestor-names src open close)))))
            (enclosing-parens text matches pos)))))
 
 (defn jump-target
