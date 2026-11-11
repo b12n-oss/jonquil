@@ -35,15 +35,15 @@
     (plugin-list-rows/with-list ui (assoc (files "np-a") :ids ["np-a" "np-b"])
       (fn []
         (without-plugins ui
-          (fn []
-            (spit (file ui "np-b") (review/source "np-b"))
-            (try
-              (let [lines ((:reload-plugins!* ui))]
-                (support/check :no-plugins-reload-refuses
-                               (and (= [(str off "nothing was reloaded")] lines) (not (live? "np-b")) (live? "np-a")
-                                    (str/includes? (support/console-text ui) (str "; " off "nothing was reloaded")))
-                               {:lines lines}))
-              (finally (io/delete-file (file ui "np-b") true)))))))))
+                         (fn []
+                           (spit (file ui "np-b") (review/source "np-b"))
+                           (try
+                             (let [lines ((:reload-plugins!* ui))]
+                               (support/check :no-plugins-reload-refuses
+                                              (and (= [(str off "nothing was reloaded")] lines) (not (live? "np-b")) (live? "np-a")
+                                                   (str/includes? (support/console-text ui) (str "; " off "nothing was reloaded")))
+                                              {:lines lines}))
+                             (finally (io/delete-file (file ui "np-b") true)))))))))
 
 (defn row-no-plugins-disable-refuses
   "Disable in the list: refused, the settings file and the key unchanged."
@@ -53,17 +53,17 @@
       (fn []
         ((:plugins-list!* ui))
         (without-plugins ui
-          (fn []
-            (let [sp ((:settings-path* ui))
-                  before (when (.isFile (io/file sp)) (slurp sp))
-                  lines ((:plugin-disable!* ui) "np-c")
-                  after (when (.isFile (io/file sp)) (slurp sp))]
-              (support/check :no-plugins-disable-refuses
-                             (and (= [(str off "plugin np-c wasn't disabled. To keep it off, add :np-c to :plugins :disabled in "
-                                         sp ", then start without --no-plugins.")]
-                                    lines) (= before after) (live? "np-c")
-                                  (not (contains? (get-in (settings/load-settings sp) [:plugins :disabled]) :np-c)))
-                             {:lines lines}))))))))
+                         (fn []
+                           (let [sp ((:settings-path* ui))
+                                 before (when (.isFile (io/file sp)) (slurp sp))
+                                 lines ((:plugin-disable!* ui) "np-c")
+                                 after (when (.isFile (io/file sp)) (slurp sp))]
+                             (support/check :no-plugins-disable-refuses
+                                            (and (= [(str off "plugin np-c wasn't disabled. To keep it off, add :np-c to :plugins :disabled in "
+                                                          sp ", then start without --no-plugins.")]
+                                                    lines) (= before after) (live? "np-c")
+                                                 (not (contains? (get-in (settings/load-settings sp) [:plugins :disabled]) :np-c)))
+                                            {:lines lines}))))))))
 
 (defn row-no-plugins-revert-refuses
   "Revert to v1 from the history: refused, the file still v2's."
@@ -78,12 +78,12 @@
           ((:plugin-history!* ui) "np-d")
           (try
             (without-plugins ui
-              (fn []
-                (let [lines ((:plugin-revert!* ui) 1 "")]
-                  (support/check :no-plugins-revert-refuses
-                                 (and (= [(str off "plugin np-d wasn't reverted")] lines) (= v2 (slurp (file ui "np-d")))
-                                      (= 2 (count (:entries (history/read-entries (history/history-dir ((:plugins-dir* ui)) "np-d"))))))
-                                 {:lines lines}))))
+                             (fn []
+                               (let [lines ((:plugin-revert!* ui) 1 "")]
+                                 (support/check :no-plugins-revert-refuses
+                                                (and (= [(str off "plugin np-d wasn't reverted")] lines) (= v2 (slurp (file ui "np-d")))
+                                                     (= 2 (count (:entries (history/read-entries (history/history-dir ((:plugins-dir* ui)) "np-d"))))))
+                                                {:lines lines}))))
             (finally ((:plugin-history-close!* ui)))))))))
 
 (defn row-no-plugins-accept-refuses
@@ -96,13 +96,13 @@
                                    :reason "an agent's np-e" :status :pending :check {:unchecked? true}})
         ((:review-proposals!* ui))
         (without-plugins ui
-          (fn []
-            (let [lines ((:review-accept!* ui))
-                  status (history/version-status (:entries (history/read-entries (history/history-dir ((:plugins-dir* ui)) "np-e"))) 1)]
-              (support/check :no-plugins-accept-refuses
-                             (and (= (str off "plugin np-e: v1 wasn't accepted") (last lines)) (= :pending status)
-                                  (not (live? "np-e")) (not (.exists (file ui "np-e"))))
-                             {:lines lines :status status}))))))))
+                         (fn []
+                           (let [lines ((:review-accept!* ui))
+                                 status (history/version-status (:entries (history/read-entries (history/history-dir ((:plugins-dir* ui)) "np-e"))) 1)]
+                             (support/check :no-plugins-accept-refuses
+                                            (and (= (str off "plugin np-e: v1 wasn't accepted") (last lines)) (= :pending status)
+                                                 (not (live? "np-e")) (not (.exists (file ui "np-e"))))
+                                            {:lines lines :status status}))))))))
 
 (defn row-plugin-list-shows-file-deleted
   "A loaded plugin whose file is deleted and reloaded away: its row says

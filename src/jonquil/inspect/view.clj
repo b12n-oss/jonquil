@@ -240,17 +240,17 @@
   [view op args]
   (try
     (with-history
-     view
-     (case op
-      :start (start view (:value args) (:rows args) (:cols args) (or (:label args) "*1"))
-      :earlier (earlier view)
-      :later (later view)
-      :in (in view (:idx args))
-      :out (out view)
-      :page (page view (:delta args))
-      :meta (toggle-meta view (:cursor args))
-      :table (toggle-table view)
-      :def (def-as view (:target-ns args) (:name args))))
+      view
+      (case op
+        :start (start view (:value args) (:rows args) (:cols args) (or (:label args) "*1"))
+        :earlier (earlier view)
+        :later (later view)
+        :in (in view (:idx args))
+        :out (out view)
+        :page (page view (:delta args))
+        :meta (toggle-meta view (:cursor args))
+        :table (toggle-table view)
+        :def (def-as view (:target-ns args) (:name args))))
     (catch Throwable e
       (let [msg (or (ex-message e) (str (class e)))]
         (try (assoc (render view) :note msg)

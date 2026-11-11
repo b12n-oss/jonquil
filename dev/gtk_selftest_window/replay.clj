@@ -488,7 +488,7 @@
           _ (on-gtk ((:select-tab! ui) (:id ta)) ((:run!* ui)))
           ran? (await-until 5000 20 #(and (support/idle? ui) (seq (:current (on-disk ui db)))))
           settled? (await-until 800 20 #(or (empty? (:previous (on-disk ui db)))
-                                             (empty? (:previous (on-disk ui da)))))]
+                                            (empty? (:previous (on-disk ui da)))))]
       (on-gtk (try
                 (support/check :replay-reroot-open-new-tab
                                (and ta tb (not= (:id ta) (:id tb)) (= (:id tb) active-b)

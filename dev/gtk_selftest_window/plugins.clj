@@ -317,7 +317,7 @@
   [ui]
   (go-row :plugin-eval-quiet support/check
     (with-plugins ui {"p5b-quiet.clj" (run-source "p5b-quiet" "#{:eval :console}"
-                                                   "(let [r (p/eval! ctx \"(println \\\"side\\\") (* 6 7)\")] (p/status! ctx (pr-str r)))")}
+                                                  "(let [r (p/eval! ctx \"(println \\\"side\\\") (* 6 7)\")] (p/status! ctx (pr-str r)))")}
       (fn [lines]
         (typed! ui "(+ 1 2)")
         (let [mark (on-gtk (support/out-end-offset ui))
@@ -336,7 +336,7 @@
   [ui]
   (go-row :plugin-repl-visible support/check
     (with-plugins ui {"p5b-repl.clj" (run-source "p5b-repl" "#{:eval :console}"
-                                                  "(p/status! ctx (str \"v=\" (:value (p/repl! ctx \"(+ 20 22)\"))))")}
+                                                 "(p/status! ctx (str \"v=\" (:value (p/repl! ctx \"(+ 20 22)\"))))")}
       (fn [lines]
         (let [mark (on-gtk (support/out-end-offset ui))
               _ (press-j! ui)
@@ -351,7 +351,7 @@
   [ui]
   (go-row :plugin-eval-timeout support/check
     (with-plugins ui {"p5b-slow.clj" (run-source "p5b-slow" "#{:eval :console}"
-                                                  "(p/status! ctx (try (p/eval! ctx \"(Thread/sleep 5000)\" {:timeout-ms 300}) \"no throw\" (catch :default e (ex-message e))))")}
+                                                 "(p/status! ctx (try (p/eval! ctx \"(Thread/sleep 5000)\" {:timeout-ms 300}) \"no throw\" (catch :default e (ex-message e))))")}
       (fn [lines]
         (press-j! ui)
         (let [said? (await-until 5000 20 #(= "the eval took longer than 300 ms and was stopped" (g/label-text (:status-label ui))))

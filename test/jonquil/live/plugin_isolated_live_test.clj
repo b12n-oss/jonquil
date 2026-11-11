@@ -73,7 +73,7 @@
 
 (deftest top-level-loop-is-killed-at-the-deadline-test
   (let [[r _] (check "lloop" (source "lloop" :extra (str "(spit \"kid.pid\" (str (.pid (.start (ProcessBuilder. [\"sleep\" \"300\"])))))\n"
-                                                        "(loop [] (recur))"))
+                                                         "(loop [] (recur))"))
                      :deadline-ms 3000)
         dir (some-> (:log r) io/file .getParentFile)]
     (is (= ["the check didn't finish in 3 s, so it was stopped"] (:problems r)))
@@ -88,7 +88,7 @@
         text (source "lrec" :extra "(loop [] (recur))")
         result (loader/propose-check {:registry (reg/empty-registry) :id "lrec" :source text :os "Linux"
                                       :check #(isolated/check! (assoc % :cache-base @cache :temp-base tmp
-                                                                       :deadline-ms 3000))})
+                                                                      :deadline-ms 3000))})
         r (loader/propose-step! {:dir d :os "Linux" :disabled #{} :id "lrec" :source text :reason "tidy"
                                  :result result})
         entries (:entries (history/read-entries (history/history-dir d "lrec")))
@@ -113,7 +113,7 @@
   ;; a shutdown hook SIGTERM would run starts a process after
   ;; the descendants were taken; the overrun kill gives it no chance
   (let [[r _] (check "lhook" (source "lhook" :extra (str "(.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (spit \"late.pid\" (str (.pid (.start (ProcessBuilder. [\"sleep\" \"300\"]))))))))\n"
-                                                        "(loop [] (recur))"))
+                                                         "(loop [] (recur))"))
                      :deadline-ms 3000)
         late (some-> (:log r) io/file .getParentFile (io/file "late.pid"))]
     (is (:log r) (pr-str r))

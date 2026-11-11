@@ -201,17 +201,17 @@
   [ui]
   (go-row :messages-disk-change support/check
     (disk-row! ui :messages-disk-change "(def x 1)\n"
-      (fn [{:keys [f id settle! respit! state]}]
-        (let [new-text "(def x 2)\n;; written by an agent\n"
-              _ (spit f new-text)
-              _ (settle!)
-              logged? (await-until 3000 20 #(= "● 1 message" (unread ui)))
-              _ (respit! new-text)
-              _ (settle!)
-              st (state)]
-          [(and logged? (= ["x.clj was reloaded from disk"] (:files st)) (= [1] (:repeats st)) (= [{:tab-id id}] (:targets st))
-                (= new-text (:text st)) (not (:dirty? st)))
-           (assoc st :logged logged?)])))))
+               (fn [{:keys [f id settle! respit! state]}]
+                 (let [new-text "(def x 2)\n;; written by an agent\n"
+                       _ (spit f new-text)
+                       _ (settle!)
+                       logged? (await-until 3000 20 #(= "● 1 message" (unread ui)))
+                       _ (respit! new-text)
+                       _ (settle!)
+                       st (state)]
+                   [(and logged? (= ["x.clj was reloaded from disk"] (:files st)) (= [1] (:repeats st)) (= [{:tab-id id}] (:targets st))
+                         (= new-text (:text st)) (not (:dirty? st)))
+                    (assoc st :logged logged?)])))))
 
 (defn row-messages-disk-change-dirty
   "A dirty tab whose file is rewritten keeps its edits and stays dirty,
@@ -219,17 +219,17 @@
   [ui]
   (go-row :messages-disk-change-dirty support/check
     (disk-row! ui :messages-disk-change-dirty "(def x 1)\n"
-      (fn [{:keys [f settle! respit! state ed]}]
-        (on-gtk (g/with-iters* (:buf ed) 0 0 (fn [a _] (g/gtk-text-buffer-insert (:buf ed) a ";; mine\n" -1))))
-        (spit f "(def x 2)\n")
-        (settle!)
-        (respit! "(def x 2)\n")
-        (settle!)
-        (let [st (state)]
-          [(and (= ";; mine\n(def x 1)\n" (:text st)) (:dirty? st)
-                (= ["x.clj changed on disk, and this tab keeps your unsaved edits"] (:files st))
-                (= [1] (:repeats st)))
-           st])))))
+               (fn [{:keys [f settle! respit! state ed]}]
+                 (on-gtk (g/with-iters* (:buf ed) 0 0 (fn [a _] (g/gtk-text-buffer-insert (:buf ed) a ";; mine\n" -1))))
+                 (spit f "(def x 2)\n")
+                 (settle!)
+                 (respit! "(def x 2)\n")
+                 (settle!)
+                 (let [st (state)]
+                   [(and (= ";; mine\n(def x 1)\n" (:text st)) (:dirty? st)
+                         (= ["x.clj changed on disk, and this tab keeps your unsaved edits"] (:files st))
+                         (= [1] (:repeats st)))
+                    st])))))
 
 (defn row-messages-disk-change-nul
   "Disk text with a NUL byte never reaches the tab: its text stays and one
@@ -237,17 +237,17 @@
   [ui]
   (go-row :messages-disk-change-nul support/check
     (disk-row! ui :messages-disk-change-nul "(def x 1)\n"
-      (fn [{:keys [f settle! respit! state]}]
-        (spit f "(def x\u0000 2)\n")
-        (settle!)
+               (fn [{:keys [f settle! respit! state]}]
+                 (spit f "(def x\u0000 2)\n")
+                 (settle!)
         ;; the same NUL text again is said once
-        (respit! "(def x\u0000 2)\n")
-        (settle!)
-        (let [st (state)]
-          [(and (= "(def x 1)\n" (:text st)) (not (:dirty? st))
-                (= ["x.clj changed on disk but holds a NUL byte, so this tab keeps its text"] (:files st))
-                (= [1] (:repeats st)))
-           st])))))
+                 (respit! "(def x\u0000 2)\n")
+                 (settle!)
+                 (let [st (state)]
+                   [(and (= "(def x 1)\n" (:text st)) (not (:dirty? st))
+                         (= ["x.clj changed on disk but holds a NUL byte, so this tab keeps its text"] (:files st))
+                         (= [1] (:repeats st)))
+                    st])))))
 
 (defn row-messages-disk-deleted-then-back
   "A deleted file is said once and the tab kept; written back with new
@@ -255,16 +255,16 @@
   [ui]
   (go-row :messages-disk-deleted-then-back support/check
     (disk-row! ui :messages-disk-deleted-then-back "(def x 1)\n"
-      (fn [{:keys [^java.io.File f settle! state]}]
-        (.delete f)
-        (settle!) (settle!)
-        (spit f "(def x 3)\n")
-        (settle!)
-        (let [st (state)]
+               (fn [{:keys [^java.io.File f settle! state]}]
+                 (.delete f)
+                 (settle!) (settle!)
+                 (spit f "(def x 3)\n")
+                 (settle!)
+                 (let [st (state)]
           ;; :entries is in log order, oldest first
-          [(and (= ["x.clj was deleted or moved on disk" "x.clj was reloaded from disk"] (:files st))
-                (= "(def x 3)\n" (:text st)) (not (:dirty? st)))
-           st])))))
+                   [(and (= ["x.clj was deleted or moved on disk" "x.clj was reloaded from disk"] (:files st))
+                         (= "(def x 3)\n" (:text st)) (not (:dirty? st)))
+                    st])))))
 
 (defn row-messages-disk-waits-a-tick
   "A change is followed only once the file's stat has held for one tick:
@@ -273,19 +273,19 @@
   [ui]
   (go-row :messages-disk-waits-a-tick support/check
     (disk-row! ui :messages-disk-waits-a-tick "(def x 1)\n"
-      (fn [{:keys [f tick! state]}]
-        (spit f "")
-        (tick!)
-        (let [mid (state)]
-          (spit f "(def x 2)\n")
-          (tick!)
-          (let [still (state)]
-            (tick!)
-            (let [st (state)]
-              [(and (= "(def x 1)\n" (:text mid)) (= [] (:files mid))
-                    (= "(def x 1)\n" (:text still))
-                    (= "(def x 2)\n" (:text st)) (= ["x.clj was reloaded from disk"] (:files st)))
-               {:mid mid :still still :st st}])))))))
+               (fn [{:keys [f tick! state]}]
+                 (spit f "")
+                 (tick!)
+                 (let [mid (state)]
+                   (spit f "(def x 2)\n")
+                   (tick!)
+                   (let [still (state)]
+                     (tick!)
+                     (let [st (state)]
+                       [(and (= "(def x 1)\n" (:text mid)) (= [] (:files mid))
+                             (= "(def x 1)\n" (:text still))
+                             (= "(def x 2)\n" (:text st)) (= ["x.clj was reloaded from disk"] (:files st)))
+                        {:mid mid :still still :st st}])))))))
 
 (defn row-messages-disk-follow-failure-said
   "A throw while following a change is one error row naming it, never a
@@ -293,21 +293,21 @@
   [ui]
   (go-row :messages-disk-follow-failure-said support/check
     (disk-row! ui :messages-disk-follow-failure-said "(def x 1)\n"
-      (fn [{:keys [f settle! state ed]}]
+               (fn [{:keys [f settle! state ed]}]
         ;; reload-text! bumps the paint gen first: a paint that isn't a map throws there
-        (let [paint @(:paint ed)]
-          (try
-            (on-gtk (reset! (:paint ed) :broken))
-            (spit f "(def x 2)\n")
-            (settle!)
-            (settle!)
-            (finally (on-gtk (reset! (:paint ed) paint)))))
-        (let [st (state)
-              errs (on-gtk (mapv :error? (filter #(= :file (:kind %)) (:entries @(:messages* ui)))))]
-          [(and (= 1 (count (:files st)))
-                (str/starts-with? (first (:files st)) "x.clj changed on disk, but following it failed: ")
-                (= [true] errs))
-           (assoc st :errs errs)])))))
+                 (let [paint @(:paint ed)]
+                   (try
+                     (on-gtk (reset! (:paint ed) :broken))
+                     (spit f "(def x 2)\n")
+                     (settle!)
+                     (settle!)
+                     (finally (on-gtk (reset! (:paint ed) paint)))))
+                 (let [st (state)
+                       errs (on-gtk (mapv :error? (filter #(= :file (:kind %)) (:entries @(:messages* ui)))))]
+                   [(and (= 1 (count (:files st)))
+                         (str/starts-with? (first (:files st)) "x.clj changed on disk, but following it failed: ")
+                         (= [true] errs))
+                    (assoc st :errs errs)])))))
 
 (defn- selected-entry-id [mp]
   (let [row (g/gtk-list-box-get-selected-row (:list mp))]

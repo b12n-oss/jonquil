@@ -365,9 +365,9 @@
     (try
       (reset! reg/effects {:active-tab-turn (fn [] (throw (ex-info "The window did not respond." {})))})
       (is (= {:text "plugin fmt: The window did not respond." :error? true}
-              (call-tool r "plugin_fmt_echo" {"text" "a"})))
+             (call-tool r "plugin_fmt_echo" {"text" "a"})))
       (is (= {:text "plugin fmt: The window did not respond." :error? true}
-              (call-tool r "plugin_fmt_echo" {"text" "a"})) "not stuck as still running")
+             (call-tool r "plugin_fmt_echo" {"text" "a"})) "not stuck as still running")
       (finally (reset! reg/effects before)))))
 
 ;; --- watch-tools! --------------------------------------------

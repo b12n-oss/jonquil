@@ -591,7 +591,7 @@
   in-process protocol."
   [id text]
   (checker/summary (:definition (protocol/run-protocol {:where :in-process :source text :file-id id
-                                                         :request (#'loader/request-for (reg/empty-registry) id "Linux")}))))
+                                                        :request (#'loader/request-for (reg/empty-registry) id "Linux")}))))
 
 (defn- reported [id text & {:as more}]
   (merge {:ok? true :problems [] :warnings [] :timings {} :plugin (summary-of id text)} more))
@@ -907,7 +907,7 @@
         off! (fn [id enabled?] (loader/set-enabled-step! live {:settings-path sp :id id :enabled? enabled?
                                                                :os "Linux" :now now :plugins? false}))]
     (is (= [(str off "plugin t-a wasn't disabled. To keep it off, add :t-a to :plugins :disabled in "
-                sp ", then start without --no-plugins.")]
+                 sp ", then start without --no-plugins.")]
            (off! "t-a" false)))
     (is (= [(str off "plugin t-b wasn't enabled")] (off! "t-b" true)))
     (is (identical? before @live))

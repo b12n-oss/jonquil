@@ -87,14 +87,14 @@
   [reg id os]
   (let [reg (before reg id)]
     (plugin-check/request-from-registry
-                 {:commands (plugin-registry/all-commands reg) :conditions conditions
+     {:commands (plugin-registry/all-commands reg) :conditions conditions
                   ;; the earlier plugins count like shipped bindings, so a
                   ;; chord one takes is warned about, or unreachable, for this one
-                  :keymap {:window (into (plugin-registry/bindings-with-source reg :window)
-                                         (:window km/shipped))
-                           :editor (into (plugin-registry/bindings-with-source reg :editor)
-                                         (:editor km/shipped))}
-                  :os os})))
+      :keymap {:window (into (plugin-registry/bindings-with-source reg :window)
+                             (:window km/shipped))
+               :editor (into (plugin-registry/bindings-with-source reg :editor)
+                             (:editor km/shipped))}
+      :os os})))
 
 (defn- check
   "id's file text through the protocol against reg's earlier plugins."
@@ -308,7 +308,7 @@
                             (str ". To keep it off, add :" id " to :plugins :disabled in "
                                  settings-path ", then start without --no-plugins."))))
         (= enabled? (not (contains? (set (:disabled (:plugins (settings/load-settings settings-path))))
-                                      (keyword id))))
+                                    (keyword id))))
         [(str "plugin " id " is already " what ".")]
         :else
         (if-let [why (settings/save-plugin-disabled! settings-path (keyword id) (not enabled?))]

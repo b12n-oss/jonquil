@@ -187,7 +187,7 @@
         out (atom [])
         done (future
                (mcp/serve! {:tools (mcp-window/with-plugin-tools
-                                    (mcp-window/make-window-tools {:ui ui :dir (System/getProperty "java.io.tmpdir")}) ui)
+                                     (mcp-window/make-window-tools {:ui ui :dir (System/getProperty "java.io.tmpdir")}) ui)
                             :subscribe (:watch-plugin-tools* ui)
                             :read-line (fn [] (let [l (.take q)] (when-not (= l ::eof) l)))
                             :write-line (fn [s] (swap! out conj (json/decode s)))}))]

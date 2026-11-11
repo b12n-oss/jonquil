@@ -190,8 +190,8 @@
 (deftest request-conditions-as-any-collection-test
   (doseq [cs [nil [] [:writable] :x]]
     (let [r (try (pc/validate (assoc request :conditions cs :file-id "wrap-when"
-                                      :definitions [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :when [:writable]
-                                                                            :command :wrap-when/wrap}])]))
+                                     :definitions [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :when [:writable]
+                                                                           :command :wrap-when/wrap}])]))
                  (catch :default e {:threw (ex-message e)}))]
       (is (nil? (:threw r)) (str (pr-str cs) " threw " (:threw r))))))
 

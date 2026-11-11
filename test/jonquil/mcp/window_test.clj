@@ -298,7 +298,7 @@
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
     (is (= {:text "Selected tab 1." :error? false :tab-id 1}
            ((:call ((w/with-plugin-tools (tools-for {:tabs* (fn [] [{:id 1}]) :select-tab! (fn [_] nil)})
-                                         {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
+                      {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
     (reset! served [])
     (is (= 19 (count (names))))

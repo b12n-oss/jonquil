@@ -104,11 +104,11 @@
       (let [in (io/reader (.getInputStream sock) :encoding "UTF-8")
             out (io/writer (.getOutputStream sock) :encoding "UTF-8")]
         (mcp/serve! {:tools (mcp-window/with-messages
-                             (mcp-window/with-plugin-tools
-                              (mcp-window/make-window-tools
-                               {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
-                              ui)
-                             ui session*)
+                              (mcp-window/with-plugin-tools
+                                (mcp-window/make-window-tools
+                                 {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
+                                ui)
+                              ui session*)
                      :on-initialize (fn [ci]
                                       (let [c (mcp-window/client-name ci)]
                                         (swap! session* assoc :client c)
