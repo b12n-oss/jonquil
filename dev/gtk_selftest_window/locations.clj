@@ -433,6 +433,17 @@
               (editor/mark-saved! ed)
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
+(defn- run-active-palette!
+  "run-palette! on the active tab's own palette, which is the one
+  :open-palette!* opens: (:palette ui) is the first tab's, so a row with
+  several tabs open must use this. GTK-thread only."
+  [ui query]
+  ((:open-palette!* ui))
+  (let [p (:palette ((:active-tab* ui)))]
+    (palette/set-query! p query)
+    (palette/run-selected! p)
+    (when (popover/open? p) (popover/hide! p))))
+
 (defn row-compare-with-tab
   "Compare with tab: b.clj lists the active tab's difference from b.clj's
   tab, saved or not. Take reads the other tab as it is now, so an edit made
@@ -449,12 +460,12 @@
           eb (on-gtk (:ed ((:active-tab* ui))))
           _ (on-gtk ((:open-file! ui) (.getPath fa)))
           ea (on-gtk (:ed ((:active-tab* ui))))
-          _ (on-gtk (run-palette! ui "compare with tab: b.clj"))
+          _ (on-gtk (run-active-palette! ui "compare with tab: b.clj"))
           listed? (await-until 3000 20 #(= ["2: 1 line here, 1 line in b.clj: (def x 10)"]
                                            (lpane/row-texts (:locations-pane ui))))
           _ (on-gtk (editor/apply-op-plain! eb {:edits [[7 17 "(def x 20)"]] :caret 7})
                     (support/place-cursor! (:buf ea) 9)
-                    (run-palette! ui "take the other version here"))
+                    (run-active-palette! ui "take the other version here"))
           took? (await-until 3000 20 #(= "(ns a)\n(def x 20)\n(def y 2)\n" (editor/editor-text ea)))
           cleared? (await-until 3000 20 #(and (empty? (lpane/row-texts (:locations-pane ui)))
                                               (= "; No differences from b.clj." (status ui))))]
@@ -462,7 +473,8 @@
                              {:listed listed? :took took? :cleared cleared?
                               :rows (lpane/row-texts (:locations-pane ui)) :status (status ui)
                               :a (editor/editor-text ea) :b (editor/editor-text eb)})
-              (editor/mark-saved! ea)
-              (editor/mark-saved! eb)
-              (doseq [t (filter #(#{ea eb} (:ed %)) ((:tabs* ui)))]
-                ((:close-tab! ui) (:id t)))))))
+              ;; b.clj may have filled the launch tab, so keep the first
+              ;; tab, as the usages rows do: closing the last closes the window
+              (doseq [t ((:tabs* ui))] (editor/mark-saved! (:ed t)))
+              (doseq [t (rest ((:tabs* ui)))] ((:close-tab! ui) (:id t)))
+              ((:select-tab! ui) (:id (first ((:tabs* ui)))))))))
