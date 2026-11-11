@@ -384,6 +384,9 @@
                     ;; a panel entry ([:panel/switch k]), as its key does
       (and (vector? id) (= :panel/switch (first id)))
       ((:panel-focus-fn window-key-args) (second id))
+                    ;; Compare with tab (LM3)
+      (and (vector? id) (= :compare/tab (first id)))
+      ((:compare-tab-fn window-key-args) (second id))
                     ;; a named layout (LM8)
       (and (vector? id) (= :layout/use (first id)))
       ((:layout-use-fn window-key-args) (second id))

@@ -14,6 +14,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - The Up/Down history survives a dialect switch, and is saved with the replay record.
 - Named layouts: Save the layout keeps whether the file tree and a right-hand panel show, the tree's width and the editor/console split, named after what shows; Use layout: name in the palette brings one back. Kept in the settings file.
 - Compare with the file on disk, or with git HEAD: the tab's differences from that version go in the Locations list, and Take the other version here puts that version's lines back for the difference at the caret, as one undo step.
+- Compare with tab: the palette lists every other open tab, and comparing with one puts the differences in the Locations list the same way, saved or not. Take the other version here reads that tab as it is now.
 - The status bar names the keys that act on the symbol at the caret (`Ctrl+Q doc · F12 jump · Shift+F6 rename`), from the live keymap. Show what keys do at the caret, in the palette, turns it off for the session.
 - The Processes panel (Cmd/Ctrl+Alt+8, or Show the processes in the palette): the fibers your program spawns with `jolt.fibers/spawn`, each with its state and age, and Interrupt, Kill and Forget finished. Jonquil starts watching `spawn` the first time the panel opens, since Jolt keeps no list of live fibers. In process and in the Jolt child.
 - `!` at the Interactions prompt runs a palette command by its words: `!list every key binding` and Return runs it, words that match several list them, and the line goes into the history.

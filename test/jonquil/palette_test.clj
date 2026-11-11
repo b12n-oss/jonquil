@@ -87,6 +87,15 @@
            (palette/tab-entries recent 3)))
     (is (= [] (palette/tab-entries [{:id 1 :label "a.clj"}] 1)) "one tab: nothing to switch to")))
 
+(deftest compare-tab-entries-test
+  ;; LM3: every other open tab to compare the current one with, most
+  ;; recently used first; never the current one
+  (let [recent [{:id 3 :label "c.clj"} {:id 1 :label "a.clj"} {:id 2 :label "b.clj"}]]
+    (is (= [{:id [:compare/tab 1] :doc "Compare with tab: a.clj" :chords [] :source "compare"}
+            {:id [:compare/tab 2] :doc "Compare with tab: b.clj" :chords [] :source "compare"}]
+           (palette/compare-tab-entries recent 3)))
+    (is (= [] (palette/compare-tab-entries [{:id 1 :label "a.clj"}] 1)) "one tab: nothing to compare with")))
+
 ;; the panels a switch can bring back, most recently shown first; never the
 ;; one showing
 (deftest panel-entries-test
