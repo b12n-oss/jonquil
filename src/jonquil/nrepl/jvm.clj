@@ -379,6 +379,17 @@
   (cond (contains? ops "lookup") "lookup"
         (contains? ops "info") "info"))
 
+(defn- reply-failure
+  "A bounded request's reply r as a failed status: {:status :timeout} when
+  it never answered, {:status :not-attached} for the client's own
+  disconnected reply, else nil. Checked before any error or not-found
+  reading of r."
+  [r]
+  (cond
+    (not (vector? r)) {:status :timeout}
+    ((ops/statuses r) ops/disconnected) {:status :not-attached}
+    :else nil))
+
 (defn- resolve-lookup!
   "Both lookup and full-doc's shared resolution: sends a lookup (op, from
   lookup-op) for sym,
@@ -405,34 +416,61 @@
   (the client's own synthetic disconnected reply), checked before any
   error or not-found reading of that reply.
   {:status :timeout}: a bounded request never answered."
-  [conn session op sym text prompt-ns timeout-ms]
+  [{:keys [conn session op sym text prompt-ns timeout-ms]}]
   (let [ns1 (clj/help-ns text prompt-ns)
+        ns2 (str prompt-ns)
         lookup! (fn [ns] (client/request-sync conn {:op op :sym sym :ns ns :session session} timeout-ms))
         r1 (lookup! ns1)]
-    (cond
-      (not (vector? r1)) {:status :timeout}
-      ((ops/statuses r1) ops/disconnected) {:status :not-attached}
-      ;; info answers a namespace it doesn't know with a bare done, no
-      ;; error (Basilisp 0.5.1, measured), so a miss there tries the prompt
-      ;; namespace once, and is a plain not-found when that misses too.
-      (and (= op "info") (not (ops/doc-info sym r1)) (not= ns1 (str prompt-ns)))
-      (let [r2 (lookup! (str prompt-ns))]
-        (cond
-          (not (vector? r2)) {:status :timeout}
-          ((ops/statuses r2) ops/disconnected) {:status :not-attached}
-          (ops/doc-info sym r2) {:status :retried :ns (str prompt-ns) :reply r2}
-          :else {:status :ok :ns ns1 :reply r1}))
-      (not (ns-errored? r1)) {:status :ok :ns ns1 :reply r1}
-      :else
-      (let [ns2 (str prompt-ns)]
-        (if (= ns1 ns2)
-          {:status :not-loaded :ns1 ns1}
-          (let [r2 (lookup! ns2)]
-            (cond
-              (not (vector? r2)) {:status :timeout}
-              ((ops/statuses r2) ops/disconnected) {:status :not-attached}
-              (and (not (ns-errored? r2)) (ops/doc-info sym r2)) {:status :retried :ns ns2 :reply r2}
-              :else {:status :not-loaded :ns1 ns1})))))))
+    (or
+     (reply-failure r1)
+     (cond
+       ;; info answers a namespace it doesn't know with a bare done, no
+       ;; error (Basilisp 0.5.1, measured), so a miss there tries the prompt
+       ;; namespace once, and is a plain not-found when that misses too.
+       (and (= op "info") (not (ops/doc-info sym r1)) (not= ns1 ns2))
+       (let [r2 (lookup! ns2)]
+         (or (reply-failure r2)
+             (if (ops/doc-info sym r2)
+               {:status :retried :ns ns2 :reply r2}
+               {:status :ok :ns ns1 :reply r1})))
+       (not (ns-errored? r1)) {:status :ok :ns ns1 :reply r1}
+       (= ns1 ns2) {:status :not-loaded :ns1 ns1}
+       :else
+       (let [r2 (lookup! ns2)]
+         (or (reply-failure r2)
+             (if (and (not (ns-errored? r2)) (ops/doc-info sym r2))
+               {:status :retried :ns ns2 :reply r2}
+               {:status :not-loaded :ns1 ns1})))))))
+
+(defn- doc-result
+  "full-doc's answer to the doc request msg: its non-blank text as
+  {:status :ok :text s}; a reply with none counts as a timeout."
+  [conn msg timeout-ms]
+  (let [r (client/request-sync conn msg timeout-ms)]
+    (or (reply-failure r)
+        (let [text (some :doc r)]
+          (if (str/blank? text) {:status :timeout} {:status :ok :text text})))))
+
+(defn- eof-pressed
+  "The state after an EOF key: a read waiting on a server that takes an
+  empty stdin stops waiting; on one that doesn't, the note is marked as
+  shown. Unchanged when nothing waits or the note was already shown."
+  [st]
+  (cond
+    (not (and (:waiting? st) (:running st))) st
+    (clj/stdin-eof? (:nrepl-version st)) (assoc st :waiting? false)
+    (not (:eof-noted? st)) (assoc st :eof-noted? true)
+    :else st))
+
+(defn- send-empty-stdin!
+  "Sends an empty stdin, which the server reads as EOF, off the caller's
+  thread when the connection is open."
+  [conn session]
+  (when (client/open? conn)
+    (future
+      (try
+        (client/request! conn {:op "stdin" :stdin "" :session session} (fn [_] nil))
+        (catch Throwable _ nil)))))
 
 (defrecord Jvm [selection state history listeners timings]
   ev/Evaluator
@@ -521,24 +559,13 @@
   ;; the socket write leaves the EOF queued, so the next read in that
   ;; session sees EOF once. send-input! has the same window.
   (send-eof! [_]
-    (let [[old _] (swap-vals! state
-                              (fn [st]
-                                (cond
-                                  (not (and (:waiting? st) (:running st))) st
-                                  (clj/stdin-eof? (:nrepl-version st)) (assoc st :waiting? false)
-                                  (not (:eof-noted? st)) (assoc st :eof-noted? true)
-                                  :else st)))
+    (let [[old _] (swap-vals! state eof-pressed)
           {:keys [conn session running nrepl-version]} old
           token (:token running)]
       (when (and (:waiting? old) running)
         (if (clj/stdin-eof? nrepl-version)
           (do
-            (when (client/open? conn)
-              (future
-                (try
-                  (client/request! conn {:op "stdin" :stdin "" :session session}
-                                   (fn [_] nil))
-                  (catch Throwable _ nil))))
+            (send-empty-stdin! conn session)
             (when (and (some? token) (identical? token (get-in @state [:running :token])))
               (call-wait-input! (:on-wait-input (:opts running)) false)))
           (when-not (:eof-noted? old)
@@ -598,7 +625,8 @@
           (not (client/open? conn)) (cljd/no-docs sym clj/not-attached-doc)
           (not (lookup-op ops)) (cljd/no-docs sym clj/no-lookup-doc)
           :else
-          (let [res (resolve-lookup! conn session (lookup-op ops) sym text prompt-ns (ev/help-timeout (:help-timeout-ms timings)))]
+          (let [res (resolve-lookup! {:conn conn :session session :op (lookup-op ops) :sym sym :text text
+                                          :prompt-ns prompt-ns :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
             (case (:status res)
               :timeout (cljd/no-docs sym clj/lookup-timeout-doc)
               :not-attached (cljd/no-docs sym clj/not-attached-doc)
@@ -651,7 +679,8 @@
           :else
           (future
             (try
-              (let [res (resolve-lookup! conn session (lookup-op ops) sym text prompt-ns (ev/help-timeout (:help-timeout-ms timings)))]
+              (let [res (resolve-lookup! {:conn conn :session session :op (lookup-op ops) :sym sym :text text
+                                          :prompt-ns prompt-ns :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
                 (case (:status res)
                   :timeout (on-result {:status :timeout})
                   :not-attached (on-result {:status :not-attached})
@@ -661,14 +690,8 @@
                   ;; (an unknown alias like nope/zip), so it's never sent.
                   (if-not (ops/doc-info sym (:reply res))
                     (on-result {:status :not-found})
-                    (let [r (client/request-sync conn {:op "doc" :sym sym :session session :ns (:ns res)}
-                                                 (:full-doc-timeout-ms timings))]
-                      (on-result
-                       (cond
-                         (not (vector? r)) {:status :timeout}
-                         ((ops/statuses r) ops/disconnected) {:status :not-attached}
-                         :else (let [text (some :doc r)]
-                                 (if (str/blank? text) {:status :timeout} {:status :ok :text text}))))))))
+                    (on-result (doc-result conn {:op "doc" :sym sym :session session :ns (:ns res)}
+                                           (:full-doc-timeout-ms timings))))))
               (catch Throwable _ (on-result {:status :timeout}))))))
       (catch Throwable _ (on-result {:status :timeout})))
     nil)
