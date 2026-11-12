@@ -12,7 +12,8 @@
   a temp file beside the target and renames it over the target with
   ATOMIC_MOVE (the same move jonquil.gtk.window's Save uses), and returns
   nil or an error string instead of throwing."
-  (:require [jonquil.layouts :as layouts]
+  (:require [jonquil.docs-panel :as docs-panel]
+            [jonquil.layouts :as layouts]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -142,20 +143,34 @@
                 (seq good) (assoc :layouts good)
                 (< (count good) (count v)) (assoc :warning (str path "'s :layouts has entries that aren't a name and a layout, ignoring them")))))))
 
+(defn- doc-bookmarks-part
+  "{:doc-bookmarks [page ...]} keeping the valid pages of m's list once each
+  (LM6's docs panel), {} when there are none, and a :warning when the list
+  isn't one or some entries were dropped."
+  [path m]
+  (let [v (when (map? m) (:doc-bookmarks m))]
+    (cond
+      (nil? v) {}
+      (not (sequential? v)) {:warning (str path "'s :doc-bookmarks isn't a list, ignoring it")}
+      :else (let [good (reduce docs-panel/add-bookmark [] v)]
+              (cond-> {}
+                (seq good) (assoc :doc-bookmarks good)
+                (< (count good) (count v)) (assoc :warning (str path "'s :doc-bookmarks has entries that aren't a doc page, ignoring them")))))))
+
 (defn- settings-parts
   "Each settings key's part of the file map m read from path, in a fixed
   order: {key value, :warning msg} maps, either one absent when empty."
   [path m]
   (map #(% path m)
        [theme-part dialect-part file-tree-part reopen-tabs-part remember-session-part
-        mcp-listen-part plugins-part parinfer-part layouts-part]))
+        mcp-listen-part plugins-part parinfer-part layouts-part doc-bookmarks-part]))
 
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
   :file-tree when it holds a usable one, :reopen-tabs?, :remember-session? and
   :mcp-listen? when they hold a boolean, :plugins when it holds a set of disabled ids,
   :parinfer when it holds one of parinfer-modes, :layouts when it holds
-  named layouts, and
+  named layouts, :doc-bookmarks when it holds doc pages, and
   :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."
   [path]
@@ -166,6 +181,28 @@
             warnings (keep :warning parts)]
         (cond-> (apply merge (map #(dissoc % :warning) parts))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
+
+(defn read-doc-bookmarks
+  "The docs panel's bookmarks as the file at path holds them, for a change
+  that will write them back: {:bookmarks [page ...]} (none when the file or
+  the key is missing), or {:error msg} when the file can't be read, isn't
+  EDN, or its :doc-bookmarks isn't a list of valid pages without repeats.
+  load-settings drops what it can't use, so a write built from it would
+  delete what the person wrote; this refuses instead."
+  [path]
+  (let [f (io/file path)]
+    (if-not (.exists f)
+      {:bookmarks []}
+      (let [m (try (edn/read-string (slurp f)) (catch Exception _ ::unreadable))
+            v (when (map? m) (:doc-bookmarks m))
+            good (when (sequential? v) (reduce docs-panel/add-bookmark [] v))]
+        (cond
+          (= ::unreadable m) {:error (str "couldn't read " path)}
+          (not (map? m)) {:bookmarks []}
+          (nil? v) {:bookmarks []}
+          (not (sequential? v)) {:error (str path "'s :doc-bookmarks isn't a list")}
+          (not= (count good) (count v)) {:error (str path "'s :doc-bookmarks has entries that aren't a doc page, or repeats")}
+          :else {:bookmarks good})))))
 
 (defn- resolved-target
   "path itself, unless it exists and is a symlink, in which case the real

@@ -5,9 +5,11 @@
   only when it comes later."
   (:require [jonquil.parts.extra :as extra]
             [jonquil.gtk.parts.breakpoints :as breakpoints]
+            [jonquil.gtk.parts.change-sets :as change-sets]
             [jonquil.gtk.parts.command-palette :as command-palette]
             [jonquil.gtk.parts.debugger :as debugger]
             [jonquil.gtk.parts.disk-poll :as disk-poll]
+            [jonquil.gtk.parts.docs :as docs]
             [jonquil.gtk.parts.file-tree :as file-tree]
             [jonquil.gtk.parts.layouts :as layouts]
             [jonquil.gtk.parts.live-results :as live-results]
@@ -23,4 +25,4 @@
 (def installs
   "Install fns, in order: the real parts, then any registered in
   jonquil.parts.extra."
-  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part trace/part live-results/part locations/part debugger/part breakpoints/part command-palette/part file-tree/part plugins/part replay/part] @extra/installs*))
+  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part trace/part live-results/part locations/part debugger/part breakpoints/part command-palette/part file-tree/part plugins/part change-sets/part docs/part replay/part] @extra/installs*))

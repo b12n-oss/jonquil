@@ -25,6 +25,7 @@
             [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-window.probe :as probe-rows]
             [gtk-selftest-window.app-open :as app-open]
+            [gtk-selftest-window.change-sets :as change-sets-rows]
             [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
             [gtk-selftest-window.console-layout :as console-layout]
@@ -47,6 +48,7 @@
             [gtk-selftest-window.panels :as panel-rows]
             [gtk-selftest-window.messages :as messages-rows]
             [gtk-selftest-window.processes :as processes-rows]
+            [gtk-selftest-window.docs-panel :as docs-panel-rows]
             [gtk-selftest-window.world :as world-rows]
             [gtk-selftest-window.replay :as replay-rows]
             [gtk-selftest-window.restarts :as restarts-rows]
@@ -417,6 +419,11 @@
    panel-rows/row-panel-key-says-what-fills
    panel-rows/row-panel-stale-panels-leave
    processes-rows/row-processes-interrupt-and-forget
+   change-sets-rows/row-change-set-make-apply-revert
+   change-sets-rows/row-change-set-agent-proposal
+   docs-panel-rows/row-docs-panel-show-follow-back-bookmark
+   docs-panel-rows/row-docs-panel-guide-page
+   docs-panel-rows/row-docs-panel-example-buttons
    panel-rows/row-layout-save-and-use
    panel-rows/row-layout-use-twice
    messages-rows/row-messages-agent-replace-logged

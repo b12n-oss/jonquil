@@ -1016,9 +1016,9 @@
 (def ^:private MAC-KEYCODE-F 3)
 (def ^:private MAC-KEYCODE-L 37)
 (def ^:private MAC-KEYCODE-P 35)
-;; the digit row's keycodes, the panel keys' Cmd+Option+1..8; Apple's
-;; kVK_ANSI_1..8, the table F, L and P above were measured against
-(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7" 28 "8"})
+;; the digit row's keycodes, the panel keys' Cmd+Option+1..9; Apple's
+;; kVK_ANSI_1..9 (9 is Show the documentation in a panel), the table F, L and P above were measured against
+(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7" 28 "8" 25 "9"})
 
 ;; os.name read once. The keycode fallback is macOS-only: on Linux X11
 ;; keycode 37 is Control_L.
@@ -1127,10 +1127,10 @@
        (alt-held? state)))
 
 (defn physical-key
-  "The physical key's name, \"f\", \"l\", \"p\" or a digit 1 to 6, for
+  "The physical key's name, \"f\", \"l\", \"p\" or a digit 1 to 9, for
   the :physical? bindings (the editor's Cmd/Ctrl+Alt+F and L format
   chords, the window's Cmd/Ctrl+Alt+P Parinfer chord and its Cmd/Ctrl+Alt+1
-  to 6 panel keys), or nil. Pure, so a test can
+  to 9 panel and docs keys), or nil. Pure, so a test can
   pass any os.
 
   On Linux, Alt doesn't remap the keyval, and the binding's plain f and l

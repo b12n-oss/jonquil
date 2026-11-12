@@ -195,7 +195,8 @@
     "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab" "jonquil_replace_text"
     "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
     "jonquil_check_brackets" "jonquil_project"
-    "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"})
+    "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
+    "jonquil_change_set_propose"})
 
 (defn- ends-with? [r suffix]
   (and (string? (:text r)) (str/ends-with? (str/trim (:text r)) suffix)))
@@ -281,7 +282,7 @@
           (println "[mcp-smoke] startup plugin tool seen" (name path))
           (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
                   (and (not= :no-list-changed path)
-                       (= 20 (count (get-in r ["result" "tools"])))
+                       (= 21 (count (get-in r ["result" "tools"])))
                        (= want (names-of r)))
                   {:path path :r r}))
         (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
@@ -400,8 +401,8 @@
                       (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
             (let [r (request! b1 "tools/list" {} 60000)
                   names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-              (check! "tools/list has exactly the nineteen window tools"
-                      (and (= 19 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+              (check! "tools/list has exactly the twenty window tools"
+                      (and (= 20 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
             (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
               (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
             (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]

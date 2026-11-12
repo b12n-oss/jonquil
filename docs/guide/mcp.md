@@ -53,11 +53,11 @@ claude mcp add jonquil -- jonquil --mcp --window /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/project
 ```
 
-With `--window` the server offers nineteen tools (headless keeps six), acting
+With `--window` the server offers twenty tools (headless keeps six), acting
 on the live window:
 
 <details>
-<summary><strong>The nineteen window tools</strong></summary>
+<summary><strong>The twenty window tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -80,6 +80,7 @@ on the live window:
 | `jonquil_plugin_read` | A plugin's live source and history, or one `version`'s source |
 | `jonquil_plugin_propose` | Proposes whole new `source` for `id` with a `reason`; answers pending, rejected-by-checks or refused |
 | `jonquil_plugin_status` | A proposal's status (latest without `n`) and your note if rejected |
+| `jonquil_change_set_propose` | Saves a named list of `forms` (each a `path` and the form's `text`) as a change set marked as yours, for you to apply or revert |
 
 </details>
 
@@ -124,6 +125,30 @@ press it again after reading the new one.
 </details>
 
 <details>
+<summary><strong>An agent proposing a change set</strong></summary>
+
+`jonquil_change_set_propose` takes a `name` and `forms`, each form a `path`
+(absolute, or relative to the window's folder) and the `text` of one
+top-level form that replaces the form with the same first two elements in that
+file (a later entry of the same two elements replaces the file's next such
+form). Each path is resolved to its real path and must name an existing,
+readable Clojure file (`.clj`, `.cljc`, `.cljs`, `.cljd` or `.bb`) inside the
+window's folder, or the call is refused with the reason. The set is saved
+beside the settings file, marked with the client's own name (control
+characters dropped, at most 60 characters), and the window shows it as "a
+client calling itself" that name. A line goes to the console and the status
+bar. The call applies nothing and edits no file or tab: **Change Sets** in the
+palette lists it, the panel shows each form as a diff of the file's current
+form against the proposed text, and only you press Apply to REPL or Delete.
+There is no Revert for a proposed set. A name that is already taken is
+refused, and the file is created only if the name is free, so a proposal never
+replaces one of your sets, even when two windows race. It is also refused when
+`forms` is empty or holds more than 200 entries, an entry isn't exactly one
+balanced form, or the texts together pass 262144 characters.
+
+</details>
+
+<details>
 <summary><strong>A plugin's own tools</strong></summary>
 
 A plugin gives agents tools in `:mcp-tools`:
@@ -135,7 +160,7 @@ A plugin gives agents tools in `:mcp-tools`:
 ```
 
 A window serving MCP (`--mcp --window`, or one you attach to) serves each live
-plugin's tools as `plugin_<id>_<name>` after its nineteen: `plugin_smoke-t_twice`
+plugin's tools as `plugin_<id>_<name>` after its twenty: `plugin_smoke-t_twice`
 for plugin `smoke-t` above.
 
 - Argument types: `string`, `integer`, `number`, `boolean`. A missing or
@@ -162,7 +187,7 @@ listening on in `settings.edn`:
 {:mcp-listen? true}
 ```
 
-That window serves the same nineteen tools on a socket bound to 127.0.0.1, on
+That window serves the same twenty tools on a socket bound to 127.0.0.1, on
 a port the OS picks, to one client at a time. It publishes the port in
 `mcp/<pid>.edn` beside `settings.edn`. Then register the bridge:
 

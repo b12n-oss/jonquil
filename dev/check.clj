@@ -9,6 +9,7 @@
     jonquil.parts.command-palette
     jonquil.parts.debugger
     jonquil.parts.disk-poll
+    jonquil.parts.docs
     jonquil.parts.file-tree
     jonquil.parts.messages
     jonquil.parts.layouts
@@ -18,6 +19,7 @@
     jonquil.parts.breakpoints
     jonquil.parts.replay
     jonquil.parts.trace
+    jonquil.parts.change-sets
     jonquil.parts.live-results
     jonquil.parts.time-form
     jonquil.parts.worlds
@@ -35,10 +37,12 @@
     jonquil.mcp
     jonquil.mcp.json
     jonquil.mcp.tools
+    jonquil.change-sets
     jonquil.compare
     jonquil.fibers-rt
     jonquil.hints
     jonquil.layouts
+    jonquil.docs-panel
     jonquil.instrument-lock
     jonquil.line-counts
     jonquil.messages
@@ -140,7 +144,9 @@
     jonquil.gtk.gutter
     jonquil.gtk.breakpoints
     jonquil.gtk.trace-pane
+    jonquil.gtk.change-sets-pane
     jonquil.gtk.processes-pane
+    jonquil.gtk.docs-pane
     jonquil.gtk.messages-pane
     jonquil.gtk.console-view
     jonquil.gtk.tab
@@ -148,6 +154,7 @@
     jonquil.gtk.parts.command-palette
     jonquil.gtk.parts.debugger
     jonquil.gtk.parts.disk-poll
+    jonquil.gtk.parts.docs
     jonquil.gtk.parts.file-tree
     jonquil.gtk.parts.messages
     jonquil.gtk.parts.layouts
@@ -157,6 +164,7 @@
     jonquil.gtk.parts.breakpoints
     jonquil.gtk.parts.replay
     jonquil.gtk.parts.trace
+    jonquil.gtk.parts.change-sets
     jonquil.gtk.parts.live-results
     jonquil.gtk.parts.time-form
     jonquil.gtk.parts.worlds

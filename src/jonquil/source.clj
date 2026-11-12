@@ -22,7 +22,9 @@
   (let [ca (canonical a)]
     (boolean (and ca (= ca (canonical b))))))
 
-(defn- under? [path dir]
+(defn under?
+  "True when path is dir or inside it, compared canonically."
+  [path dir]
   (let [p (canonical path) d (canonical dir)]
     (boolean (and p d (or (= p d) (str/starts-with? p (str d "/")))))))
 
