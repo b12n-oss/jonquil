@@ -27,8 +27,10 @@
   (is (nil? (editor/physical-key "Mac OS X" 0x8f6 3 0)) "no Option held")
   (is (= "p" (editor/physical-key "Mac OS X" 0x3c0 35 cmd-alt)) "Option+P arrives as pi")
   ;; the panel keys' digits; Option+5 types U+221E, a keyval above 0x1000
-  (is (= ["1" "2" "3" "4" "5" "6" "7" "8"]
-         (map #(editor/physical-key "Mac OS X" 0xa1 % cmd-alt) [18 19 20 21 23 22 26 28])))
+  (is (= ["1" "2" "3" "4" "5" "6" "7" "8" "9"]
+         (map #(editor/physical-key "Mac OS X" 0xa1 % cmd-alt) [18 19 20 21 23 22 26 28 25])))
+  (is (= "9" (editor/physical-key "Mac OS X" 0xaa 25 cmd-alt)) "Option+9's ordinal indicator")
+  (is (nil? (editor/physical-key "Linux" 0x39 25 ctrl-alt)) "Linux matches the plain 9 by keyval")
   (is (= "5" (editor/physical-key "Mac OS X" 0x100221e 23 cmd-alt)) "Option+5's infinity")
   (is (nil? (editor/physical-key "Mac OS X" 0xffe9 18 cmd-alt)) "a modifier keyval is never a digit")
   (is (nil? (editor/physical-key "Linux" 0x31 18 ctrl-alt)) "Linux keeps the plain keyval"))

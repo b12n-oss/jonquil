@@ -80,7 +80,7 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :reader :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
            :panel/processes :processes/show
            :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
@@ -91,7 +91,8 @@
            :compare-form/disk :compare-form/head :compare-form/last-run
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
            :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
-           :palette/open :help/describe-key :help/key-bindings :help/recent-keys}
+           :palette/open :help/describe-key :help/key-bindings :help/recent-keys
+           :pages/show :pages/bookmark :pages/bookmarks :pages/guide}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -483,7 +484,7 @@
   (is (= "Processes" (:processes palette/PANEL-LABELS)))
   (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
           :debugger "Frames" :plugins "Plugins" :messages "Messages"
-          :processes "Processes" :trace "Trace"}
+          :processes "Processes" :trace "Trace" :reader "Reader"}
          palette/PANEL-LABELS)))
 
 (deftest processes-part-owns-its-commands-and-panel

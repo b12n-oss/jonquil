@@ -64,6 +64,14 @@
 (ffi/defcfn gtk-widget-set-size-request "gtk_widget_set_size_request" [:pointer :int :int] :void)
 (ffi/defcfn gtk-scrolled-window-new "gtk_scrolled_window_new" [] :pointer)
 (ffi/defcfn gtk-scrolled-window-set-child "gtk_scrolled_window_set_child" [:pointer :pointer] :void)
+;; gtkbox.h gtk_box_remove (GtkBox*, GtkWidget* child), gtkwidget.h
+;; gtk_widget_get_first_child (GtkWidget*) -> GtkWidget* (NULL for none) and
+;; gtkscrolledwindow.h gtk_scrolled_window_get_vadjustment (GtkScrolledWindow*)
+;; -> GtkAdjustment*. All fixed arity; the docs panel empties its examples
+;; box with the first two and scrolls a new page to its top with the third.
+(ffi/defcfn gtk-box-remove "gtk_box_remove" [:pointer :pointer] :void)
+(ffi/defcfn gtk-widget-get-first-child "gtk_widget_get_first_child" [:pointer] :pointer)
+(ffi/defcfn gtk-scrolled-window-get-vadjustment "gtk_scrolled_window_get_vadjustment" [:pointer] :pointer)
 ;; gtkscrolledwindow.h (GTK 4.22.4, installed headers): set_policy:111-113,
 ;; set_max_content_height:161-162, set_propagate_natural_height:173-174. All
 ;; fixed arity.
@@ -221,6 +229,8 @@
 (ffi/defcfn gtk-paned-set-position "gtk_paned_set_position" [:pointer :int] :void)
 (ffi/defcfn gtk-button-new-with-label "gtk_button_new_with_label" [:string] :pointer)
 (ffi/defcfn gtk-button-set-label "gtk_button_set_label" [:pointer :string] :void)
+;; gtkbutton.h gtk_button_get_label (GtkButton*) -> const char* (borrowed)
+(ffi/defcfn gtk-button-get-label "gtk_button_get_label" [:pointer] :pointer)
 
 (defn set-int-property!
   "Set an int GObject property via the fixed-arity GValue path."

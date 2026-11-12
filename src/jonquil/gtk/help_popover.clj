@@ -161,9 +161,11 @@
                            (callable (fn [_btn _data] (f) nil) [:pointer :pointer] :void)
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
-(defn- example-widgets
-  "Appends one example's heading, code label and buttons to box. Returns
-  {:n :code :run :copy}; the buttons are nil for blank code."
+(defn example-widgets
+  "Appends one example's heading, code label and buttons to box (the full-doc
+  popover's, and the docs panel's). Returns {:n :code :run :copy}; the
+  buttons are nil for blank code. handlers is {:on-run (fn [code]) :on-copy
+  (fn [code])}."
   [box {:keys [n body code]} {:keys [on-run on-copy]}]
   (let [head (g/gtk-label-new (str "Example " n))
         ex {:n n :code code}]
