@@ -58,6 +58,17 @@
   (g/gtk-paned-set-end-child paned (:scroll cv))
   (g/gtk-paned-set-position paned 430))
 
+(defn- part-roots
+  "The root widgets of the parts' panels in part-panels*, in id order."
+  [part-panels*]
+  (map (fn [[_ p]] (:root p)) @part-panels*))
+
+(defn- append-expanding!
+  "Appends root to slot, expanding vertically."
+  [slot root]
+  (g/gtk-widget-set-vexpand root 1)
+  (g/gtk-box-append slot root))
+
 (defn- pack-right-slot!
   "place!'s third step: the vertical paned beside the right-hand slot in h-paned, each panel in the slot, and the panels and the slot hidden until one opens."
   [{:keys [h-paned paned pane sp slot rp lp hp part-panels*]}]
@@ -72,26 +83,13 @@
   (g/gtk-widget-set-vexpand (:root sp) 1)
   (g/gtk-box-append slot (:root pane))
   (g/gtk-box-append slot (:root sp))
-  (g/gtk-widget-set-vexpand (:root rp) 1)
-  (g/gtk-box-append slot (:root rp))
-  (g/gtk-widget-set-vexpand (:root lp) 1)
-  (g/gtk-box-append slot (:root lp))
-  (g/gtk-widget-set-vexpand (:root hp) 1)
-  (g/gtk-box-append slot (:root hp))
-  (doseq [[_ p] @part-panels*]
-    (g/gtk-widget-set-vexpand (:root p) 1)
-    (g/gtk-box-append slot (:root p)))
+  (doseq [root (concat (map :root [rp lp hp]) (part-roots part-panels*))]
+    (append-expanding! slot root))
   (g/gtk-paned-set-end-child h-paned slot)
   (g/gtk-paned-set-resize-end-child h-paned 0)
   (g/gtk-paned-set-shrink-end-child h-paned 0)
-  (g/gtk-widget-set-visible (:root pane) 0)
-  (g/gtk-widget-set-visible (:root sp) 0)
-  (g/gtk-widget-set-visible (:root rp) 0)
-  (g/gtk-widget-set-visible (:root lp) 0)
-  (doseq [[_ p] @part-panels*]
-    (g/gtk-widget-set-visible (:root p) 0))
-  (g/gtk-widget-set-visible (:root hp) 0)
-  (g/gtk-widget-set-visible slot 0))
+  (doseq [w (concat (map :root [pane sp rp lp]) (part-roots part-panels*) [(:root hp) slot])]
+    (g/gtk-widget-set-visible w 0)))
 
 (defn- pack-window!
   "place!'s last step: the toolbar, the tree's paned and the status bar in the window's column, which becomes the window's child at its default size."
@@ -121,6 +119,14 @@
   (pack-right-slot! m)
   (pack-window! m))
 
+(defn- connect-clicked!
+  "Connects btn's clicked signal to f, contained so a throw is said on the
+  status line as label's. Returns the handler id."
+  [status-label btn label f]
+  (g/g-signal-connect-data btn "clicked"
+                           (callable (win-status/contain-click status-label label f) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
 (defn connect!
   "activate!'s toolbar and key controller connects, in activate!'s order:
   Run, Stop, Open and Save's clicked handlers and Reset on Run's toggled
@@ -131,18 +137,10 @@
   toolbar fns and :window-key-fn."
   [{:keys [run-btn stop-btn open-btn save-btn reset-chk keyctl win status-label run-fn stop-fn open-fn save-fn ev*
            window-key-fn]}]
-  (g/g-signal-connect-data run-btn "clicked"
-                           (callable (win-status/contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data stop-btn "clicked"
-                           (callable (win-status/contain-click status-label "stop" (fn [_] (stop-fn))) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data open-btn "clicked"
-                           (callable (win-status/contain-click status-label "open" (fn [_] (open-fn))) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data save-btn "clicked"
-                           (callable (win-status/contain-click status-label "save" (fn [_] (save-fn))) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (connect-clicked! status-label run-btn "run" (fn [_] (run-fn)))
+  (connect-clicked! status-label stop-btn "stop" (fn [_] (stop-fn)))
+  (connect-clicked! status-label open-btn "open" (fn [_] (open-fn)))
+  (connect-clicked! status-label save-btn "save" (fn [_] (save-fn)))
   (g/g-signal-connect-data reset-chk "toggled"
                            (callable (win-status/contain-click status-label "reset on run"
                                                                (fn [btn]

@@ -136,9 +136,32 @@
                                              (str "Theme: auto (" (name r) ")")
                                              (str "Theme: " (name k)))))))
 
+(defn- make-poll-cb
+  "The appearance poll's GLib timeout callable. Built once, as the
+  inspector's note-clear timer is, because callbacks keeps every callable
+  for the life of the process. Only this callback clears poll-armed?, when
+  its tick returns 0 and GLib drops the timer. theme-ctx is build's, before
+  :poll-cb is added."
+  [{:keys [poll-armed?] :as theme-ctx}]
+  (callable (fn [_data]
+              (let [r (poll-tick! theme-ctx)]
+                (when (zero? r) (reset! poll-armed? false))
+                r))
+            [:pointer] :int :on-throw 1))
+
+(defn- make-theme-ctx
+  "build's theme-ctx: the window's tabs, console, settings path, status
+  label, evaluating? and closing? with the shared provider and the theme
+  and zoom state atoms, plus the appearance poll's :poll-cb. w is build's."
+  [{:keys [tabs cv settings-path* status-label evaluating-fn closing?]} provider state]
+  (let [theme-ctx (merge {:tabs tabs :cv cv :provider provider :settings-path settings-path*
+                          :status-label status-label :evaluating? evaluating-fn :closing? closing?}
+                         state)]
+    (assoc theme-ctx :poll-cb (make-poll-cb theme-ctx))))
+
 (defn build
   "activate!'s theme and zoom bindings, in activate!'s order: the one shared GtkCssProvider, the zoom and theme atoms, zoom-fn, theme-ctx with its appearance poll callable, and the set and cycle fns. w holds what they read: :tabs :cv :settings-path* :status-label :evaluating-fn :closing?. Returns w with :provider :theme-name :theme-choice :system-dark-fn* :poll-armed? :arm-count :zoom-fn :theme-ctx :set-theme-fn and :cycle-theme-fn added; zoom-px and poll-cb are reached through theme-ctx."
-  [{:keys [tabs cv settings-path* status-label evaluating-fn closing?] :as w}]
+  [w]
   (let [provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
         ;; The active theme's name, kept next to zoom-px; its initial
@@ -153,21 +176,9 @@
         poll-armed? (atom false)
         arm-count (atom 0)
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name direction))
-        theme-ctx {:tabs tabs :cv cv :provider provider :zoom-px zoom-px :theme-name theme-name
-                   :settings-path settings-path* :status-label status-label
-                   :evaluating? evaluating-fn :theme-choice theme-choice
-                   :system-dark-fn* system-dark-fn* :poll-armed? poll-armed?
-                   :arm-count arm-count :closing? closing?}
-        ;; Built once, as the inspector's note-clear timer is, because
-        ;; callbacks keeps every callable for the life of the process.
-        ;; Only this callback clears poll-armed?, when its tick returns 0
-        ;; and GLib drops the timer.
-        poll-cb (callable (fn [_data]
-                            (let [r (poll-tick! theme-ctx)]
-                              (when (zero? r) (reset! poll-armed? false))
-                              r))
-                          [:pointer] :int :on-throw 1)
-        theme-ctx (assoc theme-ctx :poll-cb poll-cb)
+        theme-ctx (make-theme-ctx w provider {:zoom-px zoom-px :theme-name theme-name :theme-choice theme-choice
+                                              :system-dark-fn* system-dark-fn* :poll-armed? poll-armed?
+                                              :arm-count arm-count})
         set-theme-fn (fn [k] (apply-choice! theme-ctx k))
         ;; The chord's/:cycle-theme!*'s action.
         cycle-theme-fn (fn [] (do-cycle-theme! theme-ctx))]
