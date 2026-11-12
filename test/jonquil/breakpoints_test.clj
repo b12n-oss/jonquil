@@ -491,12 +491,12 @@
         "the buffer's namespace isn't loaded: go-loop may come from its :refer")))
 
 (deftest cached-heads-follow-the-ns-form-test
-  (let [cache {:ns "demo.a" :heads {"go-loop" {:var "clojure.core.async/go-loop" :macro true}} :ns-found? true}]
+  (let [cache {:ns-form "(ns demo.a)" :heads {"go-loop" {:var "clojure.core.async/go-loop" :macro true}} :ns-found? true}]
     (is (= {:heads (:heads cache) :ns-found? true} (bp/cached-heads cache "(ns demo.a)\n(f)")))
     (is (= {} (bp/cached-heads cache "(ns demo.b)\n(f)")) "the ns form changed: the answer is stale")
     (is (= {} (bp/cached-heads nil "(f)")))
-    (is (= {:heads {"f" nil} :ns-found? true} (bp/cached-heads {:ns "user" :heads {"f" nil} :ns-found? true} "(f)"))
-        "no ns form: user")))
+    (is (= {:heads {"f" nil} :ns-found? true} (bp/cached-heads {:ns-form nil :heads {"f" nil} :ns-found? true} "(f)"))
+        "no ns form, asked without one")))
 
 (deftest dropped-lines-name-dots-that-wont-pause-test
   (let [t (lines "(defn f [x]"
@@ -533,4 +533,47 @@
         (is (= 41 (deref (future ((compile-instrumented adder [3]) 20)) 5000 :blocked))
             "the pause is let go at once instead of waiting for a Continue nobody can send")
         (is (nil? @(:paused brk)))
+        (is (not (realized? paused)) "and the window never hears of a pause already let go")
         (finally (debugger/disarm-breakpoints! hook) (debugger/set-debug-mode! false))))))
+
+;; --- third review ------------------------------------------------------------------
+
+(deftest heads-the-answer-doesnt-name-are-macros-test
+  (let [before (lines "(ns demo.c)" "(defn f [x]" "  (inc x))")
+        cache (assoc (debugger/macro-heads "user" (bp/head-symbols before)) :ns-form "(ns demo.c)")
+        after (lines "(ns demo.c)" "(defn f [x]" "  (frob" "    (inc x)))")
+        opts (bp/cached-heads cache after)]
+    (is (= :statement (second (at after 3 opts))) "the new call itself is a body form")
+    (is (nil? (at after 4 opts)) "frob was typed after the answer: it may be a macro")
+    (is (= [4] (bp/dropped-lines after [4] opts)) "so a dot there is named as dropped")))
+
+(deftest an-added-refer-makes-the-answer-stale-test
+  (let [before (lines "(ns demo.d)" "(defn f [x]" "  (go-loop" "    (inc x)))")
+        cache {:ns-form "(ns demo.d)" :ns-found? true :heads {"defn" {:var "clojure.core/defn" :macro true}
+                                                              "go-loop" nil "inc" {:var "clojure.core/inc"}}}
+        after (lines "(ns demo.d (:require [clojure.core.async :refer [go-loop]]))"
+                     "(defn f [x]" "  (go-loop" "    (inc x)))")]
+    (is (= ["(inc x)" :expression] (at before 4 (bp/cached-heads cache before))) "as asked: go-loop names nothing")
+    (is (= {} (bp/cached-heads cache after)) "the ns form changed, though its name didn't")
+    (is (nil? (at after 4 (bp/cached-heads cache after))))))
+
+(deftest refresh-report-only-from-an-answer-on-unchanged-text-test
+  (let [t (lines "(defn f [x]" "  (mm" "    (g x)))")
+        r {:heads {"defn" {:var "clojure.core/defn" :macro true} "mm" {:var "user/mm" :macro true} "g" nil}
+           :ns-found? true}]
+    (is (= "; Breakpoint at line 3 is inside a macro, so it won't pause."
+           (bp/refresh-report {:asked t :now t :answer r :lines [3]})))
+    (is (nil? (bp/refresh-report {:asked t :now t :answer {:error "timed out"} :lines [3]}))
+        "no answer: nothing is known to be dropped")
+    (is (nil? (bp/refresh-report {:asked t :now (str t "\n") :answer r :lines [3]})) "the text moved on")))
+
+(deftest a-toggle-says-nothing-once-its-dot-is-gone-test
+  (is (true? (bp/still-set? {:added? true :mark :m1} [:m1 :m2])))
+  (is (false? (bp/still-set? {:added? true :mark :m1} [])) "a failed arm took the dots away")
+  (is (true? (bp/still-set? {:added? false} [])) "a removal has no dot to keep"))
+
+(deftest edited-normalizes-line-ends-and-caps-the-disk-read-test
+  (let [t (lines "(defn f [x]" "  (inc x))")
+        rng (bp/resend-range t 2)]
+    (is (false? (bp/edited? t nil rng {:disk-text (str/replace t "\n" "\r\n")})) "CRLF on disk is the same form")
+    (is (true? (bp/edited? t nil rng {:disk-text :too-big})) "a file too big to read counts as edited")))

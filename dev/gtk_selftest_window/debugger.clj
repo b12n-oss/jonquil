@@ -499,7 +499,7 @@
               none? (on-gtk (empty? (dots ui)))
               ;; a stale answer: the Run must replace it
               _ (on-gtk (reset! (:bp-heads (:changed (active-ed ui)))
-                                {:ns "bpns.r" :ns-found? true :heads {"frob" {:var "bpns.r/frob" :macro true}}}))
+                                {:ns-form "(ns bpns.r)" :ns-found? true :heads {"frob" {:var "bpns.r/frob" :macro true}}}))
               _ (on-gtk ((:run!* ui)))
               asked? (await-until 8000 20 #(= {:var "bpns.r/frob"}
                                               (get-in @(:bp-heads (:changed (active-ed ui))) [:heads "frob"])))

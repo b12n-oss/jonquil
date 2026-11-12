@@ -21,7 +21,6 @@
   evaluated, it holds none."
   (:require [clojure.string :as str]
             [jonquil.changed :as changed]
-            [jonquil.clj :as clj]
             [jonquil.commands :as commands]))
 
 ;; --- the inserted form --------------------------------------------------------
@@ -420,13 +419,23 @@
   "What place says when no line from there on can hold a breakpoint."
   "No code from this line on can hold a breakpoint.")
 
+(defn ns-form-text
+  "The text of text's ns form (its first top-level (ns ...)), or nil: what
+  a cached answer about heads is kept against, so a changed :require or
+  :refer makes it stale even when the name stays."
+  [text]
+  (some (fn [f] (when (and (= :list (kind text f)) (= "ns" (head-symbol text f)))
+                  (subs text (:start f) (:end f))))
+        (commands/top-level-forms text)))
+
 (defn cached-heads
   "The spots opts a tab's cached answer gives for text: {:heads :ns-found?}
-  when cache ({:ns :heads :ns-found?}) was asked for the namespace text's
-  ns form names now (user without one), else {} (every head the window
-  doesn't know counts as a macro)."
+  when cache ({:ns-form :heads :ns-found?}) was asked with the ns form text
+  has now (nil for none), else {} (every head the window doesn't know
+  counts as a macro). Within an answer, a head it doesn't name (typed
+  since) counts as a macro too."
   [cache text]
-  (if (and cache (= (:ns cache) (or (clj/buffer-ns text) "user")))
+  (if (and cache (= (:ns-form cache) (ns-form-text text)))
     (select-keys cache [:heads :ns-found?])
     {}))
 
@@ -444,6 +453,21 @@
     0 nil
     1 (str "; Breakpoint at line " (first ls) " is inside a macro, so it won't pause.")
     (str "; Breakpoints at lines " (str/join ", " ls) " are inside a macro, so they won't pause.")))
+
+(defn refresh-report
+  "The status line after a Run asked about heads again: the dots in lines
+  that are inside a macro by answer, when answer has :heads and the text
+  (now) is still what was asked about (asked); else nil."
+  [{:keys [asked now answer lines]}]
+  (when (and (:heads answer) (= asked now))
+    (dropped-message (dropped-lines now lines (select-keys answer [:heads :ns-found?])))))
+
+(defn still-set?
+  "True when a toggle's change ({:added? :mark}) may still be reported:
+  a removal always, an added dot while its mark is among marks (a failed
+  arm may have taken every dot away meanwhile)."
+  [{:keys [added? mark]} marks]
+  (boolean (or (not added?) (some #(= mark %) marks))))
 
 (defn place
   "Where a breakpoint asked for on line goes: {:line l}, l being line when
@@ -531,7 +555,9 @@
   haven't run. After a Run, LM3's changed forms against ran (the tab's
   record) say so. In a tab that never ran (ran nil) the form counts as
   edited when the buffer has unsaved edits (:dirty?) or the form isn't in
-  the file on disk as it stands (:disk-text, nil without a file)."
+  the file on disk as it stands (:disk-text, nil without a file, :too-big
+  for one too big to read, which counts as edited). Line ends are compared
+  as \\n."
   ([text ran rng] (edited? text ran rng {}))
   ([text ran rng {:keys [dirty? disk-text]}]
    (boolean
@@ -540,7 +566,10 @@
            (some #(and (= (:start rng) (:start %)) (= (:end rng) (:end %)))
                  (changed/changed text ran))
            (or dirty?
-               (and disk-text (not (str/includes? disk-text (subs text (:start rng) (:end rng)))))))))))
+               (= :too-big disk-text)
+               (and disk-text
+                    (not (str/includes? (str/replace disk-text "\r\n" "\n")
+                                        (str/replace (subs text (:start rng) (:end rng)) "\r\n" "\n"))))))))))
 
 ;; --- what a toggle says ------------------------------------------------------------
 

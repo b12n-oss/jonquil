@@ -83,13 +83,14 @@
   (bp/cached-heads (some-> (get-in ed [:changed :bp-heads]) deref) text))
 
 (defn set-heads!
-  "Keeps the runtime's answer r ({:heads :ns-found?}) about ed's heads in
-  namespace ns, merged into the last one when it was for the same ns."
-  [ed ns r]
+  "Keeps the runtime's answer r ({:heads :ns-found?}) about ed's heads,
+  asked with ns form text ns-form (nil for none), merged into the last one
+  when that was asked with the same ns form."
+  [ed ns-form r]
   (when-let [a (get-in ed [:changed :bp-heads])]
-    (swap! a (fn [c] (if (= ns (:ns c))
+    (swap! a (fn [c] (if (and c (= ns-form (:ns-form c)))
                        (-> c (update :heads merge (:heads r)) (assoc :ns-found? (:ns-found? r)))
-                       (assoc r :ns ns)))))
+                       (assoc (select-keys r [:heads :ns-found?]) :ns-form ns-form)))))
   nil)
 
 (defn dropped

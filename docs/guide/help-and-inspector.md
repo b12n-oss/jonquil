@@ -544,7 +544,9 @@ names nothing loaded stays a call, unless the buffer's namespace isn't loaded
 yet (before its first Run), since a name it refers could be a macro: then
 every head Jonquil doesn't know counts as one, and the status bar says so, as
 it does when the runtime can't answer at all. The answer is taken when you
-toggle and again after each Run that ends well, and Runs in between reuse it.
+toggle and again after each Run that ends well, and Runs in between reuse it:
+until the next answer, a head typed since and every head after a change to
+the `ns` form count as macros.
 When a Run leaves a dot out because its line is now inside a macro (a name
 typed since, or one the Run turned out to define), the console says so, and
 after the Run the status bar names the dots that won't pause.

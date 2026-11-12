@@ -76,12 +76,20 @@
   ;; said after a toggle the runtime couldn't answer about macros for
   " The runtime didn't say which names are macros, so code inside forms it doesn't know holds no breakpoint.")
 
+(def ^:private DISK-CAP
+  ;; bytes: a file bigger than this isn't read on a toggle, and its form
+  ;; counts as edited (never sent)
+  (* 2 1024 1024))
+
 (defn- disk-text
-  "tab's file as it is on disk, or nil without one (or when it can't be
-  read)."
+  "tab's file as it is on disk, :too-big over DISK-CAP, or nil without one
+  (or when it can't be read)."
   [tab]
   (when-let [p @(:path tab)]
-    (try (slurp p) (catch Throwable _ nil))))
+    (try (if (> (.length (java.io.File. ^String p)) DISK-CAP)
+           :too-big
+           (slurp p))
+         (catch Throwable _ nil))))
 
 (def ^:private NS-NOT-LOADED
   ;; said when the runtime hasn't loaded the buffer's namespace yet
@@ -101,10 +109,13 @@
             (let [ed (:ed tab)
                   text (editor/editor-text ed)
                   rng (bp/resend-range text (:line change))
+                  ;; nothing to say once a failed arm took the dot away:
+                  ;; its own line says why
                   say! (fn [sent error]
-                         (set-status! (str (bp/toggle-message (assoc change :sent sent :error error
-                                                                     :debug-on? (:debug-turned-on? r)))
-                                           note)))]
+                         (when (bp/still-set? change (gbp/marks ed))
+                           (set-status! (str (bp/toggle-message (assoc change :sent sent :error error
+                                                                       :debug-on? (:debug-turned-on? r)))
+                                             note))))]
               (if (and rng (bp/edited? text (some-> ed :changed :ran deref) rng
                                        {:dirty? (editor/dirty? ed) :disk-text (disk-text tab)}))
                 (say! :edited nil)
@@ -112,18 +123,18 @@
 
 (defn- with-heads!
   "Asks the runtime what text's heads name, keeps the answer on ed, then
-  (then opts note) on the GUI thread: opts for jonquil.breakpoints, and
-  note, a sentence for the status bar when the answer is partial (the
-  namespace isn't loaded) or missing, else nil."
+  (then opts note r) on the GUI thread: opts for jonquil.breakpoints, note
+  a sentence for the status bar when the answer is partial (the namespace
+  isn't loaded) or missing, else nil, and r the answer itself."
   [{:keys [ev*]} ed text then]
   (let [ns (or (clj/buffer-ns text) "user")]
     (ev/macro-heads! @ev* ns (bp/head-symbols text)
                      (fn [r]
                        (on-gui! (fn []
                                   (if (:heads r)
-                                    (do (gbp/set-heads! ed ns r)
-                                        (then (gbp/heads ed text) (when (false? (:ns-found? r)) NS-NOT-LOADED)))
-                                    (then {} NO-HEADS))))))))
+                                    (do (gbp/set-heads! ed (bp/ns-form-text text) r)
+                                        (then (gbp/heads ed text) (when (false? (:ns-found? r)) NS-NOT-LOADED) r))
+                                    (then {} NO-HEADS r))))))))
 
 (defn- toggle!
   "Toggle Breakpoint on the active tab's caret line."
@@ -139,7 +150,7 @@
               (toggled! ctx {:tab tab :line line :added? false}))
           ;; which heads are macros decides where the breakpoint can go
           (with-heads! ctx ed text
-            (fn [opts note]
+            (fn [opts note _]
               (if (not= text (editor/editor-text ed))
                 (set-status! "; The text changed while the runtime answered: toggle again.")
                 (let [{placed :line :keys [moved? error]} (bp/place text line opts)]
@@ -162,13 +173,15 @@
     (if (zero? n)
       (set-status! "; This tab has no breakpoints.")
       (let [said (str "; Cleared " n " breakpoint" (when (> n 1) "s"))]
-        (arm! ctx (fn [_]
+        (arm! ctx (fn [r]
                     (resend! ctx tab ranges
                              (fn [sent _]
                                (set-status! (str said (case sent
                                                         :ok "; the forms run without them now."
                                                         nil "."
-                                                        (str "; " bp/NEXT-RUN))))))))))))
+                                                        (str "; " bp/NEXT-RUN))
+                                                 ;; disarming failed: said too
+                                                 (when-let [err (:error r)] (str " Breakpoints: " err))))))))))))
 
 (defn- refresh-heads!
   "After a Run of tab that ended well, when the tab has dots or an answer
@@ -180,9 +193,12 @@
              (gbp/supported? @ev*) (not @(:destroyed? ed)))
     (let [text (editor/editor-text ed)]
       (with-heads! ctx ed text
-        (fn [opts _]
-          (when-let [msg (bp/dropped-message (bp/dropped-lines text (gbp/lines ed text) opts))]
-            (set-status! msg)))))))
+        (fn [_ _ r]
+          ;; only from an answer, and about the text it was asked for
+          (when-not @(:destroyed? ed)
+            (let [now (editor/editor-text ed)]
+              (when-let [msg (bp/refresh-report {:asked text :now now :answer r :lines (gbp/lines ed now)})]
+                (set-status! msg)))))))))
 
 (defn- tab-wired!
   "Redraws the tab's gutter when its text changes while it has dots: the
@@ -223,7 +239,9 @@
            ;; dots go, and with none left anywhere the runtime is disarmed
            :on-tab-removed (fn [_ t]
                              (when (pos? (gbp/clear! (:ed t)))
-                               (when-not (any-dots? wctx) (arm! wctx (fn [_])))))}})
+                               (when-not (any-dots? wctx)
+                                 (arm! wctx (fn [r] (when-let [err (:error r)]
+                                                      (set-status! (str "; Breakpoints: " err))))))))}})
 
 (def part
   "The breakpoints part's install fn, (part wctx) -> contribution."

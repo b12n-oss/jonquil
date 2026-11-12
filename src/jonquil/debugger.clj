@@ -400,19 +400,25 @@
 (defn- serve-pause
   "Runs a published pause: (on-pause d), then serves the paused thread until
   continue!, and whatever way that ends clears the pause, drains the queue
-  and calls (on-resume {:continued? b}). The callbacks' own throws are dropped."
+  and calls (on-resume {:continued? b}). A pause already continued when it
+  gets here calls neither callback. The callbacks' own throws are dropped."
   [{:keys [brk callbacks t frames d]}]
   (let [{:keys [queue paused]} brk
         {:keys [on-pause on-resume]} callbacks
-        continued? (volatile! false)]
+        continued? (volatile! false)
+        ;; a pause let go before it was served (its evaluation ended) is
+        ;; never shown, so its end isn't either
+        shown? (not (some-> @paused :continued deref))]
     (try
-      (try (when on-pause (on-pause d)) (catch Throwable _ nil))
+      (when shown?
+        (try (when on-pause (on-pause d)) (catch Throwable _ nil)))
       (serve! queue t frames)
       (vreset! continued? true)
       (finally
         (reset! paused nil)
         (drain! queue)
-        (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil))))))
+        (when shown?
+          (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil)))))))
 
 (defn- claim-pause!
   "Takes brk's pause: true when nothing was paused. One pause at a time, an
