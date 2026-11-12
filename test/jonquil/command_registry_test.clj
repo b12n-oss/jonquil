@@ -65,8 +65,8 @@
    :panel/trace [:panel-focus-fn :trace] :panel/plugins [:panel-focus-fn :plugins]
    :panel/messages [:panel-focus-fn :messages] :panel/processes [:panel-focus-fn :processes]
    :processes/show [:processes-show-fn]
-   :doc-panel/show [:docs-show-fn] :doc-panel/bookmark [:docs-bookmark-fn]
-   :doc-panel/bookmarks [:docs-bookmarks-fn] :doc-panel/guide [:docs-guide-fn]})
+   :pages/show [:docs-show-fn] :pages/bookmark [:docs-bookmark-fn]
+   :pages/bookmarks [:docs-bookmarks-fn] :pages/guide [:docs-guide-fn]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)

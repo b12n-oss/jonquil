@@ -41,7 +41,7 @@ symbol at the caret. Escape or moving the caret closes it.
 ### The docs panel
 
 The popovers close as soon as you type, so they can't stay beside the code.
-**Show Doc in Panel**, in the palette or on Cmd/Ctrl+Alt+9, puts the doc of
+**Show the documentation in a panel**, in the palette or on Cmd/Ctrl+Alt+9, puts the doc of
 the symbol at the caret in a panel on the right, where it stays while you
 keep working. It asks the way full doc does: a dialect with a full doc
 answers with that (JVM Clojure's includes ClojureDocs examples, each with
@@ -52,28 +52,32 @@ command just brings the panel back and focuses it.
 
 - **Following a symbol.** Click a symbol in the page and its doc becomes the
   next page. A symbol with no docs says so on the panel's footer and leaves
-  the page as it was, and a drag that selects text isn't a click. Guide
+  the page as it was, and a drag that selects text isn't a click. The click
+  waits out the double-click time, so a double-click that selects a word
+  follows nothing. Guide
   pages work the same way.
 - **History.** Back and Forward, or `[` and `]` while the panel has focus,
   move through the last 50 pages. Opening a doc after going back drops the
   pages that were ahead, as a browser does. Back and Forward show a page as
-  it read when you first opened it, so Show Doc in Panel on the same symbol
+  it read when you first opened it, so Show the documentation in a panel on the same symbol
   asks again when you want a fresh one.
 - **Bookmarks.** The Bookmark button, or **Bookmark This Page** in the
   palette, saves the page you're reading, and pressing it on a bookmarked
   page removes the bookmark. They live in the settings file under
-  `:doc-bookmarks`, so every window and the next start have them. **Doc
-  Bookmarks…** lists them in the palette and picking one opens it. A symbol
+  `:doc-bookmarks`, so every window and the next start have them. **Open a
+  Bookmarked Page…** lists them in the palette and picking one opens it. A symbol
   is kept under the qualified name full doc gave (`clojure.core/map`), or as
   you typed it when the dialect has no full doc, and is looked up again from
-  the tab you're in.
+  the tab you're in. If you edit `:doc-bookmarks` by hand into something
+  Jonquil can't read whole (an entry that isn't a page, say), Bookmark and the
+  bookmark list leave the file alone and say why on the panel's footer.
 - **Guide pages.** **Open a Guide Page…** lists the pages of `docs/guide`
   beside the Jonquil source tree that is running. A page shows as plain
   text: headings underlined, links as their words, code indented. The
   installed app is one compiled file with no source tree, so there the
   command says the guide isn't installed.
 
-**Switch to panel: Doc Pages** brings the panel back once you've had it
+**Switch to panel: Reader** brings the panel back once you've had it
 open.
 
 ### Jump to definition

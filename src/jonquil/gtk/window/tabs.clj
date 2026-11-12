@@ -440,7 +440,7 @@
    :panel/switch :panel-focus-fn
    :compare/tab :compare-tab-fn
    :layout/use :layout-use-fn
-   :docs/page :docs-page-fn
+   :pages/open :docs-page-fn
    :world/restore-from :world-restore-from-fn})
 
 (defn- palette-run!

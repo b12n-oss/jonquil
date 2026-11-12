@@ -306,6 +306,23 @@
       (is (= {"Good" {:tree? false}} (:layouts s)) "only string names with valid layouts are kept")
       (is (re-find #":layouts" (:warning s))))))
 
+(deftest read-doc-bookmarks-test
+  (let [path (str (temp-dir) "/settings.edn")
+        read #(settings/read-doc-bookmarks path)]
+    (is (= {:bookmarks []} (read)) "no file")
+    (spit path (pr-str {:theme :navy}))
+    (is (= {:bookmarks []} (read)) "no key")
+    (spit path (pr-str {:doc-bookmarks [{:kind :symbol :id "map"}]}))
+    (is (= {:bookmarks [{:kind :symbol :id "map"}]} (read)))
+    (doseq [bad [:nope [{:kind :symbol :id "map"} {:kind :url :id "x"}] ["map"]
+                 [{:kind :symbol :id "map"} {:kind :symbol :id "map"}]]]
+      (spit path (pr-str {:doc-bookmarks bad}))
+      (is (re-find #":doc-bookmarks" (:error (read))) (pr-str bad)))
+    (spit path "{:doc-bookmarks [")
+    (is (re-find #"couldn't read" (:error (read))))
+    (spit path "[1 2]")
+    (is (= {:bookmarks []} (read)) "valid EDN that isn't a map has none")))
+
 (deftest doc-bookmarks-test
   (let [path (str (temp-dir) "/settings.edn")
         bs [{:kind :symbol :id "clojure.core/map"} {:kind :guide :id "keys"}]]

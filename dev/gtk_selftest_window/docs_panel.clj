@@ -1,7 +1,7 @@
 (ns gtk-selftest-window.docs-panel
   "LM6's docs panel: Cmd/Ctrl+Alt+9 shows the doc of the symbol at the caret,
   a click on a symbol in the page follows it, [ and ] move through the
-  history, Bookmark saves into the settings file and Doc Bookmarks opens
+  history, Bookmark saves into the settings file and Open a Bookmarked Page opens
   one, a guide page opens from the palette, and an example's buttons run and
   copy. In process, so the doc is quick doc's text."
   (:require [clojure.string :as str]
@@ -54,9 +54,9 @@
   (settings/save-settings! ((:settings-path* ui)) {:doc-bookmarks []}))
 
 (defn row-docs-panel-show-follow-back-bookmark
-  "Show Doc in Panel (Cmd/Ctrl+Alt+9) opens the panel on the doc of map;
+  "Show the documentation in a panel (Cmd/Ctrl+Alt+9) opens the panel on the doc of map;
   a click on the qualified name in the page follows it; [ and ] move through
-  the two pages; Bookmark writes :doc-bookmarks and Doc Bookmarks opens the
+  the two pages; Bookmark writes :doc-bookmarks and Open a Bookmarked Page opens the
   bookmark again; Close hides the panel."
   [ui]
   (go-row :docs-panel-show-follow-back-bookmark support/check
@@ -80,7 +80,7 @@
           label (docs-pane/bookmark-label pane)
           _ (on-gtk (docs-pane/handle-key! pane 0x5b))
           _ (await-until 3000 20 #(str/starts-with? (title ui) "map"))
-          listed (on-gtk (open-list! ui "doc bookmarks"))
+          listed (on-gtk (open-list! ui "bookmarked page"))
           _ (on-gtk (pick! ui "clojure.core/map"))
           reopened? (await-until 3000 20 #(and (str/starts-with? (title ui) "clojure.core/map") (str/includes? (title ui) "page 2 of 2")))
           _ (on-gtk ((handler ui :on-close)))
@@ -88,7 +88,7 @@
       (on-gtk (clear-bookmarks! ui)
               (support/check :docs-panel-show-follow-back-bookmark
                              (and shown? has-name? (= "clojure.core/map" followed) followed? back? fwd?
-                                  bookmarked? (= "Bookmarked" label) (= ["Doc bookmark: clojure.core/map"] listed)
+                                  bookmarked? (= "Bookmarked" label) (= ["Bookmarked page: clojure.core/map"] listed)
                                   reopened? hidden?)
                              {:shown shown? :name has-name? :followed followed :followed-title followed? :back back?
                               :fwd fwd? :bookmarked bookmarked? :label label :listed listed :reopened reopened?

@@ -11,10 +11,10 @@
   and its panel's palette label. The words of each doc are chosen so that no
   query that reached another command before reaches these (the quick doc
   command's `show docs`, `docs`)."
-  {:id :docs
+  {:id :reader
    :commands
-   {:doc-panel/show {:doc "Show Doc in Panel" :scope :window :call [:docs-show-fn]}
-    :doc-panel/bookmark {:doc "Bookmark This Page" :scope :window :call [:docs-bookmark-fn]}
-    :doc-panel/bookmarks {:doc "Doc Bookmarks…" :scope :window :call [:docs-bookmarks-fn]}
-    :doc-panel/guide {:doc "Open a Guide Page…" :scope :window :call [:docs-guide-fn]}}
-   :panels [{:id :docs :label "Doc Pages"}]})
+   {:pages/show {:doc "Show the documentation in a panel" :scope :window :call [:docs-show-fn]}
+    :pages/bookmark {:doc "Bookmark This Page" :scope :window :call [:docs-bookmark-fn]}
+    :pages/bookmarks {:doc "Open a Bookmarked Page…" :scope :window :call [:docs-bookmarks-fn]}
+    :pages/guide {:doc "Open a Guide Page…" :scope :window :call [:docs-guide-fn]}}
+   :panels [{:id :reader :label "Reader"}]})

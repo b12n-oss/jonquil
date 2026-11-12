@@ -17,14 +17,14 @@
             [jonquil.settings :as settings]))
 
 (deftest the-spec-names-four-commands-and-a-panel
-  (let [spec (some #(when (= :docs (:id %)) %) parts/specs)]
-    (is (= #{:doc-panel/show :doc-panel/bookmark :doc-panel/bookmarks :doc-panel/guide}
+  (let [spec (some #(when (= :reader (:id %)) %) parts/specs)]
+    (is (= #{:pages/show :pages/bookmark :pages/bookmarks :pages/guide}
            (set (keys (:commands spec)))))
-    (is (= [:docs-show-fn] (get-in spec [:commands :doc-panel/show :call])))
-    (is (= [{:id :docs :label "Doc Pages"}] (:panels spec)))
+    (is (= [:docs-show-fn] (get-in spec [:commands :pages/show :call])))
+    (is (= [{:id :reader :label "Reader"}] (:panels spec)))
     (is (every? #(contains? registry/window-commands %) (keys (:commands spec))))
-    (is (= "Doc Pages" (:docs palette/PANEL-LABELS)))
-    (is (= :docs (:part/id (meta (nth gtk-parts/installs (- (count gtk-parts/installs) 2))))))))
+    (is (= "Reader" (:reader palette/PANEL-LABELS)))
+    (is (= :reader (:part/id (meta (nth gtk-parts/installs (- (count gtk-parts/installs) 2))))))))
 
 (def ^:private fake-ed {:destroyed? (atom false)})
 
@@ -64,7 +64,8 @@
                   gtk-palette/open! (fn [pal entries] (swap! listed conj [pal (mapv :doc entries)]))
                   callbacks/on-gui! (fn [f] (f))]
       (let [c ((deref #'docs-part/install) wctx)]
-        {:fns (:fns c) :panels-contribution (:panels c) :handlers handlers :shown shown :said said
+        {:fns (:fns c) :hooks (:hooks c) :cache* (get-in c [:ui :docs-cache*])
+         :panels-contribution (:panels c) :handlers handlers :shown shown :said said
          :panels panels :lookups lookups :ev* (:ev* wctx) :settings-path path :listed listed
          :navs navs}))))
 
@@ -72,8 +73,8 @@
   (let [h (harness {})]
     (is (= #{:docs-show-fn :docs-bookmark-fn :docs-bookmarks-fn :docs-guide-fn :docs-page-fn}
            (set (keys (:fns h)))))
-    (is (= :root (get-in h [:panels-contribution :docs :root])))
-    (is (fn? (get-in h [:panels-contribution :docs :open!])))))
+    (is (= :root (get-in h [:panels-contribution :reader :root])))
+    (is (fn? (get-in h [:panels-contribution :reader :open!])))))
 
 (defn- run-with
   "Calls f with the harness's atoms rebound as the macro expects, with a
@@ -95,7 +96,7 @@
   (let [h (harness {})]
     (run-with h (fn [] ((:docs-show-fn (:fns h)))))
     (is (= ["map"] @(:lookups h)))
-    (is (= [:docs] @(:panels h)) "the panel opens")
+    (is (= [:reader] @(:panels h)) "the panel opens")
     (let [page (last @(:shown h))]
       (is (= "map" (:title page)))
       (is (re-find #"doc of map" (:text page)))
@@ -107,7 +108,7 @@
     (run-with h (fn [] ((:docs-show-fn (:fns h)))))
     (is (empty? @(:shown h)))
     (is (some #{"No docs for map."} @(:said h)))
-    (is (not (some #{:docs} @(:panels h))) "the panel stays as it was")))
+    (is (not (some #{:reader} @(:panels h))) "the panel stays as it was")))
 
 (deftest following-links-back-and-forward-read-the-cache
   (let [h (harness {})
@@ -169,10 +170,10 @@
   (let [h (harness {})
         on (:handlers h)]
     (run-with h (fn [] ((:docs-bookmarks-fn (:fns h)))))
-    (is (some #(re-find #"No doc bookmarks yet" %) @(:said h)))
+    (is (some #(re-find #"No bookmarked pages yet" %) @(:said h)))
     (is (empty? @(:listed h)))
     (run-with h (fn [] ((:on-link @on) "map") ((:on-bookmark @on)) ((:docs-bookmarks-fn (:fns h)))))
-    (is (= [[:pal ["Doc bookmark: map"]]] @(:listed h)))))
+    (is (= [[:pal ["Bookmarked page: map"]]] @(:listed h)))))
 
 (deftest a-palette-page-entry-opens-its-page
   (let [h (harness {})]
@@ -258,7 +259,7 @@
       (is (re-find #"(?m)^Keys\n====" (:text page)))
       (is (= [] (:examples page))))
     (run-with h (fn [] ((:docs-page-fn (:fns h)) "guide:no/such/page")))
-    (is (some #(re-find #"The guide has no page no/such/page" %) @(:said h)))))
+    (is (some #(re-find #"The guide has no page \"no/such/page\"" %) @(:said h)))))
 
 (deftest guide-links-follow-symbols-too
   (let [h (harness {})]
@@ -276,11 +277,94 @@
                   docs-pane/report! (fn [_ m] (swap! (:said h) conj m))
                   docs-pane/focus! (fn [_] (swap! (:panels h) conj :focus))]
       ((:docs-show-fn (:fns h))))
-    (is (= [:docs :focus] @(:panels h)))
+    (is (= [:reader :focus] @(:panels h)))
     (is (some #{"No symbol at the caret."} @(:said h)))))
 
 (deftest close-hides-the-panel
   (let [h (harness {})]
     (with-redefs [editor/focus! (fn [_] (swap! (:panels h) conj :editor-focus))]
       ((:on-close @(:handlers h))))
-    (is (= [[:hide :docs] :editor-focus] @(:panels h)))))
+    (is (= [[:hide :reader] :editor-focus] @(:panels h)))))
+
+(defn- pending-ev
+  "A FullDoc evaluator that holds each answer back: pending is an atom of
+  [sym on-result] pairs."
+  [pending]
+  (reify ev/FullDoc
+    (full-doc [_ sym _ on-result] (swap! pending conj [sym on-result]))))
+
+(def ^:private ok-text "x text")
+
+(deftest a-late-answer-is-dropped-after-back-a-guide-page-close-or-quit
+  (doseq [[label interrupt]
+          [["back" (fn [h] ((:on-back @(:handlers h))))]
+           ["a guide page" (fn [h] ((:docs-page-fn (:fns h)) "guide:using-jonquil"))]
+           ["close" (fn [h] (with-redefs [editor/focus! (fn [_])] ((:on-close @(:handlers h)))))]
+           ["quit" (fn [h] ((get-in h [:hooks :on-quit])))]]]
+    (let [pending (atom [])
+          h (harness {:ev (pending-ev pending)})]
+      (run-with h (fn [] ((:docs-page-fn (:fns h)) "guide:index") ((:docs-page-fn (:fns h)) "guide:keys")))
+      (let [landed (count @(:shown h))
+            panels (count @(:panels h))]
+        (run-with h (fn []
+                      ((:on-link @(:handlers h)) "late")
+                      (interrupt h)
+                      (let [[_ answer] (first @pending)] (answer {:status :ok :text ok-text}))))
+        (is (not-any? #(= "late" (:title %)) @(:shown h)) (str "after " label ": the late answer didn't land"))
+        (when (#{"close" "quit"} label)
+          (is (= landed (count @(:shown h))) (str "after " label ": nothing shown at all"))
+          (is (not-any? #{:reader} (drop panels @(:panels h))) (str "after " label ": the panel stays closed")))))))
+
+(deftest back-to-an-uncached-symbol-keeps-the-pages-ahead
+  (let [h (harness {})
+        on (:handlers h)]
+    (run-with h (fn [] (doseq [s ["a" "b" "c"]] ((:on-link @on) s))
+                  ((:on-back @on)) ((:on-back @on))))
+    (reset! (:cache* h) {})
+    (run-with h (fn [] ((:on-forward @on))))
+    (let [page (last @(:shown h))]
+      (is (= "b" (:title page)))
+      (is (= "page 2 of 3" (dp/position-text (:history page))) "the page ahead is still there"))
+    (run-with h (fn [] ((:on-forward @on))))
+    (is (= "c" (:title (last @(:shown h)))))))
+
+(deftest a-bookmark-list-that-cannot-be-read-whole-is-never-rewritten
+  (let [h (harness {})
+        on (:handlers h)
+        path (:settings-path h)
+        bad (pr-str {:theme :navy :doc-bookmarks [{:kind :symbol :id "keep"} {:kind :url :id "x"}]})]
+    (spit path bad)
+    (run-with h (fn [] ((:on-link @on) "map") ((:on-bookmark @on))))
+    (is (= bad (slurp path)) "the file is untouched")
+    (is (some #(re-find #"Bookmarks not changed: .*:doc-bookmarks" %) @(:said h)))
+    (run-with h (fn [] ((:docs-bookmarks-fn (:fns h)))))
+    (is (some #(re-find #"Bookmarks can't be listed" %) @(:said h)))
+    (is (empty? @(:listed h)))
+    (testing "a file that isn't EDN is refused too"
+      (spit path "{:doc-bookmarks [")
+      (run-with h (fn [] ((:on-bookmark @on))))
+      (is (= "{:doc-bookmarks [" (slurp path))))
+    (testing "a good file takes the toggle again"
+      (spit path (pr-str {:doc-bookmarks [{:kind :symbol :id "keep"}]}))
+      (run-with h (fn [] ((:on-bookmark @on))))
+      (is (= [(dp/symbol-page "keep") (dp/symbol-page "map")]
+             (:doc-bookmarks (settings/load-settings path)))))))
+
+(deftest rendering-does-not-read-the-settings-file
+  (let [h (harness {})
+        on (:handlers h)
+        reads (atom 0)
+        real settings/read-doc-bookmarks]
+    (run-with h (fn [] ((:on-link @on) "a") ((:on-bookmark @on))))
+    (with-redefs [settings/read-doc-bookmarks (fn [p] (swap! reads inc) (real p))
+                  settings/load-settings (fn [_] (swap! reads inc) {})]
+      (run-with h (fn [] ((:on-link @on) "b") ((:on-back @on)) ((:on-forward @on)) ((:on-back @on))))
+      (is (zero? @reads))
+      (is (true? (:bookmarked? (last @(:shown h)))) "the in-memory set knows a is bookmarked"))))
+
+(deftest an-odd-guide-id-says-so-instead-of-throwing
+  (let [h (harness {})]
+    (doseq [id ["guide:a\u0000b" "guide:../../etc/passwd" "guide:"]]
+      (run-with h (fn [] ((:docs-page-fn (:fns h)) id))))
+    (is (empty? @(:shown h)))
+    (is (<= 2 (count (filter #(re-find #"guide|page" %) @(:said h)))))))

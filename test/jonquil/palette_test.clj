@@ -171,7 +171,7 @@
 
 ;; LM6's docs panel adds four commands. A query that picked one command by
 ;; the `!` line or the palette's first row must still pick that command.
-(defn- doc-panel? [e] (= "doc-panel" (namespace (:id e))))
+(defn- pages? [e] (= "pages" (namespace (:id e))))
 
 (defn- queries-from
   "Every word of the docs, every pair of neighbouring words and every whole
@@ -186,8 +186,8 @@
 
 (deftest docs-panel-commands-take-over-no-query-test
   (let [es (shipped-entries)
-        others (vec (remove doc-panel? es))
-        mine (filterv doc-panel? es)
+        others (vec (remove pages? es))
+        mine (filterv pages? es)
         qs (queries-from others)
         first-id (fn [entries q] (:id (first (palette/filter-entries entries q))))]
     (is (= 4 (count mine)))
@@ -197,22 +197,35 @@
                   after (palette/bang-pick es (str "! " q))]
             :when (:run before)]
       (is (= before after) (str "`! " q "` still runs the same command")))
-    (testing "the palette's first row for a distinctive query (four letters or more,
+    (testing "the palette's first row for a distinctive query (three letters or more,
               at most two commands matched it) is unchanged"
-      (doseq [q qs :when (and (<= 4 (count q)) (<= 1 (count (palette/filter-entries others q)) 2))]
+      (doseq [q qs :when (and (<= 3 (count q)) (<= 1 (count (palette/filter-entries others q)) 2))]
         (is (= (first-id others q) (first-id es q))
             (str "first row of \"" q "\" unchanged"))))
     (testing "the queries named in the roadmap"
       (doseq [q ["show frames" "compare with git head" "show docs" "docs" "quick doc"]]
-        (is (empty? (filter doc-panel? (palette/filter-entries es q))) q)))))
+        (is (empty? (filter pages? (palette/filter-entries es q))) q)))))
 
 (deftest docs-panel-commands-are-found-by-their-words-test
   (let [es (shipped-entries)
         pick (fn [q] (palette/bang-pick es (str "! " q)))]
-    (is (= :doc-panel/show (:run (pick "show doc in panel"))))
-    (is (= :doc-panel/bookmark (:run (pick "bookmark this page"))))
-    (is (= :doc-panel/bookmarks (:run (pick "doc bookmarks"))))
-    (is (= :doc-panel/guide (:run (pick "guide page"))))
-    (is (= :doc-panel/guide (:run (pick "open a guide page"))))
-    (is (= 4 (count (filter doc-panel? (palette/filter-entries es "doc panel"))))
-        "doc panel lists the four")))
+    (is (= :pages/show (:run (pick "show the documentation in a panel"))))
+    (is (= :pages/bookmark (:run (pick "bookmark this page"))))
+    (is (= :pages/bookmarks (:run (pick "bookmarked page"))))
+    (is (= :pages/guide (:run (pick "guide page"))))
+    (is (= :pages/guide (:run (pick "open a guide page"))))
+    (is (= :pages/show (:id (first (palette/filter-entries es "documentation")))))))
+
+(deftest bare-doc-and-docs-queries-still-reach-quick-doc-test
+  (let [es (shipped-entries)
+        others (vec (remove pages? es))
+        with-panel (into (palette/panel-entries [:reader] nil) es)
+        first-id (fn [entries q] (:id (first (palette/filter-entries entries q))))]
+    (doseq [q ["do" "doc" "docs" "show docs" "quick doc" "the docs"]]
+      (is (= (first-id others q) (first-id es q)) (str "palette first row of \"" q "\""))
+      (is (= (first-id others q) (first-id with-panel q))
+          (str "first row of \"" q "\" with the Reader panel entry listed"))
+      (is (= (:run (palette/bang-pick others (str "!" q))) (:run (palette/bang-pick es (str "!" q))))
+          (str "`!" q "` picks as on main")))
+    (is (= :help/quick-doc (first-id es "doc")))
+    (is (= :help/quick-doc (:run (palette/bang-pick es "!docs"))))))

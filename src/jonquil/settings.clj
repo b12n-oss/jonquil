@@ -182,6 +182,28 @@
         (cond-> (apply merge (map #(dissoc % :warning) parts))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 
+(defn read-doc-bookmarks
+  "The docs panel's bookmarks as the file at path holds them, for a change
+  that will write them back: {:bookmarks [page ...]} (none when the file or
+  the key is missing), or {:error msg} when the file can't be read, isn't
+  EDN, or its :doc-bookmarks isn't a list of valid pages without repeats.
+  load-settings drops what it can't use, so a write built from it would
+  delete what the person wrote; this refuses instead."
+  [path]
+  (let [f (io/file path)]
+    (if-not (.exists f)
+      {:bookmarks []}
+      (let [m (try (edn/read-string (slurp f)) (catch Exception _ ::unreadable))
+            v (when (map? m) (:doc-bookmarks m))
+            good (when (sequential? v) (reduce docs-panel/add-bookmark [] v))]
+        (cond
+          (= ::unreadable m) {:error (str "couldn't read " path)}
+          (not (map? m)) {:bookmarks []}
+          (nil? v) {:bookmarks []}
+          (not (sequential? v)) {:error (str path "'s :doc-bookmarks isn't a list")}
+          (not= (count good) (count v)) {:error (str path "'s :doc-bookmarks has entries that aren't a doc page, or repeats")}
+          :else {:bookmarks good})))))
+
 (defn- resolved-target
   "path itself, unless it exists and is a symlink, in which case the real
   file it points at (a save would otherwise replace the symlink

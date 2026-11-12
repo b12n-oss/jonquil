@@ -22,10 +22,14 @@
   (docs-pane/report! docp msg)
   (set-status! msg))
 
-(defn- saved
-  "The bookmarked pages in the settings file, [] when there are none."
-  [{:keys [settings-path*]}]
-  (vec (:doc-bookmarks (settings/load-settings @settings-path*))))
+(defn- read-bookmarks
+  "The settings file's bookmarks read for a write, settings/read-doc-bookmarks'
+  {:bookmarks [...]} or {:error msg}. Remembers the pages in bookmarks* (the
+  render's copy) when it could read them."
+  [{:keys [settings-path* bookmarks*]}]
+  (let [r (settings/read-doc-bookmarks @settings-path*)]
+    (when-let [bs (:bookmarks r)] (reset! bookmarks* bs))
+    r))
 
 (defn- guide-directory
   "The guide's directory beside the running source tree, nil when the app
@@ -37,11 +41,11 @@
 
 (defn- render!
   "Shows the page cached for page, with the history and the bookmark button."
-  [{:keys [docp history* contents*] :as ctx} page]
+  [{:keys [docp history* contents* bookmarks*]} page]
   (docs-pane/show! docp (assoc (get @contents* page)
                                :title (dp/page-label page)
                                :history @history*
-                               :bookmarked? (dp/bookmarked? (saved ctx) page))))
+                               :bookmarked? (dp/bookmarked? @bookmarks* page))))
 
 (defn- land!
   "On the GTK thread: shows content ({:text :examples}) for page and opens the
@@ -49,16 +53,17 @@
   it go), else the history already stands on it. The cache keeps only the
   pages the history holds."
   [{:keys [history* contents* right show-right-panel!] :as ctx} page content push?]
-  (when push? (swap! history* dp/push page))
-  (swap! contents* (fn [m] (select-keys (assoc m page content) (:items @history*))))
-  (render! ctx page)
-  (show-right-panel! right :docs))
+  (let [page (if push? page (or (dp/current @history*) page))]
+    (when push? (swap! history* dp/push page))
+    (swap! contents* (fn [m] (select-keys (assoc m page content) (:items @history*))))
+    (render! ctx page)
+    (show-right-panel! right :reader)))
 
 (defn- land-full!
   "A full-doc answer for sym: its text split into the doc and its ClojureDocs
   examples, shown under the qualified name the title gives. :no-op (a server
   without the op) falls back to quick doc; any other status says why."
-  [ctx sym result quick!]
+  [ctx sym result {:keys [quick! push?]}]
   (if (= :no-op (:status result))
     (quick!)
     (if (= :ok (:status result))
@@ -66,7 +71,7 @@
             {:keys [doc title examples]} (try (doc-examples/split text)
                                               (catch :default _ {:doc text :examples []}))]
         (land! ctx (dp/symbol-page (dp/canonical-id sym title))
-               {:text doc :examples (vec examples)} true))
+               {:text doc :examples (vec examples)} push?))
       (say! ctx (help/full-doc-status sym result)))))
 
 (defn- not-found?
@@ -78,8 +83,11 @@
   "Looks sym up in the window's dialect and shows its doc: the full doc when
   the evaluator has one (with its examples), else the quick doc text. pos is
   where sym stands in the active tab's text, 0 for a symbol that came from a
-  page. A newer lookup drops this one's answer if it comes late."
-  [{:keys [ev* active-tab status-label ask-lookup! seq*] :as ctx} sym pos]
+  page. push? says whether the page joins the history (Back to a page that
+  fell out of the cache looks it up again without). A newer lookup, a step,
+  a guide page, closing the panel or the window drops this one's answer if
+  it comes late."
+  [{:keys [ev* active-tab status-label ask-lookup! seq*] :as ctx} sym pos push?]
   (let [n (swap! seq* inc)
         fresh? (fn [] (= n @seq*))
         text (editor/editor-text (:ed (active-tab)))
@@ -90,71 +98,83 @@
                                          (if (not-found? doc)
                                            (say! ctx (str "No docs for " sym "."))
                                            (land! ctx (dp/symbol-page sym)
-                                                  {:text (help/doc-text sym doc) :examples []} true)))}))]
+                                                  {:text (help/doc-text sym doc) :examples []} push?)))}))]
     (if (satisfies? ev/FullDoc @ev*)
       (do (say! ctx (str "Loading docs for " sym "..."))
           (ev/full-doc @ev* sym text
                        (fn [result]
                          (on-gui! (fn []
-                                    (try (when (fresh?) (land-full! ctx sym result quick!))
+                                    (try (when (fresh?) (land-full! ctx sym result {:quick! quick! :push? push?}))
                                          (catch :default e (say! ctx (str "; docs panel: " (ex-message e))))))))))
       (quick!))))
 
 (defn- open-guide!
   "Shows guide page id; push? as for land!. Says so when the guide or the page
   isn't there."
-  [ctx id push?]
-  (if-let [path (dp/guide-file (guide-directory) id)]
-    (land! ctx (dp/guide-page id) {:text (dp/guide-text (slurp path)) :examples []} push?)
-    (say! ctx (if (guide-directory)
-                (str "; The guide has no page " id ".")
-                "; The guide isn't installed: Jonquil found no docs/guide beside its source."))))
+  [{:keys [seq*] :as ctx} id push?]
+  (swap! seq* inc)
+  (try
+    (if-let [path (dp/guide-file (guide-directory) id)]
+      (land! ctx (dp/guide-page id) {:text (dp/guide-text (slurp path)) :examples []} push?)
+      (say! ctx (if (guide-directory)
+                  (str "; The guide has no page " (pr-str id) ".")
+                  "; The guide isn't installed: Jonquil found no docs/guide beside its source.")))
+    (catch :default e
+      (say! ctx (str "; The guide page " (pr-str id) " can't be shown: " (or (ex-message e) "unreadable") ".")))))
 
 (defn- open-page!
   "Opens page, a symbol's doc or a guide page, as a new step in the history."
   [ctx page]
   (case (:kind page)
-    :symbol (open-symbol! ctx (:id page) 0)
+    :symbol (open-symbol! ctx (:id page) 0 true)
     :guide (open-guide! ctx (:id page) true)))
 
 (defn- step!
   "Back or Forward (f is dp/back or dp/forward): moves the history and shows
   the page it stands on, from the cache, else looked up again."
-  [{:keys [history* contents*] :as ctx} f none-msg]
+  [{:keys [history* contents* seq*] :as ctx} f none-msg]
   (if-let [h (f @history*)]
     (let [page (dp/current h)]
+      (swap! seq* inc)
       (reset! history* h)
       (if (contains? @contents* page)
         (render! ctx page)
         (case (:kind page)
-          :symbol (open-symbol! ctx (:id page) 0)
+          :symbol (open-symbol! ctx (:id page) 0 false)
           :guide (open-guide! ctx (:id page) false))))
     (say! ctx none-msg)))
 
 ;; --- the commands -----------------------------------------------------------
 
 (defn- show!
-  "Show Doc in Panel: the symbol at the caret, else the panel as it was."
+  "Show the documentation in a panel: the symbol at the caret, else the panel as it was."
   [{:keys [active-tab right show-right-panel! docp history*] :as ctx}]
   (let [snap (editor/snapshot (:ed (active-tab)))]
     (if-let [{:keys [symbol start]} (help/target snap)]
-      (open-symbol! ctx symbol start)
-      (do (show-right-panel! right :docs)
+      (open-symbol! ctx symbol start true)
+      (do (show-right-panel! right :reader)
           (docs-pane/focus! docp)
           (when (empty? (:items @history*))
             (say! ctx "No symbol at the caret."))))))
 
 (defn- bookmark!
-  "Bookmark This Page: the page shown is saved, or its bookmark removed."
-  [{:keys [history* settings-path* docp] :as ctx}]
+  "Bookmark This Page: the page shown is saved, or its bookmark removed. The
+  list is read from the file again first, and a list that can't be read whole
+  is left alone, with the reason on the footer: a write would delete what it
+  couldn't parse."
+  [{:keys [history* settings-path* bookmarks* docp] :as ctx}]
   (if-let [page (dp/current @history*)]
-    (let [{:keys [added? bookmarks]} (dp/toggle-bookmark (saved ctx) page)]
-      (if-let [err (settings/save-settings! @settings-path* {:doc-bookmarks bookmarks})]
-        (say! ctx (str "; settings: " err))
-        (do (docs-pane/set-nav! docp {:history @history* :bookmarked? added?})
-            (say! ctx (if added?
-                        (str "; Bookmarked " (dp/page-label page) ".")
-                        (str "; Removed the bookmark for " (dp/page-label page) "."))))))
+    (let [{:keys [bookmarks error]} (read-bookmarks ctx)]
+      (if error
+        (say! ctx (str "; Bookmarks not changed: " error "; fix or delete that entry first."))
+        (let [{:keys [added?] new-list :bookmarks} (dp/toggle-bookmark bookmarks page)]
+          (if-let [err (settings/save-settings! @settings-path* {:doc-bookmarks new-list})]
+            (say! ctx (str "; settings: " err))
+            (do (reset! bookmarks* new-list)
+                (docs-pane/set-nav! docp {:history @history* :bookmarked? added?})
+                (say! ctx (if added?
+                            (str "; Bookmarked " (dp/page-label page) ".")
+                            (str "; Removed the bookmark for " (dp/page-label page) "."))))))))
     (say! ctx "; Nothing to bookmark: show a doc first.")))
 
 (defn- list-in-palette!
@@ -163,12 +183,13 @@
   (palette/open! (:palette (active-tab)) entries))
 
 (defn- bookmarks!
-  "Doc Bookmarks…: the bookmarks in the palette."
+  "Open a Bookmarked Page…: the bookmarks in the palette."
   [ctx]
-  (let [bs (saved ctx)]
-    (if (empty? bs)
-      (say! ctx "; No doc bookmarks yet: Bookmark This Page saves the page you are reading.")
-      (list-in-palette! ctx (dp/bookmark-entries bs)))))
+  (let [{:keys [bookmarks error]} (read-bookmarks ctx)]
+    (cond
+      error (say! ctx (str "; Bookmarks can't be listed: " error))
+      (empty? bookmarks) (say! ctx "; No bookmarked pages yet: Bookmark This Page saves the page you are reading.")
+      :else (list-in-palette! ctx (dp/bookmark-entries bookmarks)))))
 
 (defn- guide!
   "Open a Guide Page…: the guide's pages in the palette."
@@ -178,7 +199,7 @@
     (say! ctx "; The guide isn't installed: Jonquil found no docs/guide beside its source.")))
 
 (defn- page-from-palette!
-  "The palette's [:docs/page key] entry: opens the page the key names."
+  "The palette's [:pages/open key] entry: opens the page the key names."
   [ctx k]
   (if-let [page (dp/key->page k)]
     (open-page! ctx page)
@@ -204,28 +225,38 @@
   "The docs part for one window: builds the pane, wires its handlers and
   answers the commands' fns. The history (the last 50 pages) and the cache of
   what they showed are per window; the evaluator is read from ev* on every
-  lookup."
+  lookup. The bookmarks are kept in memory for the render and read from the
+  file again for each change."
   [{:keys [right hide-right-panel! show-right-panel! active-tab] :as wctx}]
   (let [docp (docs-pane/make-pane)
-        ctx (assoc wctx :docp docp :history* (atom dp/empty-history) :contents* (atom {}) :seq* (atom 0))]
+        ctx (assoc wctx :docp docp :history* (atom dp/empty-history) :contents* (atom {}) :seq* (atom 0)
+                   :bookmarks* (atom []))]
+    ;; the bookmarks are read once here; the render uses this copy
+    (read-bookmarks ctx)
     (docs-pane/set-handlers!
      docp {:on-back (fn [] (step! ctx dp/back "Nothing earlier."))
            :on-forward (fn [] (step! ctx dp/forward "Nothing later."))
            :on-bookmark (fn [] (bookmark! ctx))
-           :on-link (fn [sym] (open-symbol! ctx sym 0))
+           :on-link (fn [sym] (open-symbol! ctx sym 0 true))
            :on-run (fn [code] (run-code! ctx code))
            :on-copy (fn [code] (copy-example! ctx code))
-           :on-close (fn [] (hide-right-panel! right :docs) (editor/focus! (:ed (active-tab))))})
+           :on-close (fn []
+                       (swap! (:seq* ctx) inc)
+                       (hide-right-panel! right :reader)
+                       (editor/focus! (:ed (active-tab))))})
     {:fns {:docs-show-fn (fn [] (show! ctx))
            :docs-bookmark-fn (fn [] (bookmark! ctx))
            :docs-bookmarks-fn (fn [] (bookmarks! ctx))
            :docs-guide-fn (fn [] (guide! ctx))
            :docs-page-fn (fn [k] (page-from-palette! ctx k))}
-     :ui {:docs-pane docp}
-     :panels {:docs {:root (:root docp)
-                     :focus! (fn [] (docs-pane/focus! docp))
-                     :open! (fn [] (show-right-panel! right :docs) (docs-pane/focus! docp))}}}))
+     ;; a lookup still out when the window quits must not touch its widgets
+     :hooks {:on-quit (fn [] (swap! (:seq* ctx) inc))}
+     ;; :docs-cache* is the pages the history holds, for rows and tests
+     :ui {:docs-pane docp :docs-cache* (:contents* ctx)}
+     :panels {:reader {:root (:root docp)
+                       :focus! (fn [] (docs-pane/focus! docp))
+                       :open! (fn [] (show-right-panel! right :reader) (docs-pane/focus! docp))}}}))
 
 (def part
   "The docs part's install fn, (part wctx) -> contribution."
-  (with-meta install {:part/id :docs}))
+  (with-meta install {:part/id :reader}))

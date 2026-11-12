@@ -7,7 +7,7 @@
   or a key does; this namespace owns the widgets and what they show."
   (:require [jolt.ffi :as ffi]
             [jonquil.docs-panel :as dp]
-            [jonquil.gtk.callbacks :refer [callable]]
+            [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.source-pane :as source-pane]))
@@ -70,6 +70,8 @@
                   :on-copy (fn [code] (handler pane :on-copy code))}]
     (g/gtk-label-set-text (:title pane)
                           (str title (when-let [p (some-> history dp/position-text not-empty)] (str "  (" p ")"))))
+    ;; a click still waiting out the double-click time belongs to the old text
+    (swap! (:click-gen pane) inc)
     (g/gtk-text-buffer-set-text (:buf pane) (or text "") -1)
     (clear-box! box)
     (reset! (:examples pane)
@@ -113,6 +115,27 @@
       (when-let [sym (symbol-at-offset pane offset)]
         (handler pane :on-link sym)
         sym))))
+
+(def ^:private CLICK-TOLERANCE
+  ;; estimate: a few pixels of hand shake between press and release
+  4)
+
+(defn click-release!
+  "A primary release at character offset: a click when the press was at
+  press and the release at release (within CLICK-TOLERANCE px), which waits
+  out GTK's double-click time and then follows the symbol there, unless a
+  second press, another page or a selection came meanwhile (the console's
+  result click does the same, in jonquil.gtk.parts.live-results). A drag
+  that ends elsewhere follows nothing."
+  [pane press release offset]
+  (when (dp/near? press release CLICK-TOLERANCE)
+    (let [n (swap! (:click-gen pane) inc)
+          wait (g/double-click-time (g/gtk-settings-get-default))]
+      (future
+        (Thread/sleep wait)
+        (on-gui! (fn []
+                   (when (= n @(:click-gen pane))
+                     (follow-offset! pane offset))))))))
 
 (defn- click-offset
   "The character offset under widget coordinates wx, wy of the view."
@@ -160,9 +183,17 @@
     (g/gtk-widget-add-controller root keyctl)
     ;; released, not pressed: a drag that selects text ends in a release too,
     ;; and follow-offset! tells the two apart by the selection
+    (g/g-signal-connect-data click "pressed"
+                             (callable (fn [_gesture n-press x y _data]
+                                         (reset! (:press pane) [x y])
+                                         (when (> n-press 1) (swap! (:click-gen pane) inc))
+                                         nil)
+                                       [:pointer :int :double :double :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data click "released"
                              (callable (fn [_gesture n-press x y _data]
-                                         (try (when (= 1 n-press) (follow-offset! pane (click-offset view x y)))
+                                         (try (when (= 1 n-press)
+                                                (click-release! pane @(:press pane) [x y] (click-offset view x y)))
                                               (catch :default e (report! pane (str "; " (ex-message e)))))
                                          nil)
                                        [:pointer :int :double :double :pointer] :void)
@@ -191,7 +222,7 @@
   (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
 
 (defn make-pane
-  "Builds the panel: {:root :bar :title :scroll :content :view :buf
+  "Builds the panel, with :click-gen and :press for the click's wait: {:root :bar :title :scroll :content :view :buf
   :examples-box :footer :back-btn :forward-btn :bookmark-btn :close-btn
   :examples (atom) :handlers (atom)}. :root starts visible; the window hides
   it."
@@ -209,12 +240,13 @@
               :forward-btn (g/gtk-button-new-with-label "Forward")
               :bookmark-btn (g/gtk-button-new-with-label "Bookmark")
               :close-btn (g/gtk-button-new-with-label "Close")
-              :examples (atom []) :handlers (atom {})}]
+              :examples (atom []) :handlers (atom {})
+              :click-gen (atom 0) :press (atom nil)}]
     (lay-out! pane)
     (connect-clicked! pane (:back-btn pane) :on-back)
     (connect-clicked! pane (:forward-btn pane) :on-forward)
     (connect-clicked! pane (:bookmark-btn pane) :on-bookmark)
     (connect-clicked! pane (:close-btn pane) :on-close)
     (connect-input! pane)
-    (report! pane "Show Doc in Panel (Cmd/Ctrl+Alt+9) puts a symbol's doc here.")
+    (report! pane "Show the documentation in a panel (Cmd/Ctrl+Alt+9) puts a symbol's doc here.")
     pane))

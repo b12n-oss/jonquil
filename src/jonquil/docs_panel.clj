@@ -132,14 +132,14 @@
 (defn- page-entry
   "A palette entry that opens page, doc reading prefix then text."
   [prefix text page]
-  {:id [:docs/page (page-key page)] :doc (str prefix text) :chords [] :source "doc"})
+  {:id [:pages/open (page-key page)] :doc (str prefix text) :chords [] :source "doc"})
 
 (defn bookmark-entries
-  "The palette entries that open each bookmark: {:id [:docs/page \"symbol:map\"]
-  :doc \"Doc bookmark: map\" :chords [] :source \"doc\"}. The window runs
+  "The palette entries that open each bookmark: {:id [:pages/open \"symbol:map\"]
+  :doc \"Bookmarked page: map\" :chords [] :source \"doc\"}. The window runs
   these itself; they aren't registry commands."
   [bookmarks]
-  (vec (for [p bookmarks] (page-entry "Doc bookmark: " (page-label p) p))))
+  (vec (for [p bookmarks] (page-entry "Bookmarked page: " (page-label p) p))))
 
 ;; --- links ------------------------------------------------------------------
 
@@ -158,11 +158,19 @@
           end (loop [i (inc offset)] (if (and (< i (count text)) (symbol-char? (.charAt text (int i)))) (recur (inc i)) i))]
       [start end])))
 
+(defn near?
+  "True when points a and b, [x y], are within tol pixels of each other on
+  both axes: a click's release lands where its press did, a drag's doesn't."
+  [a b tol]
+  (boolean (and a b (<= (abs (- (first a) (first b))) tol) (<= (abs (- (second a) (second b))) tol))))
+
 (defn symbol-at
   "The symbol in text at character offset, as a click on it names one: a run
   of symbol characters without the periods and colons that end it. nil on
   whitespace, brackets, past the end, and for a keyword, a number or
-  nothing but punctuation."
+  nothing but punctuation. offset counts characters; Jolt's strings are
+  code points, as GTK's offsets are, so subs and charAt below need no
+  conversion."
   [text offset]
   (when (and (string? text) (integer? offset))
     (when-let [[s e] (word-bounds text offset)]
@@ -204,6 +212,8 @@
       (str/replace "\\" "/")
       (str/replace #"\.md$" "")))
 
+(declare guide-file)
+
 (defn guide-pages
   "The markdown pages under dir, recursively, sorted by id: {:id \"keys\"
   :title \"Keys\" :path file}. The id is the path below dir without .md; the
@@ -215,6 +225,8 @@
           base-path (.getPath base)]
       (->> (file-seq base)
            (filter #(and (.isFile ^java.io.File %) (str/ends-with? (.getName ^java.io.File %) ".md")))
+           ;; the pages guide-file would open: a link out of the guide isn't one
+           (filter #(guide-file dir (relative-id base-path (.getPath ^java.io.File %))))
            (map (fn [^java.io.File f]
                   (let [id (relative-id base-path (.getPath f))]
                     {:id id :title (or (first-heading (slurp f)) id) :path (.getPath f)})))
@@ -227,13 +239,16 @@
   from the settings file, so its id is data, not trusted)."
   [dir id]
   (when (and dir (string? id) (not (str/blank? id)))
-    (let [base (.getCanonicalFile (io/file dir))
-          f (.getCanonicalFile (io/file base (str id ".md")))]
-      (when (and (.isFile f) (str/starts-with? (.getPath f) (str (.getPath base) "/")))
-        (.getPath f)))))
+    (try
+      (let [base (.getCanonicalFile (io/file dir))
+            f (.getCanonicalFile (io/file base (str id ".md")))]
+        (when (and (.isFile f) (str/starts-with? (.getPath f) (str (.getPath base) "/")))
+          (.getPath f)))
+      ;; a NUL or other character the file system refuses: no such page
+      (catch :default _ nil))))
 
 (defn guide-entries
-  "The palette entries that open each guide page: {:id [:docs/page
+  "The palette entries that open each guide page: {:id [:pages/open
   \"guide:keys\"] :doc \"Guide page: Keys (keys)\" :chords [] :source \"doc\"}.
   A page whose title is its id reads without the parenthesis."
   [pages]

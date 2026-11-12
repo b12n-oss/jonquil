@@ -89,8 +89,8 @@
     (is (= {:added? false :bookmarks []} (dp/toggle-bookmark (:bookmarks b) map-page)))))
 
 (deftest bookmark-entries-test
-  (is (= [{:id [:docs/page "symbol:map"] :doc "Doc bookmark: map" :chords [] :source "doc"}
-          {:id [:docs/page "guide:keys"] :doc "Doc bookmark: Guide: keys" :chords [] :source "doc"}]
+  (is (= [{:id [:pages/open "symbol:map"] :doc "Bookmarked page: map" :chords [] :source "doc"}
+          {:id [:pages/open "guide:keys"] :doc "Bookmarked page: Guide: keys" :chords [] :source "doc"}]
          (dp/bookmark-entries [map-page keys-page])))
   (is (= [] (dp/bookmark-entries nil))))
 
@@ -208,13 +208,32 @@
       (is (nil? (dp/guide-file g nil)))
       (is (nil? (dp/guide-file nil "keys"))))))
 
+(deftest guide-file-and-pages-reject-odd-ids-and-symlinks-test
+  (let [d (temp-dir)]
+    (put! d "guide/keys.md" "# Keys")
+    (put! d "outside.md" "# Outside")
+    (java.nio.file.Files/createSymbolicLink
+     (.toPath (io/file d "guide/linked.md")) (.toPath (io/file d "outside.md"))
+     (make-array java.nio.file.attribute.FileAttribute 0))
+    (let [g (str d "/guide")]
+      (is (nil? (dp/guide-file g "a\u0000b")) "a NUL doesn't throw")
+      (is (nil? (dp/guide-file g "linked")) "a symlink out of the guide is refused")
+      (is (= ["keys"] (map :id (dp/guide-pages g))) "and isn't listed"))))
+
+(deftest near-test
+  (is (dp/near? [10 10] [10 10] 4))
+  (is (dp/near? [10 10] [13 12] 4))
+  (is (not (dp/near? [10 10] [20 10] 4)) "a drag")
+  (is (not (dp/near? [10 10] [10 15] 4)))
+  (is (not (dp/near? nil [1 1] 4))))
+
 (deftest guide-pages-without-a-directory-test
   (is (= [] (dp/guide-pages nil)))
   (is (= [] (dp/guide-pages "/no/such/dir/anywhere"))))
 
 (deftest guide-entries-test
-  (is (= [{:id [:docs/page "guide:keys"] :doc "Guide page: Keys (keys)" :chords [] :source "doc"}
-          {:id [:docs/page "guide:plain"] :doc "Guide page: plain" :chords [] :source "doc"}]
+  (is (= [{:id [:pages/open "guide:keys"] :doc "Guide page: Keys (keys)" :chords [] :source "doc"}
+          {:id [:pages/open "guide:plain"] :doc "Guide page: plain" :chords [] :source "doc"}]
          (dp/guide-entries [{:id "keys" :title "Keys" :path "/x/keys.md"}
                             {:id "plain" :title "plain" :path "/x/plain.md"}]))))
 
