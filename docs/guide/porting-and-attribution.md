@@ -70,7 +70,7 @@ matching the code Jonquil took from upstream.
 
 Two reader bugs blocked the console's `(read)` outright: `(read)` from
 stdin failed on Jolt through `LineNumberingPushbackReader`, filed as
-jolt-lang/jolt#1133 (merged in PR #1134) and #1137 (merged in PR #1138,
+jolt-lang/jolt#1133 (merged in jolt-lang/jolt#1134) and jolt-lang/jolt#1137 (merged in jolt-lang/jolt#1138,
 2026-09-25). Every Jolt from v0.8.15 on carries both; the fixes
 landed well before that release, back when the getting-started
 requirement still named an exact `main` commit rather than a tagged
@@ -80,7 +80,7 @@ version.
 process's real stdout, so Jonquil left it out of the program namespace.
 The cause was that the one-argument `pprint` and `(cl-format true ...)`
 called `clojure.core/print` while `*out*` was still pprint's own buffer.
-That was filed as jolt-lang/jolt#1354 and fixed in #1355, which shipped in
+That was filed as jolt-lang/jolt#1354 and fixed in jolt-lang/jolt#1355, which shipped in
 Jolt v0.8.22, and `pprint` is referred into the prompt's namespace the
 same way `doc` is. `pp` was an empty stub until jolt-lang/jolt#1389 made it
 expand to `(pprint *1)`, as on the JVM. That shipped in Jolt v0.8.23, which

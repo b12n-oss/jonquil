@@ -518,7 +518,7 @@ shows none.
 
 The panel reads the frames after the error was caught, from the evaluator that
 ran the code, in process or in the Jolt child. It needs a Jolt with
-`jolt.debug` (`jolt-lang/jolt` #1465); on an older Jolt the panel says
+`jolt.debug` (jolt-lang/jolt#1465); on an older Jolt the panel says
 "Frames need a Jolt with jolt.debug (newer than this one)." and debug mode
 stays off.
 
