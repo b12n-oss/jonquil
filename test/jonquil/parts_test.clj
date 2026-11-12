@@ -34,6 +34,7 @@
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.replay :as replay]
             [jonquil.settings :as settings]
+            [jonquil.usages :as usages]
             [jonquil.parts :as parts]))
 
 (defn- call [k & args]
@@ -89,7 +90,7 @@
            :panel/processes :processes/show
            :change-set/make :change-set/browse
            :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
-           :result/inspect :result/copy :result/define :result/jump :result/doc
+           :result/inspect :result/copy :result/define :result/jump :result/doc :result/open-location
            :panel/locations :locations/uses :locations/definitions :locations/matches
            :locations/usages-in-project :locations/next :locations/previous
            :compare/disk :compare/head :compare/take :compare/last-run
@@ -631,7 +632,41 @@
     (is (= [:result-define-fn] (get-in spec [:commands :result/define :call])))
     (is (= [:result-jump-fn] (get-in spec [:commands :result/jump :call])))
     (is (= [:result-doc-fn] (get-in spec [:commands :result/doc :call])))
-    (is (= 5 (count (:commands spec))))))
+    (is (= [:result-open-location-fn] (get-in spec [:commands :result/open-location :call])))
+    (is (= 6 (count (:commands spec))))))
+
+(deftest live-results-open-file-line
+  (let [statuses (atom [])
+        opened (atom [])
+        line (atom "    at demo.core$f.invoke (core.clj:12)")
+        wctx {:cv {:view :view :buf :buf :results (atom [])}
+              :set-status! #(swap! statuses conj %) :status-label :lbl
+              :ev* (atom nil) :active-tab (fn [] {:path (atom nil)})
+              :tree-pane {:state (atom {:root "/p"})}
+              :inspect! (fn [_]) :ask-lookup! (fn [& _]) :jump-to! (fn [& _])
+              :source-ctx (fn [_] {:ctx true})
+              :open-file-line! (fn [ctx label path n] (swap! opened conj [ctx label path n]))}]
+    (with-redefs [cview/line-at (fn [_ _] {:text @line :start 100})
+                  usages/project-files (fn [_] ["/p/src/demo/core.clj" "/p/src/other/core.clj"])
+                  g/cursor-offset (fn [_] 130)
+                  g/gtk-gesture-click-new (fn [] :gesture)
+                  g/gtk-gesture-single-set-button (fn [& _])
+                  g/gtk-event-controller-set-propagation-phase (fn [& _])
+                  g/g-signal-connect-data (fn [& _] 1)
+                  g/gtk-widget-add-controller (fn [& _])]
+      (let [open! (get-in ((deref #'live-results-part/install) wctx) [:fns :result-open-location-fn])]
+        (testing "a stack frame's file opens at its line, the frame's namespace picking among same-named files"
+          (open!)
+          (is (= [[{:ctx true} "core.clj:12" "/p/src/demo/core.clj" 12]] @opened)))
+        (testing "several candidates and no namespace to pick by: says so, opens none"
+          (reset! opened []) (reset! line "Location (core.clj:12)")
+          (with-redefs [g/cursor-offset (fn [_] 112)] (open!))
+          (is (= [] @opened))
+          (is (= ["; 2 project files could be core.clj, so none was opened."] @statuses)))
+        (testing "no file:line at the caret"
+          (reset! statuses []) (reset! line "plain output")
+          (open!)
+          (is (= ["; No file:line here."] @statuses)))))))
 
 (deftest live-results-say-no-result
   (let [statuses (atom [])

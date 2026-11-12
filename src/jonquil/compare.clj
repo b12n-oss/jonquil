@@ -152,7 +152,8 @@
 
 (defn form-keys
   "Every top-level form of text with its key, in buffer order: {:start :end
-  :sig :nth :name}, as form-key makes it for a caret in the form."
+  :sig :nth :of :name}, as form-key makes it for a caret in the form; :of is
+  how many forms share the signature."
   [text]
   (let [forms (commands/top-level-forms text)]
     (loop [forms forms seen {} acc []]
@@ -162,20 +163,21 @@
           (recur (rest forms) (assoc seen sig (inc n))
                  (conj acc {:start start :end end :sig sig :nth n
                             :name (form-name sig n)})))
-        acc))))
+        (mapv #(assoc % :of (get seen (:sig %))) acc)))))
 
 (defn form-key
-  "{:sig :nth :name} for the top-level form of text around caret: its
+  "{:sig :nth :of :name} for the top-level form of text around caret: its
   signature, how many earlier forms share it (so a second (comment ...) is
-  told apart from the first) and a name for messages, \"defn f\". nil
-  when the caret is between forms."
+  told apart from the first), how many share it in all (so a place that
+  shifted since is caught) and a name for messages, \"defn f\". nil when
+  the caret is between forms."
   [text caret]
   (let [forms (form-keys text)]
     ;; as Run Form takes it: the form the caret is in, else the one it's
     ;; right after
     (when-let [f (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
                      (first (filter (fn [{:keys [end]}] (= end caret)) forms)))]
-      (select-keys f [:sig :nth :name]))))
+      (select-keys f [:sig :nth :of :name]))))
 
 (defn form-range
   "{:start :end} of the top-level form of text with key's signature, at its
@@ -206,6 +208,11 @@
         there (find-form other key)
         shown (form-shown key)]
     (cond
+      ;; a same-signature form added or removed since the key was made
+      ;; moves every later one's place: refuse rather than take the wrong one
+      (and (:of key) (not= (:of key) (count (filter #(= (:sig key) (form-sig buffer %))
+                                                    (commands/top-level-forms buffer)))))
+      {:error (str "This tab's (" (str/join " " (:sig key)) " ...) forms changed since the compare: compare again.")}
       (nil? here) {:error (str "This tab has no " shown " any more.")}
       (nil? there) {:error (str (if (= "disk" label) "The file on disk" (str/capitalize (subs label 0 1)))
                                 (when-not (= "disk" label) (subs label 1))

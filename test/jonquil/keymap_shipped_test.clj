@@ -180,7 +180,7 @@
   (is (= [["Complete" :console/complete] ["Clear Last Output" :console/clear-last-output]
           ["Inspect This Result" :result/inspect] ["Copy This Result" :result/copy]
           ["Define a Var for This Result" :result/define] ["Jump to This Var" :result/jump]
-          ["Quick Doc for This Var" :result/doc]]
+          ["Quick Doc for This Var" :result/doc] ["Open This File and Line" :result/open-location]]
          (map (juxt :label :command) registry/console-menu))))
 
 (deftest unreachable-bindings-finds-a-shadowed-one
