@@ -780,29 +780,3 @@
     (is (empty? @debugger/stepping-any))
     (is (nil? @sa))))
 
-;; --- Step Over and Out keep to the caller chain ----------------------------------------
-
-(deftest same-chain-test
-  (let [x1 (Object.) x2 (Object.)
-        c {:fn 'user/c-not-a-var :line 6 :locals {}}
-        f1 {:fn 'user/f-not-a-var :line 2 :locals {'x x1}}
-        f1-later {:fn 'user/f-not-a-var :line 4 :locals {'x x1 'y 5}}
-        f2 {:fn 'user/f-not-a-var :line 2 :locals {'x x2}}]
-    (is (true? (debugger/same-chain? [f1 c] [f1-later c])) "later in the same call")
-    (is (false? (debugger/same-chain? [f1 c] [f2 c]))
-        "the next call from a loop: other arguments, though the frames under it look the same")
-    (is (true? (debugger/same-chain? [f1 c] [(assoc c :line 7)])) "the caller, at its next line")
-    (is (false? (debugger/same-chain? [f1 c] [{:fn 'user/other :line 2 :locals {}}])))
-    (is (false? (debugger/same-chain? [f1 c] [{:fn 'user/z :line 1 :locals {}} f1 c])) "deeper")))
-
-(deftest over-pauses-only-on-its-own-chain-test
-  (let [x1 (Object.)
-        f1 {:fn 'user/f-not-a-var :line 2 :locals {'x x1}}
-        c {:fn 'user/c-not-a-var :line 6 :locals {}}
-        stepping {:mode :over :depth 2 :frames [f1 c]}]
-    (is (true? (debugger/pause-here? {:step? true :stepping stepping :depth 2 :frames [(assoc f1 :line 3) c]})))
-    (is (false? (debugger/pause-here? {:step? true :stepping stepping :depth 2
-                                       :frames [(assoc-in f1 [:locals 'x] (Object.)) c]}))
-        "same depth, another call")
-    (is (true? (debugger/pause-here? {:step? true :stepping (assoc stepping :mode :out) :depth 1
-                                      :frames [(assoc c :line 7)]})))))

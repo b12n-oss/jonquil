@@ -578,77 +578,22 @@
   [t]
   (boolean (:jonquil/step (ex-data t))))
 
-(defn- same-frame?
-  "True when frames a and b are one activation: the same fn at the same
-  line with the very same local values (a suspended caller's don't change;
-  the next call from a loop is another activation, with other locals)."
-  [a b]
-  (and (= (str (:fn a)) (str (:fn b)))
-       (= (:line a) (:line b))
-       (let [la (:locals a) lb (:locals b)]
-         (and (= (set (keys la)) (set (keys lb)))
-              (every? (fn [[k v]] (identical? v (get lb k))) la)))))
-
-(defn- param-names
-  "The names frame label's fn takes as parameters, from its var's
-  :arglists (destructured names included), or nil for a fn without a var
-  (an inner fn--3) or a label that doesn't resolve."
-  [label]
-  (try (let [v (resolve (symbol (str label)))]
-         (when (var? v)
-           (into #{} (comp (mapcat #(tree-seq coll? seq %)) (filter symbol?) (remove #{'&}))
-                 (:arglists (meta v)))))
-       (catch Throwable _ nil)))
-
-(defn- same-activation?
-  "True when frame b is the activation recorded as a, at another line: the
-  same fn with its parameters (by its :arglists; every local without
-  them) holding the very same values. The next call from a loop, whose
-  native frames Jolt doesn't list, differs here, in its arguments."
-  [a b]
-  (and (= (str (:fn a)) (str (:fn b)))
-       (let [la (:locals a) lb (:locals b)
-             names (or (param-names (:fn a)) (keys la))]
-         (every? (fn [k] (or (not (contains? la k)) (not (contains? lb k)) (identical? (get la k) (get lb k))))
-                 names))))
-
-(defn same-chain?
-  "True when current, a step point's frames (its own first), is on the
-  chain recorded, the frames a Step Over or Out started from: its own
-  frame is the activation recorded at that depth (same-activation?) and
-  every frame under it is the very one recorded there (same-frame?). So a
-  step point in a caller, or later in the same call, passes, and the next
-  call of the function from a loop doesn't."
-  [recorded current]
-  (let [n (count current)
-        tail (drop (- (count recorded) n) recorded)]
-    (boolean (and (<= 1 n (count recorded))
-                  (same-activation? (first tail) (first current))
-                  (every? true? (map same-frame? (rest tail) (rest current)))))))
-
-(defn- mode-allows?
-  "Whether a step point at depth with its frames (its own first) pauses for
-  stepping's entry: Step Into anywhere; Step Over at the Step's depth or
-  above, Step Out only above, both on the Step's own caller chain. The
-  depth is the cheap first test."
-  [{:keys [mode] :as entry} depth frames]
-  (case mode
-    :over (and (<= depth (:depth entry)) (same-chain? (:frames entry) frames))
-    :out (and (< depth (:depth entry)) (same-chain? (:frames entry) frames))
-    true))
-
 (defn pause-here?
   "Whether a breakpoint pauses: a user breakpoint always; a step point
   (:step?) only while this thread is stepping (:stepping, its entry
-  {:mode :depth :frames}, nil when not), as its mode allows at the depth
-  here (:depth) with the frames here, its own first (:frames):
-  mode-allows?."
-  [{:keys [step? stepping depth frames]}]
+  {:mode :depth}, nil when not), by its mode against the depth here
+  (:depth): Step (:step) anywhere, Step Over (:over) in the same function
+  or a caller (depth at most the Step's), Step Out (:out) only in a caller
+  (depth below it)."
+  [{:keys [step? stepping depth]}]
   (boolean
    (cond
      (not step?) true
      (nil? stepping) false
-     :else (mode-allows? stepping depth frames))))
+     :else (case (:mode stepping)
+             :over (<= depth (:depth stepping))
+             :out (< depth (:depth stepping))
+             true))))
 
 (defn breakpoint-data
   "frames-data for breakpoint throw t: titled \"Breakpoint at line N\", or
@@ -691,9 +636,9 @@
   this thread is stepping through."
   [t frames stepping]
   (let [step? (step-point? t)
-        entry (when step? (stepping-here? stepping))
-        own (when entry (vec (user-frames (rest frames))))]
-    (pause-here? {:step? step? :stepping entry :depth (count own) :frames own})))
+        entry (when step? (stepping-here? stepping))]
+    (pause-here? {:step? step? :stepping entry
+                  :depth (when entry (frame-depth (rest frames)))})))
 
 (defn breakpoint-handler
   "A breakpoint hook pausing through brk with the callbacks (callbacks-fn)
@@ -715,9 +660,7 @@
   in stepping-any."
   [stepping p mode]
   (stop-stepping! stepping)
-  (let [own (vec (user-frames (:frames p)))]
-    ;; the paused frames: Over and Out keep to that chain
-    (reset! stepping {:thread (:thread p) :mode mode :depth (count own) :frames own}))
+  (reset! stepping {:thread (:thread p) :mode mode :depth (frame-depth (:frames p))})
   (swap! stepping-any conj (:thread p)))
 
 (defn step!

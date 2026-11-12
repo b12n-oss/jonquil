@@ -818,14 +818,24 @@
                           "    (+ 1 (r (dec n)))\n    0))\n(defn rc []\n  (let [v (r 2)]\n    v))")
                      [3 8] "(rc)" [:step :over :over :over])))))
 
-(deftest over-leaves-a-function-a-library-loop-calls-test
+(deftest over-at-the-end-of-a-function-a-library-loop-calls-test
+  ;; documented: the loop (mapv) has no frame to return to, so Step Over from
+  ;; f's last line pauses in f's next call, as Chrome's debugger does
   (if-not (debugger/break-available?)
     (is true "skipped: this Jolt has no jolt.debug")
-    (is (= ["Breakpoint at line 6" "Stepped to line 2" "Stepped to line 4" "Stepped to line 7" "3"]
+    (is (= ["Breakpoint at line 6" "Stepped to line 2" "Stepped to line 4" "Stepped to line 2" "3"]
            (over-run (str "(defn f [x]\n  (when (neg? x)\n    (str \"never\"))\n  (inc x))\n"
                           "(defn c []\n  (let [v (mapv f [1 2 3])]\n    (count v)))")
-                     [3 6] "(c)" [:step :over :over]))
-        "from f's last line, the next pause is c's next line, not f again for the loop's next item")))
+                     [3 6] "(c)" [:step :over :over])))))
+
+(deftest out-lands-on-the-line-after-a-shadowing-let-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (is (= ["Breakpoint at line 6" "Stepped to line 2" "Stepped to line 7" "{:a 1, :b 2}"]
+           (over-run (str "(defn f [m]\n  (when (nil? m)\n    (str \"never\"))\n  (assoc m :a 1))\n"
+                          "(defn g [m]\n  (let [m (f m)]\n    (assoc m :b 2)))")
+                     [3 6] "(g {})" [:step :out]))
+        "a let rebinding the param m must not hide g's next line from Step Out")))
 
 (deftest over-runs-a-lazy-call-through-test
   (if-not (debugger/break-available?)
