@@ -92,16 +92,30 @@
 
 ;; --- public reads ----------------------------------------------------------
 
+(def ^:private LINE-WINDOW
+  ;; how much of the console either side of an offset line-at reads: a
+  ;; longer line is cut there, so a click never copies the whole console
+  2000)
+
 (defn line-at
   "{:text :start} of the console line holding offset: its text without the
-  newline, and the offset it starts at."
+  newline, and the offset it starts at, read only within LINE-WINDOW
+  characters either side (a longer line is cut to that window)."
   [cv offset]
   (let [buf (:buf cv)
         n (g/gtk-text-buffer-get-char-count buf)
-        text (text-range buf 0 n)
-        s (inc (or (str/last-index-of text "\n" (dec offset)) -1))
-        e (or (str/index-of text "\n" offset) n)]
-    {:text (subs text s e) :start s}))
+        from (max 0 (- offset LINE-WINDOW))
+        text (text-range buf from (min n (+ offset LINE-WINDOW)))
+        o (- offset from)
+        s (inc (or (str/last-index-of text "\n" (dec o)) -1))
+        e (or (str/index-of text "\n" o) (count text))]
+    {:text (subs text s e) :start (+ from s)}))
+
+(defn in-input?
+  "Whether offset is in the input region (at or after the prompt's end),
+  where the user types rather than reads output."
+  [cv offset]
+  (>= offset (mark-offset (:buf cv) (:input-start cv))))
 
 (defn input-text
   "The input region's text: from input-start to the end of the buffer."

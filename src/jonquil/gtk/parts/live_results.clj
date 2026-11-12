@@ -118,7 +118,8 @@
   (let [root (project-root ctx)
         label (str file ":" line)
         r (file-refs/resolve-file file {:root root
-                                        :files (if root (usages/project-files root) [])
+                                        ;; walked only when the path itself doesn't open
+                                        :files (delay (if root (usages/project-files root) []))
                                         :exists? #(.isFile (java.io.File. ^String %))
                                         :ns-hint ns-hint})]
     (cond
@@ -199,8 +200,9 @@
         ;; trimmed while the click waits moves every span
         ref (cview/result-at cv off)
         text (cview/result-text-at cv off)
-        ;; a result wins; else a file:line reference in the clicked line
-        fref (when (and (nil? ref) (= a b)) (file-ref-at ctx off))
+        ;; a result wins; else a file:line reference in the clicked output
+        ;; line, never in the input being typed at the prompt
+        fref (when (and (nil? ref) (= a b) (not (cview/in-input? cv off))) (file-ref-at ctx off))
         n (swap! click-gen inc)
         wait (g/double-click-time (g/gtk-settings-get-default))]
     (when (and (or ref fref) (= a b))

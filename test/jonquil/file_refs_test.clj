@@ -50,3 +50,41 @@
     (testing "nothing matches"
       (is (= {:none true} (fr/resolve-file "nope.clj" opts)))
       (is (= {:none true} (fr/resolve-file "/abs/gone.clj" opts))))))
+
+;; --- review round 1 ---------------------------------------------------------
+
+(deftest ref-at-is-linear-test
+  (testing "a long unbroken run of word characters answers at once, not after backtracking"
+    (let [line (apply str (repeat 20000 "ab.cd"))
+          t0 (System/nanoTime)]
+      (is (nil? (fr/ref-at line 10000)))
+      (is (< (/ (- (System/nanoTime) t0) 1e6) 500) "well under half a second"))))
+
+(deftest ref-at-prefixes-test
+  (testing "a word before a colon isn't a drive"
+    (is (= "src/a.clj" (:file (at "file:src/a.clj:3" "src"))))
+    (is (= "x.clj" (:file (at "error:x.clj:3" "x.clj")))))
+  (testing "a URL isn't a file reference"
+    (is (nil? (at "see https://example.com/y.clj:80 now" "y.clj"))))
+  (testing "a Windows drive path keeps its drive"
+    (is (= "C:\\x\\a.clj" (:file (at "at C:\\x\\a.clj:4" "C:")))))
+  (testing "the reference nearest the click on a line with two"
+    (is (= "b.clj" (:file (at "a.clj:1 then b.clj:2" "b.clj"))))))
+
+(deftest ns-hint-word-start-test
+  (is (nil? (fr/ns-hint "at MyApp.core$f (core.clj:3)")) "never from the middle of a word"))
+
+(deftest resolve-file-review-test
+  (let [files ["/p/src/a.clj" "/p/src/b/a.clj"]
+        opts {:root "/p" :files files :exists? (constantly false)}]
+    (testing "an absolute path from another machine falls back to the project's own file"
+      (is (= {:path "/p/src/a.clj"} (fr/resolve-file "/home/ci/proj/src/a.clj" opts))))
+    (testing "a Windows absolute path is absolute"
+      (is (= {:path "C:/x/a.clj"} (fr/resolve-file "C:\\x\\a.clj" (assoc opts :exists? #{"C:/x/a.clj"})))))
+    (testing "the project's files are only walked when they're needed"
+      (let [walked (atom 0)
+            lazy-files (delay (swap! walked inc) files)]
+        (is (= {:path "/abs.clj"} (fr/resolve-file "/abs.clj" (assoc opts :files lazy-files :exists? #{"/abs.clj"}))))
+        (is (= 0 @walked))
+        (is (= {:path "/p/src/b/a.clj"} (fr/resolve-file "b/a.clj" (assoc opts :files lazy-files))))
+        (is (= 1 @walked))))))
