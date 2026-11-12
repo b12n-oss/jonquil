@@ -265,6 +265,30 @@
   #{"if" "do" "let*" "loop*" "fn*" "letfn*" "try" "quote" "var" "." "new" "set!"
     "throw" "recur" "def" "case*" "monitor-enter" "monitor-exit" "deftype*" "reify*"})
 
+(defn- answered-kind
+  "head-kind for a head the runtime answered about, info being its answer
+  ({:var \"ns/name\" :macro true}, or nil for nothing): an unresolved
+  name is a call, or a macro when the buffer's namespace wasn't found
+  (ns-found? false); a core var is a known form or else a macro or call;
+  a known macro elsewhere (clojure.test's) is a known form; any other var
+  a macro or a call."
+  [{v :var m :macro} ns-found?]
+  (let [[vns vname] (when v (split-sym v))]
+    (cond
+      (nil? v) (if (false? ns-found?) :macro :call)
+      (= "clojure.core" vns) (if (known-core vname) [:known vname] (if m :macro :call))
+      (known-elsewhere v) [:known (known-elsewhere v)]
+      m :macro
+      :else :call)))
+
+(defn- unanswered-kind
+  "head-kind for a head the runtime said nothing about: a bare known core
+  or clojure.test name is that known form; anything else may be a macro."
+  [s ns-part]
+  (if (and (nil? ns-part) (or (known-core s) (contains? #{"deftest" "testing" "is" "are"} s)))
+    [:known s]
+    :macro))
+
 (defn- head-kind
   "How a list's head reads, given heads (the runtime's answer, symbol text
   -> {:var \"ns/name\" :macro true}, or nil when it resolves to nothing;
@@ -283,18 +307,8 @@
       (and (nil? ns-part) (specials s)) [:known s]
       (contains? text-macros s) :macro
       (= "clojure.core" ns-part) (if (known-core nm) [:known nm] :macro)
-      (and heads (contains? heads s))
-      (let [{v :var m :macro} (get heads s)
-            [vns vname] (when v (split-sym v))]
-        (cond
-          (nil? v) (if (false? ns-found?) :macro :call)
-          (= "clojure.core" vns) (if (known-core vname) [:known vname] (if m :macro :call))
-          (known-elsewhere v) [:known (known-elsewhere v)]
-          m :macro
-          :else :call))
-      (and (nil? ns-part) (known-core s)) [:known s]
-      (and (nil? ns-part) (contains? #{"deftest" "testing" "is" "are"} s)) [:known s]
-      :else :macro)))
+      (and heads (contains? heads s)) (answered-kind (get heads s) ns-found?)
+      :else (unanswered-kind s ns-part))))
 
 (defn- tagged
   "The nodes in kids written right after a #tag (a tagged literal's value):
@@ -308,41 +322,66 @@
                       b)))
         (partition 2 1 kids)))
 
+(defn- named-fn-parts
+  "fn's code: the fn tail, after an optional name."
+  [text xs]
+  (fn-tail text (if (symbol-atom? text (first xs)) (rest xs) xs)))
+
+(defn- binding-body-parts
+  "let's and its kind's code: the binding vector's inits, then (body xs)
+  for what follows it."
+  [body]
+  (fn [text xs] (concat (binding-pairs text (first xs)) (body (rest xs)))))
+
+(defn- seq-body-parts
+  "doseq's and for's code: the binding vector's code, then (body xs) for
+  what follows it."
+  [body]
+  (fn [text xs] (concat (seq-bindings text (first xs)) (body (rest xs)))))
+
+(def ^:private shapes
+  ;; [names (fn [text xs]) -> parts], xs being a list's forms after its
+  ;; head; the first shape naming a head wins
+  [[no-code (fn [_ _] nil)]
+   [#{"is" "are"} (fn [_ _] nil)]
+   [#{"defn" "defn-"} defn-parts]
+   [#{"deftest"} (fn [_ xs] (stmts (rest xs)))]
+   [#{"fn" "fn*"} named-fn-parts]
+   [#{"def" "defonce"} (fn [_ xs] (def-parts xs))]
+   [#{"defmethod"} (fn [text xs] (fn-tail text (drop 2 xs)))]
+   [#{"deftype" "defrecord" "proxy"} (fn [text xs] (method-lists text (drop 2 xs)))]
+   [#{"reify" "extend-type" "extend-protocol"} method-lists]
+   [body-binding (binding-body-parts stmts)]
+   [#{"if-let" "if-some"} (binding-body-parts exprs)]
+   [#{"doseq"} (seq-body-parts stmts)]
+   [#{"for"} (seq-body-parts exprs)]
+   [#{"letfn"} letfn-parts]
+   [test-then-body (fn [_ xs] (concat (exprs (take 1 xs)) (stmts (rest xs))))]
+   [just-body (fn [_ xs] (stmts xs))]
+   [#{"testing"} (fn [_ xs] (stmts (rest xs)))]
+   [#{"try"} try-parts]
+   [#{"case"} (fn [_ xs] (case-parts xs))]
+   [#{"set!" "new"} (fn [_ xs] (exprs (rest xs)))]
+   [first-only (fn [_ xs] (exprs (take 1 xs)))]
+   [#{"comment"} (fn [_ xs] (map (fn [x] [x :top]) xs))]
+   [all-args (fn [_ xs] (exprs xs))]])
+
+(def ^:private parts-by-name
+  ;; a known head's name -> its shape's fn, the first shape naming it
+  (reduce (fn [m [names f]] (reduce (fn [m n] (if (contains? m n) m (assoc m n f))) m names))
+          {} shapes))
+
 (defn- list-parts
   "The [node position] pairs of a list's code, by its head; position is
-  :stmt for a body form, :expr for any other evaluated one."
+  :stmt for a body form, :expr for any other evaluated one. A known head's
+  shape is in shapes; a macro holds none, a call's arguments are code, and
+  a known head without a shape holds none."
   [text {:keys [kids] :as node} opts]
-  (let [k (head-kind text node opts)
-        n (when (vector? k) (second k))
-        xs (rest kids)]
+  (let [k (head-kind text node opts)]
     (cond
       (= :macro k) nil
-      (= :call k) (if (head-symbol text node) (exprs xs) (exprs kids))
-      (no-code n) nil
-      (#{"is" "are"} n) nil
-      (#{"defn" "defn-"} n) (defn-parts text xs)
-      (= "deftest" n) (stmts (rest xs))
-      (#{"fn" "fn*"} n) (fn-tail text (if (symbol-atom? text (first xs)) (rest xs) xs))
-      (#{"def" "defonce"} n) (def-parts xs)
-      (= "defmethod" n) (fn-tail text (drop 2 xs))
-      (#{"deftype" "defrecord"} n) (method-lists text (drop 2 xs))
-      (#{"reify" "extend-type" "extend-protocol"} n) (method-lists text xs)
-      (= "proxy" n) (method-lists text (drop 2 xs))
-      (body-binding n) (concat (binding-pairs text (first xs)) (stmts (rest xs)))
-      (#{"if-let" "if-some"} n) (concat (binding-pairs text (first xs)) (exprs (rest xs)))
-      (#{"doseq" "for"} n) (concat (seq-bindings text (first xs))
-                                   ((if (= "doseq" n) stmts exprs) (rest xs)))
-      (= "letfn" n) (letfn-parts text xs)
-      (test-then-body n) (concat (exprs (take 1 xs)) (stmts (rest xs)))
-      (just-body n) (stmts xs)
-      (= "testing" n) (stmts (rest xs))
-      (= "try" n) (try-parts text xs)
-      (= "case" n) (case-parts xs)
-      (#{"set!" "new"} n) (exprs (rest xs))
-      (first-only n) (exprs (take 1 xs))
-      (= "comment" n) (map (fn [x] [x :top]) xs)
-      (all-args n) (exprs xs)
-      :else nil)))
+      (= :call k) (if (head-symbol text node) (exprs (rest kids)) (exprs kids))
+      :else (when-let [f (parts-by-name (second k))] (f text (rest kids))))))
 
 (defn- pausable?
   "True when node, in an evaluated position, can hold a breakpoint: a list

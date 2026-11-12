@@ -191,39 +191,76 @@
 
       :else {:stop (str "this runtime can't evaluate in a file's namespace (" n "), so the forms were not sent")})))
 
+(declare apply-one!)
+
+(defn- entry-tab
+  "The tab entry e's form goes from: its file's open tab, else the active
+  one."
+  [{:keys [active-tab] :as ctx} e]
+  (or (tab-for-path ctx (:path e)) (active-tab)))
+
+(defn- entry-blocked
+  "Why entry e can't be sent from tab t now, or nil: its tab belongs to
+  another project, or something is already running."
+  [{:keys [cv ev* sel* refuse-foreign!] :as ctx} e t]
+  (cond
+    (and (tab-for-path ctx (:path e)) (refuse-foreign! {:tab t :cv cv :sel* sel*}))
+    "its tab belongs to another project"
+    (ev/evaluating? @ev*) "something is already running"))
+
+(defn- answer-outcome
+  "What an evaluation's answer m means for the apply: :ok to go on, a
+  reason to stop (busy, or an end other than :ok), or nil while it isn't
+  over."
+  [m]
+  (cond
+    (:busy m) "the evaluator was busy"
+    (:done m) (let [status (:status (:result (:done m)))]
+                (if (= :ok status) :ok (str "it ended " (if status (name status) "badly"))))))
+
+(defn- entry-ended!
+  "After the i-th entry's evaluation: goes on to the next on :ok, else
+  stops the apply with outcome's reason."
+  [ctx {:keys [s entries i stop!]} outcome]
+  (if (= :ok outcome)
+    (apply-one! ctx s entries (inc i))
+    (stop! outcome)))
+
+(defn- on-entry-answer
+  "The mcp-eval! callback for the i-th entry: its outcome (answer-outcome)
+  on the GTK thread."
+  [ctx step]
+  (fn [m]
+    (when-let [outcome (answer-outcome m)]
+      (on-gui! (fn [] (entry-ended! ctx step outcome))))))
+
+(defn- send-entry!
+  "Sends entry e's form from tab t in its file's namespace, or stops the
+  apply when eval-opts says it can't be."
+  [{:keys [cv ev* mcp-eval! status-label] :as ctx} {:keys [e t label stop!] :as step}]
+  (let [{:keys [opts stop]} (eval-opts @ev* (entry-source-text ctx (:path e)))]
+    (if stop
+      (stop! stop)
+      (do (say! ctx (str "Applying " label))
+          (mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
+                     (:text e)
+                     (assoc opts :owner (:id t))
+                     (on-entry-answer ctx step))))))
+
 (defn- apply-one!
   "Sends entries' i-th form to the evaluator as Run Selection sends code, in
   the namespace of its file, then goes on to the next when it ended :ok.
   A throw is said on the console, and stops the rest."
-  [{:keys [cv ev* mcp-eval! status-label active-tab sel* refuse-foreign!] :as ctx} s entries i]
+  [ctx s entries i]
   (if (>= i (count entries))
     (say! ctx (str "Applied the change set \"" (:name s) "\": " (plural (count entries) "form" "forms") "."))
     (let [e (nth entries i)
-          t (or (tab-for-path ctx (:path e)) (active-tab))
+          t (entry-tab ctx e)
           label (str (inc i) " of " (count entries) ": " (:name e))
           stop! (fn [why] (say! ctx (str "Stopped at " label ", " why ". The forms after it were not sent.")))]
-      (cond
-        (and (tab-for-path ctx (:path e)) (refuse-foreign! {:tab t :cv cv :sel* sel*}))
-        (stop! "its tab belongs to another project")
-
-        (ev/evaluating? @ev*) (stop! "something is already running")
-
-        :else
-        (let [{:keys [opts stop]} (eval-opts @ev* (entry-source-text ctx (:path e)))]
-          (if stop
-            (stop! stop)
-            (do (say! ctx (str "Applying " label))
-                (mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
-                           (:text e)
-                           (assoc opts :owner (:id t))
-                           (fn [m]
-                             (cond
-                               (:busy m) (on-gui! (fn [] (stop! "the evaluator was busy")))
-                               (:done m) (let [status (:status (:result (:done m)))]
-                                           (on-gui! (fn []
-                                                      (if (= :ok status)
-                                                        (apply-one! ctx s entries (inc i))
-                                                        (stop! (str "it ended " (if status (name status) "badly")))))))))))))))))
+      (if-let [why (entry-blocked ctx e t)]
+        (stop! why)
+        (send-entry! ctx {:s s :entries entries :i i :e e :t t :label label :stop! stop!})))))
 
 (defn not-loaded-message [n] (str n " isn't loaded: Run its file first"))
 
