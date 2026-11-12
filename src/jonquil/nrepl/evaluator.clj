@@ -665,6 +665,19 @@
         (try (on-output :error (str "; Stop failed: " (ex-message e) "\n"))
              (catch Throwable _ nil))))))
 
+(defn- flag-stop-requested!
+  "Flags the running evaluation stop-requested, and for an evaluation that
+  has an id also restart-triggered, in one swap that does nothing unless
+  :running is still the running map the caller read. Returns the state as
+  it was before the swap."
+  [state running id]
+  (first (swap-vals! state
+                     (fn [s]
+                       (if (identical? running (:running s))
+                         (cond-> (assoc-in s [:running :stop-requested?] true)
+                           id (assoc-in [:running :restart-triggered?] true))
+                         s)))))
+
 (defn- interrupt-running!
   "Stop for the running evaluation, if any: flags it stop-requested in one
   swap keyed by the identity of the exact :running map read here (separate
@@ -676,12 +689,7 @@
   so repeated Stop presses for one id still trigger only one future."
   [{:keys [state] :as ev}]
   (when-let [{:keys [id opts] :as running} (:running @state)]
-    (let [[old _] (swap-vals! state
-                              (fn [s]
-                                (if (identical? running (:running s))
-                                  (cond-> (assoc-in s [:running :stop-requested?] true)
-                                    id (assoc-in [:running :restart-triggered?] true))
-                                  s)))]
+    (let [old (flag-stop-requested! state running id)]
       ;; No :id yet means the request hasn't gone out: run-worker! sees
       ;; the flag and finishes as :interrupted without sending it, and
       ;; send-main! re-checks it once the id lands.

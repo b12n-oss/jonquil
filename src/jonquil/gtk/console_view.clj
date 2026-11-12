@@ -316,6 +316,25 @@
     (move-mark-to! buf out-end start)
     (move-mark-to! buf input-start end)))
 
+(defn- prompt-rewrite-plan
+  "Reads, before the prompt span is rewritten, what set-prompt! needs to
+  put the selection back: {:start :old-end :caret :bound :remap :in-input?}.
+  :remap maps an old buffer offset to its place after the span becomes
+  new-text, and :in-input? is true when the caret or the selection's other
+  end sat in the input."
+  [{:keys [buf out-end input-start]} new-text]
+  (let [start (mark-offset buf out-end)
+        old-end (mark-offset buf input-start)
+        caret (g/cursor-offset buf)
+        [sel-a sel-b] (g/selection-offsets buf)
+        bound (if (= caret sel-a) sel-b sel-a)
+        delta (- (count new-text) (- old-end start))]
+    {:start start :old-end old-end :caret caret :bound bound
+     :remap (fn [o] (cond (>= o old-end) (+ o delta)
+                          (>= o start) start
+                          :else o))
+     :in-input? (or (>= caret old-end) (>= bound old-end))}))
+
 (defn set-prompt!
   "Rewrites the live prompt -- the region between out-end and input-start
   -- to (str ns-name \"=> \"), clj style. GTK-thread only. A no-op when
@@ -342,19 +361,10 @@
   either side of the edit point (insert-chunk!'s own citation on why that
   can happen at a tag boundary)."
   [cv ns-name]
-  (let [{:keys [buf out-end input-start prompt-text]} cv
+  (let [{:keys [buf prompt-text]} cv
         new-text (str ns-name "=> ")]
     (when (not= new-text @prompt-text)
-      (let [start (mark-offset buf out-end)
-            old-end (mark-offset buf input-start)
-            caret (g/cursor-offset buf)
-            [sel-a sel-b] (g/selection-offsets buf)
-            bound (if (= caret sel-a) sel-b sel-a)
-            delta (- (count new-text) (- old-end start))
-            remap (fn [o] (cond (>= o old-end) (+ o delta)
-                                (>= o start) start
-                                :else o))
-            in-input? (or (>= caret old-end) (>= bound old-end))]
+      (let [{:keys [start old-end caret bound remap in-input?]} (prompt-rewrite-plan cv new-text)]
         (rewrite-prompt-span! cv start old-end new-text)
         (when in-input?
           (g/with-iters* buf (remap caret) (remap bound)
