@@ -70,9 +70,11 @@
 
 (deftest plan-diff-identity-test
   (let [t "(defn f [x] (inc x))"]
-    (is (nil? (paint/plan-diff t (paint/paint-plan t) t (paint/paint-plan t)
-                               {:prefix (count t) :suffix (count t)})))
-    (let [d (paint/plan-diff t (paint/paint-plan t) t (paint/paint-plan t) nil)]
+    (is (nil? (paint/plan-diff {:old-text t :old-plan (paint/paint-plan t)
+                                :new-text t :new-plan (paint/paint-plan t)
+                                :bounds {:prefix (count t) :suffix (count t)}})))
+    (let [d (paint/plan-diff {:old-text t :old-plan (paint/paint-plan t)
+                              :new-text t :new-plan (paint/paint-plan t) :bounds nil})]
       (is (some? d))
       (is (= [0 (count t)] (:range d))))))
 
@@ -81,9 +83,9 @@
         old-text (str/join "\n" lines)
         at (+ (* 100 23) 7)
         new-text (str (subs old-text 0 at) "z" (subs old-text at))
-        d (paint/plan-diff old-text (paint/paint-plan old-text)
-                           new-text (paint/paint-plan new-text)
-                           {:prefix at :suffix (- (count old-text) at)})
+        d (paint/plan-diff {:old-text old-text :old-plan (paint/paint-plan old-text)
+                            :new-text new-text :new-plan (paint/paint-plan new-text)
+                            :bounds {:prefix at :suffix (- (count old-text) at)}})
         [a b] (:range d)]
     (is (some? d))
     (is (< (- b a) 40))
@@ -93,8 +95,9 @@
 (deftest plan-diff-same-text-test
   (let [t "(foo 1)\n(bar 2)\n(baz 3)"
         prof {:special-forms #{} :builtins #{"bar"}}
-        d (paint/plan-diff t (paint/paint-plan t) t (paint/paint-plan prof t)
-                           {:prefix (count t) :suffix (count t)})
+        d (paint/plan-diff {:old-text t :old-plan (paint/paint-plan t)
+                            :new-text t :new-plan (paint/paint-plan prof t)
+                            :bounds {:prefix (count t) :suffix (count t)}})
         at (str/index-of t "bar")]
     (is (some? d))
     (is (<= (first (:range d)) at))
@@ -140,8 +143,9 @@
             expected (plan->model (count new-text) new-plan)
             mapped (edit-model (plan->model (count old-text) old-plan)
                                i (+ i del) (count ins) inherit?)
-            d (paint/plan-diff old-text old-plan new-text new-plan
-                               {:prefix i :suffix (- (count old-text) i del)})
+            d (paint/plan-diff {:old-text old-text :old-plan old-plan
+                                :new-text new-text :new-plan new-plan
+                                :bounds {:prefix i :suffix (- (count old-text) i del)}})
             actual (if d (apply-diff mapped d) mapped)]
         (is (= expected actual)
             (str "seed index " idx " inherit? " inherit? " edit "
@@ -180,7 +184,9 @@
             m1 (edit-model (plan->model (count t0) (paint/paint-plan t0)) i1 (+ i1 del1) (count ins1) inherit?)
             m2 (edit-model m1 i2 (+ i2 del2) (count ins2) inherit?)
             p2 (paint/paint-plan t2)
-            d (paint/plan-diff t0 (paint/paint-plan t0) t2 p2 (select-keys b2 [:prefix :suffix]))]
+            d (paint/plan-diff {:old-text t0 :old-plan (paint/paint-plan t0)
+                                :new-text t2 :new-plan p2
+                                :bounds (select-keys b2 [:prefix :suffix])})]
         (is (= (plan->model (count t2) p2) (if d (apply-diff m2 d) m2))
             (str "seed index " idx " inherit? " inherit? " edits "
                  (pr-str [{:at i1 :del del1 :ins ins1} {:at i2 :del del2 :ins ins2}] {:start start})))))))

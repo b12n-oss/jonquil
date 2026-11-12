@@ -272,6 +272,38 @@
     :else [nil (str ".jonquil.edn :auto-require should be a vector of namespace symbols, like [my.app.core], not "
                     (pr-str v) ", so it is ignored")]))
 
+(defn- host-ok?
+  "True for a bare host name or address: not blank, and either no colon or
+  an IPv6 literal (two or more)."
+  [host]
+  (and (string? host) (not (str/blank? host))
+       ;; a port goes in :port; an IPv6 literal is fine
+       (or (not (str/includes? host ":")) (>= (count (re-seq #":" host)) 2))))
+
+(defn- relative-path-ok?
+  "True for a non-blank string that isn't an absolute path."
+  [path]
+  (and (string? path) (not (str/blank? path))
+       (not (str/starts-with? path "/"))))
+
+(defn- nrepl-checks
+  "[[key value ok? message]] for the keys of a :nrepl map."
+  [{:keys [host port port-file]}]
+  [[:host host (host-ok? host)
+    ":host should be a host name or address without a port, like \"localhost\" (the port goes in :port)"]
+   [:port port (and (integer? port) (<= 1 port 65535))
+    ":port should be a port number from 1 to 65535"]
+   [:port-file port-file (relative-path-ok? port-file)
+    ":port-file should be a path relative to the project, like \".nrepl-port\""]])
+
+(defn- nrepl-check-step
+  "reduce step over nrepl-checks: keeps a valid value, warns for a bad one,
+  skips an absent one."
+  [[m ws] [k val ok? msg]]
+  (cond (nil? val) [m ws]
+        ok? [(assoc m k val) ws]
+        :else [m (conj ws (str ".jonquil.edn :nrepl " msg ", so it is ignored"))]))
+
 (defn- nrepl-part
   "[map-or-nil warnings] for .jonquil.edn's :nrepl: {:host :port
   :port-file}, every key optional. A bad value is a warning and only that
@@ -280,22 +312,7 @@
   (cond
     (nil? v) [nil []]
     (not (map? v)) [nil [".jonquil.edn :nrepl should be a map, like {:port 1667} or {:host \"box\" :port 1667}"]]
-    :else
-    (let [{:keys [host port port-file]} v
-          checks [[:host host (and (string? host) (not (str/blank? host))
-                                   ;; a port goes in :port; an IPv6 literal is fine
-                                   (or (not (str/includes? host ":")) (>= (count (re-seq #":" host)) 2)))
-                   ":host should be a host name or address without a port, like \"localhost\" (the port goes in :port)"]
-                  [:port port (and (integer? port) (<= 1 port 65535))
-                   ":port should be a port number from 1 to 65535"]
-                  [:port-file port-file (and (string? port-file) (not (str/blank? port-file))
-                                             (not (str/starts-with? port-file "/")))
-                   ":port-file should be a path relative to the project, like \".nrepl-port\""]]]
-      (reduce (fn [[m ws] [k val ok? msg]]
-                (cond (nil? val) [m ws]
-                      ok? [(assoc m k val) ws]
-                      :else [m (conj ws (str ".jonquil.edn :nrepl " msg ", so it is ignored"))]))
-              [{} []] checks))))
+    :else (reduce nrepl-check-step [{} []] (nrepl-checks v))))
 
 (defn- kw-or-warn
   "[keyword-or-nil warning-or-nil] for key k of the config map m."
@@ -324,6 +341,18 @@
   (when-not (or (nil? cl) (map? cl))
     ".jonquil.edn :cljs should be a map, like {:shadow-build :app}"))
 
+(defn- accepted-keys
+  "The keys config-from-map adds when the value is usable: :auto-require,
+  :cljs, :nrepl, :parinfer, :format-style, :remember-session?."
+  [{:keys [auto-require cljs nrepl parinfer format-style remember-session?]}]
+  (cond-> {}
+    auto-require (assoc :auto-require auto-require)
+    (map? cljs) (assoc :cljs cljs)
+    nrepl (assoc :nrepl nrepl)
+    (contains? parinfer-modes parinfer) (assoc :parinfer parinfer)
+    (contains? format-styles format-style) (assoc :format-style format-style)
+    (boolean? remember-session?) (assoc :remember-session? remember-session?)))
+
 (defn- config-from-map
   "parse-config's result for the config map m."
   [m]
@@ -339,13 +368,9 @@
         fsw (format-style-warning fs)
         rs (get m :remember-session?)
         rsw (remember-session-warning rs)]
-    (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw fsw rsw])) nrw)}
-      ar (assoc :auto-require ar)
-      (map? cl) (assoc :cljs cl)
-      nr (assoc :nrepl nr)
-      (contains? parinfer-modes pi) (assoc :parinfer pi)
-      (contains? format-styles fs) (assoc :format-style fs)
-      (boolean? rs) (assoc :remember-session? rs))))
+    (merge {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw fsw rsw])) nrw)}
+           (accepted-keys {:auto-require ar :cljs cl :nrepl nr :parinfer pi
+                           :format-style fs :remember-session? rs}))))
 
 (defn parse-config
   "{:dialect k? :runtime k? :auto-require [sym]? :cljs map? :nrepl map?
@@ -391,31 +416,38 @@
   [k]
   (get {:in-process "in-process" :nrepl "nREPL"} k (name k)))
 
+(defn- marker-decides?
+  "True when exactly one profile (hits) matched a project marker and it
+  claims path's extension, or there is no path."
+  [hits path]
+  (and (= 1 (count hits))
+       (or (nil? path) (contains? (:extensions (first hits)) (extension path)))))
+
+(defn- default-hit
+  "The profile in pool that the settings default names, or nil. A default
+  naming a marker-less profile (:clj is the only one today) is a real hit
+  only for a file with no project (in practice an untitled buffer). Inside a
+  project, a marker-less default is ignored and selection falls through to
+  :fallback, same as if no default were set at all."
+  [pool project default]
+  (let [d (when default (some (fn [p] (when (= default (:id p)) p)) pool))]
+    (when (and d (or (nil? project) (seq (:project-markers d)))) d)))
+
 (defn- choose-profile
   "[profile source] for select: config, then a deciding marker, then the
   extension, the settings default and the fallback."
   [{:keys [profiles project path default by-config markers]}]
   (let [hits (filterv (fn [p] (some markers (:project-markers p))) profiles)
-        ext (extension path)
-        marker-decides? (and (= 1 (count hits))
-                             (let [only (first hits)]
-                               (or (nil? path) (contains? (:extensions only) ext))))
+        decides? (marker-decides? hits path)
         ;; A single marker whose profile doesn't claim path's extension isn't
         ;; a real hit after all: the pool widens back to every profile, so
         ;; extension, settings and fallback can look past it.
-        pool (cond (> (count hits) 1) hits
-                   marker-decides? hits
-                   :else profiles)
+        pool (if (or (> (count hits) 1) decides?) hits profiles)
+        ext (extension path)
         by-ext (first (filter (fn [p] (contains? (:extensions p) ext)) pool))
-        ;; A settings default naming a marker-less profile (:clj is the
-        ;; only one today) is a real hit only for a file with no project (in
-        ;; practice an untitled buffer). Inside a project, a
-        ;; marker-less default is ignored and selection falls through to
-        ;; :fallback, same as if no default were set at all.
-        by-default (when-let [d (when default (some (fn [p] (when (= default (:id p)) p)) pool))]
-                     (when (or (nil? project) (seq (:project-markers d))) d))]
+        by-default (default-hit pool project default)]
     (cond by-config [by-config :config]
-          marker-decides? [(first hits) :marker]
+          decides? [(first hits) :marker]
           by-ext [by-ext :extension]
           by-default [by-default :settings]
           :else [(first pool) :fallback])))
@@ -449,6 +481,31 @@
       (and nrepl (not nrepl?))
       (conj (str ".jonquil.edn :nrepl only applies to the nREPL dialect, not " (:name p) ", so it is ignored")))))
 
+(defn- launch-target
+  "The target ClojureScript that Jonquil starts will use, :node or
+  :browser, or nil when the selection is not a cljs launch."
+  [cljs? rt target]
+  (when (and cljs? (= :launch rt))
+    (if (= :browser target) :browser :node)))
+
+(defn- target-warnings
+  "Warnings for a :cljs :target that the selection ignores or can't use."
+  [cljs? rt target]
+  (cond
+    (and cljs? (= :launch rt) (some? target) (not (#{:node :browser} target)))
+    [(str ".jonquil.edn :cljs :target should be :node or :browser, not " (pr-str target) "; using :node")]
+    (and cljs? (= :attach rt) (some? target))
+    [".jonquil.edn :cljs :target applies only to ClojureScript that Jonquil starts, not shadow-cljs, so it is ignored"]
+    :else []))
+
+(defn- console-warnings
+  "Warning for a :cljs :forward-console? that isn't a boolean, browser only."
+  [cljs-target fc]
+  (if (and (= :browser cljs-target) (some? fc) (not (boolean? fc)))
+    [(str ".jonquil.edn :cljs :forward-console? should be true or false, not "
+          (pr-str fc) "; forwarding stays on")]
+    []))
+
 (defn- cljs-launch
   "{:cljs-target k? :cljs-console? b? :warnings [str]} for a ClojureScript
   selection on runtime rt with the config's :cljs map."
@@ -457,25 +514,59 @@
         ;; :cljs :target picks node or the browser for ClojureScript that
         ;; Jonquil starts; shadow-cljs (attach) has its own targets.
         target (when cljs? (get cljs :target))
-        cljs-target (when (and cljs? (= :launch rt))
-                      (if (= :browser target) :browser :node))
+        cljs-target (launch-target cljs? rt target)
         ;; :cljs :forward-console? turns the browser page's console hook
         ;; off; node has no hook, so the key is browser-only
-        fc (get cljs :forward-console?)
-        cljs-console? (when (= :browser cljs-target) (not (false? fc)))
-        w7 (if (and (= :browser cljs-target) (some? fc) (not (boolean? fc)))
-             [(str ".jonquil.edn :cljs :forward-console? should be true or false, not "
-                   (pr-str fc) "; forwarding stays on")]
-             [])
-        w6 (cond
-             (and cljs? (= :launch rt) (some? target) (not (#{:node :browser} target)))
-             [(str ".jonquil.edn :cljs :target should be :node or :browser, not " (pr-str target) "; using :node")]
-             (and cljs? (= :attach rt) (some? target))
-             [".jonquil.edn :cljs :target applies only to ClojureScript that Jonquil starts, not shadow-cljs, so it is ignored"]
-             :else [])]
+        fc (get cljs :forward-console?)]
     {:cljs-target cljs-target
-     :cljs-console? cljs-console?
-     :warnings (into w6 w7)}))
+     :cljs-console? (when (= :browser cljs-target) (not (false? fc)))
+     :warnings (into (target-warnings cljs? rt target) (console-warnings cljs-target fc))}))
+
+(defn- project-config
+  "parse-config's result for the project's .jonquil.edn, or no warnings
+  when there is no project."
+  [project]
+  (if project
+    (parse-config (:config project) (:config-error project))
+    {:warnings []}))
+
+(defn- unknown-dialect-warnings
+  "Warning when .jonquil.edn names a dialect that no profile has."
+  [dialect by-config]
+  (if (and dialect (not by-config))
+    [(str ".jonquil.edn names " dialect ", which isn't a known dialect")]
+    []))
+
+(defn- dialect-scoped-config
+  "The config keys that only some dialects read, kept when the chosen
+  profile p is one of them: :auto-require (:clj, :jolt), :cljs, :nrepl."
+  [p {:keys [auto-require cljs nrepl]}]
+  (cond-> {}
+    (and auto-require (contains? #{:clj :jolt} (:id p))) (assoc :auto-require auto-require)
+    (and cljs (= :cljs (:id p))) (assoc :cljs cljs)
+    (and nrepl (= :nrepl (:id p))) (assoc :nrepl nrepl)))
+
+(defn- launch-config
+  "The :cljs-target and :cljs-console? that cljs-launch chose, when set."
+  [{:keys [cljs-target cljs-console?]}]
+  (cond-> {}
+    cljs-target (assoc :cljs-target cljs-target)
+    (some? cljs-console?) (assoc :cljs-console? cljs-console?)))
+
+(defn- editor-config
+  "The editor's own config keys. Parinfer is the editor's, not a runtime's,
+  so no dialect gates it; the format-style pin rides the same way."
+  [{:keys [parinfer format-style]}]
+  (cond-> {}
+    parinfer (assoc :parinfer parinfer)
+    format-style (assoc :format-style format-style)))
+
+(defn- selection-config
+  "The config-derived keys of select's result for the chosen profile p."
+  [p config launch]
+  (merge (dialect-scoped-config p config)
+         (launch-config launch)
+         (editor-config config)))
 
 (defn select
   "Chooses the dialect and runtime for a window.
@@ -491,42 +582,22 @@
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback."
   [profiles project path default]
-  (let [{:keys [dialect runtime auto-require cljs nrepl parinfer format-style warnings] :as config}
-        (if project
-          (parse-config (:config project) (:config-error project))
-          {:warnings []})
+  (let [{:keys [dialect runtime cljs warnings] :as config} (project-config project)
         by-config (when dialect (profile profiles dialect))
-        w1 (if (and dialect (not by-config))
-             [(str ".jonquil.edn names " dialect ", which isn't a known dialect")]
-             [])
         markers (:markers project #{})
         [p source] (choose-profile {:profiles profiles :project project :path path
                                     :default default :by-config by-config :markers markers})
         rt-ok? (and runtime (contains? (:runtimes p) runtime))
         default-rt (default-runtime p markers)
         rt (if rt-ok? runtime default-rt)
-        {:keys [cljs-target cljs-console?] launch-warnings :warnings} (cljs-launch p rt cljs)
-        auto-require? (contains? #{:clj :jolt} (:id p))
-        cljs? (= :cljs (:id p))
-        nrepl? (= :nrepl (:id p))]
-    (cond-> {:profile p
-             :runtime rt
-             :project-dir (:dir project)
-             :source source
-             :warnings (-> (vec warnings)
-                           (into w1)
-                           (into (runtime-warnings runtime rt-ok? p default-rt))
-                           (into (scope-warnings p config))
-                           (into launch-warnings))}
-      (and auto-require auto-require?) (assoc :auto-require auto-require)
-      (and cljs cljs?) (assoc :cljs cljs)
-      cljs-target (assoc :cljs-target cljs-target)
-      (some? cljs-console?) (assoc :cljs-console? cljs-console?)
-      (and nrepl nrepl?) (assoc :nrepl nrepl)
-      ;; Parinfer is the editor's, not a runtime's, so no dialect gates it;
-      ;; the format-style pin rides the same way.
-      parinfer (assoc :parinfer parinfer)
-      format-style (assoc :format-style format-style))))
+        launch (cljs-launch p rt cljs)]
+    (merge {:profile p :runtime rt :project-dir (:dir project) :source source
+            :warnings (-> (vec warnings)
+                          (into (unknown-dialect-warnings dialect by-config))
+                          (into (runtime-warnings runtime rt-ok? p default-rt))
+                          (into (scope-warnings p config))
+                          (into (:warnings launch)))}
+           (selection-config p config launch))))
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the
