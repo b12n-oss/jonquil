@@ -47,6 +47,13 @@
     (is (str/includes? t "gtk4 4.24.1 (LGPL-2.1-or-later)\n  source: https://download.gnome.org/sources/gtk/4.24/gtk-4.24.1.tar.xz\n  licence files: licenses/gtk4/COPYING\n"))
     (is (str/includes? t "lzo 2.10 (GPL-2.0-or-later)\n  source: https://www.oberhumer.com/opensource/lzo/download/lzo-2.10.tar.gz\n  licence files: none found in the Homebrew keg\n"))))
 
+(deftest sources-txt-says-when-the-source-is-another-version-test
+  (let [t (ar/sources-txt [{:name "brotli" :version "1.2.0" :stable "1.2.1" :license "MIT"
+                            :url "https://github.com/google/brotli/archive/refs/tags/v1.2.1.tar.gz"
+                            :license-files ["LICENSE"]}])]
+    (is (str/includes? t "brotli 1.2.0 (MIT)\n  source: https://github.com/google/brotli/archive/refs/tags/v1.2.1.tar.gz (for 1.2.1, newer than the 1.2.0 bundled: brew upgrade brotli before a public build)\n"))
+    (is (= ["brotli"] (ar/outdated [{:name "brotli" :version "1.2.0" :stable "1.2.1"} {:name "gtk4" :version "4.24.1" :stable "4.24.1"}])))))
+
 (deftest lzo-test
   (is (true? (ar/lzo? ["libgtk-4.1.dylib" "liblzo2.2.dylib"])))
   (is (false? (ar/lzo? ["libgtk-4.1.dylib"]))))

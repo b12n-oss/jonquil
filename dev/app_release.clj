@@ -12,7 +12,11 @@
   jonquil: the filesystem ignores case, so it would be the launcher.
   app:bundle and app:install stay the Homebrew-linked local build."
   (:require [app-bundle]
-            [clojure.string :as str]))
+            [clojure.data.json :as json]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [jolt.process :as p]))
 
 ;; --- reading otool's output ------------------------------------------------------
 
@@ -84,19 +88,230 @@
        "export DYLD_LIBRARY_PATH=\"$here/../Frameworks${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}\"\n"
        "exec \"$here/jonquil-bin\" \"$@\"\n"))
 
+(defn outdated
+  "The names of formulae whose bundled :version isn't Homebrew's :stable."
+  [formulae]
+  (vec (keep (fn [{:keys [name version stable]}] (when (and stable (not= stable version)) name)) formulae)))
+
 (defn sources-txt
-  "licenses/SOURCES.txt for formulae ({:name :version :license :url
-  :license-files})."
+  "licenses/SOURCES.txt for formulae ({:name :version :stable :license :url
+  :license-files}). :url is Homebrew's source for :stable, its formula's
+  current version, which an older keg (:version) doesn't match: said so."
   [formulae]
   (str "Jonquil.app bundles these libraries unmodified, as separate dynamic\n"
        "libraries, built by Homebrew. Each keeps its own licence. The source of\n"
        "each, at exactly the version bundled, is at the URL given.\n\n"
        (str/join "\n"
-                 (for [{:keys [name version license url license-files]} formulae]
+                 (for [{:keys [name version stable license url license-files]} formulae]
                    (str name " " version " (" license ")\n"
-                        "  source: " url "\n"
+                        "  source: " url
+                        (when (and stable (not= stable version))
+                          (str " (for " stable ", newer than the " version " bundled: brew upgrade " name
+                               " before a public build)"))
+                        "\n"
                         "  licence files: "
                         (if (seq license-files)
                           (str/join ", " (map #(str "licenses/" name "/" %) license-files))
                           "none found in the Homebrew keg")
                         "\n")))))
+
+;; --- building it -------------------------------------------------------------------
+
+(def ^:private app "target/Jonquil.app")
+(def ^:private contents (str app "/Contents"))
+(def ^:private frameworks (str contents "/Frameworks"))
+(def ^:private licenses (str contents "/Resources/licenses"))
+(def ^:private bin (str contents "/MacOS/jonquil-bin"))
+(def ^:private launcher (str contents "/MacOS/Jonquil"))
+
+(defn- fail! [msg]
+  (binding [*out* *err*] (println (str "app-release: " msg)))
+  (System/exit 1))
+
+(defn- warn! [msg]
+  (binding [*out* *err*] (println (str "app-release: WARNING: " msg))))
+
+(defn- sh!
+  "Runs args, answering stdout; fails the release naming the command when
+  it fails."
+  [& args]
+  (let [{:keys [exit out err]} (apply p/sh (map str args))]
+    (when-not (zero? exit)
+      (fail! (str (str/join " " args) " failed:\n" err)))
+    out))
+
+(defn- real-path [path] (str/trim (sh! "realpath" path)))
+
+(defn- refs-of [lib]
+  (otool-refs (sh! "otool" "-L" lib) (last (str/split-lines (str/trim (sh! "otool" "-D" lib))))))
+
+(defn- roots
+  "The /opt/homebrew candidates deps.edn's :jolt/native gives for macOS,
+  those on disk."
+  []
+  (->> (:jolt/native (edn/read-string (slurp "deps.edn")))
+       (mapcat :darwin)
+       (filter #(and (str/starts-with? % "/opt/homebrew/") (.exists (io/file %))))
+       (map real-path)))
+
+(defn- bundle-lib!
+  "Copies plan entry {:src :name :refs} into Frameworks, relinked to @rpath."
+  [{:keys [src name refs]}]
+  (let [dest (str frameworks "/" name)]
+    (sh! "cp" (real-path src) dest)
+    (sh! "chmod" "u+w" dest)
+    (sh! "install_name_tool" "-id" (str "@rpath/" name) dest)
+    (doseq [r refs]
+      (sh! "install_name_tool" "-change" r (str "@rpath/" (base-name r)) dest))
+    (when-not (str/includes? (sh! "otool" "-l" dest) "@loader_path")
+      (sh! "install_name_tool" "-add_rpath" "@loader_path" dest))))
+
+(defn- formula-of
+  "[name version] of the Homebrew keg a library's real path is in, or nil."
+  [path]
+  (when-let [[_ n v] (re-find #"^/opt/homebrew/Cellar/([^/]+)/([^/]+)/" path)] [n v]))
+
+(defn- licence-files
+  "The top-level licence files of keg dir: LICENSE, COPYING and the like,
+  or a file named for its licence (glib's LGPL-2.1-or-later.txt)."
+  [dir]
+  (->> (.listFiles (io/file dir))
+       (filter #(and (.isFile %)
+                     (re-find #"(?i)^(licen[cs]e|copying|copyright|notice)|^[A-Za-z0-9.+-]*(GPL|MIT|BSD|MPL|Apache)[A-Za-z0-9.+-]*\.txt$"
+                              (.getName %))))
+       (map #(.getName %))
+       sort vec))
+
+(defn- write-licences!
+  "licenses/<formula>/ with each bundled formula's licence files, then
+  SOURCES.txt and NOTICE."
+  [plan]
+  (let [kegs (->> plan (keep (comp formula-of real-path :src)) distinct (sort-by first))
+        by-name (into {} (map (fn [f] [(get f "name") f]))
+                      (get (json/read-str (apply sh! "brew" "info" "--json=v2" (map first kegs))) "formulae"))
+        formulae (doall
+                  (for [[n v] kegs
+                        :let [dir (str "/opt/homebrew/Cellar/" n "/" v)
+                              files (licence-files dir)
+                              f (by-name n)]]
+                    (do (doseq [x files]
+                          (io/make-parents (str licenses "/" n "/" x))
+                          (sh! "cp" (str dir "/" x) (str licenses "/" n "/" x)))
+                        {:name n :version v :stable (get-in f ["versions" "stable"]) :license (str (get f "license"))
+                         :url (str (get-in f ["urls" "stable" "url"])) :license-files files})))]
+    (when-let [old (seq (outdated formulae))]
+      (warn! (str "these formulae are older than Homebrew's source links: " (str/join ", " old))))
+    (when-let [bare (seq (keep #(when (empty? (:license-files %)) (:name %)) formulae))]
+      (warn! (str "no licence file in the keg of " (str/join ", " bare) "; add its text before a public build")))
+    (io/make-parents (str licenses "/SOURCES.txt"))
+    (spit (str licenses "/SOURCES.txt") (sources-txt formulae))
+    (spit (str licenses "/NOTICE")
+          (str "Jonquil is under the Eclipse Public License 2.0. The libraries in\n"
+               "Contents/Frameworks are separate works under their own licences, listed\n"
+               "with their sources in SOURCES.txt.\n"))))
+
+(defn- macho-files
+  "The Mach-O files of the bundle: the binary and every Frameworks dylib."
+  []
+  (cons bin (map #(str frameworks "/" %) (sort (.list (io/file frameworks))))))
+
+(defn- min-macos
+  "The highest minos among the bundle's Mach-O files."
+  []
+  (max-version (keep #(otool-minos (sh! "otool" "-l" %)) (macho-files))))
+
+(defn- sign! []
+  (let [id (or (System/getenv "JONQUIL_SIGN_IDENTITY") "-")]
+    (println (str "signing " (if (= "-" id) "ad hoc" (str "as " id))))
+    (doseq [f (concat (rest (macho-files)) [bin app])]
+      (sh! "codesign" "--force" "--timestamp=none" "-s" id f))))
+
+(defn- checks
+  "[name ok?] for each check of the built bundle."
+  []
+  [["no Homebrew paths" (not-any? #(re-find #"/opt/homebrew|/usr/local" (sh! "otool" "-L" %)) (macho-files))]
+   ["plutil -lint" (zero? (:exit (p/sh "plutil" "-lint" (str contents "/Info.plist"))))]
+   ["codesign --verify --deep --strict" (zero? (:exit (p/sh "codesign" "--verify" "--deep" "--strict" app)))]
+   ["launcher executable" (.canExecute (io/file launcher))]])
+
+(defn release!
+  "Builds target/Jonquil.app and target/Jonquil-<version>-macos-arm64.zip."
+  []
+  (sh! "rm" "-rf" app)
+  (doseq [d [(str contents "/MacOS") frameworks licenses]] (.mkdirs (io/file d)))
+  (println "building jonquil-bin")
+  (sh! "jolt" "build" "-m" "jonquil.main" "--signable" "-o" bin)
+  (sh! "rm" "-rf" (str bin ".build"))
+  (spit launcher (launcher-text))
+  (.setExecutable (io/file launcher) true)
+  (let [plan (closure-plan (roots) refs-of)]
+    (doseq [e plan] (bundle-lib! e))
+    (println (str (count plan) " libraries in Frameworks"))
+    (when (lzo? (map :name plan))
+      (warn! "liblzo2 (GPL-2.0-or-later) is in the bundle (cairo's script interpreter needs it); don't publish this build"))
+    (write-licences! plan))
+  (sh! "cp" "resources/Jonquil.icns" (str contents "/Resources/Jonquil.icns"))
+  (spit (str contents "/Info.plist")
+        (app-bundle/info-plist {:version (app-bundle/git-version) :build (app-bundle/build-number)
+                                :doc-extensions app-bundle/doc-extensions
+                                :executable "Jonquil" :min-macos (min-macos)}))
+  (sign!)
+  (let [cs (checks)]
+    (doseq [[n ok] cs] (println (str "  check " n ": " (if ok "ok" "FAILED"))))
+    (when-let [[n _] (first (remove second cs))]
+      (fail! (str "release check failed: " n))))
+  (let [zip (str "target/Jonquil-" (app-bundle/git-version) "-macos-arm64.zip")]
+    (sh! "rm" "-f" zip)
+    (sh! "ditto" "-c" "-k" "--keepParent" app zip)
+    (println (str "wrote " app " and " zip))))
+
+;; --- checking it ---------------------------------------------------------------------
+
+(def ^:private SANDBOX
+  ;; every read under /opt/homebrew denied, so a library or data file from
+  ;; Homebrew shows as a failure
+  "(version 1)(allow default)(deny file-read* (subpath \"/opt/homebrew\"))")
+
+(defn- outside
+  "The dyld-loaded paths in log text that are neither in dir nor the
+  system's."
+  [text dir]
+  (->> (re-seq #"(?m)^dyld\[\d+\]: <[^>]+> (.+)$" text)
+       (map (comp str/trim second))
+       (remove #(or (str/starts-with? % dir) (system-lib? %)))
+       distinct vec))
+
+(defn release-check!
+  "Launches the app at dir's launcher for 10 seconds under SANDBOX, with
+  DYLD_PRINT_LIBRARIES set inside (sandbox-exec drops DYLD_* it's
+  handed), then stops it: exits 1 when it ended early, loaded a library
+  from outside the bundle and the system, or showed no load from the
+  bundle at all."
+  [dir]
+  (let [dir (.getCanonicalPath (io/file dir))
+        log (java.io.File/createTempFile "jonquil-release-check-" ".log")
+        proc (p/process {:out :discard :err log}
+                        "sandbox-exec" "-p" SANDBOX "/bin/sh" "-c"
+                        ;; sourced, not run: a fresh /bin/sh (protected) would
+                        ;; drop DYLD_PRINT_LIBRARIES; the launcher's exec keeps it
+                        "export DYLD_PRINT_LIBRARIES=1; . \"$0\"" (str dir "/Contents/MacOS/Jonquil"))]
+    (Thread/sleep 10000)
+    (let [alive? (p/alive? proc)]
+      (when alive? (p/destroy proc))
+      @proc
+      (let [text (slurp log)
+            bad (outside text dir)
+            n (count (filter #(str/includes? % (str dir "/Contents/Frameworks/")) (str/split-lines text)))]
+        (.delete log)
+        (cond
+          (not alive?) (fail! (str "release-check: Jonquil exited early:\n"
+                                   (str/join "\n" (take-last 15 (str/split-lines text)))))
+          (seq bad) (fail! (str "release-check: loaded from outside the bundle: " (first bad)))
+          (zero? n) (fail! "release-check: saw no library load from the bundle, so it can't tell where they came from")
+          :else (println (str "release-check: ok (" n " libraries from the bundle)")))))))
+
+(defn -main [& [cmd dir]]
+  (case cmd
+    "release" (release!)
+    "check" (release-check! (or dir app))
+    (fail! "usage: jolt -M:bundle -m app-release <release|check [app]>")))
