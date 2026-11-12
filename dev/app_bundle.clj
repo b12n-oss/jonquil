@@ -25,8 +25,11 @@
 
 (defn info-plist
   "The Info.plist XML for the bundle. opts: :version (CFBundleShortVersionString),
-  :build (CFBundleVersion, period-separated integers) and :doc-extensions (the extensions Jonquil offers to open, in order)."
-  [{:keys [version build doc-extensions]}]
+  :build (CFBundleVersion, period-separated integers) and :doc-extensions (the extensions Jonquil offers to open, in order).
+  A release bundle (app-release) also passes :executable (CFBundleExecutable,
+  \"jonquil\" otherwise) and :min-macos (LSMinimumSystemVersion, \"13.0\"
+  otherwise)."
+  [{:keys [version build doc-extensions executable min-macos] :or {executable "jonquil" min-macos "13.0"}}]
   (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
        "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
@@ -34,12 +37,12 @@
        (kv "CFBundleName" "Jonquil")
        (kv "CFBundleDisplayName" "Jonquil")
        (kv "CFBundleIdentifier" bundle-id)
-       (kv "CFBundleExecutable" "jonquil")
+       (kv "CFBundleExecutable" executable)
        (kv "CFBundleIconFile" "Jonquil")
        (kv "CFBundlePackageType" "APPL")
        (kv "CFBundleVersion" build)
        (kv "CFBundleShortVersionString" version)
-       (kv "LSMinimumSystemVersion" "13.0")
+       (kv "LSMinimumSystemVersion" min-macos)
        "  <key>NSHighResolutionCapable</key>\n  <true/>\n"
        "  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n"
        "      <key>CFBundleTypeName</key>\n      <string>Clojure source</string>\n"
@@ -70,11 +73,11 @@
   (binding [*out* *err*] (println (str "app-bundle: " msg)))
   (System/exit 1))
 
-(defn- git-version []
+(defn git-version []
   (let [r (p/sh "git" "describe" "--tags" "--always")]
     (if (zero? (:exit r)) (str/trim (:out r)) "0.0.0")))
 
-(defn- build-number
+(defn build-number
   "The commit count as CFBundleVersion (Apple wants period-separated integers)."
   []
   (let [r (p/sh "git" "rev-list" "--count" "HEAD")

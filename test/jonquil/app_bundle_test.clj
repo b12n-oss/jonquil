@@ -59,6 +59,15 @@
      (testing "exactly two document types"
        (is (nil? (extract path "CFBundleDocumentTypes.2")))))))
 
+(deftest info-plist-executable-and-floor-test
+  (when-plutil
+   (let [release (plist-file! (ab/info-plist (assoc base :executable "Jonquil" :min-macos "26.0")))
+         plain (plist-file! (ab/info-plist base))]
+     (is (= "Jonquil" (extract release "CFBundleExecutable")))
+     (is (= "26.0" (extract release "LSMinimumSystemVersion")))
+     (is (= "jonquil" (extract plain "CFBundleExecutable")) "app:bundle's plist is unchanged")
+     (is (= "13.0" (extract plain "LSMinimumSystemVersion"))))))
+
 (deftest info-plist-dirty-version-test
   (when-plutil
    (let [path (plist-file! (ab/info-plist (assoc base :version "abc1234-dirty")))]
