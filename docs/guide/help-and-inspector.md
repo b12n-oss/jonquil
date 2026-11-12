@@ -197,7 +197,8 @@ neither is a `let`-bound `join`. Two more check boxes under the kinds bring
 the rest back: **Other vars** (another var, or a local, with the same name)
 and **Unresolved**, for places a file can't decide from its own text, such
 as a name brought in by `:refer :all`, `(:use ...)` or a top-level
-`require`, or one a macro defines. Each box shows how many places it holds,
+`require` (in a file with `:refer :all` or `:use`, a `clojure.core` name
+too, since one of those may shadow it), or one a macro defines. Each box shows how many places it holds,
 and their rows say `other var` or `unresolved` after the kind. When the
 symbol at the caret is itself a local, or can't be decided, the list
 matches by name instead, so `str/join` and `clojure.string/join` both count

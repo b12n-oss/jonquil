@@ -101,12 +101,15 @@
 (defn- match
   "How hit h in a file (ctx, a resolve/file-context) relates to target, a
   resolution of the symbol the search started from: :this when it names
-  the same var, :unresolved when the file can't tell, else :other (another
-  var, or a local). Every hit is :this when target isn't a var."
+  the same var, :unresolved when the file can't tell (or resolving threw),
+  else :other (another var, or a local). Every hit is :this when target
+  isn't a var."
   [ctx target text h]
   (if-not (:var target)
     :this
-    (let [r (resolve/resolve-at ctx (:start h) (subs text (:start h) (:end h)))]
+    (let [r (try (resolve/resolve-at ctx (:start h) (subs text (:start h) (:end h)))
+                 ;; one odd file shouldn't fail the whole search
+                 (catch :default _ {:unresolved true}))]
       (cond (= (:var r) (:var target)) :this
             (:unresolved r) :unresolved
             :else :other))))

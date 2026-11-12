@@ -118,23 +118,34 @@
           splicing? (let [[s e] pick] (subs text (inc s) (dec e)))
           :else (let [[s e] pick] (subs text s e)))))
 
+(defn- first-conditional
+  "{:hash :open :splicing?} of text's first live #?( or #?@( (from tokens,
+  so never one inside a string or comment), or nil."
+  [^String text tokens]
+  (some (fn [[[k s e] [nk ns']]]
+          (when (and (= :symbol k) (= "?" (subs text s e)) (pos? s)
+                     (= \# (.charAt text (int (dec s))))
+                     (= :bracket nk) (= \( (.charAt text (int ns'))))
+            (cond (= ns' e) {:hash (dec s) :open ns' :splicing? false}
+                  (and (= ns' (inc e)) (= \@ (.charAt text (int e)))) {:hash (dec s) :open ns' :splicing? true}
+                  :else nil)))
+        (partition 2 1 tokens)))
+
 (defn select-reader-conditionals
   "text with each #?(...) and #?@(...) replaced by the branch it reads as
-  for reader features, nested ones included."
+  for reader features, nested ones included. A #? in a string or comment
+  is left alone; an unclosed one leaves the text as it is."
   [^String text features]
   (loop [t text]
-    (if-let [m (re-find #"#\?@?\(" t)]
-      (let [h (str/index-of t m)
-            p (+ h (dec (count m)))
-            tokens (vec (remove #(= :comment (first %)) (syntax/tokenize t)))
-            close (get (:matches (syntax/compute-brackets t)) p)]
-        (if (nil? close)
-          t
-          (recur (str (subs t 0 h)
-                      (chosen-branch t features (str/includes? m "@")
-                                     (elements t tokens (:matches (syntax/compute-brackets t)) p close))
-                      (subs t (inc close))))))
-      t)))
+    (let [tokens (vec (remove #(= :comment (first %)) (syntax/tokenize t)))
+          matches (:matches (syntax/compute-brackets t))]
+      (if-let [{:keys [hash open splicing?]} (first-conditional t tokens)]
+        (if-let [close (get matches open)]
+          (recur (str (subs t 0 hash)
+                      (chosen-branch t features splicing? (elements t tokens matches open close))
+                      (subs t (inc close))))
+          t)
+        t))))
 
 ;; --- ns forms: what they say ---------------------------------------------
 
@@ -153,6 +164,12 @@
   "A libspec vector's options after the lib, as a map; a dangling key is dropped."
   [opts]
   (into {} (map vec) (partition 2 opts)))
+
+(defn- check-shape!
+  "Throws when ok? is false: an ns option of the wrong shape (a symbol
+  where a vector belongs, say), which ns-info turns into an unreadable ns."
+  [ok? form]
+  (when-not ok? (throw (ex-info "ns option of the wrong shape" {:form form}))))
 
 (defn- add-refers
   "info with names referred from lib, each under its :rename name if any."
@@ -174,6 +191,8 @@
             {:keys [as as-alias refer only rename]} (opts-map (rest spec))
             names (if use? only refer)
             a (or as as-alias)]
+        (check-shape! (or (nil? names) (= :all names) (sequential? names)) spec)
+        (check-shape! (or (nil? rename) (map? rename)) spec)
         (cond-> info
           a (assoc-in [:aliases a] lib)
           (= :all names) (assoc :all? true)
@@ -186,10 +205,15 @@
       :else info)))
 
 (defn- add-refer-clojure
-  "info after a (:refer-clojure :exclude [...] :rename {...}) clause."
+  "info after a (:refer-clojure :exclude [...] :only [...] :rename {...})
+  clause. :only keeps just those core names, as :core-only."
   [info core opts]
-  (let [{:keys [exclude rename]} (opts-map opts)]
+  (let [{:keys [exclude only rename]} (opts-map opts)]
+    (check-shape! (or (nil? exclude) (sequential? exclude)) opts)
+    (check-shape! (or (nil? only) (sequential? only)) opts)
+    (check-shape! (or (nil? rename) (map? rename)) opts)
     (cond-> (update info :excludes into exclude)
+      only (assoc :core-only (set only))
       rename (update :core-renames into
                      (map (fn [[orig new]] [new (symbol (str core) (str orig))]))
                      rename))))
@@ -212,19 +236,26 @@
   :core-renames a new name to the core var it renames. :all? is true when
   a :refer :all or :use can bring in names the text doesn't list, so a
   bare name found nowhere else stays unresolved. No ns form: user. An ns
-  form that doesn't read: :ns nil and :all? true, so the file's own defs
-  don't resolve either, rather than resolving wrongly to user."
+  form that doesn't read, or holds an option of the wrong shape: :ns nil
+  and :all? true, so the file's own defs and core names don't resolve
+  either, rather than resolving wrongly. A file with in-ns and no ns form:
+  :ns nil. :core-only is there only when :refer-clojure has :only."
   [text features]
-  (let [tokens (remove #(= :comment (first %)) (syntax/tokenize text))]
+  (let [tokens (remove #(= :comment (first %)) (syntax/tokenize text))
+        unreadable (assoc empty-info :ns nil :all? true)]
     (if-let [[s e] (first (ns-spans text tokens))]
-      (let [form (try (read-string (select-reader-conditionals (subs text s e) features))
-                      (catch Throwable _ ::unreadable))]
-        (if (and (seq? form) (symbol? (second form)))
-          (reduce #(add-clause %1 (core-ns features) %2)
-                  (assoc empty-info :ns (second form))
-                  (drop 2 form))
-          (assoc empty-info :ns nil :all? true)))
-      empty-info)))
+      (try
+        (let [form (read-string (select-reader-conditionals (subs text s e) features))]
+          (if (and (seq? form) (symbol? (second form)))
+            (reduce #(add-clause %1 (core-ns features) %2)
+                    (assoc empty-info :ns (second form))
+                    (drop 2 form))
+            unreadable))
+        (catch Throwable _ unreadable))
+      ;; an in-ns file's namespace is set at run time: not user
+      (if (re-find #"\(\s*in-ns\b" text)
+        (assoc empty-info :ns nil)
+        empty-info))))
 
 ;; --- symbols ----------------------------------------------------------------
 
@@ -240,78 +271,151 @@
       [(subs t 0 i) (subs t (inc i))])))
 
 (defn- core-var
-  "The core var bare name n names under info, or nil: not excluded, not
-  renamed away, and a public of clojure.core (Jonquil's own, which stands
-  in for the dialect's)."
-  [{:keys [excludes core-renames]} core n]
+  "The core var bare name n names under ctx, or nil: a public of
+  clojure.core (Jonquil's own, which stands in for the dialect's), not
+  excluded, not renamed away, and in :core-only when the ns form has one."
+  [{:keys [info core renamed-away]} n]
   (let [sym (symbol n)
-        renamed-away (set (map (comp symbol name) (vals core-renames)))]
+        {:keys [excludes core-only]} info]
     (when (and (contains? @core-names sym)
                (not (contains? excludes sym))
-               (not (contains? renamed-away sym)))
+               (not (contains? renamed-away sym))
+               (or (nil? core-only) (contains? core-only sym)))
       (symbol (str core) n))))
 
+(defn- qualified-var
+  "The var qualified symbol q/n names under info, or nil: q an alias, the
+  file's own namespace, or a dotted full namespace name. A bare q that's no
+  alias (a top-level require's, a class) can't be decided."
+  [{:keys [aliases] ns' :ns} q n]
+  (let [lib (or (get aliases (symbol q))
+                (when (and ns' (= q (str ns'))) ns')
+                (when (str/includes? q ".") (symbol q)))]
+    (when lib (symbol (str lib) n))))
+
 (defn resolve-sym
-  "{:var sym} or {:unresolved true} for symbol text t in a file with ns
-  info, own-def? telling whether the file defines a bare name at the top
-  level, and core its core namespace. Locals are resolve-at's."
-  [{:keys [info own-def? core]} t]
-  (let [{:keys [aliases refers core-renames] ns' :ns} info]
-    (if-let [[q n] (split-qualified t)]
-      {:var (symbol (str (get aliases (symbol q) q)) n)}
-      (let [sym (symbol t)]
-        (if-let [v (or (when (and ns' (own-def? t)) (symbol (str ns') t))
-                       (get refers sym)
-                       (get core-renames sym)
-                       (core-var info core t))]
-          {:var v}
-          {:unresolved true})))))
+  "{:var sym} or {:unresolved true} for symbol text t in ctx (a
+  file-context): qualified through qualified-var; bare, the file's own def,
+  then an explicit refer or a refer-clojure rename, then clojure.core
+  unless a :refer :all or :use could shadow it. Locals are resolve-at's."
+  [{:keys [info own-def?] :as ctx} t]
+  (let [{:keys [refers core-renames all?] ns' :ns} info
+        v (if-let [[q n] (split-qualified t)]
+            (qualified-var info q n)
+            (let [sym (symbol t)]
+              (or (when (and ns' (own-def? t)) (symbol (str ns') t))
+                  (get refers sym)
+                  (get core-renames sym)
+                  (when-not all? (core-var ctx t)))))]
+    (if v {:var v} {:unresolved true})))
+
+(def ^:private def-heads
+  ;; the forms whose second element names a var (or a class, for the
+  ;; record and type forms) in the file's namespace; defmethod adds a method
+  ;; to a multimethod defined elsewhere, so it isn't one
+  #{"def" "defn" "defn-" "defmacro" "defonce" "defmulti" "defprotocol"
+    "definterface" "defrecord" "deftype" "defstruct" "definline"})
 
 (defn- def-head?
-  "Whether symbol text t starts a definition form: def, defn, defmacro,
-  defonce, defprotocol and the rest of the def family, qualified or not."
+  "Whether symbol text t starts a definition form, qualified or not."
   [t]
-  (str/starts-with? (or (second (split-qualified t)) t) "def"))
+  (contains? def-heads (or (second (split-qualified t)) t)))
+
+(defn- name-after-head
+  "The text of the name token after a def head at index i of src's tokens,
+  past metadata (^:private, ^String, ^{...}), or nil."
+  [{:keys [^String text tokens matches]} i]
+  (loop [j (inc i)]
+    (when-let [[k s e] (get tokens j)]
+      (cond
+        (= :metatag k) (recur (inc j))
+        ;; ^{...}: the tokenizer gives the { alone; skip to past its match
+        (and (= :bracket k) (= \{ (.charAt text (int s))) (pos? s) (= \^ (.charAt text (int (dec s)))))
+        (let [close (get matches s)]
+          (recur (or (some (fn [x] (when (> (second (get tokens x)) close) x)) (range (inc j) (count tokens)))
+                     (count tokens))))
+        (contains? code-kinds k) (subs text s e)
+        :else nil))))
 
 (defn- defined-names
-  "The set of names text's (def... name ...) forms define, the name token
-  being any code kind (the tokenizer marks a core name such as get as
-  :builtin, which syntax/find-definition skips)."
-  [^String text]
-  (let [ts (vec (remove #(= :comment (first %)) (syntax/tokenize text)))
-        txt (fn [[_ s e]] (subs text s e))]
-    (into #{}
-          (keep (fn [i]
-                  (let [[a b c] (subvec ts i (min (count ts) (+ i 3)))]
-                    (when (and c (= "(" (txt a))
-                               (contains? code-kinds (first b)) (def-head? (txt b))
-                               (contains? code-kinds (first c)))
-                      (txt c)))))
-          (range (count ts)))))
+  "The set of names src's def forms define, the name token being any code
+  kind (the tokenizer marks a core name such as get as :builtin, which
+  syntax/find-definition skips)."
+  [{:keys [^String text tokens] :as src}]
+  (into #{}
+        (keep (fn [i]
+                (let [[ka sa ea] (get tokens i)
+                      [kb sb eb] (get tokens (inc i))]
+                  (when (and kb (= :bracket ka) (= "(" (subs text sa ea))
+                             (contains? code-kinds kb) (def-head? (subs text sb eb)))
+                    (name-after-head src (inc i))))))
+        (range (count tokens))))
 
 (defn file-context
   "What resolving symbols in text needs, computed once per file: its ns
-  info, its core namespace and own-def?, whether the file defines a name."
+  info and ns form span, its core namespace, the core names it renames
+  away, own-def? (whether the file defines a name) and src, its tokens and
+  bracket matches."
   [text features]
-  (let [defs (delay (defined-names text))]
+  (let [src (delay (let [tokens (vec (remove #(= :comment (first %)) (syntax/tokenize text)))]
+                     {:text text :tokens tokens
+                      :matches (:matches (syntax/compute-brackets text))
+                      :ns-span (first (ns-spans text tokens))}))
+        defs (delay (defined-names @src))
+        info (ns-info text features)]
     {:text text
-     :info (ns-info text features)
+     :info info
+     :src src
      :core (core-ns features)
+     :renamed-away (set (map (comp symbol name) (vals (:core-renames info))))
      :own-def? (fn [n] (contains? @defs n))}))
+
+(defn- enclosing-vector
+  "[open close] of the innermost [...] around offset in src, or nil."
+  [{:keys [^String text matches]} offset]
+  (some (fn [o]
+          (let [c (get matches o)]
+            (when (and (= \[ (.charAt text (int o))) c (< offset c)) [o c])))
+        (range (dec offset) -1 -1)))
+
+(defn- in-ns-form
+  "The resolution of the symbol t at offset inside the file's ns form: a
+  name in a :refer or :only vector is the var it refers; anything else
+  there (the ns name, a lib, an alias) is unresolved."
+  [{:keys [src info]} offset t]
+  (let [[o] (enclosing-vector @src offset)
+        before (when o (str/trimr (subs (:text @src) 0 o)))
+        v (when (and before (or (str/ends-with? before ":refer") (str/ends-with? before ":only")))
+            (some (fn [v] (when (= (name v) t) v)) (vals (:refers info))))]
+    (if v {:var v} {:unresolved true})))
 
 (defn resolve-at
   "The resolution of the symbol whose text t starts at offset in ctx's text
-  (a file-context): {:local true} when a binding form around it binds the
-  name, else resolve-sym's answer."
-  [{:keys [text] :as ctx} offset t]
-  (if (and (not (split-qualified t)) (help/local-binding text offset t))
-    {:local true}
-    (resolve-sym ctx t)))
+  (a file-context). Inside the ns form, in-ns-form. Else a binding around
+  it decides first: the binding site itself, or a use after its bindings
+  vector, is {:local true}; a use inside that vector before the binding
+  (an init that may name the outer var) is unresolved; a use before the
+  binding (a def's own name, ahead of its parameters) is no local. Then
+  resolve-sym."
+  [ctx offset t]
+  (let [[s e] (:ns-span @(:src ctx))]
+    (if (and s (<= s offset) (< offset e))
+      (in-ns-form ctx offset t)
+      (let [b (when-not (split-qualified t) (help/local-binding-in @(:src ctx) offset t))
+            [vo vc] (when b (enclosing-vector @(:src ctx) (:start b)))]
+        (cond
+          (nil? b) (resolve-sym ctx t)
+          (= (:start b) offset) {:local true}
+          (< offset (:start b)) (resolve-sym ctx t)
+          (and vo (< vo offset vc)) {:unresolved true}
+          :else {:local true})))))
 
 (defn features-for
   "The reader features to read path with: a .cljs file's are #{:cljs}, a
-  .cljd file's #{:cljd}, any other file's the window's own (features)."
+  .cljd file's #{:cljd}, a .clj file's the window's own when they include
+  :clj, else #{:clj}, and any other file's (.cljc) the window's own."
   [path features]
   (cond (str/ends-with? path ".cljs") #{:cljs}
         (str/ends-with? path ".cljd") #{:cljd}
+        (str/ends-with? path ".clj") (if (contains? features :clj) features #{:clj})
         :else features))

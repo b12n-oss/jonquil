@@ -209,13 +209,15 @@
 
 (defn- caret-target
   "The resolution of the symbol at the active tab's caret (resolve/resolve-at,
-  read with features), or nil when there's no symbol."
+  read with features), or nil when there's no symbol, or resolving it threw
+  (the search then lists by name, as it did before LM2 resolved names)."
   [{:keys [active-tab]} features]
   (let [t (active-tab)
         snap (editor/snapshot (:ed t))]
     (when-let [{:keys [symbol start]} (help/target snap)]
       (let [fs (resolve/features-for (or @(:path t) "") features)]
-        (resolve/resolve-at (resolve/file-context (:text snap) fs) start symbol)))))
+        (try (resolve/resolve-at (resolve/file-context (:text snap) fs) start symbol)
+             (catch :default _ nil))))))
 
 ;; Find Usages in Project (LM2): jonquil.usages/scan on a future,
 ;; open tabs' text in place of their files'; a newer search
