@@ -50,6 +50,8 @@ the quick doc text. (Cmd/Ctrl+Alt+D would be easier to remember, but macOS
 takes Cmd+Option+D to hide the Dock.) With no symbol at the caret the
 command just brings the panel back and focuses it.
 
+![The docs panel open on clojure.core/map after following the qualified name, with Back, Forward, Bookmarked and Close buttons above the page](../images/reader.png)
+
 - **Following a symbol.** Click a symbol in the page and its doc becomes the
   next page. A symbol with no docs says so on the panel's footer and leaves
   the page as it was, and a drag that selects text isn't a click. The click
@@ -173,6 +175,8 @@ their own tools, which Jonquil never sees. The panel also logs an agent
 attaching or leaving, an attached runtime losing its connection, and a
 runtime starting or failing to start.
 
+![The Messages panel with four rows: a status line, two agent rows where Claude Code replaced the text of demo.clj and core.clj, and a read row for the tab list](../images/messages.png)
+
 The tick boxes above the list choose what shows. Agent, Files, Plugins,
 Connections and Runtime are on to begin with. Reads (an agent reading a tab,
 the console or the docs) and Status (everything the status bar has said, with
@@ -259,6 +263,8 @@ keeps the list, and F8 opens that file again. Like the other lists it
 stops at 1,000 places. The search runs in the background, so typing
 carries on while it looks.
 
+![Find Usages in Project on a/join: the Locations panel titled Usages of demo.a/join with its definition and one call, and the Other vars (1) and Unresolved (1) check boxes under the kinds](../images/find-usages.png)
+
 **Compare with the file on disk** and **Compare with git HEAD** list the
 places where the tab differs from that version, one row per difference,
 such as `4: 2 lines here, 1 line in HEAD: (def c 3)` with the other
@@ -296,6 +302,8 @@ and a version with no such form says so on the status bar. Adding or
 removing a form that starts the same way, above or below it, moves its
 place, so Take then asks you to compare again rather than guess. Typing
 "this form" in the palette finds the three.
+
+![This form vs the file on disk: the edited defn greet in the tab, and the Locations panel titled Differences in defn greet from disk with one row for it, though another form differs too](../images/compare-form.png)
 
 ### Freeing Ctrl+Space on macOS
 
@@ -412,6 +420,8 @@ called from another traced function:
   (user/tpair 1) => [1 1]
 ```
 
+![The Trace panel after tracing sum-squares and square: the outer call with each square call indented under it and its value](../images/trace.png)
+
 A call that threw reads `threw` and the error, and one still running reads
 `(running)`. Enter on a row opens what that call returned in the inspector,
 or its arguments when it threw. The panel refreshes after every evaluation
@@ -442,6 +452,8 @@ holds off until it ends, and **Kill** ends it outright. **Forget finished**
 drops the done and dead ones; Jonquil keeps the last 50 of those anyway.
 While the panel shows, it refreshes every second.
 
+![The Processes panel listing three fibers a Run spawned: two ready workers and one that is done, with Interrupt, Kill, Forget finished and Close](../images/processes.png)
+
 Jolt keeps no list of live fibers (jolt-lang/jolt#1606 asks for one), so
 the first time the panel opens Jonquil starts watching `spawn`, the way
 Trace wraps a function, and code compiled earlier goes through it too.
@@ -462,6 +474,8 @@ Form or Run Selection refreshes them only while the file still holds the
 text its last Run did. An Untitled or unsaved tab has no file for Jolt to
 count by, and the console says so. **Clear line counts** zeroes the
 counters, and the toggle again turns counting off.
+
+![spin.clj after a Run with line counts on: the gutter shows how many times each line ran, such as 6 beside the loop's test](../images/line-counts.png)
 
 Jolt has one instrumentation mode at a time, so counting and Keep every
 local (debug mode) take turns: turning one on turns the other off, and the
@@ -559,6 +573,8 @@ works the same way. The field evaluates with the frame's locals, a local
 opens in the inspector, **Continue** (the panel's button, or **Continue from
 the break** in the palette) runs on, and Stop ends the evaluation. Break on
 error doesn't need to be on.
+
+![A red breakpoint dot in the gutter on line 3 of price.clj and the Frames panel titled Breakpoint at line 3, listing the locals price, qty and subtotal](../images/breakpoint.png)
 
 A breakpoint goes before the code that starts on its line, so it needs
 something there that runs:

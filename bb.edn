@@ -392,6 +392,7 @@
                           "completion" "quick-doc" "rename" "inspector"
                           "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs" "file-tree"
                           "parinfer" "parinfer-project"
+                          "find-usages" "compare-form" "reader" "change-sets" "breakpoint" "trace" "line-counts" "processes" "messages"
                           "jank" "cljs-node" "cljs-browser" "nrepl-bb" "cljs-shadow"]
                results (mapv (fn [id]
                                (let [;; The console prints the clojure path; a bare name
