@@ -37,6 +37,14 @@
   [text]
   (second (re-find #"(?m)^\s*minos\s+(\S+)" text)))
 
+(defn otool-rpaths
+  "The LC_RPATH paths in `otool -l` text, in order."
+  [text]
+  (->> (str/split text #"Load command \d+")
+       (filter #(re-find #"cmd LC_RPATH" %))
+       (keep #(second (re-find #"path (.+?) \(offset" %)))
+       vec))
+
 (defn- version-key
   "v's numeric parts, padded to four so vectors compare part by part."
   [v]
@@ -71,6 +79,17 @@
                    (conj plan {:src src :name name :refs refs})))))
       plan)))
 
+(defn missing-natives
+  "The :name of each :jolt/native entry with a :darwin list but none of
+  its /opt/homebrew candidates in exists? (a set or fn of paths): the
+  build Mac lacks that Homebrew library."
+  [entries exists?]
+  (vec (keep (fn [{:keys [name darwin]}]
+               (when (and (seq darwin)
+                          (not-any? #(and (str/starts-with? % "/opt/homebrew/") (exists? %)) darwin))
+                 name))
+             entries)))
+
 (defn lzo?
   "True when names (the bundled libraries) hold lzo, which is GPL."
   [names]
@@ -86,26 +105,35 @@
        "# Jonquil.app's launcher: load the bundled libraries, then run Jonquil.\n"
        "here=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
        "export DYLD_LIBRARY_PATH=\"$here/../Frameworks${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}\"\n"
+       "# Jonquil drops DYLD_LIBRARY_PATH again once it's loaded, so git, node\n"
+       "# or jank it starts load their own libraries (jonquil.bundle-env)\n"
+       "export JONQUIL_BUNDLE_FRAMEWORKS=\"$here/../Frameworks\"\n"
        "exec \"$here/jonquil-bin\" \"$@\"\n"))
+
+(defn- older?
+  "True when keg version (Homebrew's revision suffix, _N, aside) isn't
+  the formula's stable version."
+  [version stable]
+  (boolean (and stable (not= stable (str/replace version #"_\d+$" "")))))
 
 (defn outdated
   "The names of formulae whose bundled :version isn't Homebrew's :stable."
   [formulae]
-  (vec (keep (fn [{:keys [name version stable]}] (when (and stable (not= stable version)) name)) formulae)))
+  (vec (keep (fn [{:keys [name version stable]}] (when (older? version stable) name)) formulae)))
 
 (defn sources-txt
   "licenses/SOURCES.txt for formulae ({:name :version :stable :license :url
   :license-files}). :url is Homebrew's source for :stable, its formula's
   current version, which an older keg (:version) doesn't match: said so."
   [formulae]
-  (str "Jonquil.app bundles these libraries unmodified, as separate dynamic\n"
-       "libraries, built by Homebrew. Each keeps its own licence. The source of\n"
-       "each, at exactly the version bundled, is at the URL given.\n\n"
+  (str "Jonquil.app bundles these libraries, built by Homebrew, as separate dynamic\n"
+       "libraries, with only their install names and rpaths changed (install_name_tool) and re-signed.\n"
+       "Each keeps its own licence. The source of each is at the URL given, at the version given.\n\n"
        (str/join "\n"
                  (for [{:keys [name version stable license url license-files]} formulae]
                    (str name " " version " (" license ")\n"
                         "  source: " url
-                        (when (and stable (not= stable version))
+                        (when (older? version stable)
                           (str " (for " stable ", newer than the " version " bundled: brew upgrade " name
                                " before a public build)"))
                         "\n"
@@ -145,14 +173,20 @@
 (defn- refs-of [lib]
   (otool-refs (sh! "otool" "-L" lib) (last (str/split-lines (str/trim (sh! "otool" "-D" lib))))))
 
+(defn- on-disk? [path] (.exists (io/file path)))
+
 (defn- roots
   "The /opt/homebrew candidates deps.edn's :jolt/native gives for macOS,
-  those on disk."
+  those on disk; fails when an entry has none (no Homebrew GTK here)."
   []
-  (->> (:jolt/native (edn/read-string (slurp "deps.edn")))
-       (mapcat :darwin)
-       (filter #(and (str/starts-with? % "/opt/homebrew/") (.exists (io/file %))))
-       (map real-path)))
+  (let [entries (:jolt/native (edn/read-string (slurp "deps.edn")))]
+    (when-let [missing (seq (missing-natives entries on-disk?))]
+      (fail! (str "no Homebrew library on this Mac for " (str/join ", " missing)
+                  " (brew install gtk4); the bundle would have no GTK")))
+    (->> entries
+         (mapcat :darwin)
+         (filter #(and (str/starts-with? % "/opt/homebrew/") (on-disk? %)))
+         (map real-path))))
 
 (defn- bundle-lib!
   "Copies plan entry {:src :name :refs} into Frameworks, relinked to @rpath."
@@ -163,8 +197,11 @@
     (sh! "install_name_tool" "-id" (str "@rpath/" name) dest)
     (doseq [r refs]
       (sh! "install_name_tool" "-change" r (str "@rpath/" (base-name r)) dest))
-    (when-not (str/includes? (sh! "otool" "-l" dest) "@loader_path")
-      (sh! "install_name_tool" "-add_rpath" "@loader_path" dest))))
+    ;; every rpath Homebrew left (a Cellar path, @loader_path/../lib) goes,
+    ;; then exactly @loader_path: the copies find each other beside them
+    (doseq [r (otool-rpaths (sh! "otool" "-l" dest))]
+      (sh! "install_name_tool" "-delete_rpath" r dest))
+    (sh! "install_name_tool" "-add_rpath" "@loader_path" dest)))
 
 (defn- formula-of
   "[name version] of the Homebrew keg a library's real path is in, or nil."
@@ -229,7 +266,10 @@
 (defn- checks
   "[name ok?] for each check of the built bundle."
   []
-  [["no Homebrew paths" (not-any? #(re-find #"/opt/homebrew|/usr/local" (sh! "otool" "-L" %)) (macho-files))]
+  [["no Homebrew paths" (not-any? #(re-find #"/opt/homebrew|/usr/local"
+                                            (str (sh! "otool" "-L" %) (str/join "\n" (otool-rpaths (sh! "otool" "-l" %)))))
+                                  (macho-files))]
+   ["rpaths are @loader_path" (every? #(= ["@loader_path"] (otool-rpaths (sh! "otool" "-l" %))) (rest (macho-files)))]
    ["plutil -lint" (zero? (:exit (p/sh "plutil" "-lint" (str contents "/Info.plist"))))]
    ["codesign --verify --deep --strict" (zero? (:exit (p/sh "codesign" "--verify" "--deep" "--strict" app)))]
    ["launcher executable" (.canExecute (io/file launcher))]])
@@ -245,6 +285,7 @@
   (spit launcher (launcher-text))
   (.setExecutable (io/file launcher) true)
   (let [plan (closure-plan (roots) refs-of)]
+    (when (empty? plan) (fail! "no library to bundle"))
     (doseq [e plan] (bundle-lib! e))
     (println (str (count plan) " libraries in Frameworks"))
     (when (lzo? (map :name plan))

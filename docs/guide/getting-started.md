@@ -112,9 +112,16 @@ where its source is.
 
 The app is signed ad hoc. With `JONQUIL_SIGN_IDENTITY` set, it's signed
 with that identity instead. The task ends with these checks:
-- no bundled file still points at Homebrew;
+- no bundled file loads from, or keeps an rpath into, Homebrew;
+- every bundled library's only rpath is `@loader_path`;
 - the plist lints;
-- the signature verifies.
+- the signature verifies;
+- the launcher is executable.
+
+It fails at the start when this Mac has no Homebrew GTK to bundle. Once
+Jonquil has loaded, it drops `DYLD_LIBRARY_PATH` from its own environment
+(`jonquil.bundle-env`), so git, node or jank that it starts load their own
+libraries, not the bundle's.
 
 `jolt app:release-check` launches the app for 10 seconds in a sandbox that
 can't read `/opt/homebrew`, and fails if it exits early or loads a

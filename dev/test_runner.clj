@@ -17,6 +17,7 @@
   '[gtk-async-test
     jonquil.app-bundle-test
     jonquil.app-release-test
+    jonquil.bundle-env-test
     jonquil.app-linux-test
     jonquil.smoke-test
     jonquil.upstream.syntax-test

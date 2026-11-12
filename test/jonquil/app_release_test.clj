@@ -54,6 +54,37 @@
     (is (str/includes? t "brotli 1.2.0 (MIT)\n  source: https://github.com/google/brotli/archive/refs/tags/v1.2.1.tar.gz (for 1.2.1, newer than the 1.2.0 bundled: brew upgrade brotli before a public build)\n"))
     (is (= ["brotli"] (ar/outdated [{:name "brotli" :version "1.2.0" :stable "1.2.1"} {:name "gtk4" :version "4.24.1" :stable "4.24.1"}])))))
 
+(deftest otool-rpaths-test
+  (let [t (str "Load command 12\n          cmd LC_RPATH\n      cmdsize 56\n         path /opt/homebrew/Cellar/jpeg-turbo/3.2.0/lib (offset 12)\n"
+               "Load command 13\n          cmd LC_RPATH\n      cmdsize 32\n         path @loader_path/../lib (offset 12)\n"
+               "Load command 14\n          cmd LC_LOAD_DYLIB\n         name @rpath/libx.dylib (offset 24)\n")]
+    (is (= ["/opt/homebrew/Cellar/jpeg-turbo/3.2.0/lib" "@loader_path/../lib"] (ar/otool-rpaths t)))
+    (is (= [] (ar/otool-rpaths "Load command 1\n      cmd LC_SEGMENT_64\n")))))
+
+(deftest a-homebrew-revision-isnt-outdated-test
+  (is (= [] (ar/outdated [{:name "zstd" :version "1.5.7_1" :stable "1.5.7"}])))
+  (is (= ["brotli"] (ar/outdated [{:name "brotli" :version "1.2.0_2" :stable "1.2.1"}])))
+  (let [t (ar/sources-txt [{:name "zstd" :version "1.5.7_1" :stable "1.5.7" :license "BSD-3-Clause"
+                            :url "https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.tar.gz" :license-files ["LICENSE"]}])]
+    (is (str/includes? t "  source: https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.tar.gz\n") "no 'newer' note for a revision")))
+
+(deftest sources-txt-says-what-changed-test
+  (let [t (ar/sources-txt [])]
+    (is (str/includes? t "only their install names and rpaths changed (install_name_tool) and re-signed"))
+    (is (str/includes? t "at the version given"))
+    (is (not (str/includes? t "unmodified")))))
+
+(deftest missing-natives-test
+  (let [entries [{:name "gtk-4" :darwin ["/opt/homebrew/lib/libgtk-4.1.dylib" "libgtk-4.1.dylib"]}
+                 {:name "glib-2.0" :darwin ["/opt/homebrew/lib/libglib-2.0.0.dylib"]}
+                 {:name "linux-only" :linux ["libx.so"]}]]
+    (is (= ["gtk-4"] (ar/missing-natives entries #{"/opt/homebrew/lib/libglib-2.0.0.dylib"}))
+        "an entry with a :darwin list and no Homebrew candidate on disk")
+    (is (= [] (ar/missing-natives entries #{"/opt/homebrew/lib/libgtk-4.1.dylib" "/opt/homebrew/lib/libglib-2.0.0.dylib"})))))
+
+(deftest launcher-marks-the-bundle-test
+  (is (str/includes? (ar/launcher-text) "export JONQUIL_BUNDLE_FRAMEWORKS=\"$here/../Frameworks\"")))
+
 (deftest lzo-test
   (is (true? (ar/lzo? ["libgtk-4.1.dylib" "liblzo2.2.dylib"])))
   (is (false? (ar/lzo? ["libgtk-4.1.dylib"]))))
