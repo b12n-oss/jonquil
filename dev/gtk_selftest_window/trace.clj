@@ -9,16 +9,12 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.palette :as palette]
-            [jonquil.gtk.popover :as popover]
             [jonquil.gtk.trace-pane :as trace-pane]))
 
-(defn- run-palette! [ui query]
-  (let [p (:palette ui)]
-    ((:open-palette!* ui))
-    (palette/set-query! p query)
-    (palette/run-selected! p)
-    (when (popover/open? p) (popover/hide! p))))
+(defn- run-palette!
+  "support/run-palette!: the active tab's palette."
+  [ui query]
+  (support/run-palette! ui query))
 
 (defn- status [ui] (g/label-text (:status-label ui)))
 

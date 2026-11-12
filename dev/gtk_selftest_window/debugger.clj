@@ -14,8 +14,6 @@
             [jonquil.gtk.debugger-pane :as dpane]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.palette :as palette]
-            [jonquil.gtk.popover :as popover]
             [temp-dirs]))
 
 (defn row-debugger-pane-shows
@@ -94,14 +92,9 @@
 ;; --- the real window -----------------------------------------------------
 
 (defn- run-palette!
-  "Opens the palette, filters it to query and runs the first entry, then
-  closes it. GTK-thread only."
+  "support/run-palette!: the active tab's palette."
   [ui query]
-  (let [p (:palette ui)]
-    ((:open-palette!* ui))
-    (palette/set-query! p query)
-    (palette/run-selected! p)
-    (when (popover/open? p) (popover/hide! p))))
+  (support/run-palette! ui query))
 
 (defn- status [ui] (g/label-text (:status-label ui)))
 
