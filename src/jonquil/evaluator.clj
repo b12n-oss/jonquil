@@ -44,8 +44,9 @@
     "The namespace symbol the REPL prompt evaluates in.")
   (set-mode! [ev mode]
     ":reset or :accumulate.")
-  (complete [ev prefix text pos extra-context]
-    "Completion candidates, jonquil.docs/candidates' shape. Never throws.")
+  (complete [ev req]
+    "Completion candidates, jonquil.docs/candidates' shape. req is
+    {:prefix :text :pos :extra-context}. Never throws.")
   (lookup [ev sym text pos]
     "A doc-info map, jonquil.docs/symbol-doc's shape, or nil. Never throws.")
   (limitations [ev]
@@ -78,9 +79,10 @@
   evaluator, out-of-process Jolt and jank). The window asks them through
   ask-help!, so a slow server never holds the GTK thread; in-process Jolt
   doesn't implement this and is asked directly."
-  (offline-candidates [ev prefix text pos extra-context]
+  (offline-candidates [ev req]
     "complete's candidates without asking the server: what complete falls
-    back to. Never throws."))
+    back to. req is complete's {:prefix :text :pos :extra-context}. Never
+    throws."))
 
 (defn server-help?
   "True when ev's help asks a server (ServerHelp)."
@@ -169,8 +171,9 @@
     "Flips Jolt's debug mode (code compiled from then on keeps its locals),
     reading the runtime's own mode, off the caller's thread; on-done gets
     {:on? b}, the mode it's in now, or {:error s}.")
-  (eval-in-frame! [ev frame-i code error-id on-result]
-    "Evaluates code with the last error's frame frame-i's locals bound
+  (eval-in-frame! [ev req on-result]
+    "req is {:frame-i :code :error-id}. Evaluates code with the last
+    error's frame frame-i's locals bound
     (jonquil.debugger/eval-in-frame), off the caller's thread; on-result gets
     {:out :text} or {:error s}, jonquil.debugger/STALE when error-id names
     an older error."))

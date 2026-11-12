@@ -75,7 +75,7 @@
                (history [_] nil)
                (prompt-ns [_] 'user)
                (set-mode! [_ _] nil)
-               (complete [_ _ _ _ _] [])
+               (complete [_ _] [])
                (lookup [_ _ _ _] nil)
                (limitations [_] [])
                (interrupt! [_] nil)

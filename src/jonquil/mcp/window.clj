@@ -409,7 +409,7 @@
 
 (defn- tool-complete [{:keys [ui]} args]
   (let [prefix (tools/required-string args "prefix")
-        names (->> (ev/complete ((:evaluator* ui)) prefix prefix (count prefix) nil)
+        names (->> (ev/complete ((:evaluator* ui)) {:prefix prefix :text prefix :pos (count prefix) :extra-context nil})
                    (map #(if (map? %) (or (:name %) (:text %) (:symbol %)) %))
                    (remove nil?)
                    (map str)

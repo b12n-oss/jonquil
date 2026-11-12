@@ -236,8 +236,8 @@
   (set-mode! [_ _] nil)
   ;; Completion is offline: the fork has no completions op (measured
   ;; unknown-op). Never Jolt's own docs.
-  (complete [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (complete [_ req]
+    (try (cljd/candidates (:profile selection) req)
          (catch Throwable _ [])))
   ;; Quick doc asks the app's lookup (fork 685e56de and later answer it) in
   ;; the buffer's namespace, only while attached: it never connects on its
@@ -264,8 +264,8 @@
      "A load stops at the first form the app's REPL compiler rejects; the app's watcher still compiles the saved file."])
 
   ev/ServerHelp
-  (offline-candidates [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (offline-candidates [_ req]
+    (try (cljd/candidates (:profile selection) req)
          (catch Throwable _ [])))
 
   connection/Attached

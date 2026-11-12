@@ -391,7 +391,7 @@
   Sorted the way jonquil.syntax/get-autocomplete-candidates sorts a
   prefix: exact-case matches first, then buffer names, special forms and
   builtins."
-  [profile prefix text _pos extra-context]
+  [profile {:keys [prefix text extra-context]}]
   (let [prefix (or prefix "")
         user (candidate-user-symbols text prefix extra-context)]
     (vec (sort-by (fn [c] (candidate-sort-key prefix c))

@@ -63,7 +63,7 @@
             (is (str/starts-with? (str (:error-text (first (run e "(/ 1 0)" false nil))))
                                   "Error: java.lang.ArithmeticException: Divide by zero")))
           (testing "completion through babashka's complete, prefix only"
-            (let [names (map :symbol (ev/complete e "map" "(map" 4 nil))]
+            (let [names (map :symbol (ev/complete e {:prefix "map" :text "(map" :pos 4 :extra-context nil}))]
               (is (some #{"mapv"} names))
               (is (every? #(str/starts-with? % "map") names) (pr-str (remove #(str/starts-with? % "map") names)))))
           (testing "lookup: docs, and no :file that isn't on this disk"

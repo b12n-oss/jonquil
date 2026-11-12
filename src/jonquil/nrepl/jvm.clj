@@ -651,8 +651,8 @@
   ;; on the GTK thread. Any throw, a timeout or no connection falls back
   ;; to offline alone. Never docs/candidates, which would list Jolt-
   ;; process namespaces instead of the attached server's own.
-  (complete [this prefix text pos extra-context]
-    (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (complete [this {:keys [prefix text] :as req}]
+    (let [offline (try (cljd/candidates (:profile selection) req)
                        (catch Throwable _ []))]
       (try
         ;; "completions" (nREPL's own), else "complete" (cider's), same
@@ -701,8 +701,8 @@
       clj/limitations))
 
   ev/ServerHelp
-  (offline-candidates [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (offline-candidates [_ req]
+    (try (cljd/candidates (:profile selection) req)
          (catch Throwable _ [])))
 
   ev/FullDoc
@@ -801,7 +801,7 @@
   (toggle-debug-mode! [_ on-done]
     (future (try (on-done {:error "Debug mode is Jolt's: the JVM keeps no locals."}) (catch Throwable _)))
     nil)
-  (eval-in-frame! [_ _i _code _error-id on-result]
+  (eval-in-frame! [_ _req on-result]
     (future (try (on-result {:error "Evaluating in a frame needs Jolt: the JVM keeps no locals."}) (catch Throwable _)))
     nil)
 

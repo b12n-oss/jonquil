@@ -868,9 +868,9 @@
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [_ mode] (swap! state assoc :mode mode) nil)
-  (complete [this prefix text pos extra-context]
+  (complete [this {:keys [prefix text] :as req}]
     (try
-      (let [offline (cljd/candidates (:profile selection) prefix text pos extra-context)]
+      (let [offline (cljd/candidates (:profile selection) req)]
         (try
           ;; stale alone arms the fetch: an empty cache must not, or a
           ;; failed fetch (a gone page, say) would retry on every
@@ -900,8 +900,8 @@
                      cljs-node/limitations))
 
   ev/ServerHelp
-  (offline-candidates [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (offline-candidates [_ req]
+    (try (cljd/candidates (:profile selection) req)
          (catch Throwable _ [])))
 
   ev/FullDoc

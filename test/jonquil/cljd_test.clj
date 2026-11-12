@@ -118,17 +118,17 @@
 (deftest candidates-test
   (let [text (str "(ns demo.app (:require [cljd.flutter :as f] [\"dart:io\" :as io]))\n"
                   "(defn where-now [] 1)\n(defn window-size [] 2)\n(f/widget :padding 8)\n")
-        syms (fn [prefix & [extra]] (mapv :symbol (cljd/candidates dialect/cljd prefix text 0 extra)))]
+        syms (fn [prefix & [extra]] (mapv :symbol (cljd/candidates dialect/cljd {:prefix prefix :text text :pos 0 :extra-context extra})))]
     (testing "the buffer's own names, then ClojureDart's forms"
       (is (= ["where-now" "window-size" "when"] (take 3 (syms "w"))) "buffer names sort first")
       (is (some #{"widget"} (syms "w")))
-      (is (= :user (:category (first (cljd/candidates dialect/cljd "where" text 0 nil))))))
+      (is (= :user (:category (first (cljd/candidates dialect/cljd {:prefix "where" :text text :pos 0 :extra-context nil}))))))
     (testing "aliases from the ns form, and the aliased flutter forms"
       (is (= ["f/"] (take 1 (syms "f"))))
       (is (some #{"f/widget" "f/build" "f/$"} (syms "f/")))
       (is (some #{"io/"} (syms "i"))))
     (testing "cljd's own forms are special; Jolt's builtins stay builtins"
-      (let [by-sym (into {} (map (juxt :symbol :category)) (cljd/candidates dialect/cljd "" text 0 nil))]
+      (let [by-sym (into {} (map (juxt :symbol :category)) (cljd/candidates dialect/cljd {:prefix "" :text text :pos 0 :extra-context nil}))]
         (is (= :special (by-sym "await")))
         (is (= :special (by-sym "f/widget")))
         (is (= :builtin (by-sym "map")))))

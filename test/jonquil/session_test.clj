@@ -322,7 +322,7 @@
 
 (defn- frame-eval-sync [s i code error-id]
   (let [p (promise)]
-    (ev/eval-in-frame! s i code error-id (fn [r] (deliver p r)))
+    (ev/eval-in-frame! s {:frame-i i :code code :error-id error-id} (fn [r] (deliver p r)))
     (deref p 3000 :timeout)))
 
 (deftest eval-in-frame-test
@@ -342,7 +342,7 @@
     (repl-sync s "(/ 1 0)")
     (binding [debugger/*frames-fn* (fn [_] [{:fn 'user/f :file nil :line 1 :locals {}}])]
       (let [p (promise)]
-        (ev/eval-in-frame! s 0 "(loop [] (recur))" nil (fn [r] (deliver p r)))
+        (ev/eval-in-frame! s {:frame-i 0 :code "(loop [] (recur))" :error-id nil} (fn [r] (deliver p r)))
         (Thread/sleep 300)
         (ev/interrupt! s)
         (is (= {:error "Stopped."} (deref p 5000 :timeout)) "Stop reaches a frame evaluation")))))

@@ -183,7 +183,7 @@
   with :text for render!'s own doc-preview lookup, or nil)."
   [view {:keys [ed ns-fn candidates-fn doc-fn close-others! on-error position snapshot-fn apply-op! server-ev]
          :or {position :bottom
-              candidates-fn (fn [prefix text pos extra] (docs/candidates (ns-fn) prefix text pos extra))
+              candidates-fn (fn [prefix text pos extra] (docs/candidates (ns-fn) {:prefix prefix :text text :pos pos :extra-context extra}))
               doc-fn (fn [sym text pos] (docs/symbol-doc (ns-fn) sym text pos))}}]
   (let [snapshot-fn (or snapshot-fn (fn [] (editor/snapshot ed)))
         apply-op! (or apply-op! (fn [result] (editor/apply-op! ed result)))
@@ -368,17 +368,23 @@
     (catch :default e
       ((:on-error c) (str "; complete: " (ex-message e))))))
 
+(defn- completion-request
+  "The {:prefix :text :pos :extra-context} map ev/complete and
+  ev/offline-candidates take, for prefix p in snapshot."
+  [p snapshot]
+  {:prefix (:prefix p) :text (:text snapshot) :pos (:end p) :extra-context (:extra-context snapshot)})
+
 (defn- ask-candidates!
   "e's candidates for prefix p in snapshot, through ev/ask-help!: [:now
   cands] when they land within the grace wait, else [:later], and the
   late answer goes to arrived! on the GTK thread."
   [c e snapshot p]
   (let [token (swap! (:gen c) inc)
-        offline (fn [] (ev/offline-candidates e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot)))
+        offline (fn [] (ev/offline-candidates e (completion-request p snapshot)))
         [k cands] (ev/ask-help! ev/help-grace-ms
                                 ;; skipped when superseded before it went out
                                 (fn [] (when (= token @(:gen c))
-                                         (ev/complete e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot))))
+                                         (ev/complete e (completion-request p snapshot))))
                                 (fn [cands] (on-gui! (fn [] (arrived! c {:e e :token token :snapshot snapshot :cands cands})))))]
     (if (= k :now)
       [:now (offline-on-error c (offline) cands)]
@@ -403,8 +409,7 @@
       (let [[k cands] (ask-candidates! c e snapshot p)]
         (if (= k :now)
           (show-or-commit! c snapshot (help/open-state p cands))
-          (show! c snapshot (help/waiting-state p (ev/offline-candidates e (:prefix p) (:text snapshot) (:end p)
-                                                                         (:extra-context snapshot))))))
+          (show! c snapshot (help/waiting-state p (ev/offline-candidates e (completion-request p snapshot))))))
       (do (swap! (:gen c) inc)
           (show-or-commit! c snapshot (help/open-state p ((:candidates-fn c) (:prefix p) (:text snapshot) (:end p)
                                                                              (:extra-context snapshot)))))))
@@ -487,8 +492,7 @@
       (let [[k cands] (ask-candidates! c e snap p)]
         (if (= k :now)
           (help/refine st snap cands)
-          (help/refine-waiting st snap (ev/offline-candidates e (:prefix p) (:text snap) (:end p)
-                                                              (:extra-context snap))))))))
+          (help/refine-waiting st snap (ev/offline-candidates e (completion-request p snap))))))))
 
 (defn refine!
   "Called on every editor/on-cursor-moved! tick (jonquil.gtk.window.tabs's

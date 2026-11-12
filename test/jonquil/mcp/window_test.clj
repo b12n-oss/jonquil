@@ -30,7 +30,7 @@
       (evaluating? [_] (v evaluating?))
       (waiting-for-input? [_] (v waiting?))
       (lookup [_ _ _ _] lookup)
-      (complete [_ _ _ _ _] complete))))
+      (complete [_ _] complete))))
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 

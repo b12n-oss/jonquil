@@ -181,9 +181,10 @@
     (let [c (canonical path)
           rs (visible-rows pane)
           exact (some (fn [r] (when (= path (or (:listed r) (:path r))) r)) rs)]
-      (if exact
-        (when-not (:error? exact) exact)
-        (some (fn [r] (when (= c (:path r)) r)) rs)))))
+      (cond
+        (nil? exact) (some (fn [r] (when (= c (:path r)) r)) rs)
+        (:error? exact) nil
+        :else exact))))
 
 (defn- rect-alloc [[x y w h]]
   (let [r (ffi/alloc 16)]

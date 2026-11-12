@@ -147,7 +147,7 @@
       (do (cview/append! cv :system (str "; in " label ": " code "\n"))
           ((if (and (:paused? @frames-state) (satisfies? ev/Break e))
              (fn [on-result] (ev/break-eval! e i code on-result))
-             (fn [on-result] (ev/eval-in-frame! e i code (:error-id @frames-state) on-result)))
+             (fn [on-result] (ev/eval-in-frame! e {:frame-i i :code code :error-id (:error-id @frames-state)} on-result)))
            (landing #(frame-eval-landed! ctx label %)))))))
 
 (defn- set-handlers!

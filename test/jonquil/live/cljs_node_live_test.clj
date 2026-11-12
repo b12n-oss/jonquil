@@ -137,7 +137,7 @@
 (deftest completion-from-the-analyzer-live
   (with-cljs [e (make)]
     ;; before anything ran there is no child: offline names answer alone
-    (is (some (fn [c] (= "map" (:symbol c))) (ev/complete e "ma" "" 0 nil)))
+    (is (some (fn [c] (= "map" (:symbol c))) (ev/complete e {:prefix "ma" :text "" :pos 0 :extra-context nil})))
     (let [done (promise)]
       (ev/eval! e completion-src {:run? true
                                   :on-output (fn [_ _])
@@ -145,7 +145,7 @@
       (is (= :ok (:status (deref done 60000 :timeout)))))
     (let [offers? (fn [prefix sym]
                     (some (fn [c] (= sym (:symbol c)))
-                          (ev/complete e prefix completion-src 0 nil)))
+                          (ev/complete e {:prefix prefix :text completion-src :pos 0 :extra-context nil})))
           deadline (+ (System/currentTimeMillis) 10000)]
       ;; the fetch lands just after the Run answers
       (loop [] (when (and (not (offers? "str/u" "str/upper-case"))
@@ -699,7 +699,7 @@
           (let [{:keys [result]} (run e "(defn twice [x] (* 2 x))")]
             (is (= :ok (:status result)) (pr-str result)))
           (let [offers? (fn [] (some (fn [c] (= "twice" (:symbol c)))
-                                     (ev/complete e "tw" "" 0 nil)))
+                                     (ev/complete e {:prefix "tw" :text "" :pos 0 :extra-context nil})))
                 deadline (+ (System/currentTimeMillis) 10000)]
             (loop [] (when (and (not (offers?)) (< (System/currentTimeMillis) deadline))
                        (Thread/sleep 100) (recur)))

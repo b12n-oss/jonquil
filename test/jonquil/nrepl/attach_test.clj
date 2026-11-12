@@ -290,10 +290,10 @@
   (with-app {}
     (fn [srv dir _]
       (let [e (make dir)
-            cands (ev/complete e "wh" drive-text 0 nil)]
+            cands (ev/complete e {:prefix "wh" :text drive-text :pos 0 :extra-context nil})]
         (is (= "where" (:symbol (first cands))) "the buffer's own name first")
         (is (some #{"when"} (map :symbol cands)))
-        (is (some #{"str/"} (map :symbol (ev/complete e "st" drive-text 0 nil))) "an alias from the ns form")
+        (is (some #{"str/"} (map :symbol (ev/complete e {:prefix "st" :text drive-text :pos 0 :extra-context nil}))) "an alias from the ns form")
         (is (empty? (fake/ops-seen srv)) "completion never talks to the app, or connects")))))
 
 (def ^:private where-info

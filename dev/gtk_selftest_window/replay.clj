@@ -605,7 +605,7 @@
     (history [_] (atom {:items [] :index 0 :draft ""}))
     (prompt-ns [_] ns)
     (set-mode! [_ _] nil)
-    (complete [_ _ _ _ _] [])
+    (complete [_ _] [])
     (lookup [_ _ _ _] nil)
     (limitations [_] [])))
 

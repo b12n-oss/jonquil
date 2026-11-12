@@ -469,7 +469,7 @@
   on a non-zero exit, naming jolt's own stderr."
   [prefix text pos]
   (let [code (str "(require (quote [jonquil.docs :as docs])) "
-                  "(prn (mapv :symbol (docs/candidates 'user " (pr-str prefix) " " (pr-str text) " " pos ")))")
+                  "(prn (mapv :symbol (docs/candidates 'user {:prefix " (pr-str prefix) " :text " (pr-str text) " :pos " pos "})))")
         {:keys [exit out err]} (p/shell {:out :string :err :string :continue true}
                                         "jolt" "-M" "-e" code)]
     (when-not (zero? exit)

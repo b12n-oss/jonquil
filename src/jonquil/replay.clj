@@ -361,6 +361,15 @@
         (= (nth s j) \") (inc j)
         :else (recur (inc j))))))
 
+(defn- literal-end
+  "For a string, comment or character literal that starts at j with the
+  character c, the index just past it. nil for anything else."
+  [^String s j c n]
+  (cond
+    (= c \") (string-end s j)
+    (= c \;) (or (str/index-of s "\n" j) n)
+    (= c \\) (+ j 2)))
+
 (defn- bracket-end
   "Index just past the bracket whose opener is at i, strings, comments and
   character literals skipped; past the end of s when it never closes."
@@ -368,14 +377,13 @@
   (let [n (count s)]
     (loop [j i depth 0]
       (let [c (when (< j n) (nth s j))]
-        (cond
-          (nil? c) n
-          (= c \") (recur (string-end s j) depth)
-          (= c \;) (recur (or (str/index-of s "\n" j) n) depth)
-          (= c \\) (recur (+ j 2) depth)
-          (contains? #{\( \[ \{} c) (recur (inc j) (inc depth))
-          (contains? #{\) \] \}} c) (if (= 1 depth) (inc j) (recur (inc j) (dec depth)))
-          :else (recur (inc j) depth))))))
+        (if-let [skip (when c (literal-end s j c n))]
+          (recur skip depth)
+          (cond
+            (nil? c) n
+            (contains? #{\( \[ \{} c) (recur (inc j) (inc depth))
+            (contains? #{\) \] \}} c) (if (= 1 depth) (inc j) (recur (inc j) (dec depth)))
+            :else (recur (inc j) depth)))))))
 
 (defn- atom-end [^String s i]
   (let [n (count s)]

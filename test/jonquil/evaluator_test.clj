@@ -84,8 +84,8 @@
 (deftest help-matches-docs-test
   (let [e (fresh)]
     (run e "(defn helped \"Helps.\" [x] x)" true)
-    (is (= (docs/candidates 'user "hel" "(hel" 4 nil) (ev/complete e "hel" "(hel" 4 nil)))
-    (is (some #{"helped"} (map :symbol (ev/complete e "hel" "(hel" 4 nil))))
+    (is (= (docs/candidates 'user {:prefix "hel" :text "(hel" :pos 4 :extra-context nil}) (ev/complete e {:prefix "hel" :text "(hel" :pos 4 :extra-context nil})))
+    (is (some #{"helped"} (map :symbol (ev/complete e {:prefix "hel" :text "(hel" :pos 4 :extra-context nil}))))
     (is (= "Helps." (:doc (ev/lookup e "helped" "(helped 1)" 1))))
     (is (= "clojure.core" (:ns (ev/lookup e "map" "(map inc [1])" 1))))
     (is (nil? (ev/lookup e "" "" 0)))))

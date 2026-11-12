@@ -28,13 +28,13 @@
 
 (deftest candidates-test
   (setup-sandbox)
-  (let [results (docs/candidates 'jonquil.docs-test.sandbox "hel" "" 0)]
+  (let [results (docs/candidates 'jonquil.docs-test.sandbox {:prefix "hel" :text "" :pos 0})]
     (is (= "hello" (:symbol (first results))))))
 
 (deftest removed-namespace-falls-back-to-user-test
   (docs/clear-doc-cache!)
   (is (= :found (:status (docs/symbol-doc 'no.such.ns "map" "" 0))))
-  (is (some #(= "map" (:symbol %)) (docs/candidates 'no.such.ns "ma" "" 0))))
+  (is (some #(= "map" (:symbol %)) (docs/candidates 'no.such.ns {:prefix "ma" :text "" :pos 0}))))
 
 (deftest program-namespace-test
   (docs/clear-doc-cache!)
@@ -45,7 +45,7 @@
   (let [d (docs/symbol-doc 'p4.docs.demo "greet" "" 0)]
     (is (= :found (:status d)))
     (is (re-find #"Says hi" (str (:doc d)))))
-  (is (some #(= "greet" (:symbol %)) (docs/candidates 'p4.docs.demo "gr" "" 0)))
+  (is (some #(= "greet" (:symbol %)) (docs/candidates 'p4.docs.demo {:prefix "gr" :text "" :pos 0})))
   (remove-ns 'p4.docs.demo))
 
 (deftest memo-is-keyed-by-namespace-and-text-test

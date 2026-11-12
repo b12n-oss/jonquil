@@ -126,8 +126,8 @@
   (history [_] (:history ctx))
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [this mode] (set-mode! this mode))
-  (complete [_ prefix text pos extra-context]
-    (docs/candidates (:prompt-ns @state) prefix text pos extra-context))
+  (complete [_ req]
+    (docs/candidates (:prompt-ns @state) req))
   (lookup [_ sym text pos]
     ;; a newer Jolt records a required namespace's :file as its classpath
     ;; name, which resolves on the roots project-roots set
@@ -156,14 +156,14 @@
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)
-  (eval-in-frame! [_ i code error-id on-result]
+  (eval-in-frame! [_ {:keys [frame-i code error-id]} on-result]
     (future
       (let [token (debugger/make-token)
             r (try (let [e (:last-error @state)]
                      (cond (nil? e) {:error "No error yet."}
                            (debugger/stale? e error-id) {:error debugger/STALE}
                            :else (do (swap! state assoc :frame-token token)
-                                     (debugger/eval-in-frame e i code {:frames-fn (debugger/frames-fn) :token token}))))
+                                     (debugger/eval-in-frame e frame-i code {:frames-fn (debugger/frames-fn) :token token}))))
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))})
                    (finally (swap! state (fn [st] (cond-> st (identical? token (:frame-token st)) (dissoc :frame-token))))))]
         (try (on-result r) (catch Throwable _))))

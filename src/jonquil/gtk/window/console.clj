@@ -83,7 +83,7 @@
                          ;; of it, so there's no editor for this instance
                          ;; to name.
                          {:ns-fn completion-ns-fn
-                          :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
+                          :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* {:prefix prefix :text text :pos pos :extra-context extra}))
                           :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
                           :server-ev server-ev
                           :close-others! close-popovers-fn

@@ -656,11 +656,11 @@
     (fn [srv dir file]
       (let [e (make dir) text "(gre" pos (count text)]
         (testing "not connected: offline candidates only, and the fake never sees a completions request"
-          (is (= (cljd/candidates dialect/clj "gre" text pos nil) (ev/complete e "gre" text pos nil)))
+          (is (= (cljd/candidates dialect/clj {:prefix "gre" :text text :pos pos :extra-context nil}) (ev/complete e {:prefix "gre" :text text :pos pos :extra-context nil})))
           (is (not (connection/connected? e)))
           (is (not-any? #{"completions"} (fake/ops-seen srv))))
         (run e fixture-core-text {:run? true :path file})
-        (let [cands (ev/complete e "gre" text pos nil)]
+        (let [cands (ev/complete e {:prefix "gre" :text text :pos pos :extra-context nil})]
           (testing "after a Run, the server's own candidates are merged in"
             (is (some #(= {:symbol "greet" :category :user} %) cands)))
           (testing "the request carried the buffer's own ns"
@@ -739,11 +739,11 @@
         (run e "1" {:run? false})
         (testing "offline-candidates never asks the server"
           (let [seen (count (filter #{"completions"} (fake/ops-seen srv)))]
-            (is (not (contains? (names (ev/offline-candidates e "gre" fixture-core-text 0 nil)) "greetings")))
+            (is (not (contains? (names (ev/offline-candidates e {:prefix "gre" :text fixture-core-text :pos 0 :extra-context nil})) "greetings")))
             (is (= seen (count (filter #{"completions"} (fake/ops-seen srv)))))))
         (testing "a slow server: complete falls back offline at 300 ms, and has its names with the longer limit"
-          (is (not (contains? (names (ev/complete e "gre" fixture-core-text 0 nil)) "greetings")))
-          (is (contains? (names (binding [ev/*help-timeout-ms* 3000] (ev/complete e "gre" fixture-core-text 0 nil)))
+          (is (not (contains? (names (ev/complete e {:prefix "gre" :text fixture-core-text :pos 0 :extra-context nil})) "greetings")))
+          (is (contains? (names (binding [ev/*help-timeout-ms* 3000] (ev/complete e {:prefix "gre" :text fixture-core-text :pos 0 :extra-context nil})))
                          "greetings")))))))
 
 (def full-doc-greet-text
@@ -1123,7 +1123,7 @@
     (is (= {:note "No error yet."} (answer #(ev/error-frames! e %))) "never attached")
     (is (= {:error "Debug mode is Jolt's: the JVM keeps no locals."} (answer #(ev/toggle-debug-mode! e %))))
     (is (= {:error "Evaluating in a frame needs Jolt: the JVM keeps no locals."}
-           (answer #(ev/eval-in-frame! e 0 "1" nil %))))))
+           (answer #(ev/eval-in-frame! e {:frame-i 0 :code "1" :error-id nil} %))))))
 
 ;; --- run-worker! characterization (task 22) ---
 
