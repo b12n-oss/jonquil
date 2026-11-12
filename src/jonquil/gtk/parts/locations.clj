@@ -239,10 +239,13 @@
 ;; :last-run? when it is the last Run, for
 ;; Take, which works out the difference at the caret afresh.
 (defn- compare-list!
-  [{:keys [compare-state state locp right hide-right-panel! set-status!] :as ctx} t label other extra]
-  (let [l (compare/location-list label other (editor/editor-text (:ed t)))]
+  "Lists the differences between tab's text and other in the Locations panel,
+  or says there are none. extra is what compare-state keeps beside the
+  label (nil for the disk or HEAD)."
+  [{:keys [compare-state state locp right hide-right-panel! set-status!] :as ctx} {:keys [tab label other extra]}]
+  (let [l (compare/location-list label other (editor/editor-text (:ed tab)))]
     (if (seq (:entries l))
-      (do (reset! compare-state (merge {:tab-id (:id t) :label label :other other} extra))
+      (do (reset! compare-state (merge {:tab-id (:id tab) :label label :other other} extra))
           (make-locations! ctx l))
       (do (reset! compare-state nil)
           ;; a list of differences that are gone goes too
@@ -279,7 +282,7 @@
       (let [{:keys [text error]} (read-other path)]
         (if error
           (set-status! (str "; " error))
-          (compare-list! ctx t label text nil))))))
+          (compare-list! ctx {:tab t :label label :other text}))))))
 
 (defn- compare-tab!
   "Compare with tab: the active tab against the open tab other-id, as it
@@ -290,8 +293,9 @@
     (cond
       (nil? o) (set-status! "; That tab isn't open any more.")
       (= (:id o) (:id t)) (set-status! "; Pick another tab to compare this one with.")
-      :else (compare-list! ctx t (g/label-text (:label o)) (editor/editor-text (:ed o))
-                           {:other-tab-id other-id}))))
+      :else (compare-list! ctx {:tab t :label (g/label-text (:label o))
+                                :other (editor/editor-text (:ed o))
+                                :extra {:other-tab-id other-id}}))))
 
 (def ^:private last-run-label "the last Run")
 
@@ -303,21 +307,21 @@
   [{:keys [active-tab set-status!] :as ctx}]
   (let [t (active-tab)]
     (if-let [text (last-run-text t)]
-      (compare-list! ctx t last-run-label text {:last-run? true})
+      (compare-list! ctx {:tab t :label last-run-label :other text :extra {:last-run? true}})
       (set-status! "; This tab hasn't had a whole Run that ended well yet."))))
 
 (defn- take-hunk!
   "Takes other's lines for the difference at the caret of t, as one undo
   step. extra is what compare-state keeps beside the label, kept again."
-  [{:keys [state set-status!] :as ctx} t label other extra]
-  (let [ed (:ed t)
+  [{:keys [state set-status!] :as ctx} {:keys [tab label other extra]}]
+  (let [ed (:ed tab)
         buffer (editor/editor-text ed)
         line (first (g/cursor-line-col (:buf ed)))]
     (if-let [h (compare/hunk-at (compare/hunks other buffer) line buffer)]
       (let [[s e r] (compare/take-edit buffer h)]
         ;; one undo step, exactly the other version's lines
         (editor/apply-op-plain! ed {:edits [[s e r]] :caret s})
-        (compare-list! ctx t label other extra)
+        (compare-list! ctx {:tab tab :label label :other other :extra extra})
         (when (seq (:entries (:list @state)))
           (set-status! (str "; Took " (if (= "disk" label) "the disk's" (str label "'s"))
                             " version of line " (inc (:line h)) "."))))
@@ -336,7 +340,8 @@
                 :else (:other st))]
     (if (not= tab-id (:id t))
       (set-status! "; Compare this tab first: with the file on disk, git HEAD, another tab or the last Run.")
-      (take-hunk! ctx t label other (select-keys st [:other-tab-id :last-run?])))))
+      (take-hunk! ctx {:tab t :label label :other other
+                       :extra (select-keys st [:other-tab-id :last-run?])}))))
 
 (defn- set-handlers!
   [{:keys [state locp right hide-right-panel! set-status!] :as ctx}]

@@ -179,8 +179,9 @@
   [pane path]
   (when path
     (let [c (canonical path)
-          rs (visible-rows pane)]
-      (if-let [exact (some (fn [r] (when (= path (or (:listed r) (:path r))) r)) rs)]
+          rs (visible-rows pane)
+          exact (some (fn [r] (when (= path (or (:listed r) (:path r))) r)) rs)]
+      (if exact
         (when-not (:error? exact) exact)
         (some (fn [r] (when (= c (:path r)) r)) rs)))))
 
@@ -234,6 +235,19 @@
   (g/gtk-label-set-text problem-label (or text ""))
   (g/gtk-widget-set-visible problem-label (if (str/blank? text) 0 1)))
 
+(defn- menu-target
+  "The menu's target for path (nil means the root): {:path :listed :dir?}, or
+  nil when there is nothing to open the menu on."
+  [root path row]
+  (cond (nil? path) (when root (let [c (canonical root)] {:path c :listed c :dir? true}))
+        (and row (not (:error? row))) (select-keys row [:path :listed :dir?])))
+
+(defn- show-menu-buttons!
+  "Shows the buttons whose label is among the menu's current items."
+  [{:keys [buttons menu]}]
+  (doseq [[label btn] buttons]
+    (g/gtk-widget-set-visible btn (if (some #{label} (:items @menu)) 1 0))))
+
 (defn open-menu!
   "Opens the menu for the row at path, or for the root when path is nil.
   Records the target now. pt, an optional [x y] in the list's coordinates,
@@ -244,13 +258,11 @@
   ([{:keys [popover menu state row-widgets] :as pane} path pt]
    (let [row (when path (row-at pane path))
          root (:root @state)
-         target (cond (nil? path) (when root (let [c (canonical root)] {:path c :listed c :dir? true}))
-                      (and row (not (:error? row))) (select-keys row [:path :listed :dir?]))]
+         target (menu-target root path row)]
      (when target
        (swap! menu assoc :target target :items (if (nil? path) (vec (take 2 ITEMS)) ITEMS)
               :mode :menu :open? true :problem nil)
-       (doseq [[label btn] (:buttons pane)]
-         (g/gtk-widget-set-visible btn (if (some #{label} (:items @menu)) 1 0)))
+       (show-menu-buttons! pane)
        (set-problem! pane nil)
        (show-menu-mode! pane :menu)
        (point-popover-at! pane (when row (:row (get @row-widgets (.indexOf ^java.util.List (visible-rows pane) row)))) pt)
@@ -291,10 +303,17 @@
       (let [[a b] (prefill-selection name (:dir? target))]
         (g/gtk-editable-select-region entry a b)))))
 
+(defn- trash-path!
+  "Calls the pane's :on-trash on path and reports the problem it returns (if
+  any) through :on-error."
+  [{:keys [on-trash on-error]} path]
+  (when-let [problem (when on-trash (on-trash path))]
+    (on-error (str "; trash: " problem))))
+
 (defn press-item!
   "What clicking the menu button labelled label does. Nothing unless the menu
   is open and shows that label."
-  [{:keys [menu on-trash on-error] :as pane} label]
+  [{:keys [menu] :as pane} label]
   (when (and (:open? @menu) (some #{label} (:items @menu)))
     (case label
       "New File…" (show-name-entry! pane :new-file)
@@ -302,8 +321,7 @@
       "Rename…" (show-name-entry! pane :rename)
       "Move to Trash" (let [path (listed (:target @menu))]
                         (close-menu! pane)
-                        (when-let [problem (when on-trash (on-trash path))]
-                          (on-error (str "; trash: " problem))))
+                        (trash-path! pane path))
       nil))
   nil)
 
@@ -347,19 +365,28 @@
     (when-not (ffi/null? row)
       (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))))
 
+(defn- trash-key?
+  "True for Delete, or BackSpace with Control/Meta held."
+  [keyval state]
+  (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state))))
+
+(defn- menu-key?
+  "True for the Menu key, or F10 with Shift held."
+  [keyval state]
+  (or (= keyval KEY-MENU)
+      (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK))))))
+
 (defn- row-key-action
   "[what f] for a key on selected row r (not an error row): F2 renames,
   Delete or Control/Meta+BackSpace trashes, Shift+F10 or Menu opens the
   menu. nil for any other key."
-  [{:keys [on-trash on-error] :as pane} r keyval state]
+  [pane r keyval state]
   (cond
     (= keyval KEY-F2)
     ["rename" (fn [] (when (open-menu! pane (listed r)) (press-item! pane "Rename…")))]
-    (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state)))
-    ["trash" (fn [] (when-let [problem (when on-trash (on-trash (listed r)))]
-                      (on-error (str "; trash: " problem))))]
-    (or (= keyval KEY-MENU)
-        (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK)))))
+    (trash-key? keyval state)
+    ["trash" (fn [] (trash-path! pane (listed r)))]
+    (menu-key? keyval state)
     ["menu" (fn [] (open-menu! pane (listed r)))]
     :else nil))
 
@@ -439,23 +466,32 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   (g/gtk-widget-add-controller list keyctl))
 
-(defn- build-name-menu!
-  "Builds the name menu's popover: the item buttons, the name entry and the
-  problem label."
-  [{:keys [root popover buttons items-box name-box heading-label entry problem-label guard] :as pane}]
-    ;; The name menu. Parented to root (see the ns docstring), built once.
+(defn- style-name-popover!
+  "Parents the popover to root (see the ns docstring) and sets how it looks
+  and behaves."
+  [{:keys [root popover]}]
   (g/gtk-widget-set-parent popover root)
   (g/gtk-widget-add-css-class popover "jonquil-popover")
   (g/gtk-widget-set-halign popover g/ALIGN-START)
   (g/gtk-popover-set-autohide popover 1)
-  (g/gtk-popover-set-position popover g/POPOVER-POS-BOTTOM)
+  (g/gtk-popover-set-position popover g/POPOVER-POS-BOTTOM))
+
+(defn- add-item-buttons!
+  "Packs each item button into the items box and connects its click to
+  press-item!."
+  [{:keys [buttons items-box guard] :as pane}]
   (doseq [[label btn] buttons]
     (g/gtk-button-set-has-frame btn 0)
     (g/gtk-box-append items-box btn)
     (g/g-signal-connect-data btn "clicked"
                              (callable (guard "menu" (fn [_ _] (press-item! pane label) nil))
                                        [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT))
+                             ffi/null ffi/null g/CONNECT-DEFAULT)))
+
+(defn- lay-out-name-box!
+  "Styles the heading, the entry and the problem label and packs them into
+  the name box."
+  [{:keys [name-box heading-label entry problem-label]}]
   (g/gtk-widget-add-css-class heading-label "jonquil-doc")
   (g/gtk-label-set-xalign heading-label 0.0)
   (g/gtk-widget-add-css-class problem-label "jonquil-doc")
@@ -464,12 +500,33 @@
   (g/gtk-widget-set-size-request entry NAME-WIDTH -1)
   (g/gtk-box-append name-box heading-label)
   (g/gtk-box-append name-box entry)
-  (g/gtk-box-append name-box problem-label)
+  (g/gtk-box-append name-box problem-label))
+
+(defn- build-name-menu!
+  "Builds the name menu's popover: the item buttons, the name entry and the
+  problem label."
+  [{:keys [popover items-box name-box] :as pane}]
+  (style-name-popover! pane)
+  (add-item-buttons! pane)
+  (lay-out-name-box! pane)
   (let [content (g/gtk-box-new g/ORIENTATION-VERTICAL 0)]
     (g/gtk-box-append content items-box)
     (g/gtk-box-append content name-box)
     (g/gtk-popover-set-child popover content))
   (g/gtk-widget-set-visible name-box 0))
+
+(defn- on-list-right-click!
+  "Opens the menu where a right click landed: on the row there (selecting
+  it), or on the root when the click is below the rows."
+  [{:keys [list] :as pane} x y]
+  (let [row (g/gtk-list-box-get-row-at-y list (int y))
+        pt [x y]]
+    (if (ffi/null? row)
+      (open-menu! pane nil pt)
+      (let [path (listed (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
+        (g/gtk-list-box-select-row list row)
+        (open-menu! pane path pt)))
+    nil))
 
 (defn- connect-name-menu!
   "The popover's closed, the entry's activate and the list's right click."
@@ -490,16 +547,7 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   (g/gtk-gesture-single-set-button click 3)
   (g/g-signal-connect-data click "pressed"
-                           (callable (guard "menu"
-                                            (fn [_g _n x y _data]
-                                              (let [row (g/gtk-list-box-get-row-at-y list (int y))
-                                                    pt [x y]]
-                                                (if (ffi/null? row)
-                                                  (open-menu! pane nil pt)
-                                                  (let [path (listed (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
-                                                    (g/gtk-list-box-select-row list row)
-                                                    (open-menu! pane path pt)))
-                                                nil)))
+                           (callable (guard "menu" (fn [_g _n x y _data] (on-list-right-click! pane x y)))
                                      [:pointer :int :double :double :pointer] :void)
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   (g/gtk-widget-add-controller list click))
@@ -514,6 +562,41 @@
                            (callable (guard "open folder" (fn [_ _] (on-open-folder) nil)) [:pointer :pointer] :void)
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
+(defn- new-widgets
+  "Every widget the pane uses, created but not yet laid out, as a map.
+  :keyctl, :click and :header are used while wiring and are not kept in the
+  pane."
+  []
+  {:root (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+   :header (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
+   :header-label (g/gtk-label-new "No folder")
+   :refresh-btn (g/gtk-button-new-with-label "⟳")
+   :open-folder-btn (g/gtk-button-new-with-label "Open Folder…")
+   :scroll (g/gtk-scrolled-window-new)
+   :list (g/gtk-list-box-new)
+   :body-label (g/gtk-label-new "")
+   :keyctl (g/gtk-event-controller-key-new)
+   :click (g/gtk-gesture-click-new)
+   :popover (g/gtk-popover-new)
+   :items-box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+   :name-box (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
+   :heading-label (g/gtk-label-new "")
+   :entry (g/gtk-entry-new)
+   :problem-label (g/gtk-label-new "")
+   :buttons (mapv (fn [label] [label (g/gtk-button-new-with-label label)]) ITEMS)})
+
+(defn- new-pane
+  "The pane map: the kept widgets from w, the callbacks in opts and fresh
+  state."
+  [w {:keys [on-open on-error on-new-file on-new-folder on-rename on-trash]}]
+  (merge (select-keys w [:root :header-label :refresh-btn :open-folder-btn :list :body-label
+                         :scroll :popover :items-box :name-box :heading-label :entry
+                         :problem-label :buttons])
+         {:state (atom (ft/load-model nil)) :rows (atom []) :row-widgets (atom [])
+          :on-open on-open :on-error on-error :guard (guard-fn on-error)
+          :on-new-file on-new-file :on-new-folder on-new-folder :on-rename on-rename :on-trash on-trash
+          :menu (atom {:open? false :mode nil :items [] :target nil})}))
+
 (defn make-pane
   "Builds the pane, empty (show-model! fills it). opts is {:on-open (fn
   [path]) :on-open-folder (fn []) :on-error (fn [msg]) and, optionally,
@@ -521,36 +604,12 @@
   (fn [path new-name]), :on-trash (fn [path])}. The last four return nil on
   success or an error string (the entry shows it); a throw in any callback
   goes to :on-error. GTK-thread only."
-  [{:keys [on-open on-open-folder on-error on-new-file on-new-folder on-rename on-trash]}]
-  (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        header (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        header-label (g/gtk-label-new "No folder")
-        refresh-btn (g/gtk-button-new-with-label "⟳")
-        open-folder-btn (g/gtk-button-new-with-label "Open Folder…")
-        scroll (g/gtk-scrolled-window-new)
-        list (g/gtk-list-box-new)
-        body-label (g/gtk-label-new "")
-        keyctl (g/gtk-event-controller-key-new)
-        click (g/gtk-gesture-click-new)
-        popover (g/gtk-popover-new)
-        items-box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        name-box (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
-        heading-label (g/gtk-label-new "")
-        entry (g/gtk-entry-new)
-        problem-label (g/gtk-label-new "")
-        buttons (mapv (fn [label] [label (g/gtk-button-new-with-label label)]) ITEMS)
-        guard (guard-fn on-error)
-        pane {:root root :header-label header-label :refresh-btn refresh-btn
-              :open-folder-btn open-folder-btn :list list :body-label body-label
-              :state (atom (ft/load-model nil)) :rows (atom []) :row-widgets (atom [])
-              :on-open on-open :on-error on-error :guard guard
-              :on-new-file on-new-file :on-new-folder on-new-folder :on-rename on-rename :on-trash on-trash
-              :scroll scroll :popover popover :items-box items-box :name-box name-box :heading-label heading-label
-              :entry entry :problem-label problem-label :buttons buttons
-              :menu (atom {:open? false :mode nil :items [] :target nil})}]
-    (lay-out-header! pane header)
-    (connect-list! pane keyctl)
+  [{:keys [on-open-folder] :as opts}]
+  (let [w (new-widgets)
+        pane (new-pane w opts)]
+    (lay-out-header! pane (:header w))
+    (connect-list! pane (:keyctl w))
     (build-name-menu! pane)
-    (connect-name-menu! pane click)
+    (connect-name-menu! pane (:click w))
     (connect-header-btns! pane on-open-folder)
     pane))
