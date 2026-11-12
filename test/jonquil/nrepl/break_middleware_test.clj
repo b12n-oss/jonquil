@@ -219,3 +219,34 @@
           (testing "after the eval, a breakpoint reached on the session runs on"
             (is (= 41 (deref (eval-under entry (fn [_] (f 20))) 5000 :blocked)))))
         (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))
+
+(deftest a-future-paused-when-its-eval-ends-is-woken-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [{:keys [h entry]} (setup)
+          sent (atom [])]
+      (try
+        (h {"op" "eval" "session" "s1" "jonquil-breakpoints" "1" :reply (fn [m] (swap! sent conj m))})
+        (let [f (eval (read-string (:text adder)))
+              fut (promise)
+              ev (eval-under entry (fn [_]
+                                     (deliver fut (future (f 20)))
+                                     (loop [i 0] (when (and (< i 250) (not (some #(get % "jonquil-paused") @sent)))
+                                                   (Thread/sleep 20) (recur (inc i))))
+                                     :eval-done))]
+          (is (= :eval-done (deref ev 5000 :blocked)))
+          (is (= 41 (deref @fut 5000 :blocked))
+              "the eval's end wakes the future it left paused, which the window can no longer continue"))
+        (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))
+
+(deftest breakpoints-op-answers-heads-test
+  (let [{:keys [h]} (setup)
+        [r] (ask h {"op" "jonquil-breakpoints" "session" "s1" "ns" "user" "heads" (pr-str ["when" "nope"])})]
+    (is (= {"when" {:var "clojure.core/when" :macro true} "nope" nil} (edn/read-string (get r "heads"))))))
+
+(deftest breakpoints-op-on-a-jolt-without-jolt-debug-test
+  (with-redefs [debugger/break-available? (constantly false)]
+    (let [{:keys [h]} (setup)
+          [r] (ask h {"op" "jonquil-breakpoints" "session" "s1" "on" "true"})]
+      (is (string? (get r "error")) "arming says why, so the window sends no breakpoint code")
+      (is (nil? @debugger/breakpoint-hook)))))

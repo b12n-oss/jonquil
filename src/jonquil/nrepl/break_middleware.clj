@@ -24,7 +24,8 @@
   op arms or disarms jonquil.debugger/breakpoint-hook with the session's own
   hook, and an eval sent with \"jonquil-breakpoints\" \"1\" arms it too (a
   restarted child) and lets a breakpoint pause while that eval runs."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [jolt.nrepl :as server]
             [jonquil.debugger :as debugger]))
 
@@ -81,7 +82,7 @@
       ;; left published (its cleanup skipped) ends here too; the
       ;; client drops its own when the eval finishes.
       (reset! (:armed? e) false)
-      (debugger/end-stale-pause! (:break e) {}))))
+      (debugger/end-stale-pause! (:break e) {} {:other-thread :wake}))))
 
 (defn session-wrapper
   "Session e's jolt.nrepl/*eval-wrapper*: runs the evaluation's thunk under
@@ -95,7 +96,7 @@
       (finally
         ;; a breakpoint reached after this eval can't reach the client
         (reset! (:bp-ok? e) false)
-        (debugger/end-stale-pause! (:break e) {})))))
+        (debugger/end-stale-pause! (:break e) {} {:other-thread :wake})))))
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))
 
@@ -144,6 +145,14 @@
                                                       {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))))
     (server/respond request {"status" ["done"] "error" "Not paused any more."})))
 
+(defn- heads-reply
+  "jonquil.debugger/macro-heads for the symbols in heads (an EDN vector),
+  in namespace ns."
+  [ns heads]
+  (try {"status" ["done"]
+        "heads" (pr-str (debugger/macro-heads ns (edn/read-string (str heads))))}
+       (catch Throwable t {"status" ["done"] "error" (or (ex-message t) (str (class t)))})))
+
 (defn- breakpoints-reply
   "Arms or disarms session entry e's breakpoint hook (on, \"true\" or
   \"false\")."
@@ -167,7 +176,10 @@
         "clone" (clone-request! sessions next request)
         ("eval" "load-file") (arm-and-pass! e next request)
         "jonquil-break-check" (server/respond request (break-check-reply))
-        "jonquil-breakpoints" (server/respond request (breakpoints-reply e (get request "on")))
+        "jonquil-breakpoints"
+        (server/respond request (if-let [heads (get request "heads")]
+                                  (heads-reply (get request "ns") heads)
+                                  (breakpoints-reply e (get request "on"))))
         "jonquil-break-eval" (break-eval! e request)
         "jonquil-break-continue"
         (server/respond request {"status" ["done"]

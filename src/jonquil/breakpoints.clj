@@ -20,6 +20,7 @@
   that may read its arguments as code. When a position isn't known to be
   evaluated, it holds none."
   (:require [clojure.string :as str]
+            [jonquil.changed :as changed]
             [jonquil.commands :as commands]))
 
 ;; --- the inserted form --------------------------------------------------------
@@ -90,18 +91,21 @@
   (let [p (prefix text node)]
     (or (str/includes? p "'") (str/includes? p "`") (str/includes? p "?"))))
 
-(defn- head-name
-  "The name of a list's head symbol without its namespace (s/defn reads as
-  defn, so a library's defn-like macro is treated as one), or nil when the
-  head isn't a plain symbol."
+(defn- head-symbol
+  "The text of a list's head when it is a plain symbol, namespace and all,
+  else nil."
   [text {:keys [kids]}]
   (when-let [h (first kids)]
     (when (and (symbol-atom? text h) (not (str/starts-with? (atom-text text h) "@")))
-      (let [s (atom-text text h)
-            i (str/last-index-of s "/")]
-        (if (or (nil? i) (= s "/") (= i (dec (count s))))
-          s
-          (subs s (inc i)))))))
+      (atom-text text h))))
+
+(defn- split-sym
+  "[ns name] of symbol text s; ns nil when s isn't qualified."
+  [s]
+  (let [i (str/index-of s "/")]
+    (if (or (nil? i) (= s "/") (zero? i) (= i (dec (count s))))
+      [nil s]
+      [(subs s 0 i) (subs s (inc i))])))
 
 ;; --- the walk: which nodes are code, and where --------------------------------
 
@@ -183,7 +187,7 @@
   (never a catch's class or name)."
   [text xs]
   (mapcat (fn [x]
-            (case (when (= :list (kind text x)) (head-name text x))
+            (case (when (= :list (kind text x)) (head-symbol text x))
               "catch" (stmts (drop 3 (:kids x)))
               "finally" (stmts (rest (:kids x)))
               [[x :stmt]]))
@@ -206,7 +210,7 @@
 
 (def ^:private body-binding
   ;; [bindings] & body
-  #{"let" "loop" "binding" "with-open" "with-redefs" "with-local-vars"
+  #{"let" "loop" "let*" "loop*" "binding" "with-open" "with-redefs" "with-local-vars"
     "when-let" "when-some" "when-first" "dotimes"})
 
 (def ^:private test-then-body
@@ -217,34 +221,95 @@
   ;; & body
   #{"do" "future" "delay" "lazy-seq" "with-out-str"})
 
+(def ^:private all-args
+  ;; every argument is evaluated as it is
+  #{"if" "if-not" "and" "or" "cond" "condp" "recur" "throw"})
+
 (def ^:private first-only
-  ;; only the first argument is plain code: the rest is threaded or read
-  ;; as a member name
-  #{"->" "->>" "some->" "some->>" "cond->" "cond->>" "as->" "doto" "." ".."})
+  ;; only the first argument is plain code: the rest is threaded
+  #{"->" "->>" "some->" "some->>" "cond->" "cond->>" "as->" "doto"})
 
 (def ^:private no-code
-  ;; nothing inside is code we may touch: quoted, compile-time, or a
-  ;; declaration
+  ;; nothing inside is code we may touch: quoted, compile-time, interop
+  ;; whose target may be a class, or a declaration
   #{"quote" "var" "ns" "import" "require" "use" "refer" "declare" "defprotocol"
-    "definterface" "defmulti" "defmacro" "gen-class" "is" "are" "deftemplate"
-    "refer-clojure" "in-ns" "load"})
+    "definterface" "defmulti" "defmacro" "gen-class" "refer-clojure" "in-ns" "load"
+    "." ".." "letfn*" "case*" "deftype*" "reify*" "monitor-enter" "monitor-exit"})
 
-(defn- macro-ish?
-  "True for a head that isn't core but reads like a macro that may treat
-  its arguments as code: (with-foo ...), (defthing ...), (x-> ...)."
-  [n]
-  (or (str/starts-with? n "with-") (str/starts-with? n "def") (str/includes? n "->")))
+(def ^:private named
+  ;; the rest of the core heads list-parts knows by name
+  #{"defn" "defn-" "fn" "fn*" "def" "defonce" "defmethod" "deftype" "defrecord" "reify"
+    "extend-type" "extend-protocol" "proxy" "if-let" "if-some" "doseq" "for" "letfn"
+    "try" "case" "set!" "new" "comment"})
+
+(def ^:private known-core
+  (into #{} cat [body-binding test-then-body just-body all-args first-only no-code named]))
+
+(def ^:private known-elsewhere
+  ;; macros outside clojure.core whose shape is known, by their var
+  {"clojure.test/deftest" "deftest" "clojure.test/testing" "testing"
+   "clojure.test/is" "is" "clojure.test/are" "are"})
+
+(def ^:private specials
+  ;; special forms: never vars, so the runtime can't resolve them
+  #{"if" "do" "let*" "loop*" "fn*" "letfn*" "try" "quote" "var" "." "new" "set!"
+    "throw" "recur" "def" "case*" "monitor-enter" "monitor-exit" "deftype*" "reify*"})
+
+(defn- head-kind
+  "How a list's head reads, given heads (the runtime's answer, symbol text
+  -> {:var \"ns/name\" :macro true}, or nil when it resolves to nothing;
+  :heads absent when the runtime didn't answer):
+  [:known n] for a form list-parts knows by name n, :macro for any other
+  macro (nothing inside is touched), :call for a fn or an unresolved name
+  (a local, interop). With no answer, a head that isn't a known core name
+  counts as a macro."
+  [text node {:keys [heads text-macros]}]
+  (let [s (head-symbol text node)
+        [ns-part nm] (when s (split-sym s))]
+    (cond
+      (nil? s) :call
+      (and (nil? ns-part) (specials s)) [:known s]
+      (contains? text-macros s) :macro
+      (= "clojure.core" ns-part) (if (known-core nm) [:known nm] :macro)
+      (and heads (contains? heads s))
+      (let [{v :var m :macro} (get heads s)
+            [vns vname] (when v (split-sym v))]
+        (cond
+          (nil? v) :call
+          (= "clojure.core" vns) (if (known-core vname) [:known vname] (if m :macro :call))
+          (known-elsewhere v) [:known (known-elsewhere v)]
+          m :macro
+          :else :call))
+      (and (nil? ns-part) (known-core s)) [:known s]
+      (and (nil? ns-part) (contains? #{"deftest" "testing" "is" "are"} s)) [:known s]
+      :else :macro)))
+
+(defn- tagged
+  "The nodes in kids written right after a #tag (a tagged literal's value):
+  read by the tag's reader, not code."
+  [text kids]
+  (into #{} (keep (fn [[a b]]
+                    (when (and (= :atom (kind text a))
+                               (let [t (atom-text text a)]
+                                 (and (str/starts-with? t "#") (> (count t) 1)
+                                      (not (#{\' \_ \? \{ \( \"} (.charAt ^String t 1))))))
+                      b)))
+        (partition 2 1 kids)))
 
 (defn- list-parts
   "The [node position] pairs of a list's code, by its head; position is
   :stmt for a body form, :expr for any other evaluated one."
-  [text {:keys [kids] :as node}]
-  (let [n (head-name text node)
+  [text {:keys [kids] :as node} opts]
+  (let [k (head-kind text node opts)
+        n (when (vector? k) (second k))
         xs (rest kids)]
     (cond
-      (nil? n) (exprs kids)
+      (= :macro k) nil
+      (= :call k) (if (head-symbol text node) (exprs xs) (exprs kids))
       (no-code n) nil
-      (#{"defn" "defn-" "deftest"} n) (if (= "deftest" n) (stmts (rest xs)) (defn-parts text xs))
+      (#{"is" "are"} n) nil
+      (#{"defn" "defn-"} n) (defn-parts text xs)
+      (= "deftest" n) (stmts (rest xs))
       (#{"fn" "fn*"} n) (fn-tail text (if (symbol-atom? text (first xs)) (rest xs) xs))
       (#{"def" "defonce"} n) (def-parts xs)
       (= "defmethod" n) (fn-tail text (drop 2 xs))
@@ -264,10 +329,8 @@
       (#{"set!" "new"} n) (exprs (rest xs))
       (first-only n) (exprs (take 1 xs))
       (= "comment" n) (map (fn [x] [x :top]) xs)
-      (macro-ish? n) nil
-      ;; a call, or a core form whose arguments are all evaluated (if,
-      ;; cond, condp, and, or, recur, throw, ...)
-      :else (exprs xs))))
+      (all-args n) (exprs xs)
+      :else nil)))
 
 (defn- pausable?
   "True when node, in an evaluated position, can hold a breakpoint: a list
@@ -279,16 +342,34 @@
 (defn- walk
   "Adds node's spots, and those of the code inside it, to acc (a vector).
   pos is :top, :stmt or :expr."
-  [text acc [node pos]]
+  [text opts acc [node pos]]
   (let [acc (if (and (not= :top pos) (pausable? text node))
               (conj acc {:start (:start node) :end (:end node) :kind (if (= :stmt pos) :statement :expression)})
               acc)
         parts (when-not (quoted? text node)
                 (case (kind text node)
-                  :list (list-parts text node)
+                  :list (list-parts text node opts)
                   (:vector :map :set) (exprs (:kids node))
-                  nil))]
-    (reduce (partial walk text) acc parts)))
+                  nil))
+        skip (tagged text (:kids node))]
+    (reduce (partial walk text opts) acc (remove (fn [[n _]] (skip n)) parts))))
+
+(defn head-symbols
+  "Every distinct list head in text that is a plain symbol: what to ask
+  the runtime about (macro-heads)."
+  [text]
+  (letfn [(heads [node]
+            (when (:kids node)
+              (cons (head-symbol text node) (mapcat heads (:kids node)))))]
+    (into (sorted-set) (comp (mapcat heads) (remove nil?)) (commands/top-level-forms text))))
+
+(defn text-macros
+  "The names text's own top-level (defmacro name ...) forms define."
+  [text]
+  (into #{} (keep (fn [f]
+                    (when (and (= :list (kind text f)) (= "defmacro" (head-symbol text f)))
+                      (when-let [nm (second (:kids f))] (atom-text text nm)))))
+        (commands/top-level-forms text)))
 
 (defn- line-starts
   "The offset each line starts at, line 1 first."
@@ -311,13 +392,21 @@
   "Every place in text that can hold a breakpoint, in text order:
   {:start :end :kind :line}, :kind :statement (inserted before it) or
   :expression (wrapped in a do), :line its 1-based start line. Two that
-  start at the same offset keep the outer one first."
-  [text]
-  (let [starts (line-starts text)]
-    (->> (reduce (fn [acc form] (walk text acc [form :top])) [] (commands/top-level-forms text))
-         (map-indexed (fn [i s] (assoc s :i i :line (line-of starts (:start s)))))
-         (sort-by (juxt :start :i))
-         (mapv #(dissoc % :i)))))
+  start at the same offset keep the outer one first. opts' :heads is the
+  runtime's answer about text's head symbols (macro-heads, in
+  jonquil.debugger); without it any head that isn't a known core form is
+  taken for a macro, and nothing inside it holds a breakpoint. A defmacro
+  in text names a macro either way."
+  ([text] (spots text {}))
+  ([text opts]
+   (let [starts (line-starts text)
+         opts (assoc opts :text-macros (text-macros text))
+         forms (commands/top-level-forms text)
+         skip (tagged text forms)]
+     (->> (reduce (fn [acc form] (walk text opts acc [form :top])) [] (remove skip forms))
+          (map-indexed (fn [i s] (assoc s :i i :line (line-of starts (:start s)))))
+          (sort-by (juxt :start :i))
+          (mapv #(dissoc % :i))))))
 
 (defn- spot-on
   "The first spot that starts on line, or nil."
@@ -331,12 +420,13 @@
 (defn place
   "Where a breakpoint asked for on line goes: {:line l}, l being line when
   something on it can pause, else the next line that can (and :moved?
-  true), or {:error NOWHERE}."
-  [text line]
-  (let [all (spots text)]
-    (if-let [s (first (filter #(>= (:line %) line) all))]
-      (cond-> {:line (:line s)} (not= line (:line s)) (assoc :moved? true))
-      {:error NOWHERE})))
+  true), or {:error NOWHERE}. opts as spots takes them."
+  ([text line] (place text line {}))
+  ([text line opts]
+   (let [all (spots text opts)]
+     (if-let [s (first (filter #(>= (:line %) line) all))]
+       (cond-> {:line (:line s)} (not= line (:line s)) (assoc :moved? true))
+       {:error NOWHERE}))))
 
 (defn- edits
   "The [offset string] insertions for spot s, a breakpoint on its line."
@@ -351,10 +441,11 @@
   {:text :lines}, :lines being the lines that got one. With range
   {:start :end}, only that part of text is answered (and only breakpoints
   wholly inside it count): the code a Run Form or Run Selection sends, read
-  in the context of the whole text."
-  ([text lines] (instrument text lines {:start 0 :end (count text)}))
-  ([text lines {:keys [start end]}]
-   (let [all (spots text)
+  in the context of the whole text. opts' :heads as spots takes it."
+  ([text lines] (instrument text lines {}))
+  ([text lines {:keys [start end] :or {start 0} :as opts}]
+   (let [end (or end (count text))
+         all (spots text (select-keys opts [:heads]))
          chosen (->> (distinct lines)
                      (keep #(spot-on all %))
                      (filter #(and (<= start (:start %)) (<= (:end %) end))))
@@ -370,15 +461,16 @@
 ;; --- Live at once: which top-level form a toggle sends again -------------------
 
 (def ^:private defining
-  #{"defn" "defn-" "defmacro" "defmethod" "defmulti" "defprotocol" "extend-type"
-    "extend-protocol" "deftype" "defrecord"})
+  ;; deftype, defrecord, defprotocol and defmulti stay out: sending them
+  ;; again makes a new class or dispatch table, which changes the program
+  #{"defn" "defn-" "defmacro" "defmethod" "extend-type" "extend-protocol"})
 
 (defn- fn-value?
   "True for a def's value that is literally (fn ...), #(...) or (reify ...)."
   [text node]
   (and node (= :list (kind text node))
        (or (= "#" (prefix text node))
-           (contains? #{"fn" "fn*" "reify"} (head-name text node)))))
+           (contains? #{"fn" "fn*" "reify"} (head-symbol text node)))))
 
 (defn defines-code?
   "True when form (a top-level form of text) only defines code, so sending
@@ -386,7 +478,7 @@
   def or defonce whose value is literally a fn or a reify."
   [text form]
   (and (= :list (kind text form)) (not (quoted? text form))
-       (let [n (head-name text form)
+       (let [n (head-symbol text form)
              xs (rest (:kids form))]
          (or (contains? defining n)
              (and (#{"def" "defonce"} n)
@@ -406,6 +498,15 @@
     (when (and form (not (commands/comment-form? text form)) (defines-code? text form))
       {:start (:start form) :end (:end form)})))
 
+(defn edited?
+  "True when the form at rng ({:start :end}) of text has edits that
+  haven't run: LM3's changed forms, against ran (the tab's record, nil
+  when it never ran) mark it."
+  [text ran rng]
+  (boolean (and ran rng
+                (some #(and (= (:start rng) (:start %)) (= (:end rng) (:end %)))
+                      (changed/changed text ran)))))
+
 ;; --- what a toggle says ------------------------------------------------------------
 
 (def NEXT-RUN
@@ -415,10 +516,11 @@
 (defn toggle-message
   "The status line for a toggle. t: :added? (else removed), :line, :moved?
   (the breakpoint went to the next line that can hold one), :sent (:ok,
-  :failed with :error, :busy, :refused, or nil when the form isn't one to
-  send again) and :debug-on? (the toggle turned debug mode on)."
+  :failed with :error, :busy, :refused, :edited (not sent: the form has
+  edits that haven't run), or nil when the form isn't one to send again) and :debug-on? (the toggle turned debug mode on)."
   [{:keys [added? line moved? sent error debug-on?]}]
   (let [what (cond (not added?) "Breakpoint removed"
+                   (= :edited sent) "Breakpoint set"
                    moved? (str "Breakpoint moved to line " line)
                    :else (str "Breakpoint set at line " line))
         tail (case sent
@@ -427,6 +529,7 @@
                             (when error (str " " error)))
                :busy (str "something is running, so " NEXT-RUN)
                :refused NEXT-RUN
+               :edited "this form has edits that haven't run, so Run Form to apply both."
                NEXT-RUN)]
     (str "; " what "; " tail
          (when debug-on? " Debug mode is on now, so frames keep their locals."))))

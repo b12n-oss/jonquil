@@ -389,7 +389,10 @@
             (on-gtk (support/check :breakpoint-live-at-once said? {:available false :status (status ui)}))))
       (let [dp (:debugger-pane ui)]
         (try
-          (on-gtk (editor/set-text! (:editor ui) "(defn bpw [x]\n  (let [y (* x 2)]\n    (+ y 1)))")
+          ;; as a tab that never ran: earlier rows ran code here, and a
+          ;; form that changed since the tab's last run isn't sent again
+          (on-gtk (reset! (:ran (:changed (:editor ui))) nil)
+                  (editor/set-text! (:editor ui) "(defn bpw [x]\n  (let [y (* x 2)]\n    (+ y 1)))")
                   (caret-to-line! ui 3)
                   (run-palette! ui "toggle a breakpoint"))
           (let [live? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 3; it's live now."))
@@ -445,4 +448,24 @@
                                  (and ran? unsent? moved? two? (= 1 hits) cleared? none? (= 1 hits2))
                                  {:ran ran? :unsent unsent? :moved moved? :two two? :hits hits :cleared cleared?
                                   :none none? :hits2 hits2 :status (status ui)})))
+        (finally (breakpoints-off! ui))))))
+
+(defn row-breakpoint-waits-for-unrun-edits
+  "A toggle in a form edited since it ran doesn't send it, so the
+  unfinished edit doesn't run: the status bar says to Run Form, and the
+  function still does what it did."
+  [ui]
+  (go-row :breakpoint-waits-for-unrun-edits support/check
+    (if-not (debugger/break-available?)
+      (on-gtk (support/check :breakpoint-waits-for-unrun-edits true {:available false}))
+      (try
+        (let [[ran? _] (support/run-and-await ui "(defn bpe [a]\n  (inc a))" 5000 #(str/includes? % "#'user/bpe"))
+              _ (on-gtk (editor/set-text! (:editor ui) "(defn bpe [a]\n  (dec a))")
+                        (caret-to-line! ui 2)
+                        (run-palette! ui "toggle a breakpoint"))
+              said? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set; this form has edits that haven't run, so Run Form to apply both."))
+              dot? (on-gtk (= 1 (count (dots ui))))
+              same? (= 2 ((resolve 'user/bpe) 1))]
+          (on-gtk (support/check :breakpoint-waits-for-unrun-edits (and ran? said? dot? same?)
+                                 {:ran ran? :said said? :dot dot? :same same? :status (status ui)})))
         (finally (breakpoints-off! ui))))))

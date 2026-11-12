@@ -529,23 +529,35 @@ something there that runs:
   which keeps its value.
 
 A line with nothing that can pause (a parameter vector, a binding name, a
-`catch` clause, a `case` test, quoted code, the `ns` form, a blank or comment
-line, a macro Jonquil doesn't know that may read its arguments as code) moves
-the dot to the next line that can hold one, and the status bar says
+`catch` clause, a `case` test, quoted code, a tagged literal, the `ns` form,
+a blank or comment line, anything inside a macro's arguments) moves the dot
+to the next line that can hold one, and the status bar says
 `Breakpoint moved to line N`. The dot is a text mark, so it moves with the
 line when you edit above it.
+
+Before it places a breakpoint, Toggle Breakpoint asks the runtime what each
+form's head names in the buffer's namespace. Code inside a macro call is
+left alone, since the macro may read it as data (`s/def`, `go-loop`, a
+`defmacro` earlier in the same file), except for the core forms Jonquil
+knows the shape of (`let`, `when`, `cond`, `try` and the like). A head that
+names nothing loaded stays a call. When the runtime can't answer, every head
+Jonquil doesn't know counts as a macro, and the status bar says so.
 
 **It works at once.** Toggling sends the top-level form holding the line
 again, the way Run Form does (the console shows it), with every breakpoint
 it now holds, or without any once the last is gone. So after toggling a
-breakpoint in a `defn`, calling that function from anywhere pauses there:
-from the console, another namespace or a test. Only a form that just defines
-code is sent this way: `defn`, `defmacro`, `defmethod`, `defmulti`,
-`defprotocol`, `deftype`, `defrecord`, `extend-type`, `extend-protocol`, and
-a `def` or `defonce` whose value is literally `(fn ...)`, `#(...)` or
-`(reify ...)`. Toggling never runs anything else, so on a form like
-`(def db (connect!))`, a top-level call or a form inside a `(comment ...)`
-block the status bar says `it takes effect when you next run this form.` If
+breakpoint in a `defn`, an evaluation that calls that function pauses there,
+whether you typed it at the console or it runs code in another namespace.
+Only a form that just defines code is sent this way: `defn`, `defmacro`,
+`defmethod`, `extend-type`, `extend-protocol`, and a `def` or `defonce` whose
+value is literally `(fn ...)`, `#(...)` or `(reify ...)`. Toggling never runs
+anything else, so on a form like `(def db (connect!))`, a top-level call, a
+`deftype`, `defrecord`, `defprotocol` or `defmulti` (sending those again makes
+a new class or dispatch table) or a form inside a `(comment ...)` block the
+status bar says `it takes effect when you next run this form.` A form with
+edits that haven't run (the changed-form mark) isn't sent either, so the
+toggle never runs your unfinished edit: the status bar says
+`this form has edits that haven't run, so Run Form to apply both.` If
 sending the form again fails, the status bar says so and the dot stays.
 
 Run, Run Form and Run Selection send the code with the breakpoints in their
@@ -557,12 +569,18 @@ them again without. A tab's breakpoints aren't saved across sessions.
 
 Toggling turns Jolt's debug mode on when it's off, since a paused frame's
 locals need it, and the status bar says so. One pause at a time: while one
-is paused, another thread that reaches a breakpoint runs on. Breakpoints
-work for Jolt, in process and in a project's Jolt child, on a Jolt with
-`jolt.debug`; other dialects say they need Jolt. In the Jolt child a
-breakpoint pauses only during an evaluation you started (a Run or a console
-entry), since that is how the pause reaches the window: a breakpoint a
-background thread reaches afterwards runs on.
+is paused, another thread that reaches a breakpoint runs on, and so does an
+error with Break on error on. Breakpoints work for Jolt, in process and in a
+project's Jolt child, on a Jolt with `jolt.debug`; other dialects, and a
+child whose Jolt lacks it, say why. A breakpoint pauses only during an
+evaluation you started (a Run or a console entry):
+
+- In process, only on that evaluation's own thread. A future, a quiet
+  evaluation (completion, a plugin's) and the window's own thread run on,
+  since pausing the window's thread would freeze it.
+- In the Jolt child, on any of its threads while it runs, since that is how
+  the pause reaches the window. A thread still paused when the evaluation
+  ends is let go, because the window can't reach it after that.
 
 ### Restarts
 

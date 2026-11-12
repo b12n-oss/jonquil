@@ -74,13 +74,26 @@
   [e]
   (boolean (and e (satisfies? ev/Breakpoints e))))
 
+(defn heads
+  "The :heads the runtime last gave for ed's text (a toggle asks), or nil:
+  then every head that isn't a known core form counts as a macro."
+  [ed]
+  (some-> (get-in ed [:changed :bp-heads]) deref))
+
+(defn set-heads!
+  "Keeps the runtime's answer about ed's heads, merged into the last one."
+  [ed m]
+  (when-let [a (get-in ed [:changed :bp-heads])] (swap! a merge m))
+  nil)
+
 (defn sent-text
   "What a Run sends from ed: text's range ({:start :end}, the whole text
-  when nil) with ed's breakpoints in, when evaluator e runs them and some
-  lie in the range; the range's text as it is otherwise."
+  when nil) with ed's breakpoints in, when evaluator e has them armed and
+  some lie in the range; the range's text as it is otherwise."
   [ed e text range]
   (let [{:keys [start end] :or {start 0 end (count text)}} range
-        ls (when (supported? e) (seq (lines ed text)))]
+        ls (when (and (supported? e) (ev/breakpoints-on? e)) (seq (lines ed text)))]
     (if ls
-      (:text (bp/instrument text ls {:start start :end end}))
+      (:text (bp/instrument text ls (cond-> {:start start :end end}
+                                      (heads ed) (assoc :heads (heads ed)))))
       (subs text start end))))

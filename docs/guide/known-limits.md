@@ -47,7 +47,7 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>The debugger, tracing and live results</strong> (9)</summary>
+<summary><strong>The debugger, tracing and live results</strong> (10)</summary>
 
 - Tracing is for Jolt only, and doesn't record a traced function's call to
   itself.
@@ -59,8 +59,11 @@ Known rough edges, parked for later:
 - Breakpoints live in the code a Run or a toggle sent: `require :reload` or
   `load-file` puts back the saved code without them. A macro Jonquil doesn't
   know is treated as one that reads its arguments as code, so nothing
-  inside its arguments can hold a breakpoint. In the Jolt child a
-  breakpoint pauses only during an evaluation you started.
+  inside its arguments can hold a breakpoint. A breakpoint pauses only
+  during an evaluation you started, and in process only on its own thread.
+- A `(catch Exception _)` in your code can swallow Stop at a breakpoint, as
+  it can with Break on error: Stop ends a pause by throwing on the paused
+  thread.
 - Debug mode (Keep every local) keeps tail calls only for `recur`, so deep
   recursion that isn't `recur` can run out of stack while it's on.
 - Nothing resumes a paused error or changes a local: Continue lets it

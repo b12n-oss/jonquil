@@ -1207,3 +1207,10 @@
                         5000)
             "the console shows the failed stop"))
       (finally (ev/stop! e)))))
+
+(deftest breakpoints-wait-for-a-child-test
+  (let [e (nrepl/make-nrepl {:dialect :jolt :project-dir (str (temp-project))})
+        p (promise)]
+    (ev/set-breakpoints! e true (fn [r] (deliver p r)))
+    (is (:error (deref p 3000 :timeout)) "no child yet: nothing to arm, and it says so")
+    (is (false? (ev/breakpoints-on? e)) "so no Run sends breakpoint code")))

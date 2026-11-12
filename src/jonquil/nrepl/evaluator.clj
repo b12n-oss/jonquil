@@ -1031,16 +1031,27 @@
       false))
   ev/Breakpoints
   (set-breakpoints! [this on? on-done]
-    ;; remembered, so every eval the person sends arms them again (a
-    ;; restarted child starts without them); with no child yet the first
-    ;; eval arms them
-    (swap! state assoc :breakpoints-on? (boolean on?))
-    (if (runtime this)
-      (child-op! this {:op "jonquil-breakpoints" :msg {:on (str (boolean on?))}
-                       :unavailable "Breakpoints need Jolt's session middleware in the child."
-                       :reply breakpoints-reply}
-                 on-done)
-      (future (try (on-done {:on? (boolean on?)}) (catch Throwable _))))
+    ;; on only once the child said so: every eval the person sends then
+    ;; arms them again (a restarted child starts without them), and a
+    ;; child that can't (no jolt.debug) never gets breakpoint code
+    (when-not on? (swap! state assoc :breakpoints-on? false))
+    (child-op! this {:op "jonquil-breakpoints" :msg {:on (str (boolean on?))}
+                     :unavailable "Breakpoints need Jolt's session middleware in the child."
+                     :reply breakpoints-reply}
+               (fn [r]
+                 (when (and on? (not (:error r))) (swap! state assoc :breakpoints-on? true))
+                 (on-done r)))
+    nil)
+  (breakpoints-on? [_] (boolean (:breakpoints-on? @state)))
+  (macro-heads! [this ns-name syms on-done]
+    (child-op! this {:op "jonquil-breakpoints" :msg {:ns (str ns-name) :heads (pr-str (vec syms))}
+                     :unavailable "Breakpoints need Jolt's session middleware in the child."
+                     :reply (fn [r] (if-let [err (some :error r)]
+                                      {:error err}
+                                      (if-let [h (some :heads r)]
+                                        {:heads (edn/read-string h)}
+                                        {:error "The Jolt child didn't say which names are macros."})))}
+               on-done)
     nil))
 
 (defn make-nrepl

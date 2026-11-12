@@ -224,7 +224,15 @@
   (set-breakpoints! [ev on? on-done]
     "Arms (on? true) or disarms the hook, off the caller's thread; arming
     turns debug mode on when it's off. on-done gets {:on? b}, with
-    :debug-turned-on? true when it did, or {:error s}."))
+    :debug-turned-on? true when it did, or {:error s}, and then the hook
+    stays as it was.")
+  (breakpoints-on? [ev]
+    "True while the runtime's hook is armed, as the last
+    set-breakpoints! answered: only then does a Run send breakpoint code.")
+  (macro-heads! [ev ns-name syms on-done]
+    "What each symbol text in syms names in namespace ns-name, off the
+    caller's thread: on-done gets {:heads m} (jonquil.debugger/macro-heads)
+    or {:error s}."))
 
 (defprotocol Trace
   "Tracing functions where the code runs (jonquil.trace-rt): the two Jolt
