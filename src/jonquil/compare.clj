@@ -144,6 +144,27 @@
   [n]
   (str n (if (<= 11 (mod n 100) 13) "th" (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
 
+(defn form-name
+  "A name for messages: \"defn f\", with \" (2nd)\" and so on after it for
+  a later form (n, 0-based) of the same signature."
+  [sig n]
+  (str (str/join " " sig) (when (pos? n) (str " (" (ordinal (inc n)) ")"))))
+
+(defn form-keys
+  "Every top-level form of text with its key, in buffer order: {:start :end
+  :sig :nth :of :name}, as form-key makes it for a caret in the form; :of is
+  how many forms share the signature."
+  [text]
+  (let [forms (commands/top-level-forms text)]
+    (loop [forms forms seen {} acc []]
+      (if-let [{:keys [start end] :as f} (first forms)]
+        (let [sig (form-sig text f)
+              n (get seen sig 0)]
+          (recur (rest forms) (assoc seen sig (inc n))
+                 (conj acc {:start start :end end :sig sig :nth n
+                            :name (form-name sig n)})))
+        (mapv #(assoc % :of (get seen (:sig %))) acc)))))
+
 (defn form-key
   "{:sig :nth :of :name} for the top-level form of text around caret: its
   signature, how many earlier forms share it (so a second (comment ...) is
@@ -151,18 +172,26 @@
   shifted since is caught) and a name for messages, \"defn f\". nil when
   the caret is between forms."
   [text caret]
-  (let [forms (commands/top-level-forms text)]
+  (let [forms (form-keys text)]
     ;; as Run Form takes it: the form the caret is in, else the one it's
     ;; right after
     (when-let [f (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
                      (first (filter (fn [{:keys [end]}] (= end caret)) forms)))]
-      (let [sig (form-sig text f)
-            same (filterv #(= sig (form-sig text %)) forms)
-            n (count (filter #(= sig (form-sig text %)) (take-while #(not= f %) forms)))]
-        {:sig sig
-         :nth n
-         :of (count same)
-         :name (str (str/join " " sig) (when (pos? n) (str " (" (ordinal (inc n)) ")")))}))))
+      (select-keys f [:sig :nth :of :name]))))
+
+(defn form-range
+  "{:start :end} of the top-level form of text with key's signature, at its
+  :nth place, or nil."
+  [text {:keys [sig] k :nth}]
+  (some-> (first (filter #(and (= sig (:sig %)) (= k (:nth %))) (form-keys text)))
+          (select-keys [:start :end])))
+
+(defn form-shown
+  "How messages name the form key: (defn f ...), with \", the 2nd\" and so on
+  after it for a later form of the same signature."
+  [{:keys [sig] k :nth}]
+  (str "(" (str/join " " sig) " ...)"
+       (when (pos? k) (str ", the " (ordinal (inc k))))))
 
 (defn- find-form
   "The top-level form of text with key's signature, at its :nth place, or nil."
@@ -177,8 +206,7 @@
   [buffer other key label]
   (let [here (find-form buffer key)
         there (find-form other key)
-        shown (str "(" (str/join " " (:sig key)) " ...)"
-                   (when (pos? (:nth key)) (str ", the " (ordinal (inc (:nth key))))))]
+        shown (form-shown key)]
     (cond
       ;; a same-signature form added or removed since the key was made
       ;; moves every later one's place: refuse rather than take the wrong one

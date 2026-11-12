@@ -33,6 +33,8 @@
                               (let [id (or (:plugin-id r) (arg args "id"))]
                                 {:kind :plugin :what (str "proposed plugin " id)
                                  :target (when (:plugin-id r) {:plugin-id (:plugin-id r)})}))
+   "jonquil_change_set_propose" (fn [args _]
+                                  {:kind :agent :what (str "proposed change set " (arg args "name"))})
    "jonquil_tabs" (fn [_ _] (read-of "the tabs"))
    "jonquil_read_tab" (fn [_ r] (assoc (read-of (tab r)) :tab? true))
    "jonquil_console" (fn [_ _] (read-of "the console"))

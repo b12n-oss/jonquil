@@ -99,7 +99,8 @@
   (mcp-window/with-messages
     (mcp-window/with-plugin-tools
       (mcp-window/make-window-tools
-       {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
+       {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))
+        :client-fn (fn [] (:client @session*))})
       ui)
     ui session*))
 

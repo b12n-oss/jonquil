@@ -441,7 +441,8 @@
    :compare/tab :compare-tab-fn
    :layout/use :layout-use-fn
    :pages/open :docs-page-fn
-   :world/restore-from :world-restore-from-fn})
+   :world/restore-from :world-restore-from-fn
+   :change-set/open :change-set-open-fn})
 
 (defn- palette-run!
   "The command palette's run of id, as its key would: a tab, panel, layout or earlier-world entry through window-key-args' fns, anything else as a registry command with the window's, this editor's and the console's ctx. A throw is said on the status line."

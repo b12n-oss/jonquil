@@ -1,11 +1,16 @@
 (ns jonquil.parts-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.parts.change-sets :as change-sets-part]
             [jonquil.gtk.parts.command-palette :as command-palette-part]
+            [jonquil.nrepl.attach :as attach]
+            [jonquil.nrepl.jvm :as jvm]
+            [jonquil.session :as session]
             [jonquil.gtk.parts.debugger :as debugger-part]
             [jonquil.gtk.parts.file-tree :as file-tree-part]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
@@ -80,9 +85,10 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :reader :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
            :panel/processes :processes/show
+           :change-set/make :change-set/browse
            :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
            :result/inspect :result/copy :result/define :result/jump :result/doc :result/open-location
            :panel/locations :locations/uses :locations/definitions :locations/matches
@@ -484,7 +490,7 @@
   (is (= "Processes" (:processes palette/PANEL-LABELS)))
   (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
           :debugger "Frames" :plugins "Plugins" :messages "Messages"
-          :processes "Processes" :trace "Trace" :reader "Reader"}
+          :processes "Processes" :trace "Trace" :change-sets "Change Sets" :reader "Reader"}
          palette/PANEL-LABELS)))
 
 (deftest processes-part-owns-its-commands-and-panel
@@ -1084,3 +1090,80 @@
       (is (= 1 (count @calls)))
       (is (= "/s/settings.edn" (:settings-path (first @calls))))
       (is (fn? (:step (first @calls)))))))
+
+;; Apply to REPL evaluates a form in its file's namespace, never the prompt's
+
+(defn- eval-through
+  "Evaluates code on session s with the opts change-sets-part/eval-opts chose."
+  [s opts code]
+  (let [done (promise)]
+    (ev/eval! s code (assoc opts :on-complete (fn [r] (deliver done r))))
+    (deref done 5000 :timeout)))
+
+(deftest apply-evaluates-in-the-files-namespace-in-process
+  (let [s (session/make-session)
+        _ (eval-through s {} "(create-ns 'cs.app)")
+        text "(ns cs.app)\n(defn f [] 1)\n"
+        {:keys [opts stop]} (change-sets-part/eval-opts s text)
+        r (eval-through s opts "(def applied-var 42)")]
+    (is (nil? stop))
+    (is (= :ok (:status r)))
+    (is (some? (resolve 'cs.app/applied-var)) "defined in the file's namespace")
+    (is (nil? (resolve 'user/applied-var)) "not in the prompt's")
+    (is (= 'user (ev/prompt-ns s)) "the prompt stays where it was")
+    (is (= "user" (str (ev/prompt-ns s))))
+    (testing "a namespace that isn't loaded stops the apply, naming it"
+      (is (= {:stop "cs.nowhere isn't loaded: Run its file first"}
+             (change-sets-part/eval-opts s "(ns cs.nowhere)\n"))))
+    (testing "a file with no ns form is evaluated where the prompt is"
+      (is (nil? (:stop (change-sets-part/eval-opts s "(def a 1)")))))))
+
+(deftest apply-passes-the-buffer-to-an-attach-evaluator
+  (let [e (attach/->Attach nil nil nil nil nil)
+        text "(ns cs.app)\n"]
+    (is (= {:opts {:ns-source text}} (change-sets-part/eval-opts e text)))))
+
+(deftest apply-refuses-a-runtime-that-ignores-the-namespace
+  (let [e (jvm/->Jvm nil nil nil nil nil)]
+    (is (str/includes? (:stop (change-sets-part/eval-opts e "(ns cs.app)\n")) "can't evaluate in a file's namespace"))
+    (is (= {:opts {:ns-source "(def a 1)"}} (change-sets-part/eval-opts e "(def a 1)")))))
+
+;; The Jolt child can't be asked per form, so Apply asks it once which
+;; namespaces exist
+
+(defn- fake-child
+  "A QuietEval evaluator answering every eval with printed, recording the
+  code and opts it got."
+  [printed seen]
+  #_{:clj-kondo/ignore [:missing-protocol-method]}
+  (reify
+    ev/Evaluator
+    (eval! [_ code opts]
+      (swap! seen conj {:code code :quiet (:quiet opts)})
+      ((:on-complete opts) {:status :ok :printed printed})
+      nil)
+    ev/QuietEval
+    (quiet-eval? [_] true)))
+
+(deftest apply-asks-the-child-which-namespaces-exist
+  (let [seen (atom [])
+        got (promise)]
+    (change-sets-part/check-namespaces! (fake-child "[true false]" seen) ["a.b" "c.d"] #(deliver got %))
+    (is (= {:missing ["c.d"]} (deref got 1000 :timeout)))
+    (is (= "(mapv (fn [n] (some? (find-ns n))) '[a.b c.d])" (:code (first @seen))))
+    (is (some? (:quiet (first @seen))) "a quiet eval, so the prompt and history are untouched"))
+  (testing "all loaded"
+    (let [got (promise)]
+      (change-sets-part/check-namespaces! (fake-child "[true true]" (atom [])) ["a.b" "c.d"] #(deliver got %))
+      (is (= {:missing []} (deref got 1000 :timeout)))))
+  (testing "an answer that can't be read is an error, not a pass"
+    (let [got (promise)]
+      (change-sets-part/check-namespaces! (fake-child "nonsense (" (atom [])) ["a.b"] #(deliver got %))
+      (is (string? (:error (deref got 1000 :timeout))))))
+  (testing "no namespaces, nothing to ask"
+    (let [seen (atom []) got (promise)]
+      (change-sets-part/check-namespaces! (fake-child "[]" seen) [] #(deliver got %))
+      (is (= {:missing []} (deref got 1000 :timeout)))
+      (is (= [] @seen))))
+  (testing "the message names the namespace"
+    (is (= "c.d isn't loaded: Run its file first" (change-sets-part/not-loaded-message "c.d")))))
