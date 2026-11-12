@@ -92,27 +92,37 @@
     (try (log! {:kind :connection :summary summary})
          (catch Throwable e (log "couldn't log a connection:" (or (ex-message e) (str e)))))))
 
+(defn- connection-tools
+  "The tool set one client is served: the window's tools, wrapped with the
+  plugin tools and the Messages log for session*."
+  [{:keys [ui dir-fn gui]} session*]
+  (mcp-window/with-messages
+    (mcp-window/with-plugin-tools
+      (mcp-window/make-window-tools
+       {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
+      ui)
+    ui session*))
+
+(defn- connection-attached!
+  "Records the client's name in session* and logs its attach as connection n."
+  [ui session* n client-info]
+  (let [c (mcp-window/client-name client-info)]
+    (swap! session* assoc :client c)
+    (log-connection! ui (str c " attached (connection " n ")"))))
+
 (defn- serve-connection!
   "Serves one accepted socket until the client's EOF, then closes it. A throw
   out of serve! logs one stderr line; the caller accepts the next client.
   The window's Messages get the client's attach (on its initialize, named
   by its clientInfo) and its leave, numbered from conn-count*."
-  [sock {:keys [ui dir-fn gui conn-count*]}]
+  [sock {:keys [ui conn-count*] :as opts}]
   (let [n (swap! (or conn-count* (atom 0)) inc)
         session* (atom {})]
     (try
       (let [in (io/reader (.getInputStream sock) :encoding "UTF-8")
             out (io/writer (.getOutputStream sock) :encoding "UTF-8")]
-        (mcp/serve! {:tools (mcp-window/with-messages
-                              (mcp-window/with-plugin-tools
-                                (mcp-window/make-window-tools
-                                 {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
-                                ui)
-                              ui session*)
-                     :on-initialize (fn [ci]
-                                      (let [c (mcp-window/client-name ci)]
-                                        (swap! session* assoc :client c)
-                                        (log-connection! ui (str c " attached (connection " n ")"))))
+        (mcp/serve! {:tools (connection-tools opts session*)
+                     :on-initialize (fn [ci] (connection-attached! ui session* n ci))
                      :subscribe (:watch-plugin-tools* ui)
                      :read-line (fn [] (.readLine ^java.io.BufferedReader in))
                      :write-line (fn [s]
@@ -138,6 +148,25 @@
   [^ServerSocket ss]
   (.accept ss))
 
+(defn- accept-once!
+  "Accepts and serves one client. Returns :ok, :closed (ss was closed: that
+  is stop!, silent) or :failed (after logging one line)."
+  [^ServerSocket ss conn-opts]
+  (try (serve-connection! (accept-conn ss) conn-opts)
+       :ok
+       (catch Throwable e
+         (if (.isClosed ss)
+           :closed
+           (do (log "accept failed:" (or (ex-message e) (str e)))
+               :failed)))))
+
+(defn- give-up-accepting!
+  "Logs the give-up, closes ss and runs give-up! (which unregisters)."
+  [^ServerSocket ss give-up!]
+  (log "giving up after" max-accept-failures "failed accepts")
+  (try (.close ss) (catch Throwable _ nil))
+  (give-up!))
+
 (defn- accept-loop!
   "Accepts and serves clients one at a time until ss is closed (silent: that
   is stop!). Any other failure logs one line and retries after a pause; after
@@ -145,22 +174,27 @@
   unregisters) and exits. A successful accept resets the count."
   [^ServerSocket ss conn-opts give-up!]
   (loop [fails 0]
-    (let [r (try (serve-connection! (accept-conn ss) conn-opts)
-                 :ok
-                 (catch Throwable e
-                   (if (.isClosed ss)
-                     :closed
-                     (do (log "accept failed:" (or (ex-message e) (str e)))
-                         :failed))))]
-      (case r
-        :ok (recur 0)
-        :closed nil
-        :failed (if (>= (inc fails) max-accept-failures)
-                  (do (log "giving up after" max-accept-failures "failed accepts")
-                      (try (.close ss) (catch Throwable _ nil))
-                      (give-up!))
-                  (do (Thread/sleep (long accept-retry-ms))
-                      (recur (inc fails))))))))
+    (case (accept-once! ss conn-opts)
+      :ok (recur 0)
+      :closed nil
+      :failed (if (>= (inc fails) max-accept-failures)
+                (give-up-accepting! ss give-up!)
+                (do (Thread/sleep (long accept-retry-ms))
+                    (recur (inc fails)))))))
+
+(defn- listener-controls
+  "{:stop! :set-dir!} for a bound listener. stop! closes ss and deletes the
+  registry entry; set-dir! rewrites the entry's :dir unless stopped."
+  [^ServerSocket ss {:keys [settings-path port pid dir*]}]
+  (let [stopped? (atom false)]
+    {:stop! (fn []
+              (reset! stopped? true)
+              (try (.close ss) (catch Throwable _ nil))
+              (delete-entry! settings-path pid))
+     :set-dir! (fn [d]
+                 (reset! dir* d)
+                 (when-not @stopped?
+                   (write-entry! settings-path {:dir d :port port :pid pid})))}))
 
 (defn start-listener!
   "Binds 127.0.0.1 on an OS-picked port, writes this process's registry
@@ -181,15 +215,7 @@
         port (.getLocalPort ss)
         pid (.pid (ProcessHandle/current))
         dir* (atom dir)
-        stopped? (atom false)
-        stop! (fn []
-                (reset! stopped? true)
-                (try (.close ss) (catch Throwable _ nil))
-                (delete-entry! settings-path pid))
-        set-dir! (fn [d]
-                   (reset! dir* d)
-                   (when-not @stopped?
-                     (write-entry! settings-path {:dir d :port port :pid pid})))]
+        {:keys [stop! set-dir!]} (listener-controls ss {:settings-path settings-path :port port :pid pid :dir* dir*})]
     (try
       (write-entry! settings-path {:dir (or dir (System/getProperty "user.dir")) :port port :pid pid})
       (housekeep! settings-path)

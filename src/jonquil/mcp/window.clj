@@ -557,6 +557,48 @@
                                     #(call tname args))))))
     tables-fn))
 
+(defn- stdio-attached!
+  "Records the client's name in session* and logs its attach (stdio's EOF
+  closes the window, so only the attach is logged)."
+  [ui session* client-info]
+  (let [c (client-name client-info)]
+    (swap! session* assoc :client c)
+    (when-let [log! (:log!* ui)]
+      (log! {:kind :connection :summary (str c " attached")}))))
+
+(defn- serve-stdio!
+  "Runs the MCP serve loop on read-line / write-line. A throw out of it is
+  logged on stderr and swallowed so the caller still quits the window."
+  [{:keys [ui dir read-line write-line gui]}]
+  (try
+    (let [session* (atom {})]
+      (mcp/serve! {:tools (with-messages (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui) ui session*)
+                   :on-initialize (fn [ci] (stdio-attached! ui session* ci))
+                   :subscribe (:watch-plugin-tools* ui)
+                   :read-line read-line
+                   :write-line write-line}))
+    (catch Throwable e
+      (binding [*out* *err*]
+        (println "jonquil: the MCP serve loop failed:" (or (ex-message e) (str e)))))))
+
+(defn- quit-window!
+  "One gui turn that requests the window's close, answering the save prompt
+  with Discard (index 1) when any tab is dirty. A throw is logged on stderr."
+  [ui gui]
+  (try
+    (gui-call gui
+              (fn []
+                (let [dirty? (some #(editor/dirty? (:ed %)) ((:tabs* ui)))]
+                  ((:request-close!* ui))
+                  (when dirty?
+                    ((:close-choice! ui) {:index 1}))))
+              gui-deadline-ms)
+    (catch Throwable e
+      ;; a timeout means the window is already gone; anything else is a bug
+      ;; worth a line on stderr
+      (binding [*out* *err*]
+        (println "jonquil: the quit turn failed:" (or (ex-message e) (str e)))))))
+
 (defn serve-window!
   "Serves the window table over :read-line / :write-line until EOF, then quits
   the window, discarding unsaved edits: one gui turn that, when any tab is
@@ -565,35 +607,9 @@
   the window may already be gone. A throw out of the serve loop (stdin
   failing, say) is logged on stderr and takes the same quit path, so the window
   closes instead of sitting there with no server."
-  [{:keys [ui dir read-line write-line gui]}]
+  [{:keys [ui dir gui] :as opts}]
   (let [gui (or gui cb/on-gui!)]
     (binding [*out* *err*]
       (println "jonquil: MCP server driving the window on stdio, default directory" dir))
-    (try
-      (let [session* (atom {})]
-        (mcp/serve! {:tools (with-messages (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui) ui session*)
-                     ;; stdio's EOF closes the window, so only the attach is logged
-                     :on-initialize (fn [ci]
-                                      (let [c (client-name ci)]
-                                        (swap! session* assoc :client c)
-                                        (when-let [log! (:log!* ui)]
-                                          (log! {:kind :connection :summary (str c " attached")}))))
-                     :subscribe (:watch-plugin-tools* ui)
-                     :read-line read-line
-                     :write-line write-line}))
-      (catch Throwable e
-        (binding [*out* *err*]
-          (println "jonquil: the MCP serve loop failed:" (or (ex-message e) (str e))))))
-    (try
-      (gui-call gui
-                (fn []
-                  (let [dirty? (some #(editor/dirty? (:ed %)) ((:tabs* ui)))]
-                    ((:request-close!* ui))
-                    (when dirty?
-                      ((:close-choice! ui) {:index 1}))))
-                gui-deadline-ms)
-      (catch Throwable e
-        ;; a timeout means the window is already gone; anything else is a bug
-        ;; worth a line on stderr
-        (binding [*out* *err*]
-          (println "jonquil: the quit turn failed:" (or (ex-message e) (str e))))))))
+    (serve-stdio! (assoc opts :gui gui))
+    (quit-window! ui gui)))
