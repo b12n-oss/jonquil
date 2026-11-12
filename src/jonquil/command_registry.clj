@@ -114,6 +114,8 @@
    :tree-focused (fn [ctx] (some-> (:tree-keys ctx) :focused? (#(%))))
    :tree-menu-open (fn [ctx] (some-> (:tree-keys ctx) :menu-open? (#(%))))
    :evaluating (fn [ctx] ((:evaluating? ctx)))
+   ;; LM5: paused at a breakpoint or step (the debugger part's read)
+   :breakpoint-paused (fn [ctx] (boolean (some-> (:breakpoint-paused? ctx) (#(%)))))
    ;; a text entry popover has focus: the rename box or the command palette
    :entry-focused (fn [ctx] ((:entry-focused? ctx)))})
 

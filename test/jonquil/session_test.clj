@@ -611,6 +611,9 @@
   (repl-sync s (:text (bp/instrument step-text [2 7]
                                      (debugger/macro-heads "user" (bp/head-symbols step-text))))))
 
+(defn- step-sync [ev]
+  (let [p (promise)] (ev/step-break! ev (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+
 (deftest stepping-in-process-test
   (if-not (debugger/break-available?)
     (is true "skipped: this Jolt has no jolt.debug")
@@ -625,11 +628,11 @@
           (let [done (promise)]
             (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
             (is (= "Breakpoint at line 2" (:title (next-pause))))
-            (is (true? (ev/step-break! s)))
+            (is (true? (step-sync s)))
             (is (= "Stepped to line 3" (:title (next-pause))))
-            (is (true? (ev/step-break! s)))
+            (is (true? (step-sync s)))
             (is (= "Stepped to line 4" (:title (next-pause))))
-            (is (true? (ev/step-break! s)))
+            (is (true? (step-sync s)))
             (is (= "Breakpoint at line 7" (:title (next-pause))) "back in the caller")
             (is (true? (ev/continue-break! s)))
             (is (= "5" (:printed (deref done 5000 :timeout))))))
@@ -645,7 +648,7 @@
           (let [done (promise)]
             (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
             (is (some? (next-pause)))
-            (is (true? (ev/step-break! s)))
+            (is (true? (step-sync s)))
             (is (= "Stepped to line 3" (:title (next-pause))))
             (ev/interrupt! s)
             (is (= :interrupted (:status (deref done 5000 :timeout))))
@@ -660,8 +663,8 @@
           (let [done (promise)]
             (session/submit-repl! s "(sa 1)" {:on-complete (fn [r] (deliver done r))})
             (is (= "Breakpoint at line 2" (:title (next-pause))))
-            (ev/step-break! s) (next-pause) (ev/step-break! s) (next-pause)
-            (is (true? (ev/step-break! s)) "the last line: the run ends while stepping")
+            (step-sync s) (next-pause) (step-sync s) (next-pause)
+            (is (true? (step-sync s)) "the last line: the run ends while stepping")
             (is (= "4" (:printed (deref done 5000 :timeout))))
             (let [done2 (promise)]
               (session/submit-repl! s "(sa 1)" {:on-complete (fn [r] (deliver done2 r))})
@@ -669,3 +672,21 @@
               (ev/continue-break! s)
               (is (= "4" (:printed (deref done2 5000 :timeout)))))))
         (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
+
+(deftest step-at-a-break-on-error-pause-does-nothing-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          paused (promise)
+          done (promise)]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver paused d)) :on-resume (fn [_])})
+        (is (= {:on? true} (toggle-break-sync s)))
+        (session/submit-repl! s "(/ 1 0)" {:on-complete (fn [r] (deliver done r))})
+        (is (= "ArithmeticException: Divide by zero" (:title (deref paused 5000 nil))))
+        (is (false? (step-sync s)) "Step works at a breakpoint, not at an error")
+        (is (not (realized? done)) "the error is still paused")
+        (is (nil? @(:stepping @(:state s))))
+        (is (true? (ev/continue-break! s)))
+        (is (= :error (:status (deref done 5000 :timeout))))
+        (finally (toggle-break-sync s))))))

@@ -667,11 +667,88 @@
             (is (= "Stepped to line 3" (:title d)))
             (is (= 3 (:breakpoint d)))
             (is (:step? d)))
-          (is (false? @stepping) "the pause turned stepping off again")
+          (is (nil? @stepping) "the pause turned stepping off again")
           (reset! paused (promise))
           (is (true? (debugger/step! brk stepping)))
           (is (= "Stepped to line 4" (:title (deref @paused 5000 nil))))
-          (reset! stepping false)
+          (reset! stepping nil)
           (is (true? (debugger/continue! brk)))
           (is (= 4 (deref fut 5000 :blocked)) "Continue runs to the end: no step point pauses"))
         (finally (debugger/disarm-breakpoints! hook) (debugger/set-debug-mode! false))))))
+
+;; --- stepping review: cost, threads, refusals ----------------------------------------
+
+(deftest step-points-cost-nothing-with-stepping-off-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [calls (atom 0)
+          hook (fn [_ _] (swap! calls inc))
+          ;; the dot sits in a branch that never runs, so only step points run
+          t (lines "(fn [n]"
+                   "  (if (neg? n)"
+                   "    (str n)"
+                   "    (loop [i 0 acc 0]"
+                   "      (if (< i n)"
+                   "        (recur (inc i)"
+                   "               (+ acc i))"
+                   "        acc))))")
+          {out :text steps :steps} (instrument-h t [3])]
+      (try
+        (reset! debugger/stepping-any false)
+        (reset! debugger/breakpoint-hook hook)
+        (is (seq steps))
+        (is (= 4950 ((eval (read-string out)) 100)))
+        (is (zero? @calls) "with nobody stepping no step point throws or reaches the hook")
+        (finally (reset! debugger/breakpoint-hook nil))))))
+
+(deftest step-points-keep-values-in-loops-threading-and-case-test
+  (let [cases [[(lines "(fn [n]"
+                       "  (loop [i 0"
+                       "         acc []]"
+                       "    (if (< i n)"
+                       "      (recur (inc i)"
+                       "             (conj acc i))"
+                       "      acc)))") 2 [5] [0 1 2 3 4]]
+               [(lines "(fn [x]"
+                       "  (-> x"
+                       "      (inc)"
+                       "      (* 2)))") 2 [3] 8]
+               [(lines "(fn [k]"
+                       "  (case k"
+                       "    :a"
+                       "    (str \"A\")"
+                       "    :b (str \"B\")"
+                       "    (str \"other\")))") 2 [:b] "B"]]]
+    (doseq [[t dot args v] cases]
+      (let [{out :text} (instrument-h t [dot])]
+        (is (= v (apply (eval (read-string t)) args)) "as written")
+        (is (= v (apply (eval (read-string out)) args)) (str "with step points, stepping off:\n" out))))))
+
+(deftest step-only-pauses-the-stepping-thread-test
+  (is (true? (debugger/pause-here? {:step? false :stepping? false})))
+  (let [me (Thread/currentThread)
+        other (Thread. (fn []))]
+    (is (true? (debugger/stepping-here? (atom me))))
+    (is (false? (debugger/stepping-here? (atom other))) "a Step belongs to the thread that was paused")
+    (is (false? (debugger/stepping-here? (atom nil))))))
+
+(deftest step-refuses-a-pause-that-isnt-a-breakpoint-test
+  (let [brk (debugger/make-break)
+        stepping (atom nil)]
+    (reset! (:paused brk) {:data {:title "ArithmeticException"} :continued (atom false)
+                           :thread (Thread/currentThread)})
+    (is (false? (debugger/step! brk stepping)) "Break on error's pause: Step works at a breakpoint")
+    (is (nil? @stepping))
+    (is (false? @(:continued @(:paused brk))) "and nothing was let go")
+    (testing "a Continue already sent: Step fails and leaves stepping off"
+      (reset! (:paused brk) {:data {:breakpoint 3} :continued (atom true) :thread (Thread/currentThread)})
+      (is (false? (debugger/step! brk stepping)))
+      (is (nil? @stepping))
+      (is (false? @debugger/stepping-any)))))
+
+(deftest arrow-line-only-on-the-text-that-ran-test
+  (is (= 3 (bp/arrow-line {:sent "a\nb\nc" :now "a\nb\nc" :line 3})))
+  (is (nil? (bp/arrow-line {:sent "a\nb\nc" :now "x\na\nb\nc" :line 3}))
+      "edited since it ran: line 3 may be another line now")
+  (is (nil? (bp/arrow-line {:sent nil :now "a" :line 1})) "nothing sent from this tab")
+  (is (nil? (bp/arrow-line {:sent "a" :now "a" :line 4})) "past the end"))

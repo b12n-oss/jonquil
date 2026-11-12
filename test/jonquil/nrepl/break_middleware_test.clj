@@ -280,5 +280,5 @@
           (is (wait-for #(= ["Breakpoint at line 2" "Stepped to line 3"] (titles))))
           (is (= "true" (get (first (ask h {"op" "jonquil-break-continue" "session" "s1"})) "continued")))
           (is (= 4 (deref fut 5000 :blocked)) "Continue: line 4's step point doesn't pause")
-          (is (false? @(:stepping entry))))
+          (is (nil? @(:stepping entry))))
         (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))

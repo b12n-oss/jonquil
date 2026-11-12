@@ -69,7 +69,7 @@
   from a Step to the next pause."
   []
   (let [e {:break (debugger/make-break) :armed? (atom false) :reply (atom nil) :bp-ok? (atom false)
-           :stepping (atom false)}]
+           :stepping (atom nil)}]
     (assoc e :hook (debugger/breakpoint-handler (:break e) (fn [] (break-callbacks e))
                                                 (fn [] @(:bp-ok? e))
                                                 (:stepping e)))))
@@ -100,7 +100,7 @@
         ;; a breakpoint reached after this eval can't reach the client,
         ;; and a Step it ended in doesn't carry over to the next
         (reset! (:bp-ok? e) false)
-        (reset! (:stepping e) false)
+        (debugger/stop-stepping! (:stepping e))
         (debugger/end-stale-pause! (:break e) {} {:other-thread :wake})))))
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))
@@ -194,7 +194,7 @@
                                   (breakpoints-reply e (get request "on"))))
         "jonquil-break-eval" (break-eval! e request)
         "jonquil-break-continue"
-        (do (when e (reset! (:stepping e) false))
+        (do (when e (debugger/stop-stepping! (:stepping e)))
             (server/respond request {"status" ["done"]
                                      "continued" (str (boolean (and e (debugger/continue! (:break e)))))}))
         "jonquil-break-step"
@@ -202,7 +202,7 @@
                                  "stepped" (str (boolean (and e (debugger/step! (:break e) (:stepping e)))))})
         "interrupt"
         (do (when e
-              (reset! (:stepping e) false)
+              (debugger/stop-stepping! (:stepping e))
               (debugger/break-stop! (:break e)))
             (next request))
         "close"

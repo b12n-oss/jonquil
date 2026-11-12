@@ -4,8 +4,8 @@
   panel, line counts, the restarts and Break on error, and the hook that
   wires a tab's gutter counts. Retrying a failure goes through the window's
   :rerun-failure!, since the evaluation machinery stays in the core."
-  (:require [clojure.string :as str]
-            [jolt.ffi :as ffi]
+  (:require [jolt.ffi :as ffi]
+            [jonquil.breakpoints :as bp]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
@@ -210,19 +210,20 @@
 
 (defn- show-arrow!
   "LM5's stepping: an arrow in the gutter of the tab the paused code came
-  from (:tab), on the paused line (:breakpoint)."
+  from (:tab), on the paused line (:breakpoint), when the tab still holds
+  the text it ran (jonquil.breakpoints/arrow-line). Answers false when it
+  can't place one."
   [{:keys [arrow-tab tabs tab-by-id] :as ctx} {n :breakpoint id :tab}]
   (clear-arrow! ctx)
-  (when-let [{:keys [ed]} (and n (some? id) (tab-by-id tabs id))]
-    (when-not @(:destroyed? ed)
-      (let [text (editor/editor-text ed)
-            offset (loop [i 0 l 1]
-                     (cond (= l n) i
-                           (str/index-of text "\n" i) (recur (inc (str/index-of text "\n" i)) (inc l))
-                           :else nil))]
-        (when-let [gt (and offset (:gutter (:changed ed)))]
-          (gutter/set-arrow! gt offset)
-          (reset! arrow-tab id))))))
+  (boolean
+   (when-let [{:keys [ed]} (and n (some? id) (tab-by-id tabs id))]
+     (when-not @(:destroyed? ed)
+       (let [text (editor/editor-text ed)]
+         (when-let [line (bp/arrow-line {:sent (some-> ed :changed :bp-sent deref) :now text :line n})]
+           (when-let [gt (:gutter (:changed ed))]
+             (gutter/set-arrow! gt (nth (bp/line-starts text) (dec line)))
+             (reset! arrow-tab id)
+             true)))))))
 
 (defn- show-paused!
   "A pause in the Frames panel: an error's titled \"Paused: <error>\", a
@@ -237,11 +238,12 @@
                                          n (conj {:id :step :label "Step"})))
     (show-right-panel! right :debugger)
     (debugger-pane/focus! dbgp)
-    (when n (show-arrow! ctx d))
     (if n
-      (let [where (if (:step? d) (str "Stepped to line " n) (str "Paused at the breakpoint on line " n))]
+      (let [where (if (:step? d) (str "Stepped to line " n) (str "Paused at the breakpoint on line " n))
+            arrow? (show-arrow! ctx d)]
         (cview/append! cv :system (str "; " where ".\n"))
-        (set-status! (str "; " where ". Step, Continue or Stop.")))
+        (set-status! (str "; " where ". Step, Continue or Stop."
+                          (when-not arrow? " The tab changed since it ran, so the gutter shows no arrow."))))
       (do (cview/append! cv :system (str "; Paused at " (:title d) ".\n"))
           (set-status! (str "; Paused: " (:title d) ". Continue or Stop."))))))
 
@@ -306,11 +308,17 @@
       (set-status! "; Nothing is paused."))))
 
 (defn- step!
-  "Step (LM5): runs the paused breakpoint on to the next line."
-  [{:keys [ev* set-status!]}]
-  (let [e @ev*]
-    (when-not (and e (satisfies? ev/Breakpoints e) (ev/step-break! e))
-      (set-status! "; Nothing is paused at a breakpoint."))))
+  "Step (LM5): runs the paused breakpoint on to the next line. At Break on
+  error's pause it says Step works at a breakpoint, and does nothing."
+  [{:keys [ev* set-status! frames-state]}]
+  (let [e @ev*
+        fs @frames-state]
+    (cond
+      (and (:paused? fs) (not (:breakpoint fs)))
+      (set-status! "; Step works at a breakpoint: Continue or Stop this pause.")
+      (and e (satisfies? ev/Breakpoints e))
+      (ev/step-break! e (fn [ok?] (when-not ok? (set-status! "; Nothing is paused at a breakpoint."))))
+      :else (set-status! "; Nothing is paused at a breakpoint."))))
 
 (defn- set-restart-handler!
   [{:keys [dbgp] :as ctx}]
@@ -402,7 +410,9 @@
    :define-retry-fn (fn [] (define-retry! ctx))
    :break-fn (fn [] (toggle-break! ctx))
    :continue-fn (fn [] (continue! ctx))
-   :step-fn (fn [] (step! ctx))})
+   :step-fn (fn [] (step! ctx))
+   ;; F10's :when: a breakpoint's pause is showing (GTK thread)
+   :breakpoint-paused? (fn [] (let [fs @(:frames-state ctx)] (boolean (and (:paused? fs) (:breakpoint fs)))))})
 
 (defn- install
   "The debugger part for one window: builds the Frames pane, wires its

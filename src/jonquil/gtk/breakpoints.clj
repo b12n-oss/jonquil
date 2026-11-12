@@ -112,5 +112,6 @@
   (let [{:keys [start end] :or {start 0 end (count text)}} range
         ls (when (and (supported? e) (ev/breakpoints-on? e)) (seq (lines ed text)))]
     (if ls
-      (:text (bp/instrument text ls (merge {:start start :end end :tab tab-id} (heads ed text))))
+      (do (some-> (get-in ed [:changed :bp-sent]) (reset! text))
+          (:text (bp/instrument text ls (merge {:start start :end end :tab tab-id} (heads ed text)))))
       (subs text start end))))

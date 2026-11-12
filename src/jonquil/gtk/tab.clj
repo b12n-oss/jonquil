@@ -37,6 +37,9 @@
                          ;; LM5: what the runtime last said the buffer's
                          ;; heads name (jonquil.breakpoints' :heads)
                          :bp-heads (atom nil)
+                         ;; LM5: the text a Run last sent breakpoints
+                         ;; from, for the stepping arrow's line
+                         :bp-sent (atom nil)
                          ;; LM5: what a Run that ended well calls, to ask
                          ;; again (installed when the tab is wired)
                          :bp-refresh (atom (fn []))

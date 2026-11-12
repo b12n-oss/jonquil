@@ -114,7 +114,7 @@
       :else (submit-repl! this code (dissoc opts :run?))))
   (interrupt! [_]
     ;; Stop ends stepping (LM5)
-    (reset! (:stepping @state) false)
+    (debugger/stop-stepping! (:stepping @state))
     (eval/stop-eval! ctx)
     ;; Stop also reaches a form evaluated in a frame (jonquil.debugger)
     (some-> (:frame-token @state) debugger/interrupt-token!)
@@ -197,7 +197,7 @@
     (debugger/break-eval! (:break @state) i code (fn [r] (try (on-result r) (catch Throwable _)))))
   (continue-break! [_]
     ;; Continue runs to the next breakpoint: no step point pauses
-    (reset! (:stepping @state) false)
+    (debugger/stop-stepping! (:stepping @state))
     (debugger/continue! (:break @state)))
   ev/Breakpoints
   (set-breakpoints! [_ on? on-done]
@@ -215,7 +215,10 @@
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)
-  (step-break! [_] (debugger/step! (:break @state) (:stepping @state)))
+  (step-break! [_ on-done]
+    (let [r (debugger/step! (:break @state) (:stepping @state))]
+      (try (on-done r) (catch Throwable _))
+      nil))
   ev/Trace
   (trace-op! [_ op args on-result]
     (future
@@ -261,7 +264,7 @@
                      ;; Break on error: off until toggled
                      :break brk :break-on? false
                      ;; LM5's stepping, from a Step to the next pause
-                     :stepping (atom false)})]
+                     :stepping (atom nil)})]
     (swap! state assoc :breakpoint-hook (breakpoint-hook state brk))
     (->InProcess (eval/make-eval-context) state)))
 
@@ -419,7 +422,7 @@
     ;; this thread's evaluation is over: no breakpoint pauses it now, and
     ;; a Step it ended in doesn't reach the next one
     (let [me (Thread/currentThread)]
-      (when (identical? me (:eval-thread @state)) (reset! (:stepping @state) false))
+      (when (identical? me (:eval-thread @state)) (debugger/stop-stepping! (:stepping @state)))
       (swap! state (fn [s] (cond-> s (identical? me (:eval-thread s)) (dissoc :eval-thread)))))
     (let [ref (keep-result-ref opts result)
           result (cond-> result ref (assoc :ref ref))]

@@ -32,5 +32,6 @@
     :restart/define {:doc "Define the name the last error couldn't resolve, then retry." :scope :window
                      :call [:define-retry-fn]}}
    :panels [{:id :debugger :label "Frames"}]
-   ;; F10: free in keymap.edn, and macOS reserves no F10 shortcut
-   :bindings {:window [{:key "F10" :exact #{} :command :debug/step}]}})
+   ;; F10: free in keymap.edn, and macOS reserves no F10 shortcut; only
+   ;; while a breakpoint's pause shows, else it passes through
+   :bindings {:window [{:key "F10" :exact #{} :when [:breakpoint-paused] :command :debug/step}]}})

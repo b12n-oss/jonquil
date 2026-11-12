@@ -541,6 +541,26 @@
   [t]
   (let [d (ex-data t)] (when (map? d) (:jonquil/breakpoint d))))
 
+(defonce stepping-any
+  ;; True while any session is stepping: a step point checks it before it
+  ;; throws, so with nobody stepping it costs a deref and nothing else
+  (atom false))
+
+(defn stepping-here?
+  "True when stepping (an atom holding the thread a Step let go, or nil)
+  belongs to this thread: a step point pauses only the thread that was
+  stepping."
+  [stepping]
+  (identical? @stepping (Thread/currentThread)))
+
+(defn stop-stepping!
+  "Ends stepping (the atom) and clears stepping-any. Called at any pause,
+  Continue, Stop and an evaluation's end."
+  [stepping]
+  (reset! stepping nil)
+  (reset! stepping-any false)
+  nil)
+
 (defn- step-point?
   "True when breakpoint throw t is a step point's (it pauses only while
   stepping)."
@@ -580,7 +600,7 @@
         frames (vec (rest frames))]
     (when (claim-pause! brk)
       ;; stepping lasts from a Step to the next pause
-      (when stepping (reset! stepping false))
+      (when stepping (stop-stepping! stepping))
       (let [d (try (breakpoint-data t frames (:resolve-file callbacks))
                    (catch Throwable e (reset! paused nil) (throw e)))]
         (publish-pause! brk t frames d)
@@ -594,23 +614,30 @@
   does a throwable that isn't a breakpoint's. stepping (an atom, false
   when not given) decides whether a step point pauses (pause-here?); any
   pause turns it off."
-  ([brk callbacks-fn can-pause?] (breakpoint-handler brk callbacks-fn can-pause? (atom false)))
+  ([brk callbacks-fn can-pause?] (breakpoint-handler brk callbacks-fn can-pause? (atom nil)))
   ([brk callbacks-fn can-pause? stepping]
    (fn [t frames]
      (when (and (breakpoint-line t)
-                (pause-here? {:step? (step-point? t) :stepping? @stepping})
+                (pause-here? {:step? (step-point? t) :stepping? (stepping-here? stepping)})
                 (can-pause?))
        (pause-at-breakpoint {:brk brk :callbacks (callbacks-fn) :t t :frames frames
                              :can-pause? can-pause? :stepping stepping})))))
 
 (defn step!
-  "Step: lets brk's paused breakpoint run on with stepping (an atom) on, so
-  the next step point or breakpoint it reaches pauses. True when a pause
-  was waiting; stepping stays off otherwise."
-  [brk stepping]
-  (reset! stepping true)
-  (or (continue! brk)
-      (do (reset! stepping false) false)))
+  "Step: lets brk's paused breakpoint (or step) run on with stepping on for
+  the thread it paused, so the next step point or breakpoint that thread
+  reaches pauses. True when such a pause was waiting; false, with nothing
+  changed, for none, one already let go, or a pause that isn't a
+  breakpoint's (Break on error's: Step works at a breakpoint)."
+  [{:keys [^LinkedBlockingQueue queue paused]} stepping]
+  (let [p @paused]
+    (boolean
+     (when (and p (:breakpoint (:data p)) (compare-and-set! (:continued p) false true))
+       ;; on before the thread runs again, so its next line sees it
+       (reset! stepping (:thread p))
+       (reset! stepping-any true)
+       (.put queue :continue)
+       true))))
 
 (defn arm-breakpoints!
   "Installs hook as breakpoint-hook, after turning debug mode on when it's

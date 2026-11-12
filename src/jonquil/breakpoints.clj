@@ -28,18 +28,22 @@
 (defn breakpoint-form
   "The one-line form for a breakpoint on line n. Everything is qualified, so
   a namespace that excludes clojure.core names still compiles it. opts:
-  :step? marks a step point (it pauses only while stepping) and :tab names
+  :step? marks a step point (it pauses only while stepping, and does
+  nothing at all, not even throw, while nobody steps) and :tab names
   the tab the code came from, for the gutter's arrow."
   ([n] (breakpoint-form n {}))
   ([n {:keys [step? tab]}]
-   (str "(try (jolt.debug/with-break-handler"
+   (str (when step? "(clojure.core/when (clojure.core/deref jonquil.debugger/stepping-any) ")
+        "(try (jolt.debug/with-break-handler"
         " (clojure.core/fn [t fs] (clojure.core/when-let [h (clojure.core/deref jonquil.debugger/breakpoint-hook)] (h t fs)))"
         " (throw (clojure.core/ex-info \"Breakpoint\" {:jonquil/breakpoint " n
         (when step? " :jonquil/step true")
         (when (some? tab) (str " :jonquil/tab " (pr-str tab)))
         "})))"
         " (catch clojure.lang.ExceptionInfo e"
-        " (clojure.core/when-not (:jonquil/breakpoint (clojure.core/ex-data e)) (throw e))))")))
+        " (clojure.core/when-not (:jonquil/breakpoint (clojure.core/ex-data e)) (throw e))))"
+        ;; a step point checks stepping-any first: nobody stepping, no throw
+        (when step? ")"))))
 
 (defn breakpoint-throw?
   "True when ex-data is a breakpoint's (breakpoint-form's throw)."
@@ -600,6 +604,15 @@
                (and disk-text
                     (not (str/includes? (str/replace disk-text "\r\n" "\n")
                                         (str/replace (subs text (:start rng) (:end rng)) "\r\n" "\n"))))))))))
+
+(defn arrow-line
+  "The line the gutter's arrow goes on for a pause at line, when the tab
+  still holds the text its breakpoints were sent from (sent); nil when it
+  changed since (the line may be another one now), nothing was sent, or
+  the line is past the end."
+  [{:keys [sent now line]}]
+  (when (and sent (= sent now) line (<= 1 line (count (line-starts now))))
+    line))
 
 ;; --- what a toggle says ------------------------------------------------------------
 
