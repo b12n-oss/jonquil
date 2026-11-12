@@ -611,8 +611,10 @@
   (repl-sync s (:text (bp/instrument step-text [2 7]
                                      (debugger/macro-heads "user" (bp/head-symbols step-text))))))
 
-(defn- step-sync [ev]
-  (let [p (promise)] (ev/step-break! ev (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+(defn- step-sync
+  ([ev] (step-sync ev :step))
+  ([ev mode]
+   (let [p (promise)] (ev/step-break! ev mode (fn [r] (deliver p r))) (deref p 20000 :timeout))))
 
 (deftest stepping-in-process-test
   (if-not (debugger/break-available?)
@@ -736,7 +738,53 @@
 (deftest stopping-a-session-ends-its-step-test
   (let [s (session/make-session)
         t (Thread. (fn []))]
-    (reset! (:stepping @(:state s)) t)
+    (reset! (:stepping @(:state s)) {:thread t :mode :step :depth 1})
     (swap! debugger/stepping-any conj t)
     (ev/stop! s)
     (is (not (contains? @debugger/stepping-any t)) "a closed window leaves no entry")))
+
+;; --- Step Over and Step Out (LM5) -------------------------------------------------------
+
+(def ^:private over-out-text
+  ;; a holds a dot it never reaches, so its lines are step points; b's dot
+  ;; is on the line that calls a
+  "(defn a [x]\n  (when (neg? x)\n    (str \"never\"))\n  (let [y (inc x)]\n    (* y 2)))\n(defn b [x]\n  (let [r (a x)]\n    (+ r 1)))")
+
+(deftest step-over-and-out-in-process-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          paused (atom (promise))
+          next-pause (fn [] (let [d (deref @paused 5000 nil)] (reset! paused (promise)) d))
+          start (fn [] (let [done (promise)]
+                         (session/submit-repl! s "(b 1)" {:on-complete (fn [r] (deliver done r))})
+                         (is (= "Breakpoint at line 7" (:title (next-pause))))
+                         done))
+          finish (fn [done] (ev/continue-break! s) (is (= "5" (:printed (deref done 5000 :timeout)))))]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync s true)))
+        (repl-sync s (:text (bp/instrument over-out-text [3 7]
+                                           (debugger/macro-heads "user" (bp/head-symbols over-out-text)))))
+        (testing "Step Over from the call line stays in b"
+          (let [done (start)]
+            (is (true? (step-sync s :over)))
+            (is (= "Stepped to line 8" (:title (next-pause))))
+            (finish done)))
+        (testing "Step Into goes into a"
+          (let [done (start)]
+            (is (true? (step-sync s :step)))
+            (is (= "Stepped to line 2" (:title (next-pause))))
+            (finish done)))
+        (testing "Step Out from inside a lands back in b"
+          (let [done (start)]
+            (step-sync s :step)
+            (is (= "Stepped to line 2" (:title (next-pause))))
+            (is (true? (step-sync s :out)))
+            (is (= "Stepped to line 8" (:title (next-pause))))
+            (finish done)))
+        (testing "Step Out from the outermost frame runs to the end, as Continue"
+          (let [done (start)]
+            (is (true? (step-sync s :out)))
+            (is (= "5" (:printed (deref done 5000 :timeout))))))
+        (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))

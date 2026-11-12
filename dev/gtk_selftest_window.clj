@@ -490,6 +490,7 @@
    debugger-rows/row-breakpoint-waits-for-unrun-edits
    debugger-rows/row-breakpoint-asks-again-after-a-run
    debugger-rows/row-step-follows-the-lines
+   debugger-rows/row-step-over-and-out
    restarts-rows/row-restart-retry
    restarts-rows/row-restart-edit
    restarts-rows/row-restart-define

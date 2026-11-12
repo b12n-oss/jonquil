@@ -1035,8 +1035,10 @@
               (is (= "41" (:printed (first (run e "(bpf 20)" false)))))))))
       (finally (ev/stop! e)))))
 
-(defn- step-sync [ev]
-  (let [p (promise)] (ev/step-break! ev (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+(defn- step-sync
+  ([ev] (step-sync ev :step))
+  ([ev mode]
+   (let [p (promise)] (ev/step-break! ev mode (fn [r] (deliver p r))) (deref p 20000 :timeout))))
 
 (deftest stepping-in-the-child-test
   (let [e (make (temp-project))
@@ -1110,6 +1112,37 @@
                 (is (= ["Stepped to line 5" "2"] [(:title d3) (x-of d3)])))
               (is (true? (ev/continue-break! e)))
               (is (= "6" (:printed (deref done 20000 :timeout))))))))
+      (finally (ev/stop! e)))))
+
+(deftest step-over-and-out-in-the-child-test
+  (let [e (make (temp-project))
+        text "(defn a [x]\n  (when (neg? x)\n    (str \"never\"))\n  (let [y (inc x)]\n    (* y 2)))\n(defn b [x]\n  (let [r (a x)]\n    (+ r 1)))"]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [r (set-breakpoints-sync e true)]
+        (if (and (:error r) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP step-over-and-out-in-the-child-test:" (:error r))
+              (is (string? (:error r))))
+          (let [paused (atom (promise))
+                next-pause (fn [] (let [d (deref @paused 20000 nil)] (reset! paused (promise)) d))]
+            (ev/set-break-handlers! e {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+            (run e (:text (bp/instrument text [3 7])) false)
+            (testing "Step Over stays in b"
+              (let [done (start-run e "(b 1)" {})]
+                (is (= "Breakpoint at line 7" (:title (next-pause))))
+                (is (true? (step-sync e :over)))
+                (is (= "Stepped to line 8" (:title (next-pause))))
+                (ev/continue-break! e)
+                (is (= "5" (:printed (deref done 20000 :timeout))))))
+            (testing "Step Into goes into a, and Step Out lands back in b"
+              (let [done (start-run e "(b 1)" {})]
+                (is (= "Breakpoint at line 7" (:title (next-pause))))
+                (is (true? (step-sync e :step)))
+                (is (= "Stepped to line 2" (:title (next-pause))))
+                (is (true? (step-sync e :out)))
+                (is (= "Stepped to line 8" (:title (next-pause))))
+                (ev/continue-break! e)
+                (is (= "5" (:printed (deref done 20000 :timeout)))))))))
       (finally (ev/stop! e)))))
 
 (deftest breakpoints-armed-before-the-child-starts-test

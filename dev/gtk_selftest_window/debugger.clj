@@ -552,8 +552,48 @@
                 done? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 5")))
                 no-arrow? (await-until 3000 20 #(nil? (arrow-line ui)))]
             (on-gtk (support/check :step-follows-the-lines
-                                   (and ran? dot2? dot6? at2? (= ["Continue" "Step"] labels) at3? at6? stepped? done? no-arrow?)
+                                   (and ran? dot2? dot6? at2? (= ["Continue" "Step Into" "Step Over" "Step Out"] labels) at3? at6? stepped? done? no-arrow?)
                                    {:ran ran? :dot2 dot2? :dot6 dot6? :at2 at2? :labels labels :at3 at3? :at6 at6?
                                     :stepped stepped? :done done? :no-arrow no-arrow?
+                                    :title (dpane/title-text dp) :arrow (arrow-line ui) :status (status ui)})))
+          (finally (breakpoints-off! ui true)))))))
+
+(defn row-step-over-and-out
+  "From the Frames panel's buttons: paused at b's dot on the line that
+  calls a, Step Over stays in b (its next line); Step Into goes into a,
+  and Step Out from there lands back in b's next line."
+  [ui]
+  (go-row :step-over-and-out support/check
+    (if-not (debugger/break-available?)
+      (on-gtk (support/check :step-over-and-out true {:available false}))
+      (let [dp (:debugger-pane ui)]
+        (try
+          (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-stepover-") "over.clj")
+                _ (spit f (str "(defn a [x]\n  (when (neg? x)\n    (str \"never\"))\n  (let [y (inc x)]\n    (* y 2)))\n"
+                               "(defn b [x]\n  (let [r (a x)]\n    (+ r 1)))\n"))
+                m0 (on-gtk (let [m (support/out-end-offset ui)] ((:open-file! ui) (.getPath f)) ((:run!* ui)) m))
+                ran? (await-until 8000 20 #(and (support/idle? ui) (str/includes? (support/since ui m0) "#'user/b")))
+                _ (on-gtk (caret-to-line! ui 3) (run-palette! ui "toggle a breakpoint"))
+                dot3? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 3; it's live now."))
+                _ (on-gtk (caret-to-line! ui 7) (run-palette! ui "toggle a breakpoint"))
+                dot7? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 7; it's live now."))
+                m (enter! ui "(b 1)")
+                at7? (await-until 5000 20 #(= "Breakpoint at line 7" (dpane/title-text dp)))
+                _ (on-gtk (dpane/press-restart! dp :step-over))
+                over? (await-until 5000 20 #(and (= "Stepped to line 8" (dpane/title-text dp)) (= 8 (arrow-line ui))))
+                _ (on-gtk (dpane/press-restart! dp :continue))
+                done1? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 5")))
+                m2 (enter! ui "(b 1)")
+                again? (await-until 5000 20 #(= "Breakpoint at line 7" (dpane/title-text dp)))
+                _ (on-gtk (dpane/press-restart! dp :step))
+                into? (await-until 5000 20 #(and (= "Stepped to line 2" (dpane/title-text dp)) (= 2 (arrow-line ui))))
+                _ (on-gtk (dpane/press-restart! dp :step-out))
+                out? (await-until 5000 20 #(and (= "Stepped to line 8" (dpane/title-text dp)) (= 8 (arrow-line ui))))
+                _ (on-gtk (dpane/press-restart! dp :continue))
+                done2? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m2) "=> 5")))]
+            (on-gtk (support/check :step-over-and-out
+                                   (and ran? dot3? dot7? at7? over? done1? again? into? out? done2?)
+                                   {:ran ran? :dot3 dot3? :dot7 dot7? :at7 at7? :over over? :done1 done1?
+                                    :again again? :into into? :out out? :done2 done2?
                                     :title (dpane/title-text dp) :arrow (arrow-line ui) :status (status ui)})))
           (finally (breakpoints-off! ui true)))))))

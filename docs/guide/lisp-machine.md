@@ -54,7 +54,7 @@ Emacs took first:
 | Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
 | Break on error, Continue | `debug-on-error` while the error is live: `e` evaluates in a frame, `c` continues |
 | Toggle Breakpoint (F9): pause at a line, live at once | `debug-on-entry` and Edebug's breakpoints (`edebug-defun`, then `b`), which instrument a function the same way |
-| Step (F10): the next line in a form holding a breakpoint | Edebug stepping (SPC to the next stop point), within instrumented definitions |
+| Step Into (F7), Step Over (F10), Step Out (Shift+F7) in forms holding a breakpoint | Edebug stepping (SPC to the next stop point, `o` to step out), within instrumented definitions |
 | Retry, Edit and retry, Define and retry | none close: the Elisp debugger resumes a live stack, which an unwound one can't |
 | Save World, Restore World: your session's data, one world per project | none close: `desktop-save` keeps buffers, not values; Genera's Save World wrote the whole machine, this writes data vars only |
 | Open last session's replay: what the project evaluated last time, as a script in a new tab that runs only when you Run it | none close: `desktop-save` keeps buffers, not the forms you evaluated |

@@ -1076,12 +1076,12 @@
                    (on-done r))))
     nil)
   (breakpoints-on? [_] (boolean (:breakpoints-on? @state)))
-  (step-break! [this on-done]
+  (step-break! [this mode on-done]
     ;; the child's own answer: it refuses Break on error's pause, and one
     ;; already let go; the round trip on a future, as continue-break!'s
     (if-let [{:keys [conn session]} (when (:paused? @state) (runtime this))]
       (future
-        (let [r (try (client/request-sync conn {:op "jonquil-break-step" :session session} request-timeout-ms)
+        (let [r (try (client/request-sync conn {:op "jonquil-break-step" :mode (name mode) :session session} request-timeout-ms)
                      (catch Throwable _ nil))]
           (try (on-done (and (vector? r) (= "true" (some :stepped r)))) (catch Throwable _))))
       (try (on-done false) (catch Throwable _)))

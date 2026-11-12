@@ -218,8 +218,8 @@
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)
-  (step-break! [_ on-done]
-    (let [r (debugger/step! (:break @state) (:stepping @state))]
+  (step-break! [_ mode on-done]
+    (let [r (debugger/step! (:break @state) (:stepping @state) mode)]
       (try (on-done r) (catch Throwable _))
       nil))
   ev/Trace

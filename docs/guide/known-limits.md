@@ -61,8 +61,8 @@ Known rough edges, parked for later:
   Jonquil doesn't know is treated as reading its arguments as data, so
   nothing inside it is wrapped, and a dot there doesn't pause. A breakpoint pauses only
   during an evaluation you started, and in process only on its own thread.
-- Stepping reaches only the forms that hold a breakpoint, and has no Step
-  Over or Step Out yet: a call into a form without a dot runs through.
+- Stepping reaches only the forms that hold a breakpoint: a call into a
+  form without a dot runs through.
 - A `(catch Exception _)` in your code can swallow Stop at a breakpoint, as
   it can with Break on error: Stop ends a pause by throwing on the paused
   thread.

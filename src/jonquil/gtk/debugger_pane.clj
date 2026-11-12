@@ -48,8 +48,8 @@
 
 (def ^:private RESTART-IDS
   ;; :continue is Break on error's: the bar holds it alone while paused,
-  ;; with :step beside it at a breakpoint (LM5's stepping)
-  [:retry :edit :define :continue :step])
+  ;; with the three steps beside it at a breakpoint (LM5's stepping)
+  [:retry :edit :define :continue :step :step-over :step-out])
 
 (defn show-restarts!
   "Shows the restart buttons options names (jonquil.restarts/options), in
@@ -72,7 +72,7 @@
 
 (defn set-restart-handler!
   "Registers (fn [id]) for a restart button, id :retry, :edit, :define,
-  :continue or :step."
+  :continue, :step, :step-over or :step-out."
   [pane f]
   (reset! (:on-restart pane) f)
   nil)

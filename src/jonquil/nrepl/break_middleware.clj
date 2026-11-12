@@ -165,6 +165,19 @@
         "heads" (pr-str (debugger/macro-heads ns (edn/read-string (str heads))))}
        (catch Throwable t {"status" ["done"] "error" (or (ex-message t) (str (class t)))})))
 
+(defn- step-mode
+  "A jonquil-break-step request's mode: \"over\" or \"out\", else Step
+  Into."
+  [request]
+  (case (str (get request "mode")) "over" :over "out" :out :step))
+
+(defn- step-reply
+  "Steps session entry e's pause in the request's mode; the answer says
+  whether a breakpoint's pause was waiting."
+  [e request]
+  {"status" ["done"]
+   "stepped" (str (boolean (and e (debugger/step! (:break e) (:stepping e) (step-mode request)))))})
+
 (defn- breakpoints-reply
   "Arms or disarms session entry e's breakpoint hook (on, \"true\" or
   \"false\")."
@@ -197,9 +210,7 @@
         (do (when e (debugger/stop-stepping! (:stepping e)))
             (server/respond request {"status" ["done"]
                                      "continued" (str (boolean (and e (debugger/continue! (:break e)))))}))
-        "jonquil-break-step"
-        (server/respond request {"status" ["done"]
-                                 "stepped" (str (boolean (and e (debugger/step! (:break e) (:stepping e)))))})
+        "jonquil-break-step" (server/respond request (step-reply e request))
         "interrupt"
         (do (when e
               (debugger/stop-stepping! (:stepping e))

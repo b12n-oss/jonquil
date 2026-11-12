@@ -5,8 +5,8 @@ Keys by purpose; click a group to open it.
 On a Mac keyboard the top row sends media and brightness keys by default,
 so every F-key here (F5 Run, F6, F8, F12 and the rest) needs fn held, unless
 System Settings > Keyboard has "Use F1, F2, etc. keys as standard function
-keys" turned on. F8 without fn plays or pauses Music, and F10 without fn
-mutes the sound.
+keys" turned on. F8 without fn plays or pauses Music, F7 without fn goes
+to the previous track, and F10 without fn mutes the sound.
 
 <details>
 <summary><strong>Run, files and tabs</strong></summary>
@@ -64,7 +64,9 @@ mutes the sound.
 | F8 | anywhere in the window | Go to the next place in the locations list |
 | Shift+F8 | anywhere in the window | Go to the previous place in the locations list |
 | F9 | anywhere in the window | Toggle a breakpoint on the caret's line ([Breakpoints](help-and-inspector.md#breakpoints)) |
-| F10 | anywhere in the window | Step to the next line while paused at a breakpoint ([Stepping](help-and-inspector.md#stepping)) |
+| F7 | anywhere in the window | Step Into: the next line, while paused at a breakpoint ([Stepping](help-and-inspector.md#stepping)) |
+| F10 | anywhere in the window | Step Over: the next line in this function, while paused at a breakpoint |
+| Shift+F7 | anywhere in the window | Step Out: the caller's next line, while paused at a breakpoint |
 | Cmd/Ctrl+. | anywhere in the window | Go to the next place in the locations list |
 | Cmd/Ctrl+Shift+. | anywhere in the window | Go to the previous place in the locations list |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
