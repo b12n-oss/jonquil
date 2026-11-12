@@ -152,14 +152,18 @@
 
 (defn- note-ran!
   "LM3 and LM4 after a Run, Run Form or Run Selection: an :ok result marks
-  code as ran (jonquil.changed) and refreshes the marks, and either way the
-  gutter's line counts refresh. Never throws."
+  code as ran (jonquil.changed) and refreshes the marks, an :ok whole Run
+  becomes the tab's last-run text, and either way the gutter's line counts
+  refresh. Never throws."
   [{:keys [changed hook-source hook-code]} result]
   ;; LM3: what ran :ok is no longer changed (jonquil.changed)
   (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
     (try (swap! (:ran changed) changed/record hook-code (if (= :run hook-source) :run :form))
          ((deref (:refresh changed)))
          (catch :default _ nil)))
+  ;; LM3: the text Compare with the last Run compares against
+  (when-let [lr (:last-run changed)]
+    (swap! lr changed/last-run-after hook-code hook-source (:status result)))
   ;; LM4: the lines that ran, whether it ended well or not
   (when (and changed (#{:run :form :selection} hook-source))
     (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil))))

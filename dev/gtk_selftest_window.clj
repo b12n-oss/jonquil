@@ -295,6 +295,7 @@
    locations-rows/row-compare-with-head
    locations-rows/row-compare-line-only-on-disk
    locations-rows/row-compare-with-tab
+   locations-rows/row-compare-with-last-run
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named

@@ -59,3 +59,13 @@
     (testing "forms that define nothing just add"
       (let [r2 (changed/record ran "(println :hi)" :form)]
         (is (= [] (changed/changed "(defn f [] 2)\n(defn g [] 2)" r2)))))))
+
+(deftest last-run-after-test
+  ;; LM3's last-run text: the buffer as its last whole Run that ended :ok
+  ;; sent it; Run Form, Run Selection and a failed Run leave it as it was
+  (is (= "(def a 1)\n" (changed/last-run-after nil "(def a 1)\n" :run :ok)))
+  (is (= "(def a 2)\n" (changed/last-run-after "(def a 1)\n" "(def a 2)\n" :run :ok)))
+  (is (= "(def a 1)\n" (changed/last-run-after "(def a 1)\n" "(def a 2)\n" :run :error)))
+  (is (= "(def a 1)\n" (changed/last-run-after "(def a 1)\n" "(def a 2)" :form :ok)))
+  (is (= "(def a 1)\n" (changed/last-run-after "(def a 1)\n" "a" :selection :ok)))
+  (is (nil? (changed/last-run-after nil "(def a 1)" :form :ok)) "never ran whole: nothing to compare with"))

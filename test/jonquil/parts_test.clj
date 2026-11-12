@@ -85,7 +85,7 @@
            :result/inspect :result/copy :result/define :result/jump
            :panel/locations :locations/uses :locations/definitions :locations/matches
            :locations/usages-in-project :locations/next :locations/previous
-           :compare/disk :compare/head :compare/take
+           :compare/disk :compare/head :compare/take :compare/last-run
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
            :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
            :palette/open :help/describe-key :help/key-bindings :help/recent-keys}
@@ -686,7 +686,7 @@
             :locations/usages-in-project [:locations-project-usages-fn]
             :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
             :compare/disk [:compare-disk-fn] :compare/head [:compare-head-fn]
-            :compare/take [:compare-take-fn]}
+            :compare/take [:compare-take-fn] :compare/last-run [:compare-last-run-fn]}
            (update-vals (:commands spec) :call)))
     (is (= [{:id :locations :label "Locations"}] (:panels spec)))
     (is (= "Locations" (:locations palette/PANEL-LABELS)))))
