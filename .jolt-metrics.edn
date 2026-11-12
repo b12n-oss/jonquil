@@ -7,5 +7,6 @@
 {:exclude ["target/**" "jonquil.build/**" ".clj-kondo/**" ".superpowers/**"
            ".cpcache/**" "dev/smoke/fixtures/**" "docs/**"
            "src/jonquil/syntax.clj" "src/jonquil/parinfer.clj"
+           "src/jonquil/inspect/view.clj"
            "test/jonquil/upstream/**"]
  :test-paths ["test" "dev"]}
