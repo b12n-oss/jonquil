@@ -1399,7 +1399,11 @@
   [ui]
   (go-row :processes check!
     (let [code (str "(def stop? (atom false))\n"
-                    "(defn worker [] (loop [] (when-not @stop? (jolt.fibers/yield) (recur))))\n"
+                    "(defn worker []\n"
+                    "  (loop []\n"
+                    "    (when-not @stop?\n"
+                    "      (jolt.fibers/yield)\n"
+                    "      (recur))))\n"
                     "(jolt.fibers/spawn worker)\n"
                     "(jolt.fibers/spawn worker)\n"
                     "(jolt.fibers/spawn (fn [] :done))\n"
@@ -1425,7 +1429,7 @@
 (defn- scene-messages
   "The Messages panel with a few entries: a client called Claude Code
   replaced the text of two tabs and read the tab list (Reads ticked), and
-  one status line."
+  with the Reads filter ticked."
   [ui]
   (go-row :messages check!
     (let [mp (:messages-pane ui)
@@ -1441,10 +1445,8 @@
           r1 (call "jonquil_replace_text" {"text" "(ns talk.core)\n\n(defn hello [name]\n  (str \"hi \" name))\n" "id" (:id t1)})
           r2 (call "jonquil_replace_text" {"text" "(ns talk.demo\n  (:require [talk.core :as c]))\n\n(c/hello \"Jonquil\")\n" "id" (:id t2)})
           _ (on-gtk (panel-key! ui \7)
-                    (messages-pane/set-kind! mp :agent-read true)
-                    (messages-pane/set-kind! mp :status true)
-                    (panel-key! ui \1))
-          listed? (await-until 3000 20 #(<= 4 (count (messages-pane/row-texts mp))))
+                    (messages-pane/set-kind! mp :agent-read true))
+          listed? (await-until 3000 20 #(<= 3 (count (messages-pane/row-texts mp))))
           rows (on-gtk (messages-pane/row-texts mp))
           _ (ga/settle 2)
           {:keys [exit err]} (ga/screenshot (image-path :messages "png") (own-pid))]

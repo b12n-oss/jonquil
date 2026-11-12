@@ -175,7 +175,7 @@ their own tools, which Jonquil never sees. The panel also logs an agent
 attaching or leaving, an attached runtime losing its connection, and a
 runtime starting or failing to start.
 
-![The Messages panel with four rows: a status line, two agent rows where Claude Code replaced the text of demo.clj and core.clj, and a read row for the tab list](../images/messages.png)
+![The Messages panel with three rows: two agent rows where Claude Code replaced the text of demo.clj and core.clj, and a read row for the tab list](../images/messages.png)
 
 The tick boxes above the list choose what shows. Agent, Files, Plugins,
 Connections and Runtime are on to begin with. Reads (an agent reading a tab,
@@ -452,7 +452,7 @@ holds off until it ends, and **Kill** ends it outright. **Forget finished**
 drops the done and dead ones; Jonquil keeps the last 50 of those anyway.
 While the panel shows, it refreshes every second.
 
-![The Processes panel listing three fibers a Run spawned: two ready workers and one that is done, with Interrupt, Kill, Forget finished and Close](../images/processes.png)
+![The Processes panel listing three fibers a Run spawned: two workers, one running and one ready, and one fiber that is done, with Interrupt, Kill, Forget finished and Close](../images/processes.png)
 
 Jolt keeps no list of live fibers (jolt-lang/jolt#1606 asks for one), so
 the first time the panel opens Jonquil starts watching `spawn`, the way
