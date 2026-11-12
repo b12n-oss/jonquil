@@ -20,7 +20,7 @@
   [{:keys [tab tabs cv ev* status-label make-eval-opts]} snap text]
   (when (some #(= (:id tab) (:id %)) @tabs)
     (let [{:keys [ed]} tab
-          opts (make-eval-opts ed cv ev* status-label false)]
+          opts (make-eval-opts {:ed ed :cv cv :ev* ev* :status-label status-label :run? false})]
       (cview/append! cv :system (str "; Timing " (timing/form-label text) " for about a second. It runs over and over, so any side effect repeats too.\n"))
       (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
             warning (ev/eval! @ev* (timing/code text 1000)

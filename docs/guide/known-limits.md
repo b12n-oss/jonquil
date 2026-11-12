@@ -81,8 +81,6 @@ Known rough edges, parked for later:
   console entry or Untitled Run that ran before the error.
 - Two Jonquil processes on one project aren't guarded against each other:
   each writes the whole record, and the later write wins.
-- `:remember-session?` is one setting for every project; there's no
-  per-project switch yet.
 
 </details>
 

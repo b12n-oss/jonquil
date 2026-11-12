@@ -231,6 +231,19 @@
         (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))
         (str "couldn't save " path ": " (.getMessage e))))))
 
+(defn- read-for-update
+  "The settings map at target before an update, or nil when there's no
+  file. Throws, with the message the caller reports, when it can't be read
+  or isn't EDN, so nothing gets overwritten."
+  [target]
+  (when (.exists (io/file target))
+    (let [content (try (slurp target)
+                       (catch Exception _
+                         (throw (Exception. (str "couldn't read " target "; nothing saved")))))]
+      (try (edn/read-string content)
+           (catch Exception _
+             (throw (Exception. (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it"))))))))
+
 (defn save-plugin-disabled!
   "Adds plugin id (a keyword) to the settings file's :plugins :disabled, or
   with disabled? false takes it out, keeping every other key, :plugins'
@@ -242,14 +255,7 @@
   [path id disabled?]
   (try
     (let [target (resolved-target path)
-          f (io/file target)
-          m (when (.exists f)
-              (let [content (try (slurp target)
-                                 (catch Exception _
-                                   (throw (Exception. (str "couldn't read " target "; nothing saved")))))]
-                (try (edn/read-string content)
-                     (catch Exception _
-                       (throw (Exception. (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it")))))))
+          m (read-for-update target)
           plugins (when (map? m) (:plugins m))
           d (when (map? plugins) (:disabled plugins))]
       (cond

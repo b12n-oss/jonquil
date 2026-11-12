@@ -18,6 +18,13 @@
 (def ^:private file-entry {:kind :file :path "/a.clj" :at 1 :dialect "clj"})
 (def ^:private form-entry {:kind :form :text "(+ 1 2)" :ns "user" :source-file nil :at 2 :dialect "clj"})
 
+(deftest remember-session-test
+  (is (true? (replay/remember-session? nil nil)) "on unless something says otherwise")
+  (is (false? (replay/remember-session? nil false)) "the global setting off")
+  (is (true? (replay/remember-session? true false)) "a project turns it back on")
+  (is (false? (replay/remember-session? false nil)) "a project turns it off")
+  (is (false? (replay/remember-session? false true)) "the project wins either way"))
+
 (deftest record-path-test
   (is (= (str "/c/jonquil/replays/my-app-" (Integer/toHexString (.hashCode "/p/my app")) ".edn")
          (replay/record-path "/c/jonquil/settings.edn" "/p/my app")))

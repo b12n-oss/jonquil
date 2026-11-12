@@ -307,12 +307,19 @@
       nil))
   nil)
 
+(defn- call-name-action!
+  "Runs the pane's callback for action on the trimmed name: the problem
+  string it returns, or nil."
+  [{:keys [on-new-file on-new-folder on-rename]} {:keys [action target dir name]}]
+  (when-let [f (case action :new-file on-new-file :new-folder on-new-folder on-rename)]
+    (if (= action :rename) (f (listed target) name) (f dir name))))
+
 (defn submit-name!
   "Return in the name entry. A problem (jonquil.file-ops/name-problem, or a
   string the callback returns) is shown and keeps the entry open; the same
   name on a rename closes without a call; otherwise the callback runs and
   the menu closes. Nothing unless the name entry is showing."
-  [{:keys [menu on-new-file on-new-folder on-rename] :as pane} text]
+  [{:keys [menu] :as pane} text]
   (when (= :name (:mode @menu))
     (let [{:keys [target action]} @menu
           n (str/trim (str text))
@@ -324,9 +331,9 @@
       (cond
         same? (close-menu! pane)
         problem (set-problem! pane problem)
-        :else (let [f (case action :new-file on-new-file :new-folder on-new-folder on-rename)
-                    err (when f (if rename? (f (listed target) n) (f dir n)))]
-                (if err (set-problem! pane err) (close-menu! pane))))))
+        :else (if-let [err (call-name-action! pane {:action action :target target :dir dir :name n})]
+                (set-problem! pane err)
+                (close-menu! pane)))))
   nil)
 
 (defn- command-chord? [state]
@@ -340,28 +347,36 @@
     (when-not (ffi/null? row)
       (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))))
 
+(defn- row-key-action
+  "[what f] for a key on selected row r (not an error row): F2 renames,
+  Delete or Control/Meta+BackSpace trashes, Shift+F10 or Menu opens the
+  menu. nil for any other key."
+  [{:keys [on-trash on-error] :as pane} r keyval state]
+  (cond
+    (= keyval KEY-F2)
+    ["rename" (fn [] (when (open-menu! pane (listed r)) (press-item! pane "Rename…")))]
+    (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state)))
+    ["trash" (fn [] (when-let [problem (when on-trash (on-trash (listed r)))]
+                      (on-error (str "; trash: " problem))))]
+    (or (= keyval KEY-MENU)
+        (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK)))))
+    ["menu" (fn [] (open-menu! pane (listed r)))]
+    :else nil))
+
 (defn handle-key!
   "The list's key handler: 1 when keyval (with GDK modifier state) is one the
   pane acts on, else 0. Left/Right toggle a folder; F2, Delete, Control/Meta+
   BackSpace, Shift+F10 and Menu act on the selected row. The action runs on
   the next main-loop turn, since the callbacks can rebuild the rows."
-  [{:keys [on-trash on-error] :as pane} keyval state]
+  [pane keyval state]
   (let [guard (:guard pane)
         r (selected-row pane)
         later (fn [what f] (on-gui! (guard what f)) 1)]
-    (cond
-      (handles-key? pane keyval) (later "tree" (fn [] (on-key pane keyval)))
-      (and r (not (:error? r)) (= keyval KEY-F2))
-      (later "rename" (fn [] (when (open-menu! pane (listed r)) (press-item! pane "Rename…"))))
-      (and r (not (:error? r))
-           (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state))))
-      (later "trash" (fn [] (when-let [problem (when on-trash (on-trash (listed r)))]
-                              (on-error (str "; trash: " problem)))))
-      (and r (not (:error? r))
-           (or (= keyval KEY-MENU)
-               (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK))))))
-      (later "menu" (fn [] (open-menu! pane (listed r))))
-      :else 0)))
+    (if-let [[what f] (if (handles-key? pane keyval)
+                        ["tree" (fn [] (on-key pane keyval))]
+                        (when (and r (not (:error? r))) (row-key-action pane r keyval state)))]
+      (later what f)
+      0)))
 
 (defn focus!
   "Gives the list keyboard focus."
