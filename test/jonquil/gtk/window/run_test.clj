@@ -62,9 +62,9 @@
   (let [e (evaluator {:ns 'zz.other :log (atom [])})
         tab {:path (atom "/r/a.clj")}]
     (is (= {:source :form :code "(f)" :path "/r/a.clj" :ns "a.b"}
-           (#'win-run/tab-record tab (atom e) :form "(f)" "(ns a.b)\n(f)")))
+           (#'win-run/tab-record tab (atom e) {:source :form :code "(f)" :buffer-text "(ns a.b)\n(f)"})))
     (is (= {:source :form :code "(f)" :path "/r/a.clj" :ns "zz.other"}
-           (#'win-run/tab-record tab (atom e) :form "(f)" "(f)")))
+           (#'win-run/tab-record tab (atom e) {:source :form :code "(f)" :buffer-text "(f)"})))
     (is (= "zz.other" (#'win-run/run-record-ns e)))))
 
 (deftest history-adapters-test
@@ -89,7 +89,7 @@
         (submit {:action :send-stdin :text "hi\n"})
         (submit {:action :eof})))
     (is (= [[:bang "!clear the console"]
-            [::ed ::cv ev* ::l "(+ 1 2)"
+            [{:cv ::cv :ev* ev* :status-label ::l} ::ed "(+ 1 2)"
              {:hook-source :repl :hook-tab 3
               :record {:source :repl :code "(+ 1 2)" :path nil :ns "user"}}]
             [:stdin "hi\n"]

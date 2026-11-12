@@ -263,7 +263,7 @@
   schedule and append-to-root! logged. Returns [ret log]."
   [ctx remember? record result]
   (let [log (atom [])]
-    (with-redefs-fn {#'replay-part/remember-session? (fn [_] remember?)
+    (with-redefs-fn {#'replay-part/remember-session? (fn [_ _] remember?)
                      #'replay-part/schedule-replay-save! (fn [_] (swap! log conj [:schedule]) nil)
                      #'replay-part/append-to-root! (fn [_ root es opts]
                                                      (swap! log conj [:append root (mapv :text es) opts])
@@ -282,6 +282,15 @@
     (is (nil? ret))
     (is (= [] log))
     (is (= st @(:replay* ctx)))))
+
+(deftest record-eval-asks-about-the-records-root
+  (testing "the evaluation's own root decides, not the window's (a window
+           re-rooted mid-evaluation still files under the old project's say)"
+    (let [seen (atom [])
+          ctx (record-env {:root "/r/b" :path "p" :record (replay/empty-record) :dirty? false} nil [])]
+      (with-redefs-fn {#'replay-part/remember-session? (fn [path root] (swap! seen conj [path root]) false)}
+        (fn [] (@#'replay-part/record-eval! ctx {:source :repl :root "/r/a" :code "(x)"} {:status :ok})))
+      (is (= [["settings.edn" "/r/a"]] @seen)))))
 
 (deftest record-eval-files-in-the-window
   (let [ctx (record-env {:root "/r/a" :path "p" :record (replay/empty-record) :dirty? false} nil ["(a)" "(b)"])

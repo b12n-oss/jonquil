@@ -751,6 +751,16 @@
         end (g/gtk-text-buffer-get-char-count buf)]
     (not (str/includes? (text-range buf caret end) "\n"))))
 
+(defn- replace-input!
+  "Replaces the input, which starts at start, with text, the caret at its
+  end."
+  [cv start text]
+  (let [buf (:buf cv)
+        end (+ start (count text))]
+    (clear-input! cv)
+    (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a text -1)))
+    (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
+
 (defn handle-history!
   "Up/Down in the console input. dir is :prev or :next. Replaces the input
   with history-prev/history-next's result when ALL of: the caret is at or
@@ -785,11 +795,7 @@
         (if-let [replacement (case dir
                                :prev ((:history-prev cv) (input-text cv))
                                :next ((:history-next cv)))]
-          (do (clear-input! cv)
-              (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a replacement -1)))
-              (let [end (+ start (count replacement))]
-                (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
-              true)
+          (do (replace-input! cv start replacement) true)
           false)
         false))))
 
@@ -999,6 +1005,17 @@
                                      [:pointer :string :pointer] :void)
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
+(defn- run-each!
+  "Calls each fn in the atom fns, reporting a throw through the console's
+  error fn as \"; what: ...\" and going on to the next."
+  [cv fns what]
+  (doseq [f @fns]
+    (try
+      (f)
+      (catch :default e
+        (when-let [ef @(:on-error-fn cv)]
+          (ef (str "; " what ": " (ex-message e))))))))
+
 (defn- connect-notify!
   "Connects the cursor-position notify and the focus controller's leave."
   [{:keys [view buf] :as cv} focusctl]
@@ -1008,27 +1025,13 @@
   ;; changed!'s registrants -- the console's own refine!/close! trigger
   ;; for its REPL completion popup.
   (g/g-signal-connect-data buf "notify::cursor-position"
-                           (callable (fn [_buf _pspec _data]
-                                       (doseq [f @(:on-input-fns cv)]
-                                         (try
-                                           (f)
-                                           (catch :default e
-                                             (when-let [ef @(:on-error-fn cv)]
-                                               (ef (str "; cursor: " (ex-message e)))))))
-                                       nil)
+                           (callable (fn [_buf _pspec _data] (run-each! cv (:on-input-fns cv) "cursor") nil)
                                      [:pointer :pointer :pointer] :void)
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   ;; Mirrors jonquil.gtk.editor/make-editor's own focusctl wiring
   ;; -- see on-focus-lost!'s own docstring.
   (g/g-signal-connect-data focusctl "leave"
-                           (callable (fn [_ctl _data]
-                                       (doseq [f @(:on-focus-fns cv)]
-                                         (try
-                                           (f)
-                                           (catch :default e
-                                             (when-let [ef @(:on-error-fn cv)]
-                                               (ef (str "; focus: " (ex-message e)))))))
-                                       nil)
+                           (callable (fn [_ctl _data] (run-each! cv (:on-focus-fns cv) "focus") nil)
                                      [:pointer :pointer] :void)
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   (g/gtk-widget-add-controller view focusctl))

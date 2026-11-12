@@ -208,6 +208,19 @@
     (.delete (java.io.File. ^String log)))
   nil)
 
+(defn- route-around!
+  "Records spawn failure e from source in ev's state for the next attempt
+  to skip, discarding its log: true when it's one to route around (a git
+  fetch, or Jonquil's middleware failing to load), else false."
+  [ev source e]
+  (let [fetch-line (when (:git source) (fetch-error-line e))
+        jonquil-line (when (and (not fetch-line) (:jonquil source) (exited? e))
+                       (str "the Jolt child couldn't load Jonquil's nREPL middleware: " (log-error-line e)))]
+    (cond
+      fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line) (discard-log! e) true)
+      jonquil-line (do (swap! (:state ev) assoc :jonquil-error jonquil-line) (discard-log! e) true)
+      :else false)))
+
 (defn- spawn-with-fallback!
   "spawn-runtime! with attempt-source, falling back step by step. Each
   failure the evaluator can route around is remembered in its state for
@@ -237,19 +250,19 @@
                       (catch Throwable e {:e e}))]
       (if-let [rt (:rt result)]
         (merge rt (select-keys @(:state ev) [:fetch-error :jonquil-error]))
-        (let [e (:e result)
-              fetch-line (when (:git source) (fetch-error-line e))]
-          (cond
-            (:stopped? @(:state ev)) (throw e)
-            (>= attempts 3) (throw e)
-            fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line)
-                           (discard-log! e)
-                           (recur (inc attempts)))
-            (and (:jonquil source) (exited? e)) (do (swap! (:state ev) assoc :jonquil-error
-                                                           (str "the Jolt child couldn't load Jonquil's nREPL middleware: " (log-error-line e)))
-                                                    (discard-log! e)
-                                                    (recur (inc attempts)))
-            :else (throw e)))))))
+        (let [e (:e result)]
+          (if (and (not (:stopped? @(:state ev))) (< attempts 3) (route-around! ev source e))
+            (recur (inc attempts))
+            (throw e)))))))
+
+(defn- start-failure
+  "start-runtime!'s sentence for a start that threw e. child/start! keeps
+  the log of a start that never ran and names it in ex-data, so this says
+  where it is."
+  [e]
+  (str "Couldn't start Jolt over nREPL: " (ex-message e)
+       (when-let [log (:log (ex-data e))]
+         (when (.exists (java.io.File. ^String log)) (str "\nThe child's log: " log)))))
 
 (defn- start-runtime!
   "Launches and connects a child if none is live. nil, or a sentence.
@@ -282,12 +295,7 @@
               (when (:stopped? @(:state ev))
                 (shutdown-runtime! ev))
               nil)
-            (catch Throwable e
-              ;; child/start! keeps the log of a start that never ran, and
-              ;; names it in ex-data; say where it is.
-              (str "Couldn't start Jolt over nREPL: " (ex-message e)
-                   (when-let [log (:log (ex-data e))]
-                     (when (.exists (java.io.File. ^String log)) (str "\nThe child's log: " log))))))))
+            (catch Throwable e (start-failure e)))))
     (finally (.unlock start-lock))))
 
 (defn- tell-break!
@@ -388,6 +396,34 @@
           (when (and (:paused? old) on-resume) (on-resume how)))))
     (catch Throwable _ nil)))
 
+(defn- main-msg
+  "send-main!'s request: the Run's load-file or the REPL entry's eval."
+  [ev code session {:keys [run? path]}]
+  (if run?
+    ;; file-path only for a buffer that is exactly its file: the child
+    ;; records it as the vars' :file (Jolt's load-file, and
+    ;; jolt-lang/nrepl's once it passes it on), and an unsaved or dirty
+    ;; buffer's vars would point at the wrong text. The same key binds
+    ;; *file*, so such a Run has no *file* (the JVM child still gets the
+    ;; path).
+    (let [saved (session/saved-file path code)]
+      (cond-> {:op "load-file" :file code
+               :file-name (or (some-> path (str/split #"/") last) "untitled.clj") :session session}
+        saved (assoc :file-path saved)))
+    ;; the prompt's namespace, as the JVM evaluator sends it: a plain
+    ;; server (no jolt-lang/nrepl middleware) on a Jolt with
+    ;; jolt-lang/jolt #1460 keeps no ns across evals of its own
+    (let [prompt-ns (:prompt-ns @(:state ev))]
+      (cond-> {:op "eval" :code code :session session}
+        prompt-ns (assoc :ns (str prompt-ns))))))
+
+(defn- feed-output!
+  "Hands a reply's :out and :err to on-output, when there is one."
+  [on-output m]
+  (when on-output
+    (when-let [o (:out m)] (on-output :out o))
+    (when-let [e (:err m)] (on-output :err e))))
+
 (defn- send-main!
   "Sends the Run's load-file or the REPL entry's eval, feeding :out and
   :err to on-output as they arrive. A promise of all its replies.
@@ -399,37 +435,19 @@
   interrupt!'s id path once. That's safe even if a real Stop lands at the
   same moment: interrupt!'s own CAS only lets one caller trigger
   the restart future per id."
-  [ev code {:keys [run? path on-output] :as opts}]
+  [ev code {:keys [on-output] :as opts}]
   (let [{:keys [conn session]} (runtime ev)
-        break? (breakable? @(:state ev) opts)
         acc (atom [])
         done (promise)
-        saved (when run? (session/saved-file path code))
-        msg (if run?
-              ;; file-path only for a buffer that is exactly its file: the
-              ;; child records it as the vars' :file (Jolt's load-file, and
-              ;; jolt-lang/nrepl's once it passes it on), and an unsaved or
-              ;; dirty buffer's vars would point at the wrong text. The same
-              ;; key binds *file*, so such a Run has no *file* (the JVM child
-              ;; still gets the path).
-              (cond-> {:op "load-file" :file code
-                       :file-name (or (some-> path (str/split #"/") last) "untitled.clj") :session session}
-                saved (assoc :file-path saved))
-              ;; the prompt's namespace, as the JVM evaluator sends it: a
-              ;; plain server (no jolt-lang/nrepl middleware) on a Jolt with
-              ;; jolt-lang/jolt #1460 keeps no ns across evals of its own
-              (cond-> {:op "eval" :code code :session session}
-                (:prompt-ns @(:state ev)) (assoc :ns (str (:prompt-ns @(:state ev))))))
-        msg (cond-> msg break? (assoc :jonquil-break "1"))
+        msg (cond-> (main-msg ev code session opts)
+              (breakable? @(:state ev) opts) (assoc :jonquil-break "1"))
         _ (tell-break! ev :on-eval-start opts)
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)
                               (stdin-watch! ev m)
                               (break-watch! ev m)
-                              (when on-output
-                                (when-let [o (:out m)] (on-output :out o))
-                                (when-let [e (:err m)] (on-output :err e)))
+                              (feed-output! on-output m)
                               (when (client/done? m) (deliver done @acc))))]
     (swap! (:state ev) assoc-in [:running :id] id)
     (when (get-in @(:state ev) [:running :stop-requested?])
@@ -688,23 +706,67 @@
       {:on? (= "true" on)}
       {:error "The Jolt child didn't say whether debug mode is on."})))
 
-(defn- line-counts-call!
-  "One jonquil-line-counts request to the child, off the caller's thread;
-  on-done gets its map or {:error s}."
-  [ev msg on-done]
+(def ^:private not-running-yet "The Jolt child isn't running yet: Run something first.")
+
+(defn- child-op!
+  "One request for the child's middleware op op, off the caller's thread:
+  msg with :op and :session added, within timeout-ms (default
+  request-timeout-ms), its replies turned into a map by reply. on-done
+  gets that map, or not-running (default {:error not-running-yet}) with
+  no runtime, {:error inspect-lost} when it's gone, {:error unavailable}
+  when the child lacks op, {:error s} on a timeout or a throw. nil."
+  [ev {:keys [op msg unavailable not-running timeout-ms reply]} on-done]
   (future
     (let [r (try
               (let [{:keys [conn session ops] :as rt} (runtime ev)]
                 (cond
-                  (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                  (nil? rt) (or not-running {:error not-running-yet})
                   (not (live? ev)) {:error inspect-lost}
-                  (not (contains? ops "jonquil-line-counts")) {:error "Line counts need Jolt."}
+                  (not (contains? ops op)) {:error unavailable}
                   :else
-                  (let [r (client/request-sync conn (assoc msg :op "jonquil-line-counts" :session session) request-timeout-ms)]
-                    (if (vector? r) (line-counts-reply r) {:error inspect/timeout-message}))))
+                  (let [r (client/request-sync conn (assoc msg :op op :session session)
+                                               (or timeout-ms request-timeout-ms))]
+                    (if (vector? r) (reply r) {:error inspect/timeout-message}))))
               (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
       (try (on-done r) (catch Throwable _))))
   nil)
+
+(defn- data-reply
+  "A child-op! reply reading an EDN :data answer; what names it when the
+  child sends none."
+  [what]
+  (fn [r]
+    (cond (some :error r) {:error (some :error r)}
+          (some :data r) (edn/read-string (some :data r))
+          :else {:error (str "The Jolt child answered without " what ".")})))
+
+(defn- line-counts-call!
+  "One jonquil-line-counts request to the child, off the caller's thread;
+  on-done gets its map or {:error s}."
+  [ev msg on-done]
+  (child-op! ev {:op "jonquil-line-counts" :msg msg :unavailable "Line counts need Jolt."
+                 :reply line-counts-reply}
+             on-done))
+
+(defn- inspect-result
+  "The inspector's answer to op on args from the child: a view or {:error
+  s}, with :lost? when the runtime was live and dropped (child gone or
+  socket closed), which disables the panel; never-started is
+  not-running."
+  [ev op args]
+  (let [{:keys [conn session ops] :as rt} (runtime ev)]
+    (cond
+      (nil? rt) {:error inspect-not-running}
+      (not (live? ev)) {:error inspect-lost :lost? true}
+      (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
+      :else
+      (let [req (cond-> (assoc (inspect/request op args) :session session)
+                  (= op :def) (assoc :ns (str (:prompt-ns @(:state ev)))))
+            r (client/request-sync conn req request-timeout-ms)]
+        (cond
+          (not (vector? r)) {:error inspect/timeout-message}
+          ((ops/statuses r) ops/disconnected) {:error inspect-lost :lost? true}
+          :else (inspect/parse-view (some :view r)))))))
 
 (defrecord NRepl [selection state history start-lock]
   ev/Evaluator
@@ -823,23 +885,7 @@
   (inspect! [this op args on-view]
     (future
       (try
-        (let [{:keys [conn session ops] :as rt} (runtime this)
-              result
-              (cond
-                (nil? rt) {:error inspect-not-running}
-                ;; The shape jvm.clj answers with: a runtime that was
-                ;; live and dropped (child gone or socket closed) is lost,
-                ;; which disables the panel; never-started is not-running.
-                (not (live? this)) {:error inspect-lost :lost? true}
-                (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
-                :else
-                (let [req (cond-> (assoc (inspect/request op args) :session session)
-                            (= op :def) (assoc :ns (str (:prompt-ns @state))))
-                      r (client/request-sync conn req request-timeout-ms)]
-                  (cond
-                    (not (vector? r)) {:error inspect/timeout-message}
-                    ((ops/statuses r) ops/disconnected) {:error inspect-lost :lost? true}
-                    :else (inspect/parse-view (some :view r)))))]
+        (let [result (inspect-result this op args)]
           (try (on-view result) (catch Throwable _)))
         (catch Throwable e
           (try (on-view {:error (or (ex-message e) (str (class e)))})
@@ -855,117 +901,46 @@
   ;; jonquil-debug-mode ops, which read the child's own *e and Jolt.
   ev/Frames
   (error-frames! [this on-data]
-    (future
-      (let [d (try
-                (let [{:keys [conn session ops] :as rt} (runtime this)]
-                  (cond
-                    (nil? rt) {:note "No error yet."}
-                    (not (live? this)) {:error inspect-lost}
-                    (not (contains? ops "jonquil-frames")) {:error "The debugger needs Jolt."}
-                    :else
-                    (let [r (client/request-sync conn {:op "jonquil-frames" :session session} request-timeout-ms)]
-                      (if (vector? r) (frames-reply r) {:error inspect/timeout-message}))))
-                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
-        (try (on-data d) (catch Throwable _))))
-    nil)
+    (child-op! this {:op "jonquil-frames" :msg {} :not-running {:note "No error yet."}
+                     :unavailable "The debugger needs Jolt." :reply frames-reply}
+               on-data))
   (toggle-debug-mode! [this on-done]
-    (future
-      (let [r (try
-                (let [{:keys [conn session ops] :as rt} (runtime this)]
-                  (cond
-                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
-                    (not (live? this)) {:error inspect-lost}
-                    (not (contains? ops "jonquil-debug-mode")) {:error "The debugger needs Jolt."}
-                    :else
-                    (let [r (client/request-sync conn {:op "jonquil-debug-mode" :session session} request-timeout-ms)]
-                      (if (vector? r) (toggle-reply r) {:error inspect/timeout-message}))))
-                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
-        (try (on-done r) (catch Throwable _))))
-    nil)
+    (child-op! this {:op "jonquil-debug-mode" :msg {} :unavailable "The debugger needs Jolt."
+                     :reply toggle-reply}
+               on-done))
   (eval-in-frame! [this i code error-id on-result]
-    (future
-      (let [r (try
-                (let [{:keys [conn session ops] :as rt} (runtime this)]
-                  (cond
-                    (nil? rt) {:error "No error yet."}
-                    (not (live? this)) {:error inspect-lost}
-                    (not (contains? ops "jonquil-frame-eval")) {:error "The debugger needs Jolt."}
-                    :else
-                    ;; the evaluator's usual bound: a longer form keeps
-                    ;; running in the child, and this says it didn't answer
-                    (let [r (client/request-sync conn (cond-> {:op "jonquil-frame-eval" :frame i :code code :session session}
-                                                        error-id (assoc :error-id error-id))
-                                                 request-timeout-ms)]
-                      (if (vector? r) (frame-eval-reply r) {:error inspect/timeout-message}))))
-                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
-        (try (on-result r) (catch Throwable _))))
-    nil)
+    ;; the evaluator's usual bound: a longer form keeps running in the
+    ;; child, and this says it didn't answer
+    (child-op! this {:op "jonquil-frame-eval"
+                     :msg (cond-> {:frame i :code code} error-id (assoc :error-id error-id))
+                     :not-running {:error "No error yet."} :unavailable "The debugger needs Jolt."
+                     :reply frame-eval-reply}
+               on-result))
   ;; Tracing: jonquil.nrepl.inspect-middleware's jonquil-trace op, over
   ;; jonquil.trace-rt in the child
   ev/Fibers
   (fibers-op! [this op args on-result]
-    (future
-      (let [r (try
-                (let [{:keys [conn session ops] :as rt} (runtime this)]
-                  (cond
-                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
-                    (not (live? this)) {:error inspect-lost}
-                    (not (contains? ops "jonquil-fibers")) {:error "Processes need Jolt."}
-                    :else
-                    (let [r (client/request-sync conn (cond-> {:op "jonquil-fibers" :action (name op) :session session}
-                                                        (:id args) (assoc :fiber (:id args)))
-                                                 request-timeout-ms)]
-                      (cond (not (vector? r)) {:error inspect/timeout-message}
-                            (some :error r) {:error (some :error r)}
-                            (some :data r) (edn/read-string (some :data r))
-                            :else {:error "The Jolt child answered without its fibers."}))))
-                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
-        (try (on-result r) (catch Throwable _))))
-    nil)
+    (child-op! this {:op "jonquil-fibers" :unavailable "Processes need Jolt."
+                     :msg (cond-> {:action (name op)} (:id args) (assoc :fiber (:id args)))
+                     :reply (data-reply "its fibers")}
+               on-result))
   ev/Trace
   (trace-op! [this op args on-result]
-    (future
-      (let [r (try
-                (let [{:keys [conn session ops] :as rt} (runtime this)]
-                  (cond
-                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
-                    (not (live? this)) {:error inspect-lost}
-                    (not (contains? ops "jonquil-trace")) {:error "Trace needs Jolt."}
-                    :else
-                    (let [r (client/request-sync conn (cond-> {:op "jonquil-trace" :action (name op) :session session}
-                                                        (:sym args) (assoc :sym (str (:sym args)))
-                                                        (:ns args) (assoc :ns (str (:ns args)))
-                                                        (:since args) (assoc :since (:since args)))
-                                                 request-timeout-ms)]
-                      (cond (not (vector? r)) {:error inspect/timeout-message}
-                            (some :error r) {:error (some :error r)}
-                            (some :data r) (edn/read-string (some :data r))
-                            :else {:error "The Jolt child answered without the trace."}))))
-                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
-        (try (on-result r) (catch Throwable _))))
-    nil)
+    (child-op! this {:op "jonquil-trace" :unavailable "Trace needs Jolt."
+                     :msg (cond-> {:action (name op)}
+                            (:sym args) (assoc :sym (str (:sym args)))
+                            (:ns args) (assoc :ns (str (:ns args)))
+                            (:since args) (assoc :since (:since args)))
+                     :reply (data-reply "the trace")}
+               on-result))
   ;; Save World and Restore World: the inspect middleware's jonquil-world
   ;; op, over jonquil.world-rt in the child
   ev/World
   (world-op! [this op args on-result]
-    (future
-      (let [r (try
-                (let [{:keys [conn session ops] :as rt} (runtime this)]
-                  (cond
-                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
-                    (not (live? this)) {:error inspect-lost}
-                    (not (contains? ops "jonquil-world")) {:error "Save World needs Jolt."}
-                    :else
-                    (let [r (client/request-sync conn {:op "jonquil-world" :action (name op)
-                                                       :path (str (:path args)) :session session}
-                                                 world-timeout-ms)]
-                      (cond (not (vector? r)) {:error inspect/timeout-message}
-                            (some :error r) {:error (some :error r)}
-                            (some :data r) (edn/read-string (some :data r))
-                            :else {:error "The Jolt child answered without the world."}))))
-                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
-        (try (on-result r) (catch Throwable _))))
-    nil)
+    (child-op! this {:op "jonquil-world" :unavailable "Save World needs Jolt."
+                     :msg {:action (name op) :path (str (:path args))} :timeout-ms world-timeout-ms
+                     :reply (data-reply "the world")}
+               on-result))
   ;; Break on error: jonquil.nrepl.break-middleware in the child
   ev/LineCounts
   (toggle-line-counts! [this on-done] (line-counts-call! this {:action "toggle"} on-done))
@@ -980,7 +955,7 @@
                   (cond
                     ;; turning it off needs no child
                     (:break-on? @state) {:on? (:break-on? (swap! state assoc :break-on? false))}
-                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                    (nil? rt) {:error not-running-yet}
                     (not (live? this)) {:error inspect-lost}
                     (not (contains? ops "jonquil-break-check"))
                     {:error "This Jolt child can't break: it runs without jolt-lang/nrepl's session middleware."}

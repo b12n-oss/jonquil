@@ -71,6 +71,19 @@
 
 (defn- offset? [n limit] (and (integer? n) (<= 0 n limit)))
 
+(defn- caret-problem
+  "edit-result-problem's check of result's :caret and :sel against the
+  edited text's length, from len: nil or one sentence."
+  [{:keys [edits caret sel]} len]
+  ;; the edited length arithmetically: rebuilding the text per edit is
+  ;; O(edits x text), too slow on the GTK thread for a big buffer
+  (let [new-len (+ len (reduce + 0 (map (fn [[a b r]] (- (count r) (- b a))) edits)))]
+    (cond
+      (not (offset? caret new-len)) (str ":caret " (pr-str caret) " isn't inside the edited text (0.." new-len ")")
+      (and (some? sel) (not (and (vector? sel) (= 2 (count sel)) (every? #(offset? % new-len) sel))))
+      (str ":sel " (pr-str sel) " isn't two offsets inside the edited text")
+      :else nil)))
+
 (defn edit-result-problem
   "nil when result is nil (the command doesn't apply here) or a well-formed
   jonquil.edit op for snapshot's text: {:edits [[start end string] ...]
@@ -94,16 +107,7 @@
       (str "an edit is outside the text (0.." len ")")
       (not (every? (fn [[[_ e1] [s2]]] (<= e1 s2)) (partition 2 1 edits)))
       "its edits overlap or aren't in ascending order"
-      :else
-      ;; the edited length arithmetically: rebuilding the text per edit is
-      ;; O(edits x text), too slow on the GTK thread for a big buffer
-      (let [new-len (+ len (reduce + 0 (map (fn [[a b r]] (- (count r) (- b a))) edits)))
-            {:keys [caret sel]} result]
-        (cond
-          (not (offset? caret new-len)) (str ":caret " (pr-str caret) " isn't inside the edited text (0.." new-len ")")
-          (and (some? sel) (not (and (vector? sel) (= 2 (count sel)) (every? #(offset? % new-len) sel))))
-          (str ":sel " (pr-str sel) " isn't two offsets inside the edited text")
-          :else nil)))))
+      :else (caret-problem result len))))
 
 (defn- throw-message [e]
   (or (some-> e .getCause ex-message) (ex-message e) (str e)))
@@ -122,6 +126,29 @@
       (do (future-cancel f) [:timeout])
       v)))
 
+(defn- soak-fixture
+  "soak-command's step over one fixture [fname snap]: acc with the run's
+  time and any problem added, reduced on a timeout so the command's other
+  fixtures aren't tried."
+  [acc {:keys [id edit]} soak-ms [fname snap]]
+  (let [t0 (System/nanoTime)
+        [kind x] (soak-one edit snap soak-ms)
+        ms (quot (- (System/nanoTime) t0) 1000000)
+        acc (update-in acc [:timings id] (fnil max 0) ms)
+        label (str "command " (pr-str id) " on " fname)]
+    (case kind
+      :timeout (reduced
+                (update acc :problems conj
+                        (str label ": still running after " soak-ms " ms; its other fixtures weren't "
+                             "tried, and it may keep running in this process until Jonquil quits")))
+      :threw (update acc :problems conj (str label " threw: " (throw-message x)))
+      (if x (update acc :problems conj (str label ": " x)) acc))))
+
+(defn- soak-command
+  "One :edit command over every fixture, into acc."
+  [acc command soak-ms]
+  (reduce #(soak-fixture %1 command soak-ms %2) acc FIXTURES))
+
 (defn soak
   "Each :edit command of definition on each of FIXTURES, given soak-ms
   (default 2000) per fixture: {:problems [...] :timings {command-id
@@ -134,22 +161,7 @@
   invoked. Never throws."
   [{:keys [definition soak-ms] :or {soak-ms 2000}}]
   (reduce
-   (fn [acc {:keys [id edit]}]
-     (reduce
-      (fn [acc [fname snap]]
-        (let [t0 (System/nanoTime)
-              [kind x] (soak-one edit snap soak-ms)
-              ms (quot (- (System/nanoTime) t0) 1000000)
-              acc (update-in acc [:timings id] (fnil max 0) ms)
-              label (str "command " (pr-str id) " on " fname)]
-          (case kind
-            :timeout (reduced
-                      (update acc :problems conj
-                              (str label ": still running after " soak-ms " ms; its other fixtures weren't "
-                                   "tried, and it may keep running in this process until Jonquil quits")))
-            :threw (update acc :problems conj (str label " threw: " (throw-message x)))
-            (if x (update acc :problems conj (str label ": " x)) acc))))
-      acc FIXTURES))
+   (fn [acc command] (soak-command acc command soak-ms))
    {:problems [] :timings {}}
    (filter #(fn? (:edit %)) (:commands definition))))
 

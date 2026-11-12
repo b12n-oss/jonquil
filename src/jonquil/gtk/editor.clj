@@ -726,6 +726,15 @@
     (let [chunks (partition-all PAINT-CHUNK spans)]
       (if defer-first? (later chunks) (step chunks)))))
 
+(defn- full-paint-done!
+  "paint-async!'s last chunk landed: paint gen is :done? (unless a newer
+  one started), and text and plan become the tick's baseline unless an
+  edit came in meanwhile."
+  [ed {:keys [gen edit-gen text plan]}]
+  (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))
+  (when (= edit-gen @(:edit-gen ed))
+    (set-painted! ed text plan)))
+
 (defn paint-async!
   "Repaints ed without holding the GTK thread for the whole text:
   paint-plan runs on a future, then its spans are applied PAINT-CHUNK at a
@@ -790,10 +799,8 @@
                           (superseded!)
                           (paint-chunked! ed [0 len] spans
                                           {:current? current?
-                                           :done! (fn []
-                                                    (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))
-                                                    (when (= edit-gen @(:edit-gen ed))
-                                                      (set-painted! ed text plan)))
+                                           :done! #(full-paint-done! ed {:gen gen :edit-gen edit-gen
+                                                                         :text text :plan plan})
                                            :superseded! superseded!
                                            :fail! report
                                            :defer-first? defer-first?}))
@@ -811,6 +818,30 @@
          (= (:gen p) (:full-gen p))
          (= (:edit-gen p) @(:edit-gen ed))
          (= (:profile p) @(:profile ed)))))
+
+(defn- land-repaint!
+  "repaint!'s result back on the GTK thread: dropped (re-armed when no
+  later tick has started its own) unless no edit came in and the baseline
+  is still painted; a nil diff only moves the baseline; else the diff's
+  spans go through paint-chunked!."
+  [ed {:keys [painted req text plan diff spans current? rearm! fail!]}]
+  (cond
+    (not (and (current?) (identical? painted @(:painted ed))))
+    (do (swap! (:repaint-drops ed) inc)
+        (when (= req @(:repaint-req ed)) (rearm!)))
+
+    (nil? diff) (set-painted! ed text plan)
+
+    :else
+    (let [gen (:gen (swap! (:paint ed) (fn [p] (assoc p :gen (inc (:gen p)) :done? false))))]
+      (forget-painted! ed)
+      (paint-chunked! ed (:range diff) spans
+                      {:current? (fn [] (and (current?) (= gen (:gen @(:paint ed)))))
+                       :done! (fn []
+                                (swap! (:paint ed) assoc :done? true)
+                                (set-painted! ed text plan))
+                       :superseded! rearm!
+                       :fail! fail!}))))
 
 (defn- repaint!
   "The tick's repaint. With a baseline (:painted), it
@@ -851,27 +882,25 @@
             (on-gui!
              (fn []
                (try
-                 (cond
-                   (not (and (current?) (identical? painted @(:painted ed))))
-                   (do (swap! (:repaint-drops ed) inc)
-                       (when (= req @(:repaint-req ed)) (rearm!)))
-
-                   (nil? diff) (set-painted! ed text plan)
-
-                   :else
-                   (let [gen (:gen (swap! (:paint ed) (fn [p] (assoc p :gen (inc (:gen p)) :done? false))))]
-                     (forget-painted! ed)
-                     (paint-chunked! ed (:range diff) spans
-                                     {:current? (fn [] (and (current?) (= gen (:gen @(:paint ed)))))
-                                      :done! (fn []
-                                               (swap! (:paint ed) assoc :done? true)
-                                               (set-painted! ed text plan))
-                                      :superseded! rearm!
-                                      :fail! fail!})))
+                 (land-repaint! ed {:painted painted :req req :text text :plan plan :diff diff :spans spans
+                                    :current? current? :rearm! rearm! :fail! fail!})
                  (catch :default e (fail! e))))))
           (catch :default e (on-gui! (fn [] (fail! e)))))))
     (when-not (full-paint-pending? ed)
       (paint-async! ed {:defer-first? false}))))
+
+(defn- recheck-dirty!
+  "Consumes dirty-check-needed? and recomputes dirty?, telling
+  on-dirty-fns when it flipped. dirty-check-count is bumped on every
+  recompute, only so a self-test row can see that idle ticks skip it."
+  [ed]
+  (reset! (:dirty-check-needed? ed) false)
+  (swap! (:dirty-check-count ed) inc)
+  (let [cur (dirty? ed)
+        last-dirty? (:last-dirty? ed)]
+    (when (not= cur @last-dirty?)
+      (reset! last-dirty? cur)
+      (doseq [f @(:on-dirty-fns ed)] (f cur)))))
 
 (defn- tick! [ed]
   ;; The g_timeout_add that calls this every 20ms outlives the editor's own
@@ -892,14 +921,7 @@
       ;; can observe that idle ticks skip it (there's no other externally
       ;; visible difference: dirty? itself is still correct on every call, and
       ;; on-dirty-fns still only fires on a real flip either way).
-      (when @(:dirty-check-needed? ed)
-        (reset! (:dirty-check-needed? ed) false)
-        (swap! (:dirty-check-count ed) inc)
-        (let [cur (dirty? ed)
-              last-dirty? (:last-dirty? ed)]
-          (when (not= cur @last-dirty?)
-            (reset! last-dirty? cur)
-            (doseq [f @(:on-dirty-fns ed)] (f cur)))))
+      (when @(:dirty-check-needed? ed) (recheck-dirty! ed))
       (when-let [t @(:dirty-at ed)]
         (when (>= (- (System/currentTimeMillis) t) 60)
           (reset! (:dirty-at ed) nil)
@@ -1079,31 +1101,25 @@
          (not (<= 0xfd00 keyval 0xffff)))
     (MAC-KEYCODE-DIGITS keycode)))
 
-(defn- typing-key!
-  "The typing stages of the plugins design, 1 when one took the key, else
-  0: smart enter on plain Return first, then auto-pairs, Backspace, and
-  Tab/Shift+Tab indent. They run only once nothing earlier in
-  jonquil.command-registry/editor-answer (the preedit yield, the
-  completion popup, the editor keymap) took the key."
+(defn- unmodified-typing-key!
+  "typing-key!'s stages for a key with no command modifier held: 1 when
+  one took it, else 0."
   [ed keyval state]
   (cond
-    (plain-return? keyval state)
-    (if (handle-return! ed) 1 0)
-
     ;; With Parinfer on, brackets and pair Backspace are Parinfer's
     ;; (upstream's rule): 0 lets GTK insert the bare key and
     ;; the end-user-action hook balance it. The quote keeps pairing.
-    (and (no-command-modifiers? state) (contains? open-chars keyval))
+    (contains? open-chars keyval)
     (if (and (parinfer-asides? ed) (not= keyval KEY-QUOTEDBL))
       0
       (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval))))
 
-    (and (no-command-modifiers? state) (contains? close-chars keyval))
+    (contains? close-chars keyval)
     (if (parinfer-asides? ed)
       0
       (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval))))
 
-    (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
+    (= keyval KEY-BACKSPACE)
     (let [snap (snapshot ed)]
       (if (and (parinfer-asides? ed) (not (empty-string-pair? snap)))
         0
@@ -1115,13 +1131,23 @@
     ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
     ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
     ;; lines 5744-5764).
-    (and (no-command-modifiers? state)
-         (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
+    (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state)))
     (do (do-unindent! ed) 1)
 
-    (and (no-command-modifiers? state) (= keyval KEY-TAB))
-    (do-indent! ed)
+    (= keyval KEY-TAB) (do-indent! ed)
 
+    :else 0))
+
+(defn- typing-key!
+  "The typing stages of the plugins design, 1 when one took the key, else
+  0: smart enter on plain Return first, then auto-pairs, Backspace, and
+  Tab/Shift+Tab indent. They run only once nothing earlier in
+  jonquil.command-registry/editor-answer (the preedit yield, the
+  completion popup, the editor keymap) took the key."
+  [ed keyval state]
+  (cond
+    (plain-return? keyval state) (if (handle-return! ed) 1 0)
+    (no-command-modifiers? state) (unmodified-typing-key! ed keyval state)
     :else 0))
 
 (defn key-ctx

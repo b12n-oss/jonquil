@@ -197,7 +197,8 @@ when that variable is unset, blank, or not an absolute path:
 - `:remember-session?` (hand-written): `false` stops Jonquil recording what
   each project evaluated and offering it back as a replay (see
   [Last session's replay](using-jonquil.md#last-sessions-replay)). Omitted
-  or `true` keeps it on.
+  or `true` keeps it on. A project's `.jonquil.edn` can override it either
+  way.
 - `:mcp-listen?` (hand-written): `true` makes each window serve Jonquil's
   MCP tools on a loopback socket, so an agent can attach to an open window
   with `jonquil --mcp-attach` (see [Driving Jonquil from an agent](mcp.md)).
