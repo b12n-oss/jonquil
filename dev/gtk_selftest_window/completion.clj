@@ -31,7 +31,7 @@
 
 (defn row-completion-opens
   "\"(ma\", caret 3, :complete!*: the popover opens and its rows equal
-  (mapv :symbol (docs/candidates ns \"ma\" \"(ma\" 3)) in order (measured
+  (mapv :symbol (docs/candidates ns {:prefix \"ma\" :text \"(ma\" :pos 3})) in order (measured
   live: the first is macroexpand), and the preview contains
   clojure.core/<first row>."
   [ui]
@@ -413,8 +413,8 @@
 
 (defn row-repl-completion-opens
   "\"(ma\" in the console input, Ctrl+Space: the popover opens above the
-  input and its rows equal (mapv :symbol (docs/candidates ns \"ma\" \"(ma\"
-  3 history)) in order -- history being the exact REPL-history join do-
+  input and its rows equal (mapv :symbol (docs/candidates ns {:prefix \"ma\" :text \"(ma\"
+  :pos 3 :extra-context history})) in order -- history being the exact REPL-history join do-
   repl-complete! computes, captured here at the same moment so this stays
   correct no matter how much earlier rows already left in the session's
   history (measured live: none of it starts with \"ma\", so the rows
@@ -510,7 +510,7 @@
   REPL entry, which interns zork in `user` -- syntax/get-autocomplete-
   candidates has its own ns-publics source, entirely independent of
   :extra-context, so that row passed even with extra-context wired to a
-  constant nil (measured: (docs/candidates 'user \"zo\" \"(zo\" 3 nil) =>
+  constant nil (measured: (docs/candidates 'user {:prefix \"zo\" :text \"(zo\" :pos 3}) =>
   [\"zork\"]). It proved candidates come from the running namespace, not
   that history feeds docs/candidates at all.
 
