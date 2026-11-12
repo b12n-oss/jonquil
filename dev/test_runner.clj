@@ -46,6 +46,7 @@
     jonquil.session-test
     jonquil.commands-test
     jonquil.changed-test
+    jonquil.breakpoints-test
     jonquil.trace-rt-test
     jonquil.world-rt-test
     jonquil.world-test

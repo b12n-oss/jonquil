@@ -131,6 +131,25 @@
         (is (= id (:run (palette/bang-pick es (str "!" q)))) (str "!" q " runs it at the prompt")))
       (is (= :compare-form/head (:run (palette/bang-pick es "!this form vs git head")))))))
 
+(deftest breakpoint-queries-keep-their-neighbours-test
+  (testing "the breakpoint commands take no query the debugger's own commands answered"
+    (let [es (shipped-entries)
+          first-id (fn [q] (:id (first (palette/filter-entries es q))))]
+      (doseq [[q id] [["break on error" :debug/break-on-error]
+                      ["show frames" :debug/show-frames]
+                      ["continue from the break" :debug/continue]
+                      ["clear line counts" :run/clear-line-counts]
+                      ["count how often each line runs" :run/line-counts]
+                      ["toggle a breakpoint" :debug/toggle-breakpoint]
+                      ["clear all breakpoints" :debug/clear-breakpoints]]]
+        (is (= id (first-id q)) q)
+        (if (#{:debug/toggle-breakpoint :debug/clear-breakpoints} id)
+          (is (= id (:run (palette/bang-pick es (str "!" q)))) (str "!" q " runs it at the prompt"))
+          (is (= (palette/bang-pick (remove (comp #{:debug/toggle-breakpoint :debug/clear-breakpoints} :id) es)
+                                    (str "!" q))
+                 (palette/bang-pick es (str "!" q)))
+              (str "!" q " answers as it did before breakpoints")))))))
+
 (deftest bang-pick-test
   (let [es [{:id :a/clear :doc "Clear line counts: zero Jolt's counters and hide them."}
             {:id :a/count :doc "Count how often each line runs (Jolt)."}

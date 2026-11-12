@@ -4,6 +4,7 @@
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
             [jolt.nrepl :as server]
+            [jonquil.breakpoints :as bp]
             [jonquil.debugger :as debugger]
             [jonquil.nrepl.break-middleware :as mw]))
 
@@ -182,3 +183,39 @@
       (is (= "close" (last @seen)) "close goes on to the session middleware")
       (h {"op" "describe" :reply (fn [_])})
       (is (= "describe" (last @seen)) "any other op goes on"))))
+
+;; --- breakpoints (LM5), with the real jolt.debug ---------------------------------
+
+(def ^:private adder (bp/instrument "(fn [x]\n  (let [y (* x 2)]\n    (+ y 1)))" [3]))
+
+(deftest breakpoints-op-arms-and-disarms-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [{:keys [h entry]} (setup)]
+      (try
+        (let [[r] (ask h {"op" "jonquil-breakpoints" "session" "s1" "on" "true"})]
+          (is (= "true" (get r "on")))
+          (is (identical? (:hook entry) @debugger/breakpoint-hook)))
+        (is (= "false" (get (first (ask h {"op" "jonquil-breakpoints" "session" "s1" "on" "false"})) "on")))
+        (is (nil? @debugger/breakpoint-hook))
+        (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))
+
+(deftest a-marked-eval-pauses-at-a-breakpoint-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [{:keys [h entry]} (setup)
+          sent (atom [])]
+      (try
+        (h {"op" "eval" "session" "s1" "jonquil-breakpoints" "1" :reply (fn [m] (swap! sent conj m))})
+        (is (identical? (:hook entry) @debugger/breakpoint-hook) "the marked eval armed the hook")
+        (let [f (eval (read-string (:text adder)))
+              fut (eval-under entry (fn [_] (f 20)))]
+          (is (wait-for #(some (fn [m] (get m "jonquil-paused")) @sent)))
+          (let [data (edn/read-string (some (fn [m] (get m "jonquil-paused")) @sent))]
+            (is (= "Breakpoint at line 3" (:title data)))
+            (is (some #(= {:name "y" :text "40"} %) (:locals (first (:frames data))))))
+          (is (= [{"status" ["done"] "continued" "true"}] (ask h {"op" "jonquil-break-continue" "session" "s1"})))
+          (is (= 41 (deref fut 5000 :blocked)))
+          (testing "after the eval, a breakpoint reached on the session runs on"
+            (is (= 41 (deref (eval-under entry (fn [_] (f 20))) 5000 :blocked)))))
+        (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))

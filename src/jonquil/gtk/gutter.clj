@@ -5,7 +5,9 @@
   count label right-aligned before the bar on each counted line (LM4), the
   gutter widening to fit them. The ranges and labels live in atoms that
   set-ranges! and set-counts! replace; a draw only reads them, and a
-  vertical scroll redraws. GTK thread only."
+  vertical scroll redraws. Breakpoints (LM5) are red dots in a column of
+  their own at the left, there only while a dot is: the dots are text
+  marks (set-dots!), so they follow edits. GTK thread only."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable]]
@@ -60,6 +62,26 @@
   ;; px, between a count label and the bar
   4)
 
+(def DOT
+  ;; px, the breakpoint column, at the gutter's left edge while it has dots
+  12)
+
+(def ^:private DOT-RADIUS 4.0)
+
+(def ^:private DOT-COLOR
+  ;; a choice: one red reads as a breakpoint on every theme
+  "#d73a49")
+
+(defn dot-spots
+  "[[x y]] in the gutter's coordinates: the centre of each breakpoint dot,
+  in the dot column, halfway down its mark's line."
+  [{:keys [dots buf] :as gt}]
+  (vec (for [m @dots
+             :let [[y h] (line-yrange gt (g/mark-offset buf m))]]
+         [(/ DOT 2.0) (+ (to-gutter-y gt y) (/ h 2.0))])))
+
+(defn- dot-width [gt] (if (seq @(:dots gt)) DOT 0))
+
 (defn- label-width
   "label's pixel width in the gutter's own font."
   [{:keys [area]} label]
@@ -80,6 +102,7 @@
   aligned to PAD before the bar, at the top of its line."
   [gt]
   (let [right (- (count-width gt) WIDTH PAD)]
+    ;; labels are right-aligned to the bar, after the dot column
     (vec (for [[off label w] @(:counts gt)]
            [label (- right w) (to-gutter-y gt (first (line-yrange gt off)))]))))
 
@@ -89,6 +112,13 @@
     (doseq [[x y w h] (bar-rects gt)]
       (g/cairo-rectangle cr (double x) (double y) (double w) (double h)))
     (g/cairo-fill cr))
+  (when (seq @(:dots gt))
+    (let [[r gr b] (rgb DOT-COLOR)]
+      (g/cairo-set-source-rgb cr r gr b)
+      (doseq [[x y] (dot-spots gt)]
+        (g/cairo-new-sub-path cr)
+        (g/cairo-arc cr (double x) (double y) DOT-RADIUS 0.0 (* 2.0 Math/PI)))
+      (g/cairo-fill cr)))
   (when (seq @(:counts gt))
     (let [[r gr b] @(:count-color gt)]
       (g/cairo-set-source-rgb cr r gr b)
@@ -106,6 +136,15 @@
   (g/gtk-widget-queue-draw (:area gt))
   nil)
 
+(defn- resize!
+  "Sizes the gutter to its parts: the dot column while there are dots, the
+  widest count label, then the bar; and redraws."
+  [gt]
+  (let [width (+ (dot-width gt) @(:label-width gt) WIDTH)]
+    (reset! (:width gt) width)
+    (g/gtk-widget-set-size-request (:area gt) width -1)
+    (g/gtk-widget-queue-draw (:area gt))))
+
 (defn set-counts!
   "Replaces the count labels, {line label} with 0-based buffer lines (a
   line past the end is dropped), resizes the gutter to fit them and
@@ -120,12 +159,19 @@
         cs (vec (for [[line label] (sort-by key m)
                       :when (< -1 line (count starts))]
                   [(nth starts line) label (label-width gt label)]))
-        width (if (seq cs) (+ WIDTH PAD (apply max (map #(nth % 2) cs))) WIDTH)]
+        label-w (if (seq cs) (+ PAD (apply max (map #(nth % 2) cs))) 0)]
     (reset! (:counts gt) cs)
-    (reset! (:width gt) width)
-    (g/gtk-widget-set-size-request (:area gt) width -1)
-    (g/gtk-widget-queue-draw (:area gt))
+    (reset! (:label-width gt) label-w)
+    (resize! gt)
     nil))
+
+(defn set-dots!
+  "Replaces the breakpoint dots, a seq of text marks in the gutter's
+  buffer, resizes the gutter for its dot column and redraws."
+  [gt marks]
+  (reset! (:dots gt) (vec marks))
+  (resize! gt)
+  nil)
 
 (defn apply-theme!
   "The bar in theme t's :changed-mark, the count labels in its comment
@@ -138,12 +184,13 @@
 
 (defn attach!
   "Sets a gutter as ed's view's left gutter: {:area :view :buf :ranges
-  :counts :width :color :count-color :draws}, :draws counting the draws
-  (for rows)."
+  :counts :width :label-width :dots :color :count-color :draws}, :draws
+  counting the draws (for rows)."
   [ed]
   (let [area (g/gtk-drawing-area-new)
         gt {:area area :view (:view ed) :buf (:buf ed)
             :ranges (atom []) :draws (atom 0) :counts (atom []) :width (atom WIDTH)
+            :label-width (atom 0) :dots (atom [])
             :color (atom (rgb (:changed-mark (theme/theme theme/default-theme))))
             :count-color (atom (rgb (get-in (theme/theme theme/default-theme) [:tokens :comment])))}]
     (g/gtk-widget-set-size-request area WIDTH -1)

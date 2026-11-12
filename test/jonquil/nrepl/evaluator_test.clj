@@ -5,6 +5,7 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.breakpoints :as bp]
             [jonquil.console :as console]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
@@ -925,6 +926,18 @@
   (is (false? (nrepl/breakable? {:break-on? true} {:no-break true})) "auto-require's")
   (is (false? (nrepl/breakable? {:break-on? false} {}))))
 
+(deftest breakpoints-armed-test
+  (is (true? (nrepl/breakpoints-armed? {:breakpoints-on? true} {})))
+  (is (false? (nrepl/breakpoints-armed? {:breakpoints-on? true} {:quiet "token:"})) "a quiet eval")
+  (is (false? (nrepl/breakpoints-armed? {:breakpoints-on? true} {:no-break true})) "auto-require's")
+  (is (false? (nrepl/breakpoints-armed? {} {}))))
+
+(deftest breakpoints-reply-test
+  (is (= {:on? true :debug-turned-on? true} (nrepl/breakpoints-reply [{:on "true" :debug-turned-on "true"}])))
+  (is (= {:on? false :debug-turned-on? false} (nrepl/breakpoints-reply [{:on "false"}])))
+  (is (= {:error "nope"} (nrepl/breakpoints-reply [{:error "nope"}])))
+  (is (:error (nrepl/breakpoints-reply [{:status ["done"]}]))))
+
 (defn- toggle-break-sync [e]
   (let [p (promise)] (ev/toggle-break! e (fn [r] (deliver p r))) (deref p 20000 :timeout)))
 
@@ -987,6 +1000,39 @@
             (testing "off: no pause"
               (is (= :error (:status (first (run e "(bi 3)" false)))))
               (is (not (realized? @paused)))))))
+      (finally (ev/stop! e)))))
+
+;; --- breakpoints in the child (LM5) ----------------------------------------------
+
+(defn- set-breakpoints-sync [e on?]
+  (let [p (promise)] (ev/set-breakpoints! e on? (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+
+(deftest breakpoints-in-the-child-test
+  (let [e (make (temp-project))]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [r (set-breakpoints-sync e true)]
+        (if (and (:error r) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP breakpoints-in-the-child-test: this child can't break:" (:error r))
+              (is (string? (:error r))))
+          (let [paused (promise)
+                resumed (atom [])]
+            (is (true? (:on? r)) (pr-str r))
+            (ev/set-break-handlers! e {:on-pause (fn [d] (deliver paused d))
+                                       :on-resume (fn [how] (swap! resumed conj how))})
+            (run e (:text (bp/instrument "(defn bpf [x]\n  (let [y (* x 2)]\n    (+ y 1)))" [3])) false)
+            (testing "a call from the prompt pauses at the breakpoint, with Break on error off"
+              (let [done (start-run e "(bpf 20)" {})
+                    d (deref paused 20000 nil)]
+                (is (= "Breakpoint at line 3" (:title d)))
+                (is (some #{{:name "y" :text "40"}} (:locals (first (:frames d)))) (pr-str d))
+                (is (= {:out "" :text "41"} (break-eval-sync e 0 "(inc y)")))
+                (is (true? (ev/continue-break! e)))
+                (is (= "41" (:printed (deref done 20000 :timeout))))
+                (is (= [{:continued? true}] @resumed))))
+            (is (= {:on? false :debug-turned-on? false} (set-breakpoints-sync e false)))
+            (testing "disarmed: the same code runs through"
+              (is (= "41" (:printed (first (run e "(bpf 20)" false)))))))))
       (finally (ev/stop! e)))))
 
 ;; --- trace in the child (LM4) ----------------------------------------------------

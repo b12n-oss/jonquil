@@ -62,6 +62,7 @@ keys" turned on. F8 without fn plays or pauses Music.
 | F6 | anywhere in the window | Move focus between the editor and the console |
 | F8 | anywhere in the window | Go to the next place in the locations list |
 | Shift+F8 | anywhere in the window | Go to the previous place in the locations list |
+| F9 | anywhere in the window | Toggle a breakpoint on the caret's line ([Breakpoints](help-and-inspector.md#breakpoints)) |
 | Cmd/Ctrl+. | anywhere in the window | Go to the next place in the locations list |
 | Cmd/Ctrl+Shift+. | anywhere in the window | Go to the previous place in the locations list |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |

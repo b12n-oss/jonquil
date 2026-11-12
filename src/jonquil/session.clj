@@ -194,6 +194,14 @@
   (break-eval! [_ i code on-result]
     (debugger/break-eval! (:break @state) i code (fn [r] (try (on-result r) (catch Throwable _)))))
   (continue-break! [_] (debugger/continue! (:break @state)))
+  ev/Breakpoints
+  (set-breakpoints! [_ on? on-done]
+    (future
+      (let [hook (:breakpoint-hook @state)
+            r (try (if on? (debugger/arm-breakpoints! hook) (debugger/disarm-breakpoints! hook))
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-done r) (catch Throwable _))))
+    nil)
   ev/Trace
   (trace-op! [_ op args on-result]
     (future
@@ -215,14 +223,27 @@
   ev/Owners
   (release-owner! [_ owner] (release-owner-in! state owner) nil))
 
+(defn- breakpoint-hook
+  "This session's breakpoint hook (LM5): a breakpoint reached on any thread
+  pauses through the session's break, with the break handlers set when it
+  pauses."
+  [state brk]
+  (debugger/breakpoint-handler
+   brk
+   (fn [] (assoc (:break-handlers @state)
+                 :resolve-file (fn [f] (:file (source/resolve-file {:file f})))))
+   (constantly true)))
+
 (defn make-session
   "A session in reset mode with the prompt in `user`."
   []
-  (->InProcess (eval/make-eval-context)
-               (atom {:mode :reset :prompt-ns 'user :created {}
-                      :inspect-view (atom nil)
-                      ;; Break on error: off until toggled
-                      :break (debugger/make-break) :break-on? false})))
+  (let [brk (debugger/make-break)
+        state (atom {:mode :reset :prompt-ns 'user :created {}
+                     :inspect-view (atom nil)
+                     ;; Break on error: off until toggled
+                     :break brk :break-on? false})]
+    (swap! state assoc :breakpoint-hook (breakpoint-hook state brk))
+    (->InProcess (eval/make-eval-context) state)))
 
 (defmethod ev/make :in-process [selection]
   ;; The project's source folders, so a project kept in process can require

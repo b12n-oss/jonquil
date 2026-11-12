@@ -200,32 +200,44 @@
 ;; evaluation can start before this one's failure is recorded.
 
 (defn- show-paused!
+  "A pause in the Frames panel: an error's titled \"Paused: <error>\", a
+  breakpoint's (LM5) \"Breakpoint at line N\" as it came."
   [{:keys [frames-state dbgp right show-right-panel! cv set-status!]} d]
-  (let [shown (assoc d :title (str "Paused: " (:title d)))]
+  (let [n (:breakpoint d)
+        shown (if n d (assoc d :title (str "Paused: " (:title d))))]
     (reset! frames-state (assoc shown :paused? true))
     (debugger-pane/show! dbgp shown)
     (debugger-pane/show-restarts! dbgp [{:id :continue :label "Continue"}])
     (show-right-panel! right :debugger)
     (debugger-pane/focus! dbgp)
-    (cview/append! cv :system (str "; Paused at " (:title d) ".\n"))
-    (set-status! (str "; Paused: " (:title d) ". Continue or Stop."))))
+    (if n
+      (do (cview/append! cv :system (str "; Paused at the breakpoint on line " n ".\n"))
+          (set-status! (str "; Paused at the breakpoint on line " n ". Continue or Stop.")))
+      (do (cview/append! cv :system (str "; Paused at " (:title d) ".\n"))
+          (set-status! (str "; Paused: " (:title d) ". Continue or Stop."))))))
 
 (defn- end-paused!
   [{:keys [frames-state dbgp]} {:keys [continued?]}]
   (when (:paused? @frames-state)
-    (let [d {:note (if continued? "Continued: the error unwinds." "Stopped while paused.")}]
+    (let [d {:note (cond (not continued?) "Stopped while paused."
+                         (:breakpoint @frames-state) "Continued: the code runs on."
+                         :else "Continued: the error unwinds.")}]
       (reset! frames-state d)
       (debugger-pane/show! dbgp d)
       (debugger-pane/show-restarts! dbgp []))))
 
 (defn- register-break!
-  [{:keys [current-eval break-resumed] :as ctx} e]
+  [{:keys [current-eval break-resumed paused-breakpoint?] :as ctx} e]
   (when (and e (satisfies? ev/Break e))
-    (ev/set-break-handlers! e {:on-pause (fn [d] (on-gui! (fn [] (show-paused! ctx d))))
+    (ev/set-break-handlers! e {:on-pause (fn [d]
+                                           (reset! paused-breakpoint? (boolean (:breakpoint d)))
+                                           (on-gui! (fn [] (show-paused! ctx d))))
                                ;; the flag on the worker, before the error
-                               ;; it lets through is recorded as the failure
+                               ;; it lets through is recorded as the failure;
+                               ;; a breakpoint (LM5) lets no error through
                                :on-resume (fn [how]
-                                            (reset! break-resumed (when (:continued? how) @current-eval))
+                                            (reset! break-resumed (when (and (:continued? how) (not @paused-breakpoint?))
+                                                                    @current-eval))
                                             (on-gui! (fn [] (end-paused! ctx how))))
                                :on-eval-start (fn [id] (reset! current-eval id))
                                :on-eval-end (fn [id] (compare-and-set! break-resumed id nil))})))
@@ -365,7 +377,8 @@
   [wctx]
   (let [dbgp (debugger-pane/make-pane)
         ctx (assoc wctx :dbgp dbgp :frames-state (atom nil) :line-counting? (atom false)
-                   :current-eval (atom nil) :break-resumed (atom nil))]
+                   :current-eval (atom nil) :break-resumed (atom nil)
+                   :paused-breakpoint? (atom false))]
     (set-handlers! ctx)
     (watch-break! ctx)
     (set-restart-handler! ctx)

@@ -489,3 +489,81 @@
     (if (and p (= error-id (:error-id (:data p))))
       (local-value (:error p) i local-name {:frames-fn (fn [_] (:frames p))})
       ::not-paused)))
+
+;; --- breakpoints (LM5): a pause where the person chose, nothing wrong -------
+
+(defonce breakpoint-hook
+  ;; What jonquil.breakpoints/breakpoint-form calls with the throwable and
+  ;; frames when its throw reaches its own break handler: nil (the form
+  ;; does nothing) or a fn of [t frames]. An atom, not a dynamic var, so a
+  ;; call on any thread (a future, a test runner) reaches it.
+  (atom nil))
+
+(defn breakpoint-line
+  "The line a breakpoint throw names (its ex-data's :jonquil/breakpoint),
+  or nil for any other throwable."
+  [t]
+  (let [d (ex-data t)] (when (map? d) (:jonquil/breakpoint d))))
+
+(defn breakpoint-data
+  "frames-data for breakpoint throw t: titled \"Breakpoint at line N\",
+  with :breakpoint N."
+  [t frames resolve-file]
+  (let [n (breakpoint-line t)]
+    (assoc (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})
+           :title (str "Breakpoint at line " n) :breakpoint n)))
+
+(defn- claim-pause!
+  "Takes brk's pause for a breakpoint: true when nothing was paused. The
+  claim's :continued is already true, so a Continue before the pause is
+  published finds nothing to continue."
+  [{:keys [paused]}]
+  (compare-and-set! paused nil {:claim true :continued (atom true)}))
+
+(defn pause-at-breakpoint
+  "The breakpoint hook's body, on the thread that reached the breakpoint:
+  pauses there through brk as Break on error does, unless something is
+  paused already (that thread then runs on). frames' first entry is
+  jolt.debug/with-break-handler's own thunk, which has no locals, so it
+  is dropped. Answers true when it paused."
+  [{:keys [brk callbacks t frames]}]
+  (let [{:keys [queue paused]} brk
+        frames (vec (rest frames))]
+    (when (claim-pause! brk)
+      (let [d (try (breakpoint-data t frames (:resolve-file callbacks))
+                   (catch Throwable e (reset! paused nil) (throw e)))]
+        (drain! queue)
+        (reset! paused {:error t :frames frames :data d :continued (atom false)})
+        (serve-pause {:brk brk :callbacks callbacks :t t :frames frames :d d})
+        true))))
+
+(defn breakpoint-handler
+  "A breakpoint hook pausing through brk with the callbacks (callbacks-fn)
+  answers at pause time. (can-pause?) false lets a breakpoint run on, as
+  does a throwable that isn't a breakpoint's."
+  [brk callbacks-fn can-pause?]
+  (fn [t frames]
+    (when (and (breakpoint-line t) (can-pause?))
+      (pause-at-breakpoint {:brk brk :callbacks (callbacks-fn) :t t :frames frames}))))
+
+(defn arm-breakpoints!
+  "Installs hook as breakpoint-hook, after turning debug mode on when it's
+  off (a breakpoint's frame needs its locals). {:on? true :debug-turned-on?
+  b}, or {:error s} on a Jolt without jolt.debug, where nothing is
+  installed. Loads jolt.debug, which the inserted form names."
+  [hook]
+  (if-not (and (available?) (break-available?))
+    {:error NO-API}
+    (try
+      (let [was (locking instrument-lock/lock ((requiring-resolve 'jolt.profile/instrument-mode)))
+            r (when (not= :debug was) (set-debug-mode! true))]
+        (or (when (:error r) r)
+            (do (reset! breakpoint-hook hook)
+                {:on? true :debug-turned-on? (not= :debug was)})))
+      (catch Throwable e (jolt-error e)))))
+
+(defn disarm-breakpoints!
+  "Empties breakpoint-hook when it still holds hook. {:on? false}."
+  [hook]
+  (compare-and-set! breakpoint-hook hook nil)
+  {:on? false})

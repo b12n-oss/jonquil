@@ -20,7 +20,7 @@ works, the languages Jonquil runs, and how it's put together.
      the Dock, the file tree.
    - [Help and the inspector](help-and-inspector.md): completion, quick
      doc, jump, rename, the palette, inspecting values, the last
-     error's frames, the restarts, and Break on error.
+     error's frames, the restarts, Break on error and breakpoints.
    - [Dialects and runtimes](dialects/index.md): choosing a dialect and
      running Jolt out of process, then a page each for
      [ClojureDart](dialects/clojuredart.md),
