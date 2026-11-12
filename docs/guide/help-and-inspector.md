@@ -686,7 +686,7 @@ from a Step to the next pause. So:
 - **Step Into** goes to the next line the run reaches in that form, or
   after a return to the caller's next line when the caller holds a
   breakpoint too. A call into a form with no breakpoint runs through
-  without pausing.
+  without pausing, unless its tab is instrumented (below).
 - **Step Over** and **Step Out** compare how deep the code is: Over pauses
   at the same depth or above, so a call on the line runs through, and Out
   pauses only above, once the function returned. Out from the outermost
@@ -707,6 +707,19 @@ points cost next to nothing: each checks one flag and goes on, without
 throwing. A Step belongs to the thread that was paused: another thread
 reaching a step point meanwhile runs on, so the step lands on the line the
 paused code reaches next. Break on error never turns stepping on.
+
+To step into functions that hold no dot, run **Instrument this tab for
+stepping** from the palette. It sends every top-level form in the tab that
+only defines code (a `defn`, a `defmethod`, a `def` of a `fn`) again with
+step points, so Step Into goes into any of them. Every later Run, Run Form
+or Run Selection of that tab keeps the step points in. A form with edits
+that haven't run isn't sent, and the status line counts it. Forms inside a
+`(comment ...)` block and forms that do more than define code are never
+sent. **Stop instrumenting this tab** sends the same forms again without
+step points (a dot keeps its own). Clear All Breakpoints and closing the
+tab end instrumenting too. Nothing is sent until you ask, and a function
+value made before the command (one a `def` already holds) keeps no step
+points.
 
 ### Restarts
 

@@ -653,24 +653,32 @@
       " 1 form has edits that haven't run, so it wasn't sent: Run it to include it."
       (str " " (forms-n k) " have edits that haven't run, so they weren't sent: Run them to include them."))))
 
+(defn- instrumented-message
+  "instrument-message for Instrument this tab."
+  [n skipped sent]
+  (cond
+    (and (zero? n) (zero? skipped)) "; This tab defines no functions to instrument."
+    (and (pos? n) (not= :ok sent))
+    "; This tab is instrumented for stepping; its forms get step points when you next run them."
+    :else (str "; Instrumented " (forms-n n) " for stepping"
+               (when (pos? n) (str ", so Step Into goes into " (if (= 1 n) "it" "them") " now"))
+               "." (skipped-sentence skipped))))
+
+(defn- uninstrumented-message
+  "instrument-message for Stop instrumenting this tab."
+  [n skipped sent]
+  (if (and (pos? n) (not= :ok sent))
+    "; This tab isn't instrumented now; its forms lose their step points when you next run them."
+    (str "; Stopped instrumenting this tab; sent " (forms-n n) " again without step points."
+         (skipped-sentence skipped))))
+
 (defn instrument-message
   "The status line after Instrument this tab (on? true) or Stop
   instrumenting (on? false): n forms sent, skipped forms left out for
   edits that haven't run, sent the re-send's outcome (:ok, or :failed,
   :busy, :refused; nil when nothing was sent)."
   [{:keys [on? n skipped sent]}]
-  (let [skipped (or skipped 0)]
-    (cond
-      (and on? (zero? n) (zero? skipped)) "; This tab defines no functions to instrument."
-      (and (pos? n) (not= :ok sent))
-      (if on?
-        "; This tab is instrumented for stepping; its forms get step points when you next run them."
-        "; This tab isn't instrumented now; its forms lose their step points when you next run them.")
-      on? (str "; Instrumented " (forms-n n) " for stepping"
-               (when (pos? n) (str ", so Step Into goes into " (if (= 1 n) "it" "them") " now"))
-               "." (skipped-sentence skipped))
-      :else (str "; Stopped instrumenting this tab; sent " (forms-n n) " again without step points."
-                 (skipped-sentence skipped)))))
+  ((if on? instrumented-message uninstrumented-message) n (or skipped 0) sent))
 
 (defn edited?
   "True when the form at rng ({:start :end}) of text has edits that

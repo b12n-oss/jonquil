@@ -7,7 +7,11 @@
   form there only defines code, sends that form again (the core's
   :run-ranges!), so the breakpoint is live at once. Clear All Breakpoints
   takes a tab's dots away and sends the forms that held them again
-  without. The runs themselves put the dots in (jonquil.gtk.window.run)."
+  without. Instrument this tab for stepping sends every defining form
+  again with step points, and every later Run keeps them, until Stop
+  instrumenting, Clear All Breakpoints or the tab closes; neither ever
+  sends a form with edits that haven't run. The runs themselves put the
+  dots in (jonquil.gtk.window.run)."
   (:require [jolt.ffi :as ffi]
             [jonquil.breakpoints :as bp]
             [jonquil.clj :as clj]
@@ -19,10 +23,12 @@
 
 (def ^:private NEED-JOLT "; Breakpoints need Jolt.")
 
-(defn- any-dots?
-  "True when a tab in the window has a breakpoint."
+(defn- armed?
+  "True when the runtime should take breakpoints: a tab in the window has
+  a breakpoint or is instrumented for stepping (the step points name
+  jonquil.debugger's vars, so they must never reach an unarmed runtime)."
   [{:keys [tabs]}]
-  (boolean (some #(seq (gbp/marks (:ed %))) @tabs)))
+  (boolean (some #(or (seq (gbp/marks (:ed %))) (gbp/step-all? (:ed %))) @tabs)))
 
 (defn- caret-line
   "The caret's 1-based line in ed."
@@ -34,7 +40,7 @@
   breakpoints failed at the first evaluation (a Jolt child without
   jolt.debug)."
   [{:keys [tabs set-status!]} err]
-  (doseq [t @tabs] (gbp/clear! (:ed t)))
+  (doseq [t @tabs] (gbp/clear! (:ed t)) (gbp/set-step-all! (:ed t) false))
   (set-status! (str "; Breakpoints are off: " err)))
 
 (defn- arm-with!
@@ -43,7 +49,7 @@
   Jolt child not running yet) are armed by its first evaluation; when that
   fails the answer comes again, and every dot goes."
   [ctx e then]
-  (ev/set-breakpoints! e (any-dots? ctx)
+  (ev/set-breakpoints! e (armed? ctx)
                        (fn [r] (on-gui! (fn [] (if (:pending-failed? r)
                                                  (clear-window! ctx (:error r))
                                                  (then r)))))))
@@ -90,6 +96,17 @@
            :too-big
            (slurp p))
          (catch Throwable _ nil))))
+
+(defn- split-edited
+  "ranges of tab's text as {:send :skipped}: :skipped the ones with edits
+  that haven't run (jonquil.breakpoints/edited?), which a command never
+  sends."
+  [tab text ranges]
+  (let [ed (:ed tab)
+        opts {:dirty? (editor/dirty? ed) :disk-text (disk-text tab)}
+        ran (some-> ed :changed :ran deref)
+        edited? #(bp/edited? text ran % opts)]
+    {:send (vec (remove edited? ranges)) :skipped (vec (filter edited? ranges))}))
 
 (def ^:private NS-NOT-LOADED
   ;; said when the runtime hasn't loaded the buffer's namespace yet
@@ -160,28 +177,121 @@
                     :else (toggled! ctx {:tab tab :line placed :moved? moved? :added? true :note note
                                          :mark (gbp/add! ed text placed)})))))))))))
 
+(defn- arm-note
+  "The note on an arm answer r that failed, nil when it didn't."
+  [r]
+  (when-let [err (:error r)] (str " Breakpoints: " err)))
+
+(defn- clear-ranges
+  "The ranges Clear All Breakpoints sends again from tab's text: the forms
+  holding a dot that only define code, and, when all? (the tab is
+  instrumented), every defining form without edits that haven't run."
+  [tab text all?]
+  (->> (concat (keep #(bp/resend-range text %) (gbp/lines (:ed tab) text))
+               (when all? (:send (split-edited tab text (bp/step-all-ranges text)))))
+       distinct (sort-by :start) vec))
+
+(defn- cleared-head
+  "The start of Clear All's status line, after n dots went (all?: the tab
+  was instrumented too)."
+  [n all?]
+  (cond-> (if (pos? n) (str "; Cleared " n " breakpoint" (when (> n 1) "s")) "; Stopped instrumenting this tab")
+    (and all? (pos? n)) (str " and stopped instrumenting this tab")))
+
+(defn- cleared-tail
+  "The rest of Clear All's status line: how the re-send went (sent), and a
+  failed disarm's error (r)."
+  [sent r]
+  (str (case sent
+         :ok "; the forms run without them now."
+         nil "."
+         (str "; " bp/NEXT-RUN))
+       (arm-note r)))
+
+(defn- disarm-and-resend!
+  "Arms or disarms the runtime as the window now needs, sends tab's forms
+  at ranges again, then says head and how that went."
+  [{:keys [set-status!] :as ctx} tab ranges head]
+  (arm! ctx (fn [r] (resend! ctx tab ranges (fn [sent _] (set-status! (str head (cleared-tail sent r))))))))
+
 (defn- clear-all!
-  "Clear All Breakpoints in the active tab: the dots go, the runtime is
-  disarmed when no tab has one left, and the forms that held them and
-  only define code are sent again without them."
+  "Clear All Breakpoints in the active tab: the dots go, and so does
+  instrumenting for stepping; the runtime is disarmed when no tab needs
+  it any more, and the forms clear-ranges names are sent again without
+  them."
   [{:keys [active-tab set-status!] :as ctx}]
   (let [tab (active-tab)
         ed (:ed tab)
         text (editor/editor-text ed)
-        ranges (->> (gbp/lines ed text) (keep #(bp/resend-range text %)) distinct (sort-by :start) vec)
+        all? (gbp/step-all? ed)
+        ranges (clear-ranges tab text all?)
         n (gbp/clear! ed)]
-    (if (zero? n)
+    (gbp/set-step-all! ed false)
+    (if (and (zero? n) (not all?))
       (set-status! "; This tab has no breakpoints.")
-      (let [said (str "; Cleared " n " breakpoint" (when (> n 1) "s"))]
-        (arm! ctx (fn [r]
-                    (resend! ctx tab ranges
-                             (fn [sent _]
-                               (set-status! (str said (case sent
-                                                        :ok "; the forms run without them now."
-                                                        nil "."
-                                                        (str "; " bp/NEXT-RUN))
-                                                 ;; disarming failed: said too
-                                                 (when-let [err (:error r)] (str " Breakpoints: " err))))))))))))
+      (disarm-and-resend! ctx tab ranges (cleared-head n all?)))))
+
+(defn- step-all-plan
+  "tab's defining forms as {:send :skipped} (split-edited): what the two
+  instrument commands send again, and what they leave for a Run."
+  [tab]
+  (let [text (editor/editor-text (:ed tab))]
+    (split-edited tab text (bp/step-all-ranges text))))
+
+(defn- say-instrumented!
+  "The status line after an instrument command (on? for Instrument) sent
+  plan's forms with outcome sent, then suffix (nil for none)."
+  [{:keys [set-status!]} {:keys [on? plan sent suffix]}]
+  (set-status! (str (bp/instrument-message {:on? on? :n (count (:send plan)) :skipped (count (:skipped plan))
+                                            :sent sent})
+                    suffix)))
+
+(defn- send-instrumented!
+  "Once arming tab's runtime answered r: plan's forms are sent again with
+  step points, or, when arming failed, the tab's flag goes off again."
+  [ctx tab plan r]
+  (if-let [err (:error r)]
+    (do (gbp/set-step-all! (:ed tab) false)
+        ((:set-status! ctx) (str "; " err)))
+    (resend! ctx tab (:send plan) (fn [sent _] (say-instrumented! ctx {:on? true :plan plan :sent sent})))))
+
+(defn- instrument-tab!
+  "Instruments tab: with a defining form in it, its flag goes on (every
+  later Run fills its defining forms with step points too), the runtime
+  is armed, and the forms without edits that haven't run are sent again."
+  [ctx tab]
+  (let [plan (step-all-plan tab)]
+    (if (and (empty? (:send plan)) (empty? (:skipped plan)))
+      (say-instrumented! ctx {:on? true :plan plan})
+      (do (gbp/set-step-all! (:ed tab) true)
+          (arm! ctx #(send-instrumented! ctx tab plan %))))))
+
+(defn- instrument!
+  "Instrument this tab for stepping, on the active tab: Step Into goes
+  into any function it defines."
+  [{:keys [ev* active-tab set-status!] :as ctx}]
+  (if (gbp/supported? @ev*)
+    (instrument-tab! ctx (active-tab))
+    (set-status! NEED-JOLT)))
+
+(defn- uninstrument-tab!
+  "Stops instrumenting tab: the flag goes off, the runtime is disarmed when
+  no tab needs it any more, and the defining forms without edits that
+  haven't run are sent again without step points (a dot's form keeps its
+  dot)."
+  [ctx tab]
+  (let [plan (step-all-plan tab)
+        said! (fn [r] (fn [sent _] (say-instrumented! ctx {:on? false :plan plan :sent sent :suffix (arm-note r)})))]
+    (gbp/set-step-all! (:ed tab) false)
+    (arm! ctx #(resend! ctx tab (:send plan) (said! %)))))
+
+(defn- uninstrument!
+  "Stop instrumenting this tab, on the active tab."
+  [{:keys [active-tab set-status!] :as ctx}]
+  (let [tab (active-tab)]
+    (if (gbp/step-all? (:ed tab))
+      (uninstrument-tab! ctx tab)
+      (set-status! "; This tab isn't instrumented."))))
 
 (defn- refresh-heads!
   "After a Run of tab that ended well, when the tab has dots or an answer
@@ -228,25 +338,31 @@
   [wctx old new]
   (when (gbp/supported? old) (ev/set-breakpoints! old false (fn [_])))
   (when (gbp/supported? new)
-    (on-gui! (fn [] (when (any-dots? wctx)
+    (on-gui! (fn [] (when (armed? wctx)
                       (arm-with! wctx new (say-error! wctx "; Breakpoints are off: ")))))))
 
 (defn- tab-removed!
   "The tab hook for a tab about to close, while it and its buffer are still
-  there: its dots go, and with none left anywhere the runtime is disarmed."
+  there: its dots and its instrumenting go, and with nothing left that
+  needs it the runtime is disarmed."
   [wctx t]
-  (when (and (pos? (gbp/clear! (:ed t))) (not (any-dots? wctx)))
-    (arm! wctx (say-error! wctx "; Breakpoints: "))))
+  (let [all? (gbp/step-all? (:ed t))
+        n (gbp/clear! (:ed t))]
+    (gbp/set-step-all! (:ed t) false)
+    (when (and (or (pos? n) all?) (not (armed? wctx)))
+      (arm! wctx (say-error! wctx "; Breakpoints: ")))))
 
 (defn- install
-  "The breakpoints part for one window: the two command fns, the tab hooks,
+  "The breakpoints part for one window: the four command fns, the tab hooks,
   and a watch that arms a new evaluator (a dialect switch) while a tab has
   breakpoints."
   [{:keys [ev*] :as wctx}]
   (add-watch ev* ::breakpoints
              (fn [_ _ old new] (when-not (identical? old new) (runtime-switched! wctx old new))))
   {:fns {:toggle-breakpoint-fn (fn [] (toggle! wctx))
-         :clear-breakpoints-fn (fn [] (clear-all! wctx))}
+         :clear-breakpoints-fn (fn [] (clear-all! wctx))
+         :instrument-tab-fn (fn [] (instrument! wctx))
+         :uninstrument-tab-fn (fn [] (uninstrument! wctx))}
    :hooks {:on-tab-wired (fn [_ t] (tab-wired! wctx t))
            :on-tab-removed (fn [_ t] (tab-removed! wctx t))}})
 

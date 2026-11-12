@@ -98,7 +98,7 @@
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
            :debug/break-on-error :debug/continue :debug/step :debug/step-over :debug/step-out :restart/retry :restart/edit :restart/define
            :palette/open :help/describe-key :help/key-bindings :help/recent-keys
-           :debug/toggle-breakpoint :debug/clear-breakpoints
+           :debug/toggle-breakpoint :debug/clear-breakpoints :debug/instrument-tab :debug/uninstrument-tab
            :pages/show :pages/bookmark :pages/bookmarks :pages/guide}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
@@ -783,7 +783,8 @@
 
 (deftest breakpoints-part-owns-its-commands-and-key
   (let [spec (some #(when (= :breakpoints (:id %)) %) parts/specs)]
-    (is (= {:debug/toggle-breakpoint [:toggle-breakpoint-fn] :debug/clear-breakpoints [:clear-breakpoints-fn]}
+    (is (= {:debug/toggle-breakpoint [:toggle-breakpoint-fn] :debug/clear-breakpoints [:clear-breakpoints-fn]
+            :debug/instrument-tab [:instrument-tab-fn] :debug/uninstrument-tab [:uninstrument-tab-fn]}
            (update-vals (:commands spec) :call)))
     (is (= [{:key "F9" :exact #{} :command :debug/toggle-breakpoint}] (get-in spec [:bindings :window])))))
 

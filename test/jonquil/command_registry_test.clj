@@ -12,7 +12,7 @@
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
    :replay-open-fn :replay-forget-fn :change-set-make-fn :change-set-list-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :compare-last-run-fn :compare-form-disk-fn :compare-form-head-fn :compare-form-last-run-fn :layout-save-fn :layout-forget-fn
-   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :step-fn :step-over-fn :step-out-fn :toggle-breakpoint-fn :clear-breakpoints-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :result-open-location-fn :panel-focus-fn
+   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :step-fn :step-over-fn :step-out-fn :toggle-breakpoint-fn :clear-breakpoints-fn :instrument-tab-fn :uninstrument-tab-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :result-open-location-fn :panel-focus-fn
    :docs-show-fn :docs-bookmark-fn :docs-bookmarks-fn :docs-guide-fn])
 
 (defn- recording-ctx
@@ -55,6 +55,7 @@
    :layout/save [:layout-save-fn] :layout/forget [:layout-forget-fn]
    :debug/break-on-error [:break-fn] :debug/continue [:continue-fn] :debug/step [:step-fn] :debug/step-over [:step-over-fn] :debug/step-out [:step-out-fn]
    :debug/toggle-breakpoint [:toggle-breakpoint-fn] :debug/clear-breakpoints [:clear-breakpoints-fn]
+   :debug/instrument-tab [:instrument-tab-fn] :debug/uninstrument-tab [:uninstrument-tab-fn]
    :run/changed [:run-changed-fn]
    :trace/toggle [:trace-toggle-fn] :trace/show [:trace-show-fn]
    :trace/clear [:trace-clear-fn] :trace/untrace-all [:trace-untrace-all-fn]
