@@ -92,6 +92,46 @@
     (when (every? #(zero? (g/gtk-widget-get-visible %)) (vals roots))
       (g/gtk-widget-set-visible slot 0))))
 
+(defn- focus-panel!
+  "Moves focus into the panel k: the inspector, the source panel, the
+  plugin list or one of the parts' panels. m is make-panel-focus-fn's.
+  Throws for an id it doesn't know."
+  [{:keys [pane sp lp part-panels*]} k]
+  (case k
+    :inspector (inspector-pane/focus! pane)
+    :source (source-pane/focus! sp)
+    :plugins (g/gtk-widget-grab-focus (:list lp))
+    (if-let [p (get @part-panels* k)]
+      ((:focus! p))
+      (throw (IllegalArgumentException. (str "No matching clause: " k))))))
+
+(defn- empty-panel-message
+  "The status line for a panel k with nothing to show yet."
+  [k]
+  (case k
+    :inspector "; Nothing inspected yet: inspect a form or a result first."
+    :source "; The Source panel is empty: jump to a definition first."))
+
+(defn- make-panel-focus-fn
+  "The panel keys and the palette's Switch to panel: a fn of a panel id
+  that focuses the panel when it shows. Frames, Trace and Plugins
+  otherwise run their own command, which asks for what they show now (a
+  hidden one would show the calls or the error from before). The
+  inspector, source panel and locations list come back with their state
+  when they showed before and it still holds (a dialect switch and a
+  cleared list take them off the recent list); with nothing to show they
+  say what fills them. m holds :right :pane :sp :lp :part-panels*
+  :settings-path* and :status-label."
+  [{:keys [right part-panels* settings-path* status-label] :as m}]
+  (fn [k]
+    (cond
+      (= k (showing-panel right)) (focus-panel! m k)
+      (= k :plugins) (win-plugin-agent/plugin-step! {:settings-path @settings-path*
+                                                     :step (fn [] []) :open-list? true})
+      (contains? @part-panels* k) ((:open! (get @part-panels* k)))
+      (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus-panel! m k))
+      :else (win-status/set-status! status-label (empty-panel-message k)))))
+
 (defn build
   "activate!'s right-hand slot bindings, in activate!'s order: the slot box, part-panels* (reset once the parts install), the right map every slot fn takes, and panel-focus-fn. w holds what they read: :win :h-paned :pane :sp :rp :lp :hp :settings-path* :status-label. Returns w with :slot :part-panels* :right and :panel-focus-fn added; activate! resets *right to the right map next."
   [{:keys [win h-paned pane sp rp lp hp settings-path* status-label] :as w}]
@@ -107,34 +147,8 @@
                ;; Switch to panel entries, and the panel keys' "open it"
                :recent-panels (atom [])
                :part-panels* part-panels*}
-        ;; The panel keys and the palette's Switch to panel: focus the panel
-        ;; when it shows. Frames, Trace and Plugins otherwise run their own
-        ;; command, which asks for what they show now (a hidden one would
-        ;; show the calls or the error from before). The inspector, source
-        ;; panel and locations list come back with their state when they
-        ;; showed before and it still holds (a dialect switch and a cleared
-        ;; list take them off the recent list); with nothing to show they
-        ;; say what fills them.
-        panel-focus-fn (fn [k]
-                         (let [focus! (fn []
-                                        (case k
-                                          :inspector (inspector-pane/focus! pane)
-                                          :source (source-pane/focus! sp)
-                                          :plugins (g/gtk-widget-grab-focus (:list lp))
-                                          (if-let [p (get @part-panels* k)]
-                                            ((:focus! p))
-                                            (throw (IllegalArgumentException. (str "No matching clause: " k))))))]
-                           (cond
-                             (= k (showing-panel right)) (focus!)
-                             (= k :plugins) (win-plugin-agent/plugin-step! {:settings-path @settings-path*
-                                                                            :step (fn [] []) :open-list? true})
-                             (contains? @part-panels* k) ((:open! (get @part-panels* k)))
-                             (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
-                             :else
-                             (win-status/set-status! status-label
-                                                     (case k
-                                                       :inspector "; Nothing inspected yet: inspect a form or a result first."
-                                                       :source "; The Source panel is empty: jump to a definition first.")))))]
+        panel-focus-fn (make-panel-focus-fn {:right right :pane pane :sp sp :lp lp :part-panels* part-panels*
+                                             :settings-path* settings-path* :status-label status-label})]
     (assoc w :slot slot :part-panels* part-panels* :right right :panel-focus-fn panel-focus-fn)))
 
 (defn build-panels

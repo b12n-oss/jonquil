@@ -83,6 +83,31 @@
                                          (note-if-hidden! ctx path true)))
           nil))))
 
+(defn- remap-expanded
+  "The expanded folder paths with each one at or under old-canon moved
+  under path, the renamed entry's new listed path."
+  [expanded old-canon path]
+  (set (map (fn [d] (cond
+                      (= d old-canon) path
+                      (str/starts-with? d (str old-canon "/")) (str path (subs d (count old-canon)))
+                      :else d))
+            expanded)))
+
+(defn- follow-rename!
+  "tree-rename!'s window follow-up, on the next turn: the expanded folders
+  move to the new name, every tab in moves ([[tab new-path] ...]) takes
+  its new path, then the labels, title and tree are refreshed. renamed is
+  {:old-canon :path :new}. ctx is tree-rename!'s."
+  [{:keys [tree-pane win active-tab] :as ctx} moves {:keys [old-canon path new]}]
+  ;; before the tab paths change, since a path change
+  ;; rebuilds the tree (pruning the old folders)
+  (swap! (:state tree-pane) update :expanded remap-expanded old-canon path)
+  (doseq [[t p] moves]
+    (reset! (:path t) p))
+  (win-tabs/refresh-labels! ctx)
+  (let [t (active-tab)] (win-files/update-title! (:ed t) win (:path t)))
+  (show-in-tree! tree-pane new))
+
 (defn- tree-rename!
   "Rename...: renames old (the entry as listed: a symlink itself, never its
   target) to new-name, then every tab on old (or under it, for a folder)
@@ -94,7 +119,7 @@
   a.clj on a case-insensitive volume) resolves only while old exists.
   Expanded folders at or under old stay expanded under the new name. A tab
   still on the new path refuses the rename. nil, or the error string for the entry."
-  [{:keys [cv tree-pane tabs win active-tab] :as ctx} old new-name]
+  [{:keys [cv tabs] :as ctx} old new-name]
   (let [new (.getAbsolutePath (java.io.File. (.getParentFile (java.io.File. ^String old)) (str/trim (str new-name))))
         moves (vec (keep (fn [t] (when-let [p (ops/retarget @(:path t) old new)] [t p])) @tabs))
         old-canon (.getCanonicalPath (java.io.File. ^String old))
@@ -103,21 +128,7 @@
                                (ops/rename! old new-name))]
     (if error
       (tree-failed! ctx "rename" error)
-      (do (tree-later! cv "rename"
-                       (fn []
-                         ;; before the tab paths change, since a path change
-                         ;; rebuilds the tree (pruning the old folders)
-                         (swap! (:state tree-pane) update :expanded
-                                (fn [e] (set (map (fn [d] (cond
-                                                            (= d old-canon) path
-                                                            (str/starts-with? d (str old-canon "/")) (str path (subs d (count old-canon)))
-                                                            :else d))
-                                                  e))))
-                         (doseq [[t p] moves]
-                           (reset! (:path t) p))
-                         (win-tabs/refresh-labels! ctx)
-                         (let [t (active-tab)] (win-files/update-title! (:ed t) win (:path t)))
-                         (show-in-tree! tree-pane new)))
+      (do (tree-later! cv "rename" (fn [] (follow-rename! ctx moves {:old-canon old-canon :path path :new new})))
           nil))))
 
 (defn- listed-dir?

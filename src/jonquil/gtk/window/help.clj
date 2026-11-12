@@ -84,8 +84,9 @@
   holds (the caret is on the same symbol in the active tab); else the
   status goes back to Ready, unless something newer has replaced the
   Looking up line. label names the feature in an error line, also used
-  when the lookup itself threw (ev/help-error)."
-  [{:keys [ev* status-label]} sym text pos still? label on-doc]
+  when the lookup itself threw (ev/help-error). The second arg is
+  {:sym :text :pos :still? :label :on-doc}."
+  [{:keys [ev* status-label]} {:keys [sym text pos still? label on-doc]}]
   (let [e @ev*
         looking (str "Looking up " sym "...")
         answer! (fn [doc]
@@ -145,6 +146,35 @@
     :else
     (win-status/set-status! status-label (help/full-doc-status symbol result))))
 
+(defn- request-full-doc!
+  "do-quick-doc!'s second press on the same target: says Loading, asks the
+  server for symbol's full doc and lands the answer on the GTK thread
+  (land-full-doc!). ctx is do-quick-doc!'s, id the target and snap the
+  snapshot it was read from. Returns nil."
+  [{:keys [ev* status-label] :as ctx} id symbol snap]
+  (win-status/set-status! status-label (str "Loading full docs for " symbol "..."))
+  (ev/full-doc @ev* symbol (:text snap)
+               (fn [result]
+                 (on-gui! (guarded-status status-label "full doc"
+                                          #(land-full-doc! ctx id symbol result))))))
+
+(defn- lookup-quick-doc!
+  "do-quick-doc!'s ordinary press: looks symbol up and shows its quick doc
+  in the popover, remembering the target's id in last-shown, unless the
+  caret has moved on by the time a late answer lands. ctx is
+  do-quick-doc!'s, target help/target's answer and snap the snapshot it
+  was read from. Returns nil."
+  [{:keys [ed ev* status-label help-pop last-shown close-popovers-fn active?]} {:keys [symbol start] :as target} snap]
+  (let [id (select-keys target [:symbol :start])]
+    (ask-lookup! {:ev* ev* :status-label status-label}
+                 {:sym symbol :text (:text snap) :pos start
+                  :still? (fn [] (and (active?) (live-editor? ed) (same-target? id (editor/snapshot ed))))
+                  :label "quick doc"
+                  :on-doc (fn [doc]
+                            (reset! last-shown id)
+                            (close-popovers-fn help-pop)
+                            (help-popover/show-doc! help-pop (help/doc-text symbol doc)))})))
+
 (defn do-quick-doc!
   "Ctrl+Q/Shift+F1, the ui's own :quick-doc!*: help/target on ed's
   current snapshot; none sets status \"No symbol at the caret.\"
@@ -181,24 +211,14 @@
   status. Every other press, and every evaluator without FullDoc (cljd,
   in-process), takes the ordinary re-show path below unchanged, which
   also records the freshly shown target in last-shown."
-  [{:keys [ed ev* status-label help-pop last-shown close-popovers-fn active?] :as ctx}]
+  [{:keys [ed ev* status-label help-pop last-shown] :as ctx}]
   (try
     (let [snap (editor/snapshot ed)]
-      (if-let [{:keys [symbol start] :as target} (help/target snap)]
+      (if-let [{:keys [symbol] :as target} (help/target snap)]
         (let [id (select-keys target [:symbol :start])]
           (if (and (popover/open? help-pop) (= id @last-shown) (satisfies? ev/FullDoc @ev*))
-            (do (win-status/set-status! status-label (str "Loading full docs for " symbol "..."))
-                (ev/full-doc @ev* symbol (:text snap)
-                             (fn [result]
-                               (on-gui! (guarded-status status-label "full doc"
-                                                        #(land-full-doc! ctx id symbol result))))))
-            (ask-lookup! {:ev* ev* :status-label status-label} symbol (:text snap) start
-                         (fn [] (and (active?) (live-editor? ed) (same-target? id (editor/snapshot ed))))
-                         "quick doc"
-                         (fn [doc]
-                           (reset! last-shown id)
-                           (close-popovers-fn help-pop)
-                           (help-popover/show-doc! help-pop (help/doc-text symbol doc))))))
+            (request-full-doc! ctx id symbol snap)
+            (lookup-quick-doc! ctx target snap)))
         (win-status/set-status! status-label "No symbol at the caret.")))
     (catch :default e
       (win-status/set-status! status-label (str "; quick doc: " (ex-message e))))))
@@ -216,6 +236,18 @@
 
 (declare jump-to! source-jump-to!)
 
+(defn- place-at-line!
+  "Moves ed's caret to the line of loc (clamped to the text) and scrolls
+  to it."
+  [ed loc]
+  (let [text (editor/editor-text ed)]
+    (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))))
+
+(defn- say-jumped!
+  "Sets the status to \"Jumped to <symbol>.\"."
+  [status-label symbol]
+  (win-status/set-status! status-label (str "Jumped to " symbol ".")))
+
 (defn open-in-tab!
   "A definition in one of the project's files (loc's :editable?, the rule Open in window uses)
   opens in a tab, or brings forward the tab that has it, with the caret on
@@ -229,16 +261,41 @@
         {err :error} (open-file! (:path loc))
         {:keys [ed path id]} (active-tab)]
     (if (and (not err) @path (source/same-path? @path (:path loc)))
-      (let [text (editor/editor-text ed)]
+      (do
         ;; Only a jump that left its tab can go back: open-file! fills an
         ;; untouched Untitled tab in place, and there's nothing to return
         ;; to there.
         (when-not (= id from-id) (swap! jump-back* source/push from))
-        (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
+        (place-at-line! ed loc)
         (win-right-slot/hide-right-panel! right :source)
         (editor/focus! ed)
-        (win-status/set-status! status-label (str "Jumped to " symbol ".")))
+        (say-jumped! status-label symbol))
       (show-source! ctx loc))))
+
+(defn- restore-jump-tab!
+  "Brings back the tab a jump entry ({:id :path}) started from: selects it
+  while it is open, else reopens its file. Returns true when the tab ends
+  up active, false for an entry that can't be restored (an Untitled tab,
+  a deleted file). ctx is jump-back!'s."
+  [{:keys [select-tab! open-file! active-tab tab-open?]} {:keys [id path]}]
+  (cond
+    (tab-open? id) (do (select-tab! id) true)
+    path (do (open-file! path)
+             (boolean (some-> (active-tab) :path deref (source/same-path? path))))
+    :else false))
+
+(defn- pop-restorable-jump!
+  "Pops entries off jump-back* until one restores (restore-jump-tab!), an
+  entry whose tab has closed and can't be reopened being skipped for the
+  next one down. Returns the restored entry, or nil when none is left.
+  ctx is jump-back!'s."
+  [{:keys [jump-back*] :as ctx}]
+  (loop []
+    (when-let [[entry rest-h] (source/back @jump-back*)]
+      (reset! jump-back* rest-h)
+      (if (restore-jump-tab! ctx entry)
+        entry
+        (recur)))))
 
 (defn- jump-back!
   "Cmd/Ctrl+[ in the editor after a jump into a tab: back to the tab and
@@ -246,28 +303,16 @@
   has closed since. Returns false, doing nothing, when no jump is left to
   go back from, so the key passes on as before. ctx is the source-ctx map
   plus :select-tab!."
-  [{:keys [jump-back* select-tab! open-file! active-tab tab-open? status-label]}]
+  [{:keys [jump-back* active-tab status-label] :as ctx}]
   (if (empty? @jump-back*)
     false
-    ;; An entry whose tab has closed and whose file can't be reopened (an
-    ;; Untitled tab, a deleted file) is skipped for the next one down.
-    (loop []
-      (if-let [[{:keys [id path offset]} rest-h] (source/back @jump-back*)]
-        (do (reset! jump-back* rest-h)
-            (let [restored? (cond
-                              (tab-open? id) (do (select-tab! id) true)
-                              path (do (open-file! path)
-                                       (boolean (some-> (active-tab) :path deref (source/same-path? path))))
-                              :else false)]
-              (if restored?
-                (let [{:keys [ed]} (active-tab)]
-                  (place-caret-and-scroll! ed (min offset (count (editor/editor-text ed))))
-                  (editor/focus! ed)
-                  (win-status/set-status! status-label "Back.")
-                  true)
-                (recur))))
-        (do (win-status/set-status! status-label "Nothing to go back to: those tabs are closed.")
-            true)))))
+    (do (if-let [{:keys [offset]} (pop-restorable-jump! ctx)]
+          (let [{:keys [ed]} (active-tab)]
+            (place-caret-and-scroll! ed (min offset (count (editor/editor-text ed))))
+            (editor/focus! ed)
+            (win-status/set-status! status-label "Back."))
+          (win-status/set-status! status-label "Nothing to go back to: those tabs are closed."))
+        true)))
 
 (defn do-jump!
   "F12/Ctrl+B, the ui's own :jump!*: help/jump-target on ed's
@@ -292,37 +337,47 @@
             (jump-to! ctx symbol local)
             ;; A late answer is placed against the text as it is then, not
             ;; as it was when F12 was pressed.
-            (ask-lookup! ctx symbol (:text snap) start
-                         (fn [] (and ((:active? ctx (constantly true))) (live-editor? ed)
-                                     (same-target? (select-keys t [:symbol :start]) (editor/snapshot ed))))
-                         "jump"
-                         (fn [doc] (jump-to! ctx symbol (help/jump-target (editor/snapshot ed) doc))))))
+            (ask-lookup! ctx {:sym symbol :text (:text snap) :pos start
+                              :still? (fn [] (and ((:active? ctx (constantly true))) (live-editor? ed)
+                                                  (same-target? (select-keys t [:symbol :start]) (editor/snapshot ed))))
+                              :label "jump"
+                              :on-doc (fn [doc] (jump-to! ctx symbol (help/jump-target (editor/snapshot ed) doc)))})))
         (win-status/set-status! status-label "No symbol at the caret.")))
     (catch :default e
       (win-status/set-status! status-label (str "; jump: " (ex-message e))))))
 
+(defn- target-location
+  "The source location of an :external jump target (jonquil.source/location
+  of its doc, within the window's project), or nil for any other target."
+  [{:keys [sel*]} target]
+  (when (= :external (:kind target))
+    (source/location (:doc target) {:project-dir (:project-dir @sel*)})))
+
+(defn- open-location!
+  "Shows the definition at loc after closing every other popover: in a tab
+  when it is a project file the window can open (open-in-tab!), else in
+  the source panel."
+  [{:keys [help-pop close-popovers-fn] :as ctx} symbol loc]
+  (close-popovers-fn help-pop)
+  (if (and (:editable? loc) (:open-file! ctx))
+    (open-in-tab! ctx symbol loc)
+    (show-source! ctx loc)))
+
 (defn jump-to!
   "do-jump!'s target in hand (help/jump-target's answer, nil for none)."
-  [{:keys [ed status-label help-pop close-popovers-fn path sel*] :as ctx} symbol target]
-  (let [loc (when (= :external (:kind target))
-              (source/location (:doc target) {:project-dir (:project-dir @sel*)}))]
+  [{:keys [ed status-label help-pop close-popovers-fn path] :as ctx} symbol target]
+  (let [loc (target-location ctx target)]
     (cond
       (= :buffer (:kind target))
       (do (place-caret-and-scroll! ed (:offset target))
-          (win-status/set-status! status-label (str "Jumped to " symbol ".")))
+          (say-jumped! status-label symbol))
 
       (and (:path loc) @path (source/same-path? (:path loc) @path))
-      (let [text (editor/editor-text ed)]
-        (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
-        (win-status/set-status! status-label (str "Jumped to " symbol ".")))
-
-      (and (:editable? loc) (:open-file! ctx))
-      (do (close-popovers-fn help-pop)
-          (open-in-tab! ctx symbol loc))
+      (do (place-at-line! ed loc)
+          (say-jumped! status-label symbol))
 
       loc
-      (do (close-popovers-fn help-pop)
-          (show-source! ctx loc))
+      (open-location! ctx symbol loc)
 
       (= :external (:kind target))
       (do (close-popovers-fn help-pop)
@@ -347,11 +402,11 @@
             (source-jump-to! ctx symbol local)
             ;; Only while the panel still shows, and placed against its
             ;; text as it is then.
-            (ask-lookup! ctx symbol (:text snap) start
-                         (fn [] (and (pos? (g/gtk-widget-get-visible (:source-root (:right ctx))))
-                                     (same-target? (select-keys t [:symbol :start]) (editor/snapshot (:editor sp)))))
-                         "jump"
-                         (fn [doc] (source-jump-to! ctx symbol (help/jump-target (editor/snapshot (:editor sp)) doc))))))
+            (ask-lookup! ctx {:sym symbol :text (:text snap) :pos start
+                              :still? (fn [] (and (pos? (g/gtk-widget-get-visible (:source-root (:right ctx))))
+                                                  (same-target? (select-keys t [:symbol :start]) (editor/snapshot (:editor sp)))))
+                              :label "jump"
+                              :on-doc (fn [doc] (source-jump-to! ctx symbol (help/jump-target (editor/snapshot (:editor sp)) doc)))})))
         (source-pane/report! sp "No symbol at the caret.")))
     (catch :default e
       (source-pane/report! sp (str "; jump: " (ex-message e))))))
@@ -359,16 +414,14 @@
 (defn- source-jump-to!
   "do-source-jump!'s target in hand (help/jump-target's answer, nil for
   none)."
-  [{:keys [sp sel* ed path status-label] :as ctx} symbol target]
-  (let [loc (when (= :external (:kind target))
-              (source/location (:doc target) {:project-dir (:project-dir @sel*)}))]
+  [{:keys [sp ed path status-label] :as ctx} symbol target]
+  (let [loc (target-location ctx target)]
     (cond
       (= :buffer (:kind target)) (source-pane/move-to-offset! sp (:offset target))
       (and (:path loc) path @path (source/same-path? (:path loc) @path))
-      (let [text (editor/editor-text ed)]
-        (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
-        (editor/focus! ed)
-        (win-status/set-status! status-label (str "Jumped to " symbol ".")))
+      (do (place-at-line! ed loc)
+          (editor/focus! ed)
+          (say-jumped! status-label symbol))
       (and (:editable? loc) (:open-file! ctx)) (open-in-tab! ctx symbol loc)
       loc (show-source! ctx loc)
       :else (source-pane/report! sp (str "No source found for " symbol ".")))))
@@ -512,8 +565,10 @@
   caret-move hook (on-cursor-moved! for the editor, on-input-changed! for
   the console -- the callback ignores whatever args it's called with, so
   one fn works for either) and refines the popup on every call, reporting
-  a throw the same way; on-focus-lost! closes the popup."
-  [completion complete-fn status-label register-popover-fn set-fns! on-moved! on-focus-lost!]
+  a throw the same way; on-focus-lost! closes the popup. The second arg
+  is {:complete-fn :status-label :register-popover-fn :set-fns! :on-moved!
+  :on-focus-lost!}."
+  [completion {:keys [complete-fn status-label register-popover-fn set-fns! on-moved! on-focus-lost!]}]
   (register-popover-fn completion)
   (set-fns!
    {:complete! complete-fn
@@ -529,6 +584,22 @@
                  (catch :default e
                    (win-status/set-status! status-label (str "; complete: " (ex-message e)))))))
   (on-focus-lost! (fn [] (completion/close! completion))))
+
+(defn- make-completion-opts
+  "What each tab's completion is built with (jonquil.gtk.tab adds its own
+  :ed): the evaluator fns, with :server-ev answering the window's
+  evaluator when its help asks a server (ev/ServerHelp), so completion
+  then asks off the GTK thread, and :ns-fn the running program's
+  namespace, read fresh at every lookup. close-others! is the
+  registry-wide close, so opening completion closes any other open
+  popover. Returns the opts map."
+  [ev* status-label close-popovers-fn]
+  {:ns-fn (fn [] (ev/prompt-ns @ev*))
+   :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
+   :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
+   :server-ev (fn [] (let [e @ev*] (when (ev/server-help? e) e)))
+   :close-others! close-popovers-fn
+   :on-error (fn [msg] (win-status/set-status! status-label msg))})
 
 (defn build
   "activate!'s popover registry, source-ctx and completion bindings, in activate!'s order: the popovers atom with its close and register fns, jump-back* and source-ctx (the map quick doc, jump and the source panel take for a tab), and the evaluator fns and the opts every tab's completion is built with. w holds what they read: :ev* :status-label :sp :sel* :active? :active-tab, :open-file! (jonquil.gtk.window.tabs's open-file!, called with @*tab-ctx), and :tab-ctx* and :right* (activate!'s *tab-ctx and *right, read when source-ctx and its :open-file! run). Returns w with :popovers :close-popovers-fn :register-popover-fn :source-ctx :server-ev :completion-ns-fn and :completion-opts added."
@@ -551,21 +622,13 @@
                             :path (:path t) :sel* sel* :active? (fn [] (active? t))
                             :open-file! (fn [p] (open-file! @*tab-ctx p))
                             :active-tab active-tab :jump-back* jump-back*})
+        completion-opts (make-completion-opts ev* status-label close-popovers-fn)
         ;; The window's evaluator when its help asks a server
         ;; (ev/ServerHelp): completion then asks off the GTK thread.
-        server-ev (fn [] (let [e @ev*] (when (ev/server-help? e) e)))
+        server-ev (:server-ev completion-opts)
         ;; Shared by every tab's completion and the console's: the running
         ;; program's namespace, read fresh at every lookup.
-        completion-ns-fn (fn [] (ev/prompt-ns @ev*))
-        ;; What each tab's completion is built with (jonquil.gtk.tab adds
-        ;; its own :ed); close-others! is the registry-wide close, so
-        ;; opening completion closes any other open popover.
-        completion-opts {:ns-fn completion-ns-fn
-                         :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
-                         :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
-                         :server-ev server-ev
-                         :close-others! close-popovers-fn
-                         :on-error (fn [msg] (win-status/set-status! status-label msg))}]
+        completion-ns-fn (:ns-fn completion-opts)]
     (assoc w :popovers popovers :close-popovers-fn close-popovers-fn :register-popover-fn register-popover-fn
            :source-ctx source-ctx :server-ev server-ev :completion-ns-fn completion-ns-fn :completion-opts completion-opts)))
 
@@ -595,7 +658,9 @@
   ;; Joins the SAME registry, so Escape closes the def prompt before it
   ;; can fall through to Stop.
   (register-popover-fn (:def-popover pane))
-  (wire-completion! repl-completion repl-complete-fn status-label register-popover-fn
-                    (fn [fns] (cview/set-completion-fns! cv fns))
-                    (fn [f] (cview/on-input-changed! cv f))
-                    (fn [f] (cview/on-focus-lost! cv f))))
+  (wire-completion! repl-completion
+                    {:complete-fn repl-complete-fn :status-label status-label
+                     :register-popover-fn register-popover-fn
+                     :set-fns! (fn [fns] (cview/set-completion-fns! cv fns))
+                     :on-moved! (fn [f] (cview/on-input-changed! cv f))
+                     :on-focus-lost! (fn [f] (cview/on-focus-lost! cv f))}))

@@ -31,6 +31,21 @@
   (reset! confirmed-close? true)
   (g/gtk-window-close win))
 
+(defn- save-untitled!
+  "Save All's step for an Untitled tab t: selects it and opens the Save
+  dialog. A chosen path saves and continues with next!; a dismissed dialog
+  stops the sequence; any other error goes on the console. ctx is
+  save-all!'s. Returns nil."
+  [{:keys [cv win select!]} {:keys [ed path] :as t} next!]
+  (select! t)
+  (win-files/file-dialog!
+   :save win
+   (fn [{p :path err :error :as r}]
+     (cond
+       p (do (win-files/save-to! ed cv path p) (next!))
+       (win-files/dialog-dismissed? r) nil
+       :else (cview/append! cv :error (str "; save: " err "\n"))))))
+
 (defn- save-all!
   "Save All: saves each tab in dirty-tabs in order -- a
   tab with a path through save-to!, an Untitled one through the Save
@@ -43,14 +58,7 @@
     (let [next! (fn [] (if (editor/dirty? ed) (select! t) (save-all! ctx more)))]
       (if-let [p @path]
         (do (win-files/save-to! ed cv path p) (next!))
-        (do (select! t)
-            (win-files/file-dialog!
-             :save win
-             (fn [{p :path err :error :as r}]
-               (cond
-                 p (do (win-files/save-to! ed cv path p) (next!))
-                 (win-files/dialog-dismissed? r) nil
-                 :else (cview/append! cv :error (str "; save: " err "\n"))))))))
+        (save-untitled! ctx t next!)))
     (finish-close! win confirmed-close?)))
 
 (defn close-choice!
