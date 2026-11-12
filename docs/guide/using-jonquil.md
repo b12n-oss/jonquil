@@ -85,6 +85,8 @@ against the text it has now. A form that is new since then reads "(new)" and
 shows as all added. Type a name and press **Save Set**. The panel needs a
 saved tab that has run once; with nothing changed the status bar says so.
 
+![The Change Sets panel on a saved set of two changed forms, each with its file, its name and a diff of the old and new text, above Apply to REPL, Revert in Tabs, Delete and Close](../images/change-sets.png)
+
 **Change Sets** in the palette lists the project's kept sets, each with its
 form count and, for an agent's, who proposed it. Opening one shows its
 diffs and three buttons:

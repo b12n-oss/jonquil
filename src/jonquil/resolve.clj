@@ -74,9 +74,11 @@
         spans))))
 
 ;; --- reader conditionals ------------------------------------------------
-;; Jolt's read-string ignores :features and :read-cond (v0.8.26,
-;; jolt-lang/jolt#1620), so a #? always reads as Jolt's own branch; the ns
-;; text gets its branches picked here, for the file's features, before reading.
+;; A #? is picked here, for the file's own features, before reading: even
+;; a reader that honours :features keeps its platform's :clj on, as the
+;; JVM does (and Jolt v0.8.26 ignores :features outright,
+;; jolt-lang/jolt#1620), so reading a .cljc file the way ClojureScript sees
+;; it needs only :cljs on, which no read-string option gives.
 
 (defn- prefix-start
   "The offset of the form whose first token starts at s, stepping back over
