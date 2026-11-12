@@ -7,19 +7,12 @@
             [gtk-selftest-window.support :as support]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.debugger-pane :as dpane]
-            [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.palette :as palette]
-            [jonquil.gtk.popover :as popover]))
+            [jonquil.gtk.ffi :as g]))
 
 (defn- run-palette!
-  "Opens the palette, filters it to query and runs the first entry, then
-  closes it. GTK-thread only."
+  "support/run-palette!: the active tab's palette."
   [ui query]
-  (let [p (:palette ui)]
-    ((:open-palette!* ui))
-    (palette/set-query! p query)
-    (palette/run-selected! p)
-    (when (popover/open? p) (popover/hide! p))))
+  (support/run-palette! ui query))
 
 (defn- submit!
   "Types code at the console prompt and presses Return (the inspector rows'

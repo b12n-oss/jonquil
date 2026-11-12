@@ -12,8 +12,6 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.locations-pane :as lpane]
-            [jonquil.gtk.palette :as palette]
-            [jonquil.gtk.popover :as popover]
             [jonquil.locations :as loc]
             [jonquil.syntax :as syntax]
             [temp-dirs]))
@@ -86,14 +84,9 @@
 (def ^:private KEY-F8 0xffc5)
 
 (defn- run-palette!
-  "Opens the palette, filters it to query and runs the first entry, then
-  closes it. GTK-thread only."
+  "support/run-palette!: the active tab's palette."
   [ui query]
-  (let [p (:palette ui)]
-    ((:open-palette!* ui))
-    (palette/set-query! p query)
-    (palette/run-selected! p)
-    (when (popover/open? p) (popover/hide! p))))
+  (support/run-palette! ui query))
 
 (defn- f8! [ui shift?]
   ((:handle-window-key! ui) ffi/null KEY-F8 0 (if shift? g/SHIFT-MASK 0) ffi/null))
@@ -511,17 +504,6 @@
               (editor/mark-saved! ed)
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
-(defn- run-active-palette!
-  "run-palette! on the active tab's own palette, which is the one
-  :open-palette!* opens: (:palette ui) is the first tab's, so a row with
-  several tabs open must use this. GTK-thread only."
-  [ui query]
-  ((:open-palette!* ui))
-  (let [p (:palette ((:active-tab* ui)))]
-    (palette/set-query! p query)
-    (palette/run-selected! p)
-    (when (popover/open? p) (popover/hide! p))))
-
 (defn row-compare-with-tab
   "Compare with tab: b.clj lists the active tab's difference from b.clj's
   tab, saved or not. Take reads the other tab as it is now, so an edit made
@@ -538,12 +520,12 @@
           eb (on-gtk (:ed ((:active-tab* ui))))
           _ (on-gtk ((:open-file! ui) (.getPath fa)))
           ea (on-gtk (:ed ((:active-tab* ui))))
-          _ (on-gtk (run-active-palette! ui "compare with tab: b.clj"))
+          _ (on-gtk (support/run-palette! ui "compare with tab: b.clj"))
           listed? (await-until 3000 20 #(= ["2: 1 line here, 1 line in b.clj: (def x 10)"]
                                            (lpane/row-texts (:locations-pane ui))))
           _ (on-gtk (editor/apply-op-plain! eb {:edits [[7 17 "(def x 20)"]] :caret 7})
                     (support/place-cursor! (:buf ea) 9)
-                    (run-active-palette! ui "take the other version here"))
+                    (support/run-palette! ui "take the other version here"))
           took? (await-until 3000 20 #(= "(ns a)\n(def x 20)\n(def y 2)\n" (editor/editor-text ea)))
           cleared? (await-until 3000 20 #(and (empty? (lpane/row-texts (:locations-pane ui)))
                                               (= "; No differences from b.clj." (status ui))))]
@@ -568,16 +550,16 @@
           _ (spit f ran)
           _ (on-gtk ((:open-file! ui) (.getPath f)))
           ed (on-gtk (:ed ((:active-tab* ui))))
-          _ (on-gtk (run-active-palette! ui "compare with the last run"))
+          _ (on-gtk (support/run-palette! ui "compare with the last run"))
           not-yet? (await-until 3000 20 #(= "; This tab hasn't had a whole Run that ended well yet." (status ui)))
           _ (on-gtk ((:run!* ui)))
           recorded? (await-until 8000 20 #(= ran @(:last-run (:changed ed))))
           _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count (editor/editor-text ed)) "(ns lrun)\n(def a 2)\n"]] :caret 0})
-                    (run-active-palette! ui "compare with the last run"))
+                    (support/run-palette! ui "compare with the last run"))
           listed? (await-until 3000 20 #(= ["2: 1 line here, 1 line in the last Run: (def a 1)"]
                                            (lpane/row-texts (:locations-pane ui))))
           _ (on-gtk (support/place-cursor! (:buf ed) 12)
-                    (run-active-palette! ui "take the other version here"))
+                    (support/run-palette! ui "take the other version here"))
           took? (await-until 3000 20 #(= ran (editor/editor-text ed)))
           cleared? (await-until 3000 20 #(and (empty? (lpane/row-texts (:locations-pane ui)))
                                               (= "; No differences from the last Run." (status ui))))]

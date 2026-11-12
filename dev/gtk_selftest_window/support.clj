@@ -12,6 +12,8 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.popover :as popover]
             [jonquil.theme :as theme]
             [temp-dirs]))
 
@@ -156,3 +158,17 @@
 (def KEY-RETURN 0xff0d)
 (def KEY-F6 0xffc3)
 (def KEY-Q 0x071)
+
+(defn run-palette!
+  "Opens the palette, filters it to query, runs the first entry and closes
+  it, on the active tab's own palette: the one :open-palette!* opens with
+  fresh entries. (:palette ui) is the first tab's, which, when another tab
+  is active, holds whatever entries it had when it was last opened (none if
+  never), so a row that drove it could run nothing, or a stale list, and
+  left the active tab's palette open. GTK-thread only."
+  [ui query]
+  ((:open-palette!* ui))
+  (let [p (:palette ((:active-tab* ui)))]
+    (palette/set-query! p query)
+    (palette/run-selected! p)
+    (when (popover/open? p) (popover/hide! p))))
