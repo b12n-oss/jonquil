@@ -393,7 +393,7 @@
         caret-in? (<= s caret e')
         opts (if caret-in? (caret-opts ctx caret) {})
         result (run-mode {:mode mode :P P :R R :change (change-of ctx) :rel-caret (- caret s) :opts opts
-                            :prev-consistent? prev-consistent?})
+                          :prev-consistent? prev-consistent?})
         NR (:text result)]
     (cond
       (and (:success result) (string? NR) (not= NR R))
