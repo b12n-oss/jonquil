@@ -8,6 +8,9 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+<details>
+<summary><strong>42 entries</strong></summary>
+
 - Quick Doc for This Var: on a var result in the console, the right-click menu and the palette print that var's doc into the console as comment lines, below the result.
 - `jolt metrics`, `jolt metrics:edn`, `jolt metrics:json` and `jolt metrics:html` report code metrics with jolt-metrics (report only, never a gate), configured in `.jolt-metrics.edn`. The HTML report is one self-contained page, written to `target/metrics.html` by default. Since jolt-metrics v0.4.0 the queue ranks a function by how much of the code depends on it, and the report adds unusual commits and files.
 - ClojureDocs examples in JVM Clojure's full doc are runnable: each has Run in Interactions and Copy to Definitions. The example's `user=>` prompts and printed results are dropped first. Run always uses the `user` namespace (the console says `; in user` when the prompt is elsewhere, and the prompt doesn't move), honours plugin before-run vetoes and refuses while the console is busy. Copy puts the example after the top-level form at the caret, or inside a `(comment ...)` block when the caret is in one, as one undo step. The buttons are mouse-only.
@@ -51,7 +54,12 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - The inspector (Cmd/Ctrl+I) works for Jolt running out of process: Jonquil loads its inspector code into the Jolt child as nREPL middleware, written under `~/.cache/jonquil/nrepl-middleware`, so stepping through a value leaves `*1`, `*2` and `*3` alone, on a plain nREPL server too.
 - ClojureScript dialect (experimental): Jonquil attaches to a running shadow-cljs nREPL server, selects the build from `.jonquil.edn` or `shadow-cljs.edn`, and Runs a `.cljs` buffer in the JS runtime that has the build loaded; see the ClojureScript section of the using guide. `jolt smoke:cljs` drives it against a live app.
 
+</details>
+
 ### Fixed
+
+<details>
+<summary><strong>32 entries</strong></summary>
 
 - Two presses of the line counts toggle at once, or a line counts toggle at the same moment as the debug-mode toggle, no longer lose one. Each toggle read Jolt's instrumentation mode and then set it, so both could read the old mode and the status bar could disagree with the runtime. Every read-then-set of the mode now holds one lock, in process and in the Jolt child.
 - A plugin's `p/eval!` of code that throws reports the error's own message again on newer Jolt, where `load-string` wraps a runtime throw in a CompilerException ("Syntax error macroexpanding at (1:1).") the way JVM Clojure does. The wrapper is unwrapped only when it marks the throw as raised while running, so a cause the code gave its own throw stays hidden.
@@ -86,7 +94,12 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - `--mcp-attach DIR` follows a listening window after Open Folder re-roots it.
 - Old `~/.cache/jonquil/nrepl-middleware` folders from other Jonquil versions are pruned after a day unused.
 
+</details>
+
 ### Changed
+
+<details>
+<summary><strong>20 entries</strong></summary>
 
 - Jolt runs the tasks: `jolt <task>` replaces `bb <task>` everywhere, and babashka is no longer needed to build, test or run Jonquil. The tasks stay in `bb.edn`, which jolt reads. The scripts tasks start (the smokes, `test:debugger`, `test:nightly`) run under jolt, `mcp:smoke` reads JSON with clojure.data.json, the docs engine's tasks go through `jolt run`, the pre-commit hooks call `jolt`, the Linux image drops babashka, and the lint workflow installs jolt. `linux:run`'s `--` before the command is optional, since jolt drops the first `--` from a task's arguments where bb keeps it. babashka is still a dialect Jonquil attaches to, so `test:bb` and the `nrepl-bb` shot still need `bb` on `PATH`.
 - Internal: a window feature can be added as a part, a spec namespace plus an install fn that returns its context functions, self-test and MCP entries, and start, re-root and quit hooks. The last session's replay was the first part, and layouts, worlds, Time Form and Processes are parts now too. So are Messages, disk polling, Trace and live console results, which came out of the window's startup code, and Locations with Compare and the debugger, then the command palette with the `!` line and the describe-keys commands, and the file tree's behaviour, then the plugins' window code. Parts can also hook a tab being wired, being closed and being switched to. A part can also bring its own right-hand panel and keys. Nothing you see changes. See Window parts in the architecture guide.
@@ -108,3 +121,5 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - Jolt now runs out of process by default in a project with a `deps.edn`, so a program that calls `System/exit`, `shutdown-agents` or redefines `clojure.core` takes down a separate Jolt child rather than Jonquil. A loose file still runs in process, and `.jonquil.edn` `{:runtime :in-process}` keeps a project there. With no jolt-lang/nrepl checkout, Jonquil fetches nREPL v0.4.0 as a git dependency, and starts a plain nREPL server if that fails. The out-of-process start no longer lists "Output appears when an evaluation finishes" as a limit, since nREPL v0.4.0 streams output.
 - Jonquil now needs Jolt v0.8.23 or later, and `pp` is referred at the prompt next to `pprint`, so `(pp)` pretty-prints `*1` in process and out of process.
 - A `.cljs` file outside a shadow-cljs project (a loose file, or a figwheel or `cljs.main` project with no `shadow-cljs.edn`) now selects ClojureScript instead of falling back to in-process Jolt. It runs on node (see Added).
+
+</details>
