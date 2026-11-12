@@ -213,7 +213,9 @@
    {:label (results/label :copy) :action "result-copy" :command :result/copy}
    {:label (results/label :define) :action "result-define" :command :result/define}
    {:label (results/label :jump) :action "result-jump" :command :result/jump}
-   {:label (results/label :doc) :action "result-doc" :command :result/doc}])
+   {:label (results/label :doc) :action "result-doc" :command :result/doc}
+   ;; file:line references in output (LM1's file:line kind)
+   {:label (results/label :open-location) :action "result-open-location" :command :result/open-location}])
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named

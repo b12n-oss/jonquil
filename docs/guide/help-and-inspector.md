@@ -292,8 +292,10 @@ dispatch value tells its methods apart, and just `comment` for a comment
 block), and by its place among forms that share them, so a second
 `(comment ...)` block matches the second one there. The list's title names
 the form, with its place when it isn't the first, Take works the same way,
-and a version with no such form says so on the status bar. Typing "this
-form" in the palette finds the three.
+and a version with no such form says so on the status bar. Adding or
+removing a form that starts the same way, above or below it, moves its
+place, so Take then asks you to compare again rather than guess. Typing
+"this form" in the palette finds the three.
 
 ### Freeing Ctrl+Space on macOS
 
@@ -383,6 +385,18 @@ Define's form throws "That result is gone." for it rather than defining a
 placeholder. Live results come from Jolt, in process or in a
 project's Jolt child, and quiet evaluations (completion, help) keep nothing;
 other runtimes print results as plain text.
+
+A file and line in console output, such as `src/app/core.clj:12:3` in an
+error's location or `(core.clj:12)` in a JVM stack frame, opens there with
+a click, with the same wait for a double-click, or with **Open This File and
+Line** from the console's menu or the palette, the caret in it. This works
+for any runtime, since it reads the text. A path under the project folder,
+or an absolute one, opens as written; a bare name opens the project file
+that ends with it, and when several do, the namespace in a stack frame
+(`demo.core$f.invoke` means `demo/core.clj`) picks one. Otherwise the status
+bar says how many files could be meant and opens none. A project file opens
+in a tab and any other file in the source panel, as a jump to a definition
+does.
 
 ## Tracing a function
 

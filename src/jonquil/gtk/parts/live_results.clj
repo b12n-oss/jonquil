@@ -1,14 +1,18 @@
 (ns jonquil.gtk.parts.live-results
   "LM1's live console results as a window part (the commands are
   jonquil.parts.live-results/spec). Moved out of jonquil.gtk.window: the
-  result verbs, the right-click caret move and the click-to-inspect gesture."
+  result verbs, the right-click caret move and the click-to-inspect gesture,
+  and the file:line references in console text, opened by a click or by
+  Open This File and Line."
   (:require [jolt.ffi :as ffi]
+            [jonquil.file-refs :as file-refs]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
-            [jonquil.results :as results]))
+            [jonquil.results :as results]
+            [jonquil.usages :as usages]))
 
 (def ^:private no-result "; No result here.")
 
@@ -92,6 +96,44 @@
         (show-var-doc! ctx sym)
         (set-status! "; That result isn't a var.")))))
 
+;; file:line references (LM1's file:line kind): plain console text, not a
+;; result, so they need no handle; the reference names a file and a line
+(defn- file-ref-at
+  "The file:line reference in the console line holding offset, with the
+  line's ns-hint, or nil."
+  [{:keys [cv]} offset]
+  (let [{:keys [text start]} (cview/line-at cv offset)]
+    (when-let [r (file-refs/ref-at text (- offset start))]
+      (assoc r :ns-hint (file-refs/ns-hint text)))))
+
+(defn- project-root
+  "The folder the file tree shows, else the active tab's file's folder, or nil."
+  [{:keys [tree-pane active-tab]}]
+  (or (some-> tree-pane :state deref :root)
+      (some-> (active-tab) :path deref (java.io.File.) .getCanonicalFile .getParent)))
+
+(defn- open-file-ref!
+  "Opens the file and line r names, or says why it can't."
+  [{:keys [set-status! source-ctx active-tab open-file-line!] :as ctx} {:keys [file line ns-hint]}]
+  (let [root (project-root ctx)
+        label (str file ":" line)
+        r (file-refs/resolve-file file {:root root
+                                        ;; walked only when the path itself doesn't open
+                                        :files (delay (if root (usages/project-files root) []))
+                                        :exists? #(.isFile (java.io.File. ^String %))
+                                        :ns-hint ns-hint})]
+    (cond
+      (:path r) (open-file-line! (source-ctx (active-tab)) label (:path r) line)
+      (:candidates r) (set-status! (str "; " (count (:candidates r)) " project files could be " file
+                                        ", so none was opened."))
+      :else (set-status! (str "; No file " file " in this project.")))))
+
+(defn- result-open-location!
+  [{:keys [cv set-status!] :as ctx}]
+  (if-let [r (file-ref-at ctx (g/cursor-offset (:buf cv)))]
+    (open-file-ref! ctx r)
+    (set-status! "; No file:line here.")))
+
 ;; GTK's own right-click opens the menu without moving the caret
 ;; (gtk_text_view_click_gesture_pressed: a context-menu press goes
 ;; to do_popup), so this moves it to the click first, in the capture
@@ -137,6 +179,15 @@
                (some #(= ref (:ref %)) @(:results cv)))
       (inspect-result! ctx ref text))))
 
+(defn- open-after-wait!
+  "On the GUI thread, once the click's wait is up: opens the file:line
+  reference r if that click is still the last and nothing is selected
+  since."
+  [{:keys [cv click-gen] :as ctx} {:keys [n r]}]
+  (let [[a2 b2] (g/selection-offsets (:buf cv))]
+    (when (and (= n @click-gen) (= a2 b2))
+      (open-file-ref! ctx r))))
+
 ;; a single primary click, with no text selected by it, on a result
 ;; line. It waits out GTK's gtk-double-click-time, which on macOS
 ;; follows the system's double-click speed, and a second press
@@ -149,12 +200,17 @@
         ;; trimmed while the click waits moves every span
         ref (cview/result-at cv off)
         text (cview/result-text-at cv off)
+        ;; a result wins; else a file:line reference in the clicked output
+        ;; line, never in the input being typed at the prompt
+        fref (when (and (nil? ref) (= a b) (not (cview/in-input? cv off))) (file-ref-at ctx off))
         n (swap! click-gen inc)
         wait (g/double-click-time (g/gtk-settings-get-default))]
-    (when (and ref (= a b))
+    (when (and (or ref fref) (= a b))
       (future
         (Thread/sleep wait)
-        (on-gui! (fn [] (inspect-after-wait! ctx {:n n :ref ref :text text})))))))
+        (on-gui! (fn [] (if ref
+                          (inspect-after-wait! ctx {:n n :ref ref :text text})
+                          (open-after-wait! ctx {:n n :r fref}))))))))
 
 (defn- add-click!
   "Adds the click gesture to the console's view, its callables built once."
@@ -176,7 +232,7 @@
     (g/gtk-widget-add-controller (:view cv) click)))
 
 (defn- install
-  "The live-results part for one window: answers the five result fns and the
+  "The live-results part for one window: answers the six result fns and the
   three gesture fns, and adds the right-press and click gestures to the
   console's view, each callable built once."
   [wctx]
@@ -185,7 +241,8 @@
     (add-click! ctx)
     {:fns {:result-inspect-fn (fn [] (result-inspect! ctx)) :result-copy-fn (fn [] (result-copy! ctx))
            :result-define-fn (fn [] (result-define! ctx)) :result-jump-fn (fn [] (result-jump! ctx))
-           :result-doc-fn (fn [] (result-doc! ctx))}
+           :result-doc-fn (fn [] (result-doc! ctx))
+           :result-open-location-fn (fn [] (result-open-location! ctx))}
      :ui {:result-click!* (fn [offset] (result-click! ctx offset))
           :result-release!* (fn [off] (result-release! ctx off))
           :console-right-press!* (fn [x y] (console-right-press! ctx x y))}}))

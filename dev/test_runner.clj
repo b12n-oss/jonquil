@@ -62,6 +62,7 @@
     jonquil.describe-test
     jonquil.locations-test
     jonquil.usages-test
+    jonquil.file-refs-test
     jonquil.resolve-test
     jonquil.timing-test
     jonquil.plugin-test

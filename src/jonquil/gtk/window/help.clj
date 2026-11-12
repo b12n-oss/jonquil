@@ -386,6 +386,19 @@
       :else
       (win-status/set-status! status-label (str "No definition found for " symbol ".")))))
 
+(defn open-file-line!
+  "Opens the file at path (absolute) at line, as a jump to a definition
+  there would: the tab's own file moves its caret, a project file opens in
+  a tab, anything else in the source panel. label names it in the status
+  bar. ctx is the source-ctx map."
+  [{:keys [ed status-label path sel*] :as ctx} label file-path line]
+  (if-let [loc (source/location {:file file-path :line line} {:project-dir (:project-dir @sel*)})]
+    (if (and (:path loc) @path (source/same-path? (:path loc) @path))
+      (do (place-at-line! ed loc)
+          (say-jumped! status-label label))
+      (open-location! ctx label loc))
+    (win-status/set-status! status-label (str "; Can't open " label "."))))
+
 (defn- do-source-jump!
   "F12/Ctrl+B inside the source panel: the same lookup on the panel
   editor's own snapshot, so the namespace comes from the panel file's ns

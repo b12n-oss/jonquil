@@ -12,7 +12,7 @@
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
    :replay-open-fn :replay-forget-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :compare-last-run-fn :compare-form-disk-fn :compare-form-head-fn :compare-form-last-run-fn :layout-save-fn :layout-forget-fn
-   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :panel-focus-fn
+   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :result-open-location-fn :panel-focus-fn
    :docs-show-fn :docs-bookmark-fn :docs-bookmarks-fn :docs-guide-fn])
 
 (defn- recording-ctx
@@ -59,6 +59,7 @@
    :trace/clear [:trace-clear-fn] :trace/untrace-all [:trace-untrace-all-fn]
    :result/inspect [:result-inspect-fn] :result/copy [:result-copy-fn]
    :result/define [:result-define-fn] :result/jump [:result-jump-fn] :result/doc [:result-doc-fn]
+   :result/open-location [:result-open-location-fn]
    :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn] :restart/define [:define-retry-fn]
    :panel/inspector [:panel-focus-fn :inspector] :panel/source [:panel-focus-fn :source]
    :panel/locations [:panel-focus-fn :locations] :panel/frames [:panel-focus-fn :debugger]
