@@ -60,16 +60,21 @@
 
 (defn- absolute? [p] (boolean (re-find #"^(?:/|[A-Za-z]:/)" p)))
 
+(defn- ending-with
+  "The files that end with /suffix."
+  [suffix files]
+  (filterv #(str/ends-with? % (str "/" suffix)) files))
+
 (defn- tail-candidates
-  "The project files that end with the longest tail of path (its last
-  segments, at least the file name) that any of them ends with."
+  "For an absolute path that doesn't exist here (one printed on another
+  machine): the project files ending with its longest tail of at least two
+  segments (src/a.clj, never just a.clj, which would be a guess)."
   [path files]
   (let [segs (vec (remove str/blank? (str/split path #"/")))]
     (or (some (fn [i]
-                (let [suffix (str "/" (str/join "/" (subvec segs i)))
-                      cs (filterv #(str/ends-with? % suffix) files)]
+                (let [cs (ending-with (str/join "/" (subvec segs i)) files)]
                   (when (seq cs) cs)))
-              (range (count segs)))
+              (range (max 0 (- (count segs) 1))))
         [])))
 
 (defn resolve-file
@@ -79,9 +84,9 @@
   (canonical paths, or a delay of them, walked only when needed), a
   file-exists check and ns-hint's answer for the line. An absolute path
   that exists is itself, and a path under root is that; else the project
-  files ending with the longest tail of it any of them has (so a path from
-  another machine finds the project's own file), narrowed by ns-hint when
-  several do."
+  files ending with all of a relative path, or with the longest tail of at
+  least two segments of an absolute one (so a path from another machine
+  finds the project's own file), narrowed by ns-hint when several do."
   [file {:keys [root files exists? ns-hint]}]
   (let [file (str/replace (str/replace file "\\" "/") #"^\./" "")
         under-root (when (and root (not (absolute? file))) (str root "/" file))]
@@ -89,7 +94,11 @@
       (and (absolute? file) (exists? file)) {:path file}
       (and under-root (exists? under-root)) {:path under-root}
       :else
-      (let [cands (tail-candidates file (force files))
+      (let [cands (if (absolute? file)
+                    (tail-candidates file (force files))
+                    ;; relative: the files ending with all of it, so
+                    ;; clojure/core.clj never opens the project's own core.clj
+                    (ending-with file (force files)))
             hinted (when ns-hint (filterv #(str/ends-with? (strip-ext %) (str "/" ns-hint)) cands))]
         (cond
           (= 1 (count cands)) {:path (first cands)}

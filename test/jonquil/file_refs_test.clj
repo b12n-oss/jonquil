@@ -79,6 +79,10 @@
         opts {:root "/p" :files files :exists? (constantly false)}]
     (testing "an absolute path from another machine falls back to the project's own file"
       (is (= {:path "/p/src/a.clj"} (fr/resolve-file "/home/ci/proj/src/a.clj" opts))))
+    (testing "a relative path that only shares its file name opens nothing"
+      (is (= {:none true} (fr/resolve-file "clojure/a.clj" opts))))
+    (testing "an absolute path that only shares its file name opens nothing"
+      (is (= {:none true} (fr/resolve-file "/home/ci/elsewhere/a.clj" (assoc opts :files ["/p/src/b/a.clj"])))))
     (testing "a Windows absolute path is absolute"
       (is (= {:path "C:/x/a.clj"} (fr/resolve-file "C:\\x\\a.clj" (assoc opts :exists? #{"C:/x/a.clj"})))))
     (testing "the project's files are only walked when they're needed"
