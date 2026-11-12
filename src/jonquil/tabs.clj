@@ -14,6 +14,16 @@
   (let [parts (str/split path #"/")]
     (when (> (count parts) 1) (nth parts (- (count parts) 2)))))
 
+(defn- tab-base
+  "The label of tab t before its dirty mark: the file's basename (with its
+  parent folder when clashes holds the basename) or Untitled numbered
+  untitled-n, 1 for the first."
+  [{:keys [path]} clashes untitled-n]
+  (cond
+    (nil? path) (if (= 1 untitled-n) "Untitled" (str "Untitled " untitled-n))
+    (clashes (base-name path)) (str (base-name path) " · " (parent-name path))
+    :else (base-name path)))
+
 (defn labels
   "One label per tab, in order: the file's basename, plus \" · <parent
   folder>\" when another tab has the same basename, or Untitled numbered
@@ -24,13 +34,9 @@
     (loop [[t & more] tabs untitled 0 out []]
       (if-not t
         out
-        (let [{:keys [path dirty?]} t
-              untitled' (if path untitled (inc untitled))
-              base (cond
-                     (nil? path) (if (= 1 untitled') "Untitled" (str "Untitled " untitled'))
-                     (clashes (base-name path)) (str (base-name path) " · " (parent-name path))
-                     :else (base-name path))]
-          (recur more untitled' (conj out (if dirty? (str base " ●") base))))))))
+        (let [untitled' (if (:path t) untitled (inc untitled))
+              base (tab-base t clashes untitled')]
+          (recur more untitled' (conj out (if (:dirty? t) (str base " ●") base))))))))
 
 (defn find-open
   "The index of the first tab whose :path names the same file as path

@@ -179,9 +179,10 @@
               (when key?
                 (try
                   (swap! (:recent-keys ctx) describe/remember
-                         (describe/recent-entry kname state os
-                                                (describe/typing? kname state (g/printable-key? keyval))
-                                                @ran))
+                         (describe/recent-entry
+                          {:key-name kname :state state :os os
+                           :typing (describe/typing? kname state (g/printable-key? keyval))
+                           :ran @ran}))
                   (catch :default _ nil)))
               answer)))
         (catch :default e

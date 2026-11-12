@@ -162,6 +162,29 @@
           (fallback opts "printed no PATH"))))
     (catch Throwable _ (fallback opts "failed"))))
 
+(defn- start-opts
+  "opts with every default filled in: env, home, shell, timeout-ms, exists?."
+  [{:keys [env home shell] :as opts}]
+  (let [env (or env (into {} (System/getenv)))]
+    (assoc opts
+           :env env
+           :home (or home (System/getProperty "user.home"))
+           :shell (or shell (get env "SHELL"))
+           :timeout-ms (or (:timeout-ms opts) timeout-ms)
+           :exists? (or (:exists? opts)
+                        (fn [p] (if (directory? p) true (executable-file? p)))))))
+
+(defn- begin!
+  "Delivers to result: the lookup's answer (on a future) when the launch's PATH
+  lacks the well-known dirs, :started; else the current PATH, :not-needed."
+  [{:keys [env home] :as opts} result]
+  (if (tp/needs-lookup? (get env "PATH") home)
+    (do (future (deliver result (try (lookup opts)
+                                     (catch Throwable _ (fallback opts "failed")))))
+        :started)
+    (do (deliver result {:path (get env "PATH") :source :process})
+        :not-needed)))
+
 (defn start!
   "Starts the lookup when {:env :home :shell :timeout-ms :exists?} describe a
   launch whose PATH lacks the well-known dirs, and returns :started. Returns
@@ -170,25 +193,13 @@
   Defaults: env System/getenv, home user.home, shell the SHELL variable,
   timeout-ms the timeout-ms var, exists? as described in the ns docstring."
   ([] (start! {}))
-  ([{:keys [env home shell] :as opts}]
+  ([opts]
    (try
-     (let [env (or env (into {} (System/getenv)))
-           home (or home (System/getProperty "user.home"))
-           opts (assoc opts
-                       :env env :home home
-                       :shell (or shell (get env "SHELL"))
-                       :timeout-ms (or (:timeout-ms opts) timeout-ms)
-                       :exists? (or (:exists? opts)
-                                    (fn [p] (if (directory? p) true (executable-file? p)))))
+     (let [opts (start-opts opts)
            result (promise)
            entry {:result result :timeout-ms (:timeout-ms opts) :opts opts}]
        (when (compare-and-set! state nil entry)
-         (if (tp/needs-lookup? (get env "PATH") home)
-           (do (future (deliver result (try (lookup opts)
-                                            (catch Throwable _ (fallback opts "failed")))))
-               :started)
-           (do (deliver result {:path (get env "PATH") :source :process})
-               :not-needed))))
+         (begin! opts result)))
      (catch Throwable _
        ;; The once-guard may already be set; nobody must wait on it forever.
        (when-let [{:keys [result opts]} @state]

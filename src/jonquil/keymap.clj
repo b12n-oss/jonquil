@@ -132,19 +132,26 @@
       (some #(nil? (key-value %)) names)
       (conj (str "names an unknown key " (pr-str (remove key-value names)))))))
 
+(defn- exact-problems
+  "The problems of binding b's :exact modifier set, with exact its
+  (set) members."
+  [b exact]
+  (cond-> []
+    (and (contains? b :exact) (not (set? (:exact b))))
+    (conj ":exact isn't a set")
+    (and (some modifiers exact) (some (complement exact-modifiers) exact))
+    (conj (str ":exact names " (pr-str (remove exact-modifiers exact))
+               ", only :shift :alt :ctrl :meta"))
+    (and (contains? b :exact) (or (contains? b :mods) (contains? b :not)))
+    (conj "has :exact alongside :mods or :not")))
+
 (defn- modifier-problems [b]
   (let [exact (when (set? (:exact b)) (:exact b))
         mods (concat (coll-of b :mods) (coll-of b :not) exact)]
     (cond-> []
       (some (complement modifiers) mods)
       (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
-      (and (contains? b :exact) (not (set? (:exact b))))
-      (conj ":exact isn't a set")
-      (and (some modifiers exact) (some (complement exact-modifiers) exact))
-      (conj (str ":exact names " (pr-str (remove exact-modifiers exact))
-                 ", only :shift :alt :ctrl :meta"))
-      (and (contains? b :exact) (or (contains? b :mods) (contains? b :not)))
-      (conj "has :exact alongside :mods or :not")
+      :always (into (exact-problems b exact))
       (and (contains? b :physical?) (not (boolean? (:physical? b))))
       (conj ":physical? isn't true or false"))))
 

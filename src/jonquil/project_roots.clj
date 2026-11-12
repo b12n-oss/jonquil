@@ -20,6 +20,14 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
+(defn- read-deps
+  "dir's deps.edn as a map, nil when it is missing or doesn't read as a map."
+  [dir]
+  (let [f (io/file dir "deps.edn")]
+    (when (.isFile f)
+      (try (let [m (edn/read-string (slurp f))] (when (map? m) m))
+           (catch Exception _ nil)))))
+
 (defn paths
   "The project's source folders as absolute paths: deps.edn's :paths (the
   Clojure CLI's default [\"src\"] when the file or the key is missing),
@@ -29,10 +37,7 @@
   [dir]
   (if-not dir
     []
-    (let [f (io/file dir "deps.edn")
-          deps (when (.isFile f)
-                 (try (let [m (edn/read-string (slurp f))] (when (map? m) m))
-                      (catch Exception _ nil)))
+    (let [deps (read-deps dir)
           ps (if (contains? deps :paths) (:paths deps) ["src"])]
       (into []
             (comp (filter string?)
@@ -55,6 +60,14 @@
 
 (defonce ^:private warned? (atom false))
 
+(defn- known-base-roots
+  "The roots Jolt started with: the kept ones, else read now (and kept when
+  there are any), nil when this Jolt can't say."
+  []
+  (or @base-roots
+      (when-let [f (host-fn 'jolt.host/source-roots)]
+        (reset! base-roots (vec (f))))))
+
 (defn use-project!
   "Makes dir's source folders (paths) roots Jolt searches, after the roots
   it started with; nil dir leaves only those. true when the roots were set.
@@ -63,9 +76,7 @@
   its own namespaces."
   [dir]
   (let [set-roots! (host-fn 'jolt.host/set-source-roots!)
-        base (or @base-roots
-                 (when-let [f (host-fn 'jolt.host/source-roots)]
-                   (reset! base-roots (vec (f)))))]
+        base (known-base-roots)]
     (if (and set-roots! base)
       (do (set-roots! (vec (distinct (concat base (paths dir))))) true)
       (do (when (and dir (compare-and-set! warned? false true))
@@ -128,6 +139,22 @@
   [^java.io.File f]
   (try (boolean (seq (:deps (edn/read-string (slurp f))))) (catch Throwable _ false)))
 
+(defn- resolve-cached
+  "[roots-result hit?] for deps.edn file f under cache key k: the kept result
+  while it is good (a failure only for failure-retry-ms), else a fresh
+  resolve, which says \"Resolving deps.edn...\" first when f names :deps."
+  [f k]
+  (let [h (get @resolved k)
+        hit (when (or (not (:problem h))
+                      (< (- (System/currentTimeMillis) (:at h 0)) failure-retry-ms))
+              h)]
+    [(or hit
+         (do (when (has-deps? f) (println "; Resolving deps.edn..."))
+             (let [r (resolve-project-roots (first k))]
+               (swap! resolved assoc k r)
+               r)))
+     (some? hit)]))
+
 (defn use-project-deps!
   "use-project!, with dir's :deps resolved too when it has a deps.edn: the
   dependencies' roots go after its :paths, all after the roots Jolt started
@@ -142,20 +169,10 @@
     (if-not (and f (.isFile f))
       (use-project! dir)
       (let [k [(.getCanonicalPath (io/file dir)) (.lastModified f) (user-deps-mtime)]
-            hit (let [h (get @resolved k)]
-                  (when (or (not (:problem h))
-                            (< (- (System/currentTimeMillis) (:at h 0)) failure-retry-ms))
-                    h))
-            r (or hit
-                  (do (when (has-deps? f) (println "; Resolving deps.edn..."))
-                      (let [r (resolve-project-roots (first k))]
-                        (swap! resolved assoc k r)
-                        r)))
+            [r hit?] (resolve-cached f k)
             set-roots! (host-fn 'jolt.host/set-source-roots!)
-            base (or @base-roots
-                     (when-let [g (host-fn 'jolt.host/source-roots)]
-                       (reset! base-roots (vec (g)))))]
-        (when (and (:problem r) (not hit))
+            base (known-base-roots)]
+        (when (and (:problem r) (not hit?))
           (binding [*out* *err*] (println (str "; " (:problem r)))))
         (if (and set-roots! base)
           (do (set-roots! (vec (distinct (concat base (:roots r))))) true)

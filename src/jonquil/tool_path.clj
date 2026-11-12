@@ -37,19 +37,24 @@
   (let [have (set (entries path-string))]
     (not-any? have (well-known-dirs home))))
 
+(defn- uid-shell
+  "The trimmed shell field of passwd line when its uid field (the third) is
+  uid and it has 7 fields, nil when the shell is blank or the line doesn't
+  match."
+  [line uid]
+  (let [fields (str/split line #":" -1)]
+    (when (and (>= (count fields) 7)
+               (= (str uid) (nth fields 2)))
+      (let [shell (str/trim (nth fields 6))]
+        (when-not (str/blank? shell) shell)))))
+
 (defn passwd-shell
   "The shell field of the passwd-text line whose third field (the uid) is uid,
   an int. nil when no line matches, the field is blank, or passwd-text or uid
   is nil. Lines with fewer than 7 fields are skipped."
   [passwd-text uid]
   (when (and passwd-text uid)
-    (some (fn [line]
-            (let [fields (str/split line #":" -1)]
-              (when (and (>= (count fields) 7)
-                         (= (str uid) (nth fields 2)))
-                (let [shell (str/trim (nth fields 6))]
-                  (when-not (str/blank? shell) shell)))))
-          (str/split-lines passwd-text))))
+    (some #(uid-shell % uid) (str/split-lines passwd-text))))
 
 (defn default-shell
   "The shell to run when SHELL is unset, for {:os :passwd-text :uid}: /bin/zsh

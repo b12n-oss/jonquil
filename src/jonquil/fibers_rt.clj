@@ -62,15 +62,19 @@
     ;; called once it ends (at once when it already has), on its carrier
     ((f* 'monitor!) fib (fn [_] (swap! registry note-finished id)))))
 
+(defn- recording-spawn
+  "spawn wrapped to record each fiber it starts, so the panel can list it. A
+  failure to record never reaches the spawner."
+  [orig]
+  (fn [& args]
+    (let [fib (apply orig args)]
+      (try (record! fib (first args)) (catch Throwable _ nil))
+      fib)))
+
 (defn- watch! []
   (locking registry
     (when-not (:wrapped? @registry)
-      (alter-var-root (f* 'spawn)
-                      (fn [orig]
-                        (fn [& args]
-                          (let [fib (apply orig args)]
-                            (try (record! fib (first args)) (catch Throwable _ nil))
-                            fib))))
+      (alter-var-root (f* 'spawn) recording-spawn)
       (swap! registry assoc :wrapped? true)))
   {:watching? true})
 

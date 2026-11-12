@@ -113,6 +113,23 @@
 
 (defn- kid-text [code kid] (subs code (:start kid) (:end kid)))
 
+(defn- in-string-step
+  "The step for the char c at j inside a string: [next-j depth in-str?]. A
+  backslash skips the char after it."
+  [c j depth]
+  (cond (= c \\) [(+ j 2) depth true]
+        (= c \") [(inc j) depth false]
+        :else [(inc j) depth true]))
+
+(defn- in-code-step
+  "The step for the char c at j outside a string: [next-j depth in-str?],
+  depth nil once the map's own closing brace is at j."
+  [c j depth]
+  (cond (= c \") [(inc j) depth true]
+        (= c \{) [(inc j) (inc depth) false]
+        (= c \}) (if (= 1 depth) [(inc j) nil false] [(inc j) (dec depth) false])
+        :else [(inc j) depth false]))
+
 (defn- skip-meta-map
   "Index just past the balanced {...} map that starts at i in s, strings
   skipped. Past the end of s when it never closes."
@@ -120,15 +137,23 @@
   (loop [j i depth 0 in-str? false]
     (if (>= j (count s))
       j
-      (let [c (nth s j)]
-        (cond
-          in-str? (cond (= c \\) (recur (+ j 2) depth true)
-                        (= c \") (recur (inc j) depth false)
-                        :else (recur (inc j) depth true))
-          (= c \") (recur (inc j) depth true)
-          (= c \{) (recur (inc j) (inc depth) false)
-          (= c \}) (if (= 1 depth) (inc j) (recur (inc j) (dec depth) false))
-          :else (recur (inc j) depth false))))))
+      (let [c (nth s j)
+            [j' depth' in-str?'] (if in-str?
+                                   (in-string-step c j depth)
+                                   (in-code-step c j depth))]
+        (if (nil? depth')
+          j'
+          (recur j' depth' in-str?'))))))
+
+(defn- meta-end
+  "Index just past the leading ^ metadata form of t (which starts with ^): a
+  ^{...} map, else the symbol or keyword up to the next whitespace."
+  [t]
+  (if (str/starts-with? t "^{")
+    (skip-meta-map t 1)
+    (or (some (fn [i] (when (Character/isWhitespace ^char (nth t i)) i))
+              (range (count t)))
+        (count t))))
 
 (defn- strip-meta
   "s without leading ^:kw, ^Sym and ^{...} metadata prefixes (repeated
@@ -136,12 +161,7 @@
   [s]
   (loop [t (str/triml s)]
     (if (str/starts-with? t "^")
-      (let [end (if (str/starts-with? t "^{")
-                  (skip-meta-map t 1)
-                  (or (some (fn [i] (when (Character/isWhitespace ^char (nth t i)) i))
-                            (range (count t)))
-                      (count t)))]
-        (recur (str/triml (subs t (min end (count t))))))
+      (recur (str/triml (subs t (min (meta-end t) (count t)))))
       t)))
 
 (defn- plain-symbol? [s]
@@ -205,6 +225,18 @@
                      :source-file source-file :at at :dialect dialect
                      :key (key-of head texts)})}))
 
+(defn- form-entries
+  "The entries of code's top-level forms, in order, the ns moving with each
+  form-step, starting from ns."
+  [{:keys [code ns source-file at dialect]}]
+  (loop [forms (commands/top-level-forms (or code "")) cur-ns ns out []]
+    (if-let [f (first forms)]
+      (let [{step-ns :ns entry :entry}
+            (form-step {:f f :code code :cur-ns cur-ns :source-file source-file
+                        :at at :dialect dialect})]
+        (recur (rest forms) step-ns (if entry (conj out entry) out)))
+      out)))
+
 (defn entries
   "Entries for what one action ran. source is :run (a whole buffer: a saved
   one is a file entry, an untitled one is split into forms), :form,
@@ -216,14 +248,8 @@
   [{:keys [source code path ns at dialect]}]
   (if (and (= :run source) path)
     [{:kind :file :path path :at at :dialect dialect}]
-    (let [source-file (when (contains? #{:form :selection} source) path)]
-      (loop [forms (commands/top-level-forms (or code "")) cur-ns (or ns "user") out []]
-        (if-let [f (first forms)]
-          (let [{step-ns :ns entry :entry}
-                (form-step {:f f :code code :cur-ns cur-ns :source-file source-file
-                            :at at :dialect dialect})]
-            (recur (rest forms) step-ns (if entry (conj out entry) out)))
-          out)))))
+    (form-entries {:code code :ns (or ns "user") :at at :dialect dialect
+                   :source-file (when (contains? #{:form :selection} source) path)})))
 
 ;; --- slots ---------------------------------------------------------------
 
@@ -341,16 +367,15 @@
   [^String s i]
   (let [n (count s)]
     (loop [j i depth 0]
-      (if (>= j n)
-        n
-        (let [c (nth s j)]
-          (cond
-            (= c \") (recur (string-end s j) depth)
-            (= c \;) (recur (or (str/index-of s "\n" j) n) depth)
-            (= c \\) (recur (+ j 2) depth)
-            (contains? #{\( \[ \{} c) (recur (inc j) (inc depth))
-            (contains? #{\) \] \}} c) (if (= 1 depth) (inc j) (recur (inc j) (dec depth)))
-            :else (recur (inc j) depth)))))))
+      (let [c (when (< j n) (nth s j))]
+        (cond
+          (nil? c) n
+          (= c \") (recur (string-end s j) depth)
+          (= c \;) (recur (or (str/index-of s "\n" j) n) depth)
+          (= c \\) (recur (+ j 2) depth)
+          (contains? #{\( \[ \{} c) (recur (inc j) (inc depth))
+          (contains? #{\) \] \}} c) (if (= 1 depth) (inc j) (recur (inc j) (dec depth)))
+          :else (recur (inc j) depth))))))
 
 (defn- atom-end [^String s i]
   (let [n (count s)]
@@ -489,6 +514,22 @@
                true (conj (render f))))
       out)))
 
+(defn- script-header
+  "The replay tab's header comment: the folder, the recorded dialect and
+  when, the counts of compact's groups c, and a note when the recorded
+  dialect isn't this window's (dialect). s is the session's summary."
+  [s {:keys [files defs others]} root dialect]
+  (let [recorded (:dialect s)]
+    (str ";; Last session "
+         (if root (str "in " root) "with no folder")
+         " (" recorded ", " (:when s) "), " (plural (count files) "file" "files") ",\n"
+         ";; " (plural (count defs) "definition" "definitions") ", "
+         (plural (count others) "other form" "other forms")
+         ". Nothing has run. Edit, then Run (Cmd/Ctrl+R).\n"
+         ";; A replay runs the code again, so results can differ from last time."
+         (when (not= recorded dialect)
+           (str "\n;; Recorded in " recorded "; this window runs " dialect ".")))))
+
 (defn script
   "The replay tab's text for es: a header, then files, definitions and other
   forms (commented out with #_, their in-ns lines too), each under a
@@ -499,17 +540,7 @@
   [es {:keys [root now dialect]}]
   (let [c (compact es)
         {:keys [files defs others]} c
-        s (summary es now c)
-        recorded (:dialect s)
-        header (str ";; Last session "
-                    (if root (str "in " root) "with no folder")
-                    " (" recorded ", " (:when s) "), " (plural (count files) "file" "files") ",\n"
-                    ";; " (plural (count defs) "definition" "definitions") ", "
-                    (plural (count others) "other form" "other forms")
-                    ". Nothing has run. Edit, then Run (Cmd/Ctrl+R).\n"
-                    ";; A replay runs the code again, so results can differ from last time."
-                    (when (not= recorded dialect)
-                      (str "\n;; Recorded in " recorded "; this window runs " dialect ".")))
+        header (script-header (summary es now c) c root dialect)
         section (fn [heading lines] (when (seq lines) (str heading "\n" (str/join "\n" lines))))]
     (str/join "\n\n"
               (remove nil?

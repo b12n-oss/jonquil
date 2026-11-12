@@ -69,10 +69,10 @@
 
 (deftest recent-entry-test
   (testing "typing keeps only a count"
-    (is (= {:typing 1} (d/recent-entry "parenleft" 0 "Mac OS X" true nil))))
+    (is (= {:typing 1} (d/recent-entry {:key-name "parenleft" :state 0 :os "Mac OS X" :typing true :ran nil}))))
   (testing "a chord keeps the command that actually ran, nil when the key passed on"
-    (is (= {:chord "F6" :command :focus/toggle} (d/recent-entry "F6" 0 "Mac OS X" false :focus/toggle)))
-    (is (= {:chord "Esc" :command nil} (d/recent-entry "Escape" 0 "Mac OS X" false nil)))))
+    (is (= {:chord "F6" :command :focus/toggle} (d/recent-entry {:key-name "F6" :state 0 :os "Mac OS X" :typing false :ran :focus/toggle})))
+    (is (= {:chord "Esc" :command nil} (d/recent-entry {:key-name "Escape" :state 0 :os "Mac OS X" :typing false :ran nil})))))
 
 (deftest recent-lines-test
   (is (= ["; No keys yet."] (d/recent-lines [])))

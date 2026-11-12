@@ -3,7 +3,7 @@
   row uses (here ga/sh) refuse to act for a row the driver has timed out,
   the throw fires once so the row's own finally still cleans up, and
   nothing outside a row is ever checked."
-  (:require [clojure.core.async :as a :refer [<! go timeout]]
+  (:require [clojure.core.async :refer [<! go timeout]]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [gtk-async :as ga]

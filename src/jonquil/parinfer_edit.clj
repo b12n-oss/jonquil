@@ -116,25 +116,37 @@
        (not (contains? #{\space \tab \return \newline \) \] \} \;} (.charAt text L)))
        (not (inside-span? strings L))))
 
+(defn- indent-region-start
+  "The start of the first line of the indentation region holding a: the last
+  boundary line at or before a's line, or 0."
+  [^String text spans a]
+  (loop [L (line-start text a)]
+    (if (or (zero? L) (boundary? text spans L)) L (recur (line-start text (dec L))))))
+
+(defn- indent-region-end
+  "The end of the indentation region holding b: the line before the next
+  boundary line after b's line, or the end of text."
+  [^String text spans b]
+  (let [n (count text)]
+    (loop [L (inc (line-end text b))]
+      (cond (>= L n) (line-end text n)
+            ;; (dec L) is the newline ending the previous line; a \r
+            ;; before it belongs to that line's ending, not the region.
+            (boundary? text spans L)
+            (let [e (dec L)]
+              (if (and (pos? e) (= \return (.charAt text (dec e)))) (dec e) e))
+            :else (recur (let [nl (line-end text L)]
+                           (inc (if (and (< nl n) (= \return (.charAt text nl))) (inc nl) nl))))))))
+
 (defn- indent-region
   "The region for unbalanced text: from the last boundary line at or before
   a's line to the line before the next boundary after b's line."
   [^String text a b]
-  (let [n (count text)
-        spans (vec (for [[t s e] (syntax/tokenize-equal text)
+  (let [spans (vec (for [[t s e] (syntax/tokenize-equal text)
                          :when (contains? #{:string :regex} t)]
                      [s e]))
-        s (loop [L (line-start text a)]
-            (if (or (zero? L) (boundary? text spans L)) L (recur (line-start text (dec L)))))
-        e (loop [L (inc (line-end text b))]
-            (cond (>= L n) (line-end text n)
-                  ;; (dec L) is the newline ending the previous line; a \r
-                  ;; before it belongs to that line's ending, not the region.
-                  (boundary? text spans L)
-                  (let [e (dec L)]
-                    (if (and (pos? e) (= \return (.charAt text (dec e)))) (dec e) e))
-                  :else (recur (let [nl (line-end text L)]
-                                 (inc (if (and (< nl n) (= \return (.charAt text nl))) (inc nl) nl))))))]
+        s (indent-region-start text spans a)
+        e (indent-region-end text spans b)]
     [s (max e (line-end text b))]))
 
 (defn region
@@ -159,12 +171,34 @@
 (defn- leading-ws [^String line]
   (count (take-while #(or (= \space %) (= \tab %)) line)))
 
+(defn- line-edit-movable?
+  "Whether the one-line edit at column x of p-line (code from column ip)
+  can be moved to column x' of f-line, the line Paren mode made of it: the
+  code before it unchanged (Paren mode also rewrites a tab in code as two
+  spaces, so x' only holds then) and old-text still where the edit starts."
+  [{:keys [^String p-line ^String f-line old-text x x' ip]}]
+  (and (>= x ip)
+       (= (subs p-line ip x) (subs f-line (leading-ws f-line) x'))
+       (<= (+ x' (count old-text)) (count f-line))
+       (= old-text (subs f-line x' (+ x' (count old-text))))))
+
+(defn- reapply-edit
+  "mode-fn run on the fixed lines F-lines with change put back at column x'
+  of f-line, the caret at rel-caret, c0 the edit's offset in the old form."
+  [{:keys [mode-fn F-lines change ^String f-line x' rel-caret c0]}]
+  (let [{:keys [line-no old-text new-text]} change
+        R2 (str/join "\n" (assoc F-lines line-no
+                                 (str (subs f-line 0 x') new-text (subs f-line (+ x' (count old-text))))))
+        [cl cx] (line-col R2 (+ (offset R2 line-no 0) x' (- rel-caret c0)))]
+    (mode-fn R2 {:changes [(assoc change :x x')] :cursor-line cl :cursor-x cx})))
+
 (defn- rebased
   "Smart or Indent mode run on the form with its indentation fixed (fixed,
   Paren mode's text for P) and the edit re-applied on top, or nil when the
   edit isn't a change within one line's code that can be moved across. P is
-  the form before the edit, change and rel-caret are relative to it."
-  [mode-fn ^String P ^String fixed change rel-caret]
+  the form before the edit, change and rel-caret are relative to it. Takes
+  {:mode-fn :P :fixed :change :rel-caret}."
+  [{:keys [mode-fn ^String P ^String fixed change rel-caret]}]
   (let [P-lines (str/split P #"\n" -1)
         F-lines (str/split fixed #"\n" -1)
         {:keys [line-no x old-text new-text]} change
@@ -176,17 +210,11 @@
     (when (and p-line f-line
                (= (count P-lines) (count F-lines))
                (not (str/includes? old-text "\n"))
-               (>= x ip)
-               ;; Paren mode also rewrites a tab in code as two spaces, so
-               ;; the code before x must be unchanged for x' to hold.
-               (= (subs p-line ip x) (subs f-line (leading-ws f-line) x'))
-               (<= (+ x' (count old-text)) (count f-line))
-               (= old-text (subs f-line x' (+ x' (count old-text))))
+               (line-edit-movable? {:p-line p-line :f-line f-line :old-text old-text
+                                    :x x :x' x' :ip ip})
                (<= c0 rel-caret (+ c0 (count new-text))))
-      (let [R2 (str/join "\n" (assoc F-lines line-no
-                                     (str (subs f-line 0 x') new-text (subs f-line (+ x' (count old-text))))))
-            [cl cx] (line-col R2 (+ (offset R2 line-no 0) x' (- rel-caret c0)))]
-        (mode-fn R2 {:changes [(assoc change :x x')] :cursor-line cl :cursor-x cx})))))
+      (reapply-edit {:mode-fn mode-fn :F-lines F-lines :change change :f-line f-line
+                     :x' x' :rel-caret rel-caret :c0 c0}))))
 
 (defn- indent-width
   "A line's indentation width, a tab counting two, as Parinfer reads it."
@@ -229,7 +257,7 @@
         ;; A refused re-apply is nil, so the Paren fallback really runs; an
         ;; "unhandled" one is kept, so the shim gap is named instead of
         ;; silently taking Paren mode's fix.
-        (or (kept-rebase (rebased mode-fn P fixed change rel-caret))
+        (or (kept-rebase (rebased {:mode-fn mode-fn :P P :fixed fixed :change change :rel-caret rel-caret}))
             (parinfer/paren-mode R opts))
         (mode-fn R (assoc opts :changes [change]))))))
 
@@ -257,12 +285,10 @@
   sits between each pair, in order."
   [^String s]
   (loop [i 0 ws-since? false seen? false flags []]
-    (if (>= i (count s))
-      flags
-      (let [c (.charAt s i)]
-        (if (contains? #{\space \tab \return} c)
-          (recur (inc i) true seen? flags)
-          (recur (inc i) false true (if seen? (conj flags ws-since?) flags)))))))
+    (cond
+      (>= i (count s)) flags
+      (contains? #{\space \tab \return} (.charAt s i)) (recur (inc i) true seen? flags)
+      :else (recur (inc i) false true (if seen? (conj flags ws-since?) flags)))))
 
 (defn- tokens-kept?
   "Whether every whitespace run between two non-bracket characters survives
@@ -324,6 +350,18 @@
       (:text r)
       form)))
 
+(defn- paren-stable-spans
+  "text with the form on each of spans (line spans of its top-level forms,
+  in order) that the range [a b] touches put through paren-stable-form."
+  [^String text spans a b]
+  (loop [pieces [] pos 0 spans (seq spans)]
+    (if-not spans
+      (apply str (conj pieces (subs text pos)))
+      (let [[s e] (first spans)
+            form (subs text s e)]
+        (recur (conj pieces (subs text pos s) (if (and (< s b) (< a e)) (paren-stable-form form) form))
+               e (next spans))))))
+
 (defn paren-stable
   "text with every top-level form the character range [a b] touches
   re-indented the way Paren mode reads it, so the first keystroke in a
@@ -341,13 +379,7 @@
    (let [{:keys [bracket-tokens matches unmatched]} (syntax/compute-brackets-equal text)]
      (if (seq unmatched)
        text
-       (loop [pieces [] pos 0 spans (seq (top-level-spans text bracket-tokens matches))]
-         (if-not spans
-           (apply str (conj pieces (subs text pos)))
-           (let [[s e] (first spans)
-                 form (subs text s e)]
-             (recur (conj pieces (subs text pos s) (if (and (< s b) (< a e)) (paren-stable-form form) form))
-                    e (next spans)))))))))
+       (paren-stable-spans text (top-level-spans text bracket-tokens matches) a b)))))
 
 (defn- caret-opts
   "Parinfer's cursor options for the caret inside the region: its place in R

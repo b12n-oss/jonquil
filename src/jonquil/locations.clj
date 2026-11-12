@@ -22,6 +22,14 @@
   ;; every place costs two marks in the buffer and a row in the panel
   1000)
 
+(defn- line-number
+  "The 1-based line of offset s in text, counting from pos (the start of
+  line number line) in one forward pass."
+  [^String text pos line s]
+  (loop [i pos line line]
+    (let [j (.indexOf text "\n" (int i))]
+      (if (and (>= j 0) (< j s)) (recur (inc j) (inc line)) line))))
+
 (defn entries
   "One entry per [start end] range, ranges in buffer order: its 1-based
   line and that whole line, trimmed and cut to TEXT-MAX characters. Line
@@ -30,9 +38,7 @@
   [^String text ranges]
   (loop [rs ranges pos 0 line 1 acc (transient [])]
     (if-let [[s e] (first rs)]
-      (let [line (loop [i pos line line]
-                   (let [j (.indexOf text "\n" (int i))]
-                     (if (and (>= j 0) (< j s)) (recur (inc j) (inc line)) line)))]
+      (let [line (line-number text pos line s)]
         (recur (rest rs) s line (conj! acc {:start s :end e :line line :text (line-text text s)})))
       (persistent! acc))))
 

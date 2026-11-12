@@ -8,6 +8,28 @@
 
 (defn- lines [s] (if (empty? s) [] (str/split-lines s)))
 
+(defn- ops->hunks
+  "The hunks of a line diff's ops ([:same|:del|:add line]), the first line
+  being line 0-based in the buffer: runs of :del and :add between :same
+  lines become one {:line :here :there} each."
+  [ops line]
+  (let [fresh (fn [cur line] (or cur {:line line :here [] :there []}))
+        close (fn [acc cur] (if cur (conj acc cur) acc))]
+    (loop [ops ops line line cur nil acc []]
+      (if-let [[k l] (first ops)]
+        (case k
+          :same (recur (rest ops) (inc line) nil (close acc cur))
+          :del (recur (rest ops) line (update (fresh cur line) :there conj l) acc)
+          :add (recur (rest ops) (inc line) (update (fresh cur line) :here conj l) acc))
+        (close acc cur)))))
+
+(defn- common-ends
+  "[p q]: how many leading and trailing lines vectors a and b share."
+  [a b]
+  (let [p (count (take-while true? (map = a b)))
+        q (count (take-while true? (map = (rseq (subvec a p)) (rseq (subvec b p)))))]
+    [p q]))
+
 (defn hunks
   "The differences from other to buffer, in buffer order: {:line l :here
   [buffer lines] :there [other lines]}, l the 0-based buffer line the
@@ -20,17 +42,9 @@
         b (vec (lines buffer))]
     (if (= a b)
       []
-      (let [p (count (take-while true? (map = a b)))
-            q (count (take-while true? (map = (rseq (subvec a p)) (rseq (subvec b p)))))
+      (let [[p q] (common-ends a b)
             mid (fn [v] (str/join "\n" (subvec v p (- (count v) q))))]
-        (loop [ops (review/line-diff (mid a) (mid b)) line p cur nil acc []]
-          (let [close (fn [acc] (if cur (conj acc cur) acc))]
-            (if-let [[k l] (first ops)]
-              (case k
-                :same (recur (rest ops) (inc line) nil (close acc))
-                :del (recur (rest ops) line (update (or cur {:line line :here [] :there []}) :there conj l) acc)
-                :add (recur (rest ops) (inc line) (update (or cur {:line line :here [] :there []}) :here conj l) acc))
-              (close acc))))))))
+        (ops->hunks (review/line-diff (mid a) (mid b)) p)))))
 
 (defn- line-starts
   "The offset each line of text starts at, plus the text's length last."
