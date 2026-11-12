@@ -50,16 +50,17 @@
 (defn show!
   "Shows text under summary with the caret at its start, an empty footer
   and the buttons for draft? (a set not yet kept: a name and Save, nothing
-  else to press but Close) or for a kept set (all but Save). The name entry
-  starts as default-name."
-  [pane {:keys [summary text draft? default-name]}]
+  else to press but Close) or for a kept set (all but Save, and without
+  Revert when proposed?). The name entry starts as default-name."
+  [pane {:keys [summary text draft? proposed? default-name]}]
   (g/gtk-label-set-text (:summary pane) summary)
   (editor/set-text! (:editor pane) text)
   (let [buf (:buf (:editor pane))] (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
   (set-name! pane (or default-name ""))
   (report! pane "")
   (doseq [w [(:name-entry pane) (:save-btn pane)]] (g/gtk-widget-set-visible w (if draft? 1 0)))
-  (doseq [k [:apply-btn :revert-btn :delete-btn]] (g/gtk-widget-set-visible (get pane k) (if draft? 0 1)))
+  (doseq [k [:apply-btn :delete-btn]] (g/gtk-widget-set-visible (get pane k) (if draft? 0 1)))
+  (g/gtk-widget-set-visible (:revert-btn pane) (if (or draft? proposed?) 0 1))
   nil)
 
 (defn- button! [pane label k]

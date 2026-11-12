@@ -12,7 +12,7 @@
   words (test/jonquil/palette_test.clj pins the queries)."
   {:id :change-sets
    :commands
-   {:change-set/make {:doc "Make a Change Set: bundle the work you touched in the file, to look over together."
+   {:change-set/make {:doc "Make a Change Set from the forms changed in the file."
                       :scope :window :call [:change-set-make-fn]}
     :change-set/browse {:doc "Change Sets: look over the sets you kept."
                         :scope :window :call [:change-set-list-fn]}}

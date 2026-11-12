@@ -178,6 +178,7 @@
                       ["reload your code" :debug/locals-mode]
                       ["compare with git head" :compare/head]
                       ["this form vs git head" :compare-form/head]
+                      ["this form" :compare-form/head]
                       ["make the text larger" :view/zoom-in]
                       ["save world" :world/save]]]
         (is (= id (first-id q)) q))
@@ -191,4 +192,4 @@
     (let [es (shipped-entries)]
       (is (= :change-set/browse (:run (palette/bang-pick es "!change sets"))))
       (is (= :change-set/make (:run (palette/bang-pick es "!make a change set"))))
-      (is (= :change-set/make (:run (palette/bang-pick es "!bundle the work you touched")))))))
+      (is (= :change-set/make (:run (palette/bang-pick es "!make a change set from the forms changed in the file")))))))

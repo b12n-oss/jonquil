@@ -12,13 +12,20 @@
             [jonquil.changed :as changed]
             [jonquil.commands :as commands]
             [jonquil.compare :as compare]
+            [jonquil.last-session :as last-session]
             [jonquil.plugin-review :as review]
+            [jonquil.source :as source]
             [jonquil.tabs :as tabs]))
 
 (def MAX-PROPOSED-FORMS
   ;; estimate: far more forms than one idea holds, few enough that the
   ;; review panel's text stays readable
   200)
+
+(def MAX-SET-BYTES
+  ;; a choice: a set holds forms, so a file this big is not one of ours, and
+  ;; the palette reads every file of the folder each time it opens
+  1048576)
 
 (def MAX-PROPOSED-CHARS
   ;; estimate, as plugin-mcp's MAX-SOURCE-CHARS: bigger than any form list
@@ -84,11 +91,14 @@
   (let [keys (compare/form-keys text)
         skip (fn [acc name reason] (update acc :skipped conj {:name name :reason reason}))
         step (fn [acc {:keys [name before] :as e}]
-               (let [r (when before (find-key keys e))]
+               (let [r (when before (find-key keys e))
+                     current (when r (subs text (:start r) (:end r)))]
                  (cond
                    (nil? before) (skip acc name "it is new since the last Run, so there is no earlier text to put back")
                    (nil? r) (skip acc name (str "This tab has no " (compare/form-shown e) " any more."))
-                   (= before (subs text (:start r) (:end r))) (skip acc name "it already reads as it did at the last Run")
+                   (= before current) (skip acc name "it already reads as it did at the last Run")
+                   ;; the place alone could be another form after an edit
+                   (not= (:text e) current) (skip acc name "it changed since the set was made")
                    (contains? (:seen acc) (:start r)) (skip acc name "it is listed twice")
                    :else (-> acc
                              (update :seen conj (:start r))
@@ -154,29 +164,56 @@
   isn't EDN or isn't a valid set."
   [path]
   (try
-    (let [s (edn/read-string (slurp path))]
-      (if (valid-set? s) {:set s} {:broken "It is not a valid change set."}))
+    (if (> (.length (io/file path)) MAX-SET-BYTES)
+      {:broken "It is over 1 MB, so it is not read."}
+      (let [s (edn/read-string (slurp path))]
+        (if (valid-set? s) {:set s} {:broken "It is not a valid change set."})))
     (catch :default e
       {:broken (str "It can't be read: " (or (ex-message e) (str e)))})))
 
+(defn- already-there [n]
+  (str "a change set called " n " exists already; pick another name"))
+
 (defn write-set!
-  "Writes s as its file in dir, replacing a set of the same name. nil, or a
-  sentence on failure."
-  [dir s]
-  (if-let [n (safe-name (:name s))]
-    (try (.mkdirs (io/file dir))
-         (spit (set-path dir n) (pr-str s))
-         nil
-         (catch :default e (str "The change set couldn't be saved: " (or (ex-message e) (str e)))))
-    "The change set needs a name with some letters or digits in it."))
+  "Writes s as its file in dir: a temp file beside it, then one move, so a
+  reader never sees half a file. Replaces a set of the same name, unless
+  opts has :create-new? true, which refuses an existing name and replaces
+  nothing. nil, or a sentence on failure."
+  ([dir s] (write-set! dir s nil))
+  ([dir s {:keys [create-new?]}]
+   (if-let [n (safe-name (:name s))]
+     (let [path (set-path dir n)
+           tmp (str path ".tmp-" (System/nanoTime))]
+       (try
+         (.mkdirs (io/file dir))
+         (if-not create-new?
+           (last-session/write-atomically! path (pr-str s))
+           (do (spit tmp (pr-str s))
+               (try (java.nio.file.Files/move
+                     (.toPath (java.io.File. ^String tmp)) (.toPath (java.io.File. ^String path))
+                     (make-array java.nio.file.CopyOption 0))
+                    nil
+                    (catch :default e
+                      (if (.exists (io/file path))
+                        (already-there n)
+                        (throw e)))
+                    (finally (io/delete-file tmp true)))))
+         (catch :default e (str "The change set couldn't be saved: " (or (ex-message e) (str e))))))
+     "The change set needs a name with some letters or digits in it.")))
 
 (defn delete-set!
-  "Removes the set called name from dir. nil, or a sentence on failure."
+  "Removes the file of the set listed as name from dir. name must be what
+  safe-name would make of it, so it can't leave the folder. nil, or a
+  sentence on failure (including a file that is not there, or stays)."
   [dir name]
-  (try (let [f (io/file (set-path dir name))]
-         (when (.exists f) (io/delete-file f))
-         nil)
-       (catch :default e (str "The change set couldn't be deleted: " (or (ex-message e) (str e))))))
+  (if-not (and (string? name) (= name (safe-name name)))
+    "That isn't the name of a kept change set."
+    (try (let [f (io/file (set-path dir name))]
+           (cond
+             (not (.exists f)) (str "There is no change set called " name ".")
+             (do (io/delete-file f true) (.exists f)) (str "The change set " name " couldn't be deleted.")
+             :else nil))
+         (catch :default e (str "The change set couldn't be deleted: " (or (ex-message e) (str e)))))))
 
 (defn list-sets
   "dir's sets by name: {:name :path} plus :set, or :broken and why. [] for
@@ -191,10 +228,43 @@
 
 ;; --- an agent's proposal ----------------------------------------------------------
 
+(defn clean-client
+  "A client's own name made safe to show and save: control characters
+  dropped, trimmed, at most 60 characters; nil when nothing is left or it
+  isn't a string."
+  [name]
+  (when (string? name)
+    (let [t (str/trim (apply str (remove (fn [c] (let [n (int c)] (or (< n 32) (<= 127 n 159)))) name)))
+          t (if (> (count t) 60) (subs t 0 60) t)]
+      (when-not (str/blank? t) t))))
+
+(def ^:private clojure-extensions #{"clj" "cljc" "cljs" "cljd" "bb"})
+
+(defn- extension [^String path]
+  (let [n (.getName (java.io.File. path))
+        i (str/last-index-of n ".")]
+    (when (and i (pos? i)) (subs n (inc i)))))
+
+(defn- proposal-file
+  "{:path canonical :disk text} for a proposed form's path under root, or
+  {:error msg}: the path must stay under root once symlinks and .. are
+  resolved, and name a readable Clojure file that exists."
+  [root path]
+  (let [f (let [f (io/file path)] (if (.isAbsolute f) f (io/file root path)))
+        canon (try (.getCanonicalPath f) (catch :default _ nil))]
+    (cond
+      (nil? canon) {:error (str path " isn't a usable path")}
+      (not (source/under? canon root)) {:error (str path " is outside the project")}
+      (not (.isFile (io/file canon))) {:error (str path " isn't a file in the project")}
+      (not (contains? clojure-extensions (extension canon))) {:error (str path " isn't a Clojure file (clj, cljc, cljs, cljd or bb)")}
+      (not (.canRead (io/file canon))) {:error (str path " can't be read")}
+      (> (.length (io/file canon)) MAX-SET-BYTES) {:error (str path " is too big to propose a form for")}
+      :else (try {:path canon :disk (slurp canon)}
+                 (catch :default _ {:error (str path " can't be read")})))))
+
 (defn- proposal-entry
-  "The entry for one proposed {\"path\" \"text\"} of root, or {:error msg}.
-  Its :before is the form as the file on disk has it now, so the review
-  shows what the proposal would change."
+  "The unplaced entry for one proposed {\"path\" \"text\"} of root, or
+  {:error msg}: :nth is 0 and :before nil until proposal-entries places it."
   [root p]
   (let [path (when (map? p) (get p "path"))
         text (when (map? p) (get p "text"))
@@ -207,17 +277,31 @@
       problem {:error (str "the form for " path ": " problem)}
       (not= 1 (count forms)) {:error (str "each entry is one top-level form, and the one for " path " has " (count forms))}
       :else
-      (let [abs (let [f (io/file path)] (.getPath (if (.isAbsolute f) f (io/file root path))))
-            k (first forms)
-            file (io/file abs)
-            disk (when (.isFile file) (try (slurp file) (catch :default _ nil)))
-            r (when disk (compare/form-range disk k))]
-        {:path abs :sig (:sig k) :nth 0 :name (:name k) :text text
-         :before (when r (subs disk (:start r) (:end r)))}))))
+      (let [file (proposal-file root path)]
+        (if (:error file)
+          file
+          (let [k (first forms)]
+            {:path (:path file) :disk (:disk file) :sig (:sig k) :nth 0 :name (:name k) :text text :before nil}))))))
+
+(defn- place
+  "entries (proposal-entry's) with :nth and :before set: the n-th proposed
+  form of a signature in a file replaces the file's n-th form of it, and
+  :before is that form's text, nil when the file has fewer."
+  [entries]
+  (let [disks (into {} (map (juxt :path (comp compare/form-keys :disk))) entries)]
+    (:out (reduce (fn [{:keys [seen out]} {:keys [path sig disk] :as e}]
+                    (let [n (get seen [path sig] 0)
+                          k (find-key (get disks path) {:sig sig :nth n})]
+                      {:seen (assoc seen [path sig] (inc n))
+                       :out (conj out (-> e (dissoc :disk) (assoc :nth n :name (compare/form-name sig n))
+                                          (assoc :before (when k (subs disk (:start k) (:end k))))))}))
+                  {:seen {} :out []}
+                  entries))))
 
 (defn proposal-entries
   "{:entries [...]} for an agent's list of {\"path\" \"text\"}, each one
-  top-level form (a path relative to root is made absolute), or {:error
+  top-level form of a Clojure file under root (a relative path is read
+  against root), paths made canonical so one file groups as one, or {:error
   msg} naming why none is saved."
   [root forms]
   (cond
@@ -227,16 +311,19 @@
     (> (reduce + (map #(count (str (when (map? %) (get % "text")))) forms)) MAX-PROPOSED-CHARS)
     {:error (str "the forms are over " MAX-PROPOSED-CHARS " characters in all")}
     :else
-    (let [es (mapv #(proposal-entry root %) forms)]
+    (let [canon-root (try (.getCanonicalPath (io/file root)) (catch :default _ root))
+          es (mapv #(proposal-entry canon-root %) forms)]
       (if-let [bad (first (filter :error es))]
         bad
-        {:entries es}))))
+        {:entries (place es)}))))
 
 (defn summary-text
-  "The panel's summary line for set s; draft? for one not kept yet."
+  "The panel's summary line for set s; draft? for one not kept yet. A
+  client's name is shown as what it called itself."
   [s draft?]
   (let [n (count (:entries s))
-        files (count (distinct (map :path (:entries s))))]
+        files (count (distinct (map :path (:entries s))))
+        by (clean-client (:by s))]
     (str "Change set \"" (:name s) "\"" (when draft? " (not kept yet)") ": "
          n (if (= 1 n) " form" " forms") " in " files (if (= 1 files) " file" " files")
-         (when (:by s) (str ", proposed by " (:by s))) ".")))
+         (when by (str ", proposed by a client calling itself \"" by "\"")) ".")))

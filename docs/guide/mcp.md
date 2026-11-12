@@ -130,16 +130,21 @@ press it again after reading the new one.
 `jonquil_change_set_propose` takes a `name` and `forms`, each form a `path`
 (absolute, or relative to the window's folder) and the `text` of one
 top-level form that replaces the form with the same first two elements in that
-file. It saves the set beside the settings file, marked "proposed by" the
-client's name, and puts a line in the console and on the status bar. It
-applies nothing and edits no file or tab: **Change Sets** in the palette
-lists it, the panel shows each form as a diff of the file's current form
-against the proposed text, and only you press Apply to REPL or Revert in
-Tabs. For a proposed set, Revert puts back the file's form as it was when
-the agent proposed. A name that is already taken is refused, so a proposal
-never replaces one of your sets. It is also refused when `forms` is empty or
-holds more than 200 entries, an entry isn't exactly one balanced form, or the
-texts together pass 262144 characters.
+file (a later entry of the same two elements replaces the file's next such
+form). Each path is resolved to its real path and must name an existing,
+readable Clojure file (`.clj`, `.cljc`, `.cljs`, `.cljd` or `.bb`) inside the
+window's folder, or the call is refused with the reason. The set is saved
+beside the settings file, marked with the client's own name (control
+characters dropped, at most 60 characters), and the window shows it as "a
+client calling itself" that name. A line goes to the console and the status
+bar. The call applies nothing and edits no file or tab: **Change Sets** in the
+palette lists it, the panel shows each form as a diff of the file's current
+form against the proposed text, and only you press Apply to REPL or Delete.
+There is no Revert for a proposed set. A name that is already taken is
+refused, and the file is created only if the name is free, so a proposal never
+replaces one of your sets, even when two windows race. It is also refused when
+`forms` is empty or holds more than 200 entries, an entry isn't exactly one
+balanced form, or the texts together pass 262144 characters.
 
 </details>
 

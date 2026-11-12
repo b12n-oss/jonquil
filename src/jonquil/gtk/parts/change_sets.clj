@@ -9,6 +9,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.change-sets :as cs]
+            [jonquil.clj :as clj]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.change-sets-pane :as pane]
@@ -16,6 +17,10 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
+            [jonquil.nrepl.attach]
+            [jonquil.nrepl.jank]
+            [jonquil.nrepl.shadow]
+            [jonquil.session]
             [jonquil.source :as source]))
 
 (defn- sets-dir
@@ -39,10 +44,14 @@
 ;; --- showing a set -------------------------------------------------------------
 
 (defn- show-set!
-  "Shows set s in the panel and opens it. draft? for one not kept yet."
-  [{:keys [panep shown* right show-right-panel!] :as ctx} s draft?]
-  (reset! shown* {:set s :draft? draft?})
+  "Shows set s in the panel and opens it. draft? for one not kept yet; file
+  is the name of its file in the sets folder when it is kept. An agent's
+  set offers Apply and Delete only: its :text was never in a tab, so
+  Revert has nothing to put back."
+  [{:keys [panep shown* right show-right-panel!] :as ctx} s draft? file]
+  (reset! shown* {:set s :draft? draft? :file file})
   (pane/show! panep {:summary (cs/summary-text s draft?) :text (cs/set-text s) :draft? draft?
+                     :proposed? (some? (:by s))
                      :default-name (when draft? (:name s))})
   (show-right-panel! right :change-sets)
   (g/gtk-widget-grab-focus (if draft? (:name-entry panep) (:close-btn panep)))
@@ -51,7 +60,7 @@
 (defn- show-broken!
   "Shows a set whose file can't be used: why it can't, and Delete."
   [{:keys [panep shown* right show-right-panel!]} {:keys [name path broken]}]
-  (reset! shown* {:broken name :path path})
+  (reset! shown* {:broken name :file name :path path})
   (pane/show! panep {:summary (str "Change set \"" name "\" can't be used.") :text broken :draft? false})
   (doseq [k [:apply-btn :revert-btn]] (g/gtk-widget-set-visible (get panep k) 0))
   (show-right-panel! right :change-sets))
@@ -82,7 +91,7 @@
             es (cs/from-changed text (some-> (:changed ed) :last-run deref) path ran)]
         (if (empty? es)
           (set-status! "; Nothing has changed since the last run.")
-          (show-set! ctx (cs/make-set (suggested-name ctx path) es nil) true))))))
+          (show-set! ctx (cs/make-set (suggested-name ctx path) es nil) true nil))))))
 
 (defn- save-set!
   "Save Set: keeps the draft under name."
@@ -98,7 +107,7 @@
             s (assoc set :name n)]
         (if-let [err (cs/write-set! dir s)]
           (pane/report! panep (str "; " err))
-          (do (show-set! ctx s false)
+          (do (show-set! ctx s false n)
               (pane/report! panep (str "Saved" (when replaced? ", replacing the set of that name") "."))
               (set-status! (str "; Saved the change set \"" n "\" (" (plural (count (:entries s)) "form" "forms") ")."))))))))
 
@@ -110,7 +119,7 @@
    :doc (if broken
           (str "Change Set: " name " (broken)")
           (str "Change Set: " name ", " (plural (count (:entries set)) "form" "forms")
-               (when (:by set) (str ", proposed by " (:by set)))))
+               (when-let [by (cs/clean-client (:by set))] (str ", from client \"" by "\""))))
    :chords [] :source "change sets"})
 
 (defn- list-sets!
@@ -129,7 +138,7 @@
         r (cs/read-set path)]
     (cond
       (not (.exists (io/file path))) (set-status! (str "; No change set called \"" name "\" any more."))
-      (:set r) (show-set! ctx (:set r) false)
+      (:set r) (show-set! ctx (:set r) false name)
       :else (show-broken! ctx {:name name :path path :broken (:broken r)}))))
 
 (defn- open-panel!
@@ -137,7 +146,7 @@
   else the list."
   [{:keys [shown*] :as ctx}]
   (if-let [s (:set @shown*)]
-    (show-set! ctx s (:draft? @shown*))
+    (show-set! ctx s (:draft? @shown*) (:file @shown*))
     (list-sets! ctx)))
 
 ;; --- Apply to REPL ----------------------------------------------------------------
@@ -148,6 +157,38 @@
   [ctx path]
   (or (some-> (tab-for-path ctx path) :ed editor/editor-text)
       (try (slurp path) (catch :default _ nil))))
+
+(defn eval-opts
+  "{:opts m} for evaluating a form of the file whose text is text in that
+  file's namespace on evaluator e, with the prompt's own namespace left
+  as it is, or {:stop msg} when that can't be done.
+  - The in-process session and the Jolt child take a :quiet eval, which
+    runs in :ns-source's namespace and leaves the prompt alone; in process
+    a namespace that isn't loaded stops the apply. The child falls back to
+    its session's namespace for one that isn't loaded.
+  - The attach, shadow and jank evaluators switch to :ns-source's namespace
+    themselves.
+  - Any other runtime ignores :ns-source, so a file with an ns form stops
+    the apply rather than land its forms in the wrong namespace."
+  [e text]
+  (let [n (clj/buffer-ns text)
+        quiet {:quiet (str "jq-change-set-" (System/nanoTime)) :ns-source text}]
+    (cond
+      (instance? jonquil.session.InProcess e)
+      (if (and n (not (find-ns (symbol n))))
+        {:stop (str n " isn't loaded: Run its file first")}
+        {:opts quiet})
+
+      (satisfies? ev/QuietEval e) {:opts quiet}
+
+      (or (instance? jonquil.nrepl.attach.Attach e)
+          (instance? jonquil.nrepl.shadow.Shadow e)
+          (instance? jonquil.nrepl.jank.Jank e))
+      {:opts {:ns-source text}}
+
+      (nil? n) {:opts {:ns-source text}}
+
+      :else {:stop (str "this runtime can't evaluate in a file's namespace (" n "), so the forms were not sent")})))
 
 (defn- apply-one!
   "Sends entries' i-th form to the evaluator as Run Selection sends code, in
@@ -167,18 +208,21 @@
         (ev/evaluating? @ev*) (stop! "something is already running")
 
         :else
-        (do (say! ctx (str "Applying " label))
-            (mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
-                       (:text e)
-                       {:ns-source (entry-source-text ctx (:path e)) :owner (:id t)}
-                       (fn [m]
-                         (cond
-                           (:busy m) (on-gui! (fn [] (stop! "the evaluator was busy")))
-                           (:done m) (let [status (:status (:result (:done m)))]
-                                       (on-gui! (fn []
-                                                  (if (= :ok status)
-                                                    (apply-one! ctx s entries (inc i))
-                                                    (stop! (str "it ended " (if status (name status) "badly")))))))))))))))
+        (let [{:keys [opts stop]} (eval-opts @ev* (entry-source-text ctx (:path e)))]
+          (if stop
+            (stop! stop)
+            (do (say! ctx (str "Applying " label))
+                (mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
+                           (:text e)
+                           (assoc opts :owner (:id t))
+                           (fn [m]
+                             (cond
+                               (:busy m) (on-gui! (fn [] (stop! "the evaluator was busy")))
+                               (:done m) (let [status (:status (:result (:done m)))]
+                                           (on-gui! (fn []
+                                                      (if (= :ok status)
+                                                        (apply-one! ctx s entries (inc i))
+                                                        (stop! (str "it ended " (if status (name status) "badly")))))))))))))))))
 
 (defn- apply-set!
   "Apply to REPL: every form of the shown set, in order, in the namespace of
@@ -221,8 +265,10 @@
   per tab; what it skipped is named on the console."
   [{:keys [shown* panep set-status!] :as ctx}]
   (let [{:keys [set draft?]} @shown*]
-    (if (or (nil? set) draft?)
-      (pane/report! panep "; Save the set first.")
+    (cond
+      (or (nil? set) draft?) (pane/report! panep "; Save the set first.")
+      (:by set) (pane/report! panep "; An agent's set can be applied or deleted, not reverted: its forms were never in your tabs.")
+      :else
       (let [results (mapv (fn [[path es]] (revert-path! ctx path es))
                           (group-by :path (:entries set)))
             reverted (reduce + (map :reverted results))
@@ -237,8 +283,8 @@
 
 (defn- delete-set!
   [{:keys [shown* panep right hide-right-panel! set-status!] :as ctx}]
-  (let [{:keys [set draft? broken]} @shown*
-        n (or (:name set) broken)]
+  (let [{:keys [draft? file]} @shown*
+        n file]
     (cond
       (or (nil? n) draft?) (pane/report! panep "; Only a kept set can be deleted.")
       :else
@@ -255,31 +301,38 @@
 
 ;; --- an agent's proposal --------------------------------------------------------------
 
+(defn- project-root
+  "The folder a proposal's paths must stay inside: the window's folder, else
+  the process's working directory."
+  [ctx]
+  (or (:root @(:state (:tree-pane ctx))) (System/getProperty "user.dir")))
+
 (defn- propose!
   "jonquil_change_set_propose: saves the agent's forms as a kept set marked
-  with the client's name, or refuses. {:error msg} or {:saved name :forms n}.
-  Never applies anything, and never replaces a set that exists. Runs on the
-  MCP serve thread: file work only, the notice goes to the GTK thread."
+  with the client's name (cleaned: it is the client's own word), or
+  refuses. {:error msg} or {:saved name :forms n}. Never applies anything,
+  and never replaces a set that exists: the file is made only if its name
+  is free. Runs on the MCP serve thread: file work only, the notice goes to
+  the GTK thread."
   [ctx {:keys [name forms client]}]
   (let [n (cs/safe-name name)
-        root (:root @(:state (:tree-pane ctx)))
-        dir (sets-dir ctx)]
+        root (project-root ctx)
+        dir (sets-dir ctx)
+        by (or (cs/clean-client client) "an unnamed client")]
     (cond
       (nil? n) {:error "the change set needs a name with some letters or digits in it"}
-      (.exists (io/file (cs/set-path dir n))) {:error (str "a change set called " n " exists already; pick another name")}
       :else
-      (let [r (cs/proposal-entries (or root (System/getProperty "user.dir")) forms)]
+      (let [r (cs/proposal-entries root forms)]
         (if (:error r)
           r
-          (let [by (or client "an agent")
-                s (cs/make-set n (:entries r) {:by by})]
-            (if-let [err (cs/write-set! dir s)]
+          (let [s (cs/make-set n (:entries r) {:by by})]
+            (if-let [err (cs/write-set! dir s {:create-new? true})]
               {:error err}
               (do (on-gui! (fn []
-                             (say! ctx (str by " proposed the change set \"" n "\" ("
+                             (say! ctx (str "A client calling itself \"" by "\" proposed the change set \"" n "\" ("
                                             (plural (count (:entries s)) "form" "forms")
-                                            "): Change Sets lists it for you to apply or revert."))
-                             ((:set-status! ctx) (str "; " by " proposed the change set \"" n "\"."))))
+                                            "): Change Sets lists it for you to apply or delete."))
+                             ((:set-status! ctx) (str "; A client proposed the change set \"" n "\"."))))
                   {:saved n :forms (count (:entries s))}))))))))
 
 ;; --- install -----------------------------------------------------------------------------
@@ -301,7 +354,8 @@
            :change-set-list-fn (fn [] (list-sets! ctx))
            :change-set-open-fn (fn [name] (open-set! ctx name))}
      :ui {:change-sets-pane panep
-          :change-set-propose!* (fn [m] (propose! ctx m))}
+          :change-set-propose!* (fn [m] (propose! ctx m))
+          :change-sets-root* (fn [] (project-root ctx))}
      :panels {:change-sets {:root (:root panep)
                             :focus! (fn [] (g/gtk-widget-grab-focus (:close-btn panep)))
                             :open! (fn [] (open-panel! ctx))}}}))

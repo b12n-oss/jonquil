@@ -144,6 +144,12 @@
   [n]
   (str n (if (<= 11 (mod n 100) 13) "th" (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
 
+(defn form-name
+  "A name for messages: \"defn f\", with \" (2nd)\" and so on after it for
+  a later form (n, 0-based) of the same signature."
+  [sig n]
+  (str (str/join " " sig) (when (pos? n) (str " (" (ordinal (inc n)) ")"))))
+
 (defn form-keys
   "Every top-level form of text with its key, in buffer order: {:start :end
   :sig :nth :name}, as form-key makes it for a caret in the form."
@@ -155,7 +161,7 @@
               n (get seen sig 0)]
           (recur (rest forms) (assoc seen sig (inc n))
                  (conj acc {:start start :end end :sig sig :nth n
-                            :name (str (str/join " " sig) (when (pos? n) (str " (" (ordinal (inc n)) ")")))})))
+                            :name (form-name sig n)})))
         acc))))
 
 (defn form-key

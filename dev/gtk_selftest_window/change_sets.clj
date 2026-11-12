@@ -63,7 +63,7 @@
           _ (on-gtk ((:run!* ui)))
           recorded? (await-until 8000 20 #(= ran @(:last-run (:changed ed))))
           _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count ran) edited]] :caret 0}))
-          _ (on-gtk (run-active-palette! ui "bundle the work you touched"))
+          _ (on-gtk (run-active-palette! ui "make a change set from the forms"))
           drafted? (await-until 3000 20 #(str/includes? (pane/summary-text p) "(not kept yet): 2 forms in 1 file"))
           draft-text (on-gtk (pane/diff-text p))
           draft-name (on-gtk (pane/name-text p))
@@ -92,6 +92,8 @@
                                   (= ["def a" "def c"] (map :name (:entries (:set read))))
                                   (str/includes? console "Applying 1 of 2: def a")
                                   (str/includes? console "Applying 2 of 2: def c")
+                                  (= [10 3] [(some-> (resolve 'cs/a) deref) (some-> (resolve 'cs/c) deref)])
+                                  (nil? (resolve 'user/c))
                                   (str/includes? footer "Reverted 1 form of the change set \"cs-idea\", skipped 1.")
                                   (str/includes? console2 "Revert skipped def c: it is new since the last Run")
                                   (= edited undone))
@@ -106,8 +108,15 @@
   palette's Change Sets entry opens the set, as a diff against the file."
   [ui]
   (go-row :change-set-agent-proposal support/check
-    (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-cset-agent-") "ag.clj")
+    (let [;; the project's folder: a proposal's path has to be inside it
+          f (io/file ((:change-sets-root* ui)) (str "cset-selftest-" (System/nanoTime) ".clj"))
+          outside (io/file (temp-dirs/temp-dir! "jonquil-selftest-cset-agent-") "out.clj")
+          _ (spit outside "(def o 1)\n")
           _ (spit f "(ns ag)\n(def a 1)\n")
+          refused-outside (try ((:call (mcp-window/make-window-tools {:ui ui :dir (.getParent f)}))
+                                "jonquil_change_set_propose"
+                                {"name" "agent out" "forms" [{"path" (.getPath outside) "text" "(def o 2)"}]})
+                               (catch :default e {:threw (ex-message e)}))
           tools (mcp-window/make-window-tools {:ui ui :dir (.getParent f) :client-fn (constantly "Claude Code")})
           call (fn [args] ((:call tools) "jonquil_change_set_propose" args))
           p (:change-sets-pane ui)
@@ -124,14 +133,20 @@
           _ (on-gtk (palette/set-query! pal "agent-idea")
                     (palette/run-selected! pal))
           s2 (on-gtk (status ui))
-          opened? (await-until 3000 20 #(str/includes? (pane/summary-text p) "proposed by Claude Code"))
+          opened? (await-until 3000 20 #(str/includes? (pane/summary-text p) "calling itself \"Claude Code\""))
           text (on-gtk (pane/diff-text p))
-          said? (await-until 3000 20 #(str/includes? (status ui) "Claude Code proposed the change set"))]
+          revert-visible (on-gtk (g/gtk-widget-get-visible (:revert-btn p)))
+          said? (await-until 3000 20 #(str/includes? (status ui) "A client proposed the change set"))]
       (on-gtk (support/check :change-set-agent-proposal
                              (and (not (:error? r)) (:error? again) (:error? bad) opened?
+                                  (:error? refused-outside)
+                                  (str/includes? (str (:text refused-outside)) "outside the project")
+                                  (nil? (get (kept-files ui) "agent-out"))
                                   (= "Claude Code" (:by s))
-                                  (= [(.getPath f)] (map :path (:entries s)))
+                                  (= [(.getCanonicalPath f)] (map :path (:entries s)))
                                   (str/ends-with? text "- (def a 1)\n+ (def a 99)")
-                                  (nil? (get (kept-files ui) "agent-bad")))
+                                  (nil? (get (kept-files ui) "agent-bad"))
+                                  (zero? revert-visible))
                              {:r r :again again :bad bad :set s :opened opened? :text text :said said? :listed listed :s1 s1 :s2 s2 :status (status ui)})
+              (io/delete-file f true)
               (cleanup! ui nil)))))

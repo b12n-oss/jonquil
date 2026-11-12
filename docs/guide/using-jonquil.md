@@ -77,7 +77,7 @@ the forms that differ from what last ran show up marked.
 
 A change set holds the forms you changed for one idea, so you can look at
 them together, send them to the running program in one go, or put them all
-back. **Make a Change Set** (type "bundle the work" in the palette) gathers
+back. **Make a Change Set** (type "change set from the forms" in the palette) gathers
 the active tab's changed forms, the ones the gutter marks, and opens the
 Change Sets panel on the right with one section per form: its file, its name
 (`defn f`) and a diff of the text it had at the last Run that ended well
@@ -89,26 +89,35 @@ saved tab that has run once; with nothing changed the status bar says so.
 form count and, for an agent's, who proposed it. Opening one shows its
 diffs and three buttons:
 
-- **Apply to REPL** sends each form in order, in the namespace of its file,
-  the way Run Selection sends code. Every form is echoed and its result lands
-  in the console. The first form that ends with an error stops the rest, and
-  the console names it. Apply doesn't mark the forms as run.
+- **Apply to REPL** sends each form in order, evaluated in the namespace its
+  file's `ns` form names, while the console's prompt stays in the namespace it
+  was in. Every form is echoed and its result lands in the console. The first
+  form that ends with an error stops the rest, and the console names it. In
+  the in-process session a namespace that isn't loaded stops the apply with
+  "my.app isn't loaded: Run its file first". A runtime that can't evaluate in
+  another namespace (JVM Clojure over nREPL, ClojureScript) refuses a file that
+  has an `ns` form instead of sending its forms to the wrong place. Apply
+  doesn't mark the forms as run.
 - **Revert in Tabs** puts each form's last-run text back in its open tab (it
   opens the file when no tab shows it) as one undo step per tab. A form is
   found by its first two elements and its place among forms that share them,
   as in the one-form compare. One that is gone, is new since the last Run, or
-  already reads as it did is skipped and named in the console.
+  already reads as it did is skipped and named in the console, and so is one
+  you have edited since you made the set (its text no longer matches what the
+  set holds). An agent's set has no Revert button, since its forms were never
+  in your tabs.
 - **Delete** removes the set.
 
 Sets are plain EDN files in `change-sets/<folder>-<hash>/` beside the
 settings file, one per set, so they survive a restart and stay out of the
 project's tree. A set that isn't valid EDN, or doesn't have the shape of one,
 is listed as broken, can only be deleted, and is never applied. Saving under
-a name that exists replaces that set.
+a name that exists replaces that set. Sets are written to a temporary file and
+moved into place, and a file over 1 MB is listed as broken without being read.
 
 An agent can propose a set with `jonquil_change_set_propose` (see
-[MCP](mcp.md)). It lands in the same list marked "proposed by" the client, and
-only you can apply or revert it.
+[MCP](mcp.md)). It lands in the same list, marked as proposed by a client
+calling itself by the name the client gave, and only you can apply or delete it.
 
 ### Timing a form
 

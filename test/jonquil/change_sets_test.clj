@@ -56,6 +56,12 @@
           r (cs/revert-edits last-run (take 1 es))]
       (is (= [] (:edits r)))
       (is (= "it already reads as it did at the last Run" (:reason (first (:skipped r)))))))
+  (testing "a form edited since the set was made is left alone"
+    (let [es (cs/from-changed now last-run "/p/a.clj")
+          edited (str/replace now "(+ x 2)" "(+ x 3)")
+          r (cs/revert-edits edited (take 1 es))]
+      (is (= [] (:edits r)))
+      (is (= [{:name "defn f" :reason "it changed since the set was made"}] (:skipped r)))))
   (testing "edits come in ascending order, so they apply as one op"
     (let [lr "(def a 1)\n(def b 2)\n(def c 3)\n"
           nw "(def a 10)\n(def b 2)\n(def c 30)\n"
@@ -125,6 +131,23 @@
     (testing "delete"
       (is (nil? (cs/delete-set! dir "idea")))
       (is (= ["broken" "odd"] (map :name (cs/list-sets dir)))))
+    (testing "delete takes only a file name the set would be saved under"
+      (spit (str dir "/../outside.edn") "x")
+      (is (string? (cs/delete-set! dir "../outside")))
+      (is (string? (cs/delete-set! dir "a b")))
+      (is (string? (cs/delete-set! dir "")))
+      (is (.exists (io/file dir "../outside.edn")))
+      (is (string? (cs/delete-set! dir "not-there")) "a file that is not there is an error, not Deleted"))
+    (testing "create-new refuses a name that exists, and replaces nothing"
+      (is (nil? (cs/write-set! dir s {:create-new? true})))
+      (is (string? (cs/write-set! dir (assoc s :at 77) {:create-new? true})))
+      (is (= 5 (:at (:set (cs/read-set (cs/set-path dir "idea")))))))
+    (testing "a file over the size cap is listed as broken without being read"
+      (spit (str dir "/huge.edn") (apply str (repeat (inc cs/MAX-SET-BYTES) "x")))
+      (is (= {:broken "It is over 1 MB, so it is not read."} (cs/read-set (str dir "/huge.edn"))))
+      (is (some? (:broken (first (filter #(= "huge" (:name %)) (cs/list-sets dir)))))))
+    (testing "no temp files are left behind"
+      (is (empty? (filter #(str/includes? (.getName ^java.io.File %) ".tmp-") (.listFiles (io/file dir))))))
     (is (= [] (cs/list-sets (str dir "/nowhere"))))))
 
 (deftest write-refuses-an-unnameable-set-test
@@ -132,7 +155,7 @@
     (is (string? (cs/write-set! (tmp-dir) (cs/make-set "///" [e] {:at 1}))))))
 
 (deftest proposal-test
-  (let [root (tmp-dir)
+  (let [root (.getCanonicalPath (io/file (tmp-dir)))
         f (str root "/a.clj")
         _ (spit f now)
         r (cs/proposal-entries root [{"path" "a.clj" "text" "(defn f [x] (* x 9))"}
@@ -141,7 +164,19 @@
                        :text "(defn f [x] (* x 9))" :before "(defn f [x] (+ x 2))"}
                       {:path f :sig ["defn" "zz"] :nth 0 :name "defn zz"
                        :text "(defn zz [] 0)" :before nil}]}
-           r)))
+           r))
+    (testing "later entries of one signature take later places, and the file's forms are their before"
+      (let [g (str root "/m.clj")
+            _ (spit g "(defmethod m :a [x] 1)\n(defmethod m :a [x] 2)\n")
+            r (cs/proposal-entries root [{"path" "m.clj" "text" "(defmethod m :a [x] 10)"}
+                                         {"path" g "text" "(defmethod m :a [x] 20)"}])]
+        (is (= [0 1] (map :nth (:entries r))))
+        (is (= ["(defmethod m :a [x] 1)" "(defmethod m :a [x] 2)"] (map :before (:entries r))))
+        (is (= [g g] (map :path (:entries r))))))
+    (testing "paths are made canonical, so two spellings group as one file"
+      (let [r (cs/proposal-entries root [{"path" "./a.clj" "text" "(def q 1)"}
+                                         {"path" "sub/../a.clj" "text" "(def r 1)"}])]
+        (is (= [f f] (map :path (:entries r)))))))
   (testing "refusals"
     (is (:error (cs/proposal-entries "/r" [])))
     (is (:error (cs/proposal-entries "/r" [{"path" "a.clj"}])))
@@ -149,14 +184,39 @@
     (is (:error (cs/proposal-entries "/r" [{"path" "a.clj" "text" "(defn f ["}])) "unbalanced text")
     (is (:error (cs/proposal-entries "/r" [{"path" "a.clj" "text" "(def a 1) (def b 2)"}])) "two forms in one entry")
     (is (:error (cs/proposal-entries "/r" "x")))
-    (is (:error (cs/proposal-entries "/r" (repeat (inc cs/MAX-PROPOSED-FORMS) {"path" "a.clj" "text" "(def a 1)"}))))))
+    (is (:error (cs/proposal-entries "/r" (repeat (inc cs/MAX-PROPOSED-FORMS) {"path" "a.clj" "text" "(def a 1)"})))))
+  (testing "a path must name a Clojure file under the project root"
+    (let [root (.getCanonicalPath (io/file (tmp-dir)))
+          outside (str (tmp-dir) "/secret.clj")
+          _ (spit outside "(def s 1)")
+          _ (spit (str root "/a.clj") "(def a 1)")
+          _ (spit (str root "/notes.txt") "(def a 1)")
+          _ (.mkdirs (io/file root "dir.clj"))
+          form (fn [p] (cs/proposal-entries root [{"path" p "text" "(def a 2)"}]))]
+      (is (nil? (:error (form "a.clj"))))
+      (is (str/includes? (:error (form "../../etc/passwd")) "outside the project"))
+      (is (str/includes? (:error (form outside)) "outside the project"))
+      (is (str/includes? (:error (form "/etc/passwd")) "outside the project"))
+      (is (str/includes? (:error (form "missing.clj")) "isn't a file"))
+      (is (str/includes? (:error (form "dir.clj")) "isn't a file"))
+      (is (str/includes? (:error (form "notes.txt")) "Clojure file")))))
+
+(deftest clean-client-test
+  (is (= "Claude Code" (cs/clean-client "Claude Code")))
+  (is (= "a[31mb" (cs/clean-client "a\u001b[31mb")) "the escape byte goes, the rest stays plain text")
+  (is (= "x" (cs/clean-client "  x\n\t ")))
+  (is (= 60 (count (cs/clean-client (apply str (repeat 200 "z"))))))
+  (is (nil? (cs/clean-client "\u0007 ")))
+  (is (nil? (cs/clean-client nil)))
+  (is (nil? (cs/clean-client 5))))
 
 (deftest summary-text-test
   (let [es (cs/from-changed now last-run "/p/a.clj")
         s (cs/make-set "idea" es {:at 1})]
     (is (= "Change set \"idea\": 2 forms in 1 file." (cs/summary-text s false)))
     (is (= "Change set \"idea\" (not kept yet): 2 forms in 1 file." (cs/summary-text s true)))
-    (is (= "Change set \"idea\": 1 form in 1 file, proposed by Claude."
+    (is (= "Change set \"idea\": 1 form in 1 file, proposed by a client calling itself \"Claude\"."
            (cs/summary-text (assoc s :by "Claude" :entries (take 1 es)) false)))
+    (is (str/includes? (cs/summary-text (assoc s :by "A\u001bB") false) "calling itself \"AB\""))
     (is (= "Change set \"idea\": 2 forms in 2 files."
            (cs/summary-text (update-in s [:entries 1 :path] (constantly "/p/b.clj")) false)))))
