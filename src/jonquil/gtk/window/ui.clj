@@ -253,7 +253,7 @@
      ;; rows to drive without a synthesized keystroke; and the
      ;; rename popover itself, for rows to read back via
      ;; jonquil.gtk.popover/open? and help-popover/rename-
-     ;; entry-text/rename-problem-text.
+     ;; entry-text.
      :rename!* (:rename! actions)
      :rename-to!* (:rename-to! actions)
      :rename-popover rename-pop

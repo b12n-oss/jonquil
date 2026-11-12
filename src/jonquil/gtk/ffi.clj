@@ -789,12 +789,6 @@
                      (let [ch (fn [off] (Math/round (* 255.0 (ffi/read p :float off))))]
                        (format "#%02x%02x%02x" (ch 0) (ch 4) (ch 8))))))))
 
-(defn get-bool-property
-  "obj's boolean prop read back as a Clojure boolean, reusing get-gvalue!
-  the same way rgba-property-hex does."
-  [obj prop]
-  (not (zero? (get-gvalue! obj prop G-TYPE-BOOLEAN g-value-get-boolean))))
-
 ;; An application "quit" action. GTK's macOS delegate
 ;; (gtk/gtkapplication-quartz.c:80-95 at the 4.22.4 tag) answers
 ;; applicationShouldTerminate: -- Dock Quit, logout, shutdown, the Quit

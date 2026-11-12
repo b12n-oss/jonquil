@@ -145,6 +145,16 @@
                                              (println line)
                                              (flush)))})))})))
 
+(defn- stop-runtimes!
+  "Stops the nREPL listener and every runtime this process made. A throw while
+  stopping the runtimes is printed to stderr, never rethrown."
+  []
+  (stop-listener!)
+  (try (registry/stop-all!)
+       (catch Throwable e
+         (binding [*out* *err*]
+           (println "jonquil: stopping every runtime failed:" (ex-message e))))))
+
 (defn- run-main [args plugins?]
   (when-let [m (attach-args args)]
     (System/exit (attach-mcp! m)))
@@ -156,12 +166,7 @@
   ;; normal quit also runs stop-all! just before System/exit, so it runs
   ;; twice, and the second call returns at once.
   (jolt.host/add-shutdown-hook
-   (fn []
-     (stop-listener!)
-     (try (registry/stop-all!)
-          (catch Throwable e
-            (binding [*out* *err*]
-              (println "jonquil: stopping every runtime failed:" (ex-message e)))))))
+   stop-runtimes!)
   ;; Every argument goes through GApplication's "open" signal, so several
   ;; files open as tabs and a folder roots the file tree. :cwd roots the
   ;; tree when there's no argument.
@@ -177,11 +182,7 @@
   ;; any start still in flight to finish tearing itself down, so
   ;; System/exit below can't cut that off mid-flight and orphan a child.
   ;; Guarded so a throw here can't skip the exit.
-  (stop-listener!)
-  (try (registry/stop-all!)
-       (catch Throwable e
-         (binding [*out* *err*]
-           (println "jonquil: stopping every runtime failed:" (ex-message e)))))
+  (stop-runtimes!)
   (System/exit 0))
 
 (defn -main [& all-args]

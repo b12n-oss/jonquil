@@ -295,6 +295,31 @@
       (when (and (sequential? v) (seq v) (every? symbol? v))
         (vec (take syms-cap v))))))
 
+(defn- analyzer-spellings
+  "The [spelling category] pairs one analyzer symbol can be typed as: sym's
+  namespace ns-str and name nm against the prompt namespace pns, the
+  buffer's ns->alias and refers maps, and whether a qualified name is
+  allowed (qualified-ok?)."
+  [{:keys [sym pns ns->alias refers qualified-ok?]}]
+  (let [ns-str (namespace sym) nm (name sym)]
+    (cond-> []
+      (= ns-str pns) (conj [nm :user])
+      (and (= ns-str "cljs.core") (not= ns-str pns)) (conj [nm :core])
+      (contains? ns->alias ns-str) (conj [(str (get ns->alias ns-str) "/" nm) :user])
+      (= ns-str (get refers nm)) (conj [nm :user])
+      qualified-ok? (conj [(str sym) :remote]))))
+
+(defn- distinct-by-symbol
+  "cands without later entries whose :symbol was already seen, in order."
+  [cands]
+  (second
+   (reduce (fn [[seen out] c]
+             (if (contains? seen (:symbol c))
+               [seen out]
+               [(conj seen (:symbol c)) (conj out c)]))
+           [#{} []]
+           cands)))
+
 (defn analyzer-candidates
   "Completion candidates from the analyzer's qualified symbols (syms),
   spelled the way the buffer can use them: a short name for prompt-ns's
@@ -310,23 +335,13 @@
         lower (str/lower-case prefix)
         match? (fn [s] (and (not= s prefix) (str/starts-with? (str/lower-case s) lower)))
         {:keys [aliases refers]} (cljd/buffer-ns-refs text)
-        ns->alias (reduce-kv (fn [m a n] (assoc m n a)) {} aliases)
-        qualified-ok? (or (str/includes? prefix "/") (str/includes? prefix "."))
-        pns (str (or prompt-ns ""))]
+        ctx {:pns (str (or prompt-ns ""))
+             :ns->alias (reduce-kv (fn [m a n] (assoc m n a)) {} aliases)
+             :refers refers
+             :qualified-ok? (or (str/includes? prefix "/") (str/includes? prefix "."))}]
     (->> (for [sym syms
-               :let [ns-str (namespace sym) nm (name sym)]
-               :when ns-str
-               [s cat] (cond-> []
-                         (= ns-str pns) (conj [nm :user])
-                         (and (= ns-str "cljs.core") (not= ns-str pns)) (conj [nm :core])
-                         (contains? ns->alias ns-str) (conj [(str (get ns->alias ns-str) "/" nm) :user])
-                         (= ns-str (get refers nm)) (conj [nm :user])
-                         qualified-ok? (conj [(str sym) :remote]))
+               :when (namespace sym)
+               [s cat] (analyzer-spellings (assoc ctx :sym sym))
                :when (match? s)]
            {:symbol s :category cat})
-         (reduce (fn [[seen out] c]
-                   (if (contains? seen (:symbol c))
-                     [seen out]
-                     [(conj seen (:symbol c)) (conj out c)]))
-                 [#{} []])
-         second)))
+         distinct-by-symbol)))

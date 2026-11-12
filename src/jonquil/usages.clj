@@ -97,6 +97,16 @@
       (and (= :bracket pk) (= "(" (subs text ps pe))) :call
       :else :value)))
 
+(defn- hit-at
+  "The {:start :end :how} for token i of ctx's :tokens when it is a use of
+  :name as code, else nil. ctx also holds :text, :spans and :defs."
+  [{:keys [^String text tokens spans defs name]} i [kind s e]]
+  (when (and (contains? code-kinds kind) (names? (subs text s e) name))
+    {:start s :end e
+     :how (use-kind {:text text :spans spans :defs defs
+                     :prev (when (pos? i) (nth tokens (dec i)))}
+                    s e)}))
+
 (defn hits
   "Every use of name in text as code, in order: [{:start :end :how}], how
   one of :ns (inside an ns form, ns-spans), :definition (the name of a def form),
@@ -109,16 +119,21 @@
       []
       (let [tokens (vec (remove #(= :comment (first %)) (syntax/tokenize text)))
             spans (ns-spans text tokens)
-            defs (set (map (juxt :start :end) (syntax/find-definitions text name)))]
-        (into []
-              (keep-indexed
-               (fn [i [kind s e]]
-                 (when (and (contains? code-kinds kind) (names? (subs text s e) name))
-                   {:start s :end e
-                    :how (use-kind {:text text :spans spans :defs defs
-                                    :prev (when (pos? i) (nth tokens (dec i)))}
-                                   s e)})))
-              tokens)))))
+            defs (set (map (juxt :start :end) (syntax/find-definitions text name)))
+            ctx {:text text :tokens tokens :spans spans :defs defs :name name}]
+        (into [] (keep-indexed #(hit-at ctx %1 %2)) tokens)))))
+
+(defn- dir-paths
+  "The Clojure file paths under one entry f of a folder, as a seq: nothing
+  for what ignore hides, f's contents (walk) for a folder, f itself for a
+  Clojure file."
+  [ignore walk ^java.io.File f]
+  (let [n (.getName f) dir? (.isDirectory f)]
+    (cond
+      (file-tree/ignored? ignore n dir?) nil
+      dir? (walk f)
+      (file-tree/clojure-file? n) [(.getCanonicalPath f)]
+      :else nil)))
 
 (defn project-files
   "Every Clojure file under root, sorted by path, skipping what the file
@@ -135,14 +150,7 @@
                (let [c (.getCanonicalPath dir)]
                  (when-not (contains? @seen c)
                    (vswap! seen conj c)
-                   (mapcat (fn [^java.io.File f]
-                             (let [n (.getName f) dir? (.isDirectory f)]
-                               (cond
-                                 (file-tree/ignored? ignore n dir?) nil
-                                 dir? (walk f)
-                                 (file-tree/clojure-file? n) [(.getCanonicalPath f)]
-                                 :else nil)))
-                           (or (.listFiles dir) [])))))]
+                   (mapcat #(dir-paths ignore walk %) (or (.listFiles dir) [])))))]
     (vec (sort (distinct (walk (io/file root)))))))
 
 (defn scan

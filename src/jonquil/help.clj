@@ -266,6 +266,11 @@
           (remove (fn [[cs ce]] (contains? #{"&" ":as"} (subs text cs ce)))
                   (form-children tokens matches s e))))
 
+(defn- name-entry
+  "A bound name's {:symbol :start :end} for the span [s e) of text."
+  [text s e]
+  {:symbol (subs text s e) :start s :end e})
+
 (defn- map-pattern-names
   "Names bound by a {:keys [...] :strs [...] :syms [...] :as x} or a plain
   {sym :key ...} destructuring pattern. :or's own map is skipped -- its
@@ -280,21 +285,18 @@
           (contains? #{":keys" ":strs" ":syms"} head)
           (let [[vs ve] (second cs)]
             (recur (drop 2 cs)
-                   (into acc (map (fn [[ns ne]] {:symbol (subs text ns ne) :start ns :end ne})
+                   (into acc (map (fn [[ns ne]] (name-entry text ns ne))
                                   (form-children tokens matches vs ve)))))
 
           (= ":as" head)
           (let [[ns ne] (second cs)]
-            (recur (drop 2 cs) (conj acc {:symbol (subs text ns ne) :start ns :end ne})))
-
-          (= ":or" head)
-          (recur (drop 2 cs) acc)
+            (recur (drop 2 cs) (conj acc (name-entry text ns ne))))
 
           (str/starts-with? head ":")
           (recur (drop 2 cs) acc)
 
           :else
-          (recur (drop 2 cs) (conj acc {:symbol head :start c0s :end c0e})))))))
+          (recur (drop 2 cs) (conj acc (name-entry text c0s c0e))))))))
 
 (defn- binding-names
   "The names a destructuring pattern spanning [s e) binds, recursively
@@ -415,13 +417,9 @@
       (= "letfn" op)
       (when-let [[vs ve] (vector-span)] (letfn-names src vs ve))
 
-      (contains? fn-like-forms op)
-      (when-let [[vs ve] (arity-params)]
-        (params-vector-names src vs ve))
-
-      ;; a letfn entry (name [params] body): its params bind in its
+      ;; or a letfn entry (name [params] body): its params bind in its
       ;; body; a multi-arity entry's clauses are bare arity clauses
-      (letfn-entry? src open close)
+      (or (contains? fn-like-forms op) (letfn-entry? src open close))
       (when-let [[vs ve] (arity-params)]
         (params-vector-names src vs ve))
 

@@ -139,19 +139,26 @@
 
     :else {:status (str "; Saved " saved " " (vars-word saved) " to this project's world history.") :lines []}))
 
+(defn- first-note
+  "The status note on what the data before a restore became, nil unless
+  saved-first?: it was saved (except n placeholders, first-placeholders) and
+  how to get it back."
+  [{:keys [saved-first? first-placeholders]}]
+  (when saved-first?
+    (let [n (or first-placeholders 0)]
+      (str " What you had first is saved"
+           (when (pos? n)
+             (str ", except " n " placeholder" (when (> n 1) "s") " (see the console)"))
+           ": Restore an Earlier World brings it back."))))
+
 (defn restore-report
   "{:status :lines} for a :restore answer. With :saved-first? the status
   says the data before the restore was saved, and how to get it back; with
   :first-placeholders n, that n of it went in as placeholders only. With
   :picked? a missing file is a picked save that has gone."
   ([r] (restore-report r {}))
-  ([{:keys [error missing restored placeholders]} {:keys [saved-first? first-placeholders picked?]}]
-   (let [n (or first-placeholders 0)
-         first-note (when saved-first?
-                      (str " What you had first is saved"
-                           (when (pos? n)
-                             (str ", except " n " placeholder" (when (> n 1) "s") " (see the console)"))
-                           ": Restore an Earlier World brings it back."))]
+  ([{:keys [error missing restored placeholders]} {:keys [picked?] :as opts}]
+   (let [first-note (first-note opts)]
      (cond
        (and missing picked?) {:status "; That saved world is gone: Restore an Earlier World lists what's left." :lines []}
        missing {:status "; No saved world for this project yet: Save World makes one." :lines []}

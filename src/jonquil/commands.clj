@@ -155,6 +155,16 @@
   [text form]
   (comment-block? text form))
 
+(defn- run-target
+  "The form Run Form sends for top, the top-level form around the caret: top
+  itself, or for a (comment ...) block the form directly inside it that holds
+  the caret, nil when there is none."
+  [text top caret]
+  (if (comment-block? text top)
+    (let [inner (form-around (rest (:kids top)) caret)]
+      (when (and inner (> caret (:end (first (:kids top))))) inner))
+    top))
+
 (defn run-form
   "What Run Form (Cmd/Ctrl+Enter) sends, CIDER's C-c C-c: the top-level form
   around the caret, or, when that form is a (comment ...) block, the form
@@ -166,12 +176,8 @@
   [{:keys [text caret]}]
   (when-not (str/blank? text)
     (when-let [top (form-around (form-tree text) caret)]
-      (let [form (if (comment-block? text top)
-                   (let [inner (form-around (rest (:kids top)) caret)]
-                     (when (and inner (> caret (:end (first (:kids top))))) inner))
-                   top)]
-        (when form
-          {:text (subs text (:start form) (:end form)) :start (:start form) :end (:end form)})))))
+      (when-let [form (run-target text top caret)]
+        {:text (subs text (:start form) (:end form)) :start (:start form) :end (:end form)}))))
 
 (defn- skip-blanks
   "The first offset in text at or after i that is not a space or tab, or

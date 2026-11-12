@@ -298,9 +298,8 @@
   "The call for a break handler k (:on-eval-start, :on-eval-end) of this
   evaluation; a no-op for a quiet one (eval-id nil), which calls neither."
   [state eval-id]
-  (fn [k] (when eval-id
-            (when-let [f (k (:break-handlers @state))]
-              (try (f eval-id) (catch Throwable _ nil))))))
+  (fn [k] (when-let [f (when eval-id (k (:break-handlers @state)))]
+            (try (f eval-id) (catch Throwable _ nil)))))
 
 (defn- eval-auto-require!
   "Runs auto-require! for this evaluation; a quiet one's lines go to its output."

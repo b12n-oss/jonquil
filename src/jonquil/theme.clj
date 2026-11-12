@@ -112,6 +112,46 @@
     (:err :error) (:red t)
     (get (:console t) kind (:text t))))
 
+(defn- code-view-css
+  "The rules for the code views' own node and their selection, at font size
+  px."
+  [t px]
+  (str ".jonquil-code { font-size: " px "px; "
+       "background-color: " (:background t) "; "
+       "color: " (:text t) "; "
+       "caret-color: " (:caret t) "; } "
+       ".jonquil-code text selection { "
+       "background-color: " (:selection t) "; "
+       "color: " (:text t) "; } "))
+
+(defn- popover-list-css
+  "The rules for a popover's frame, list, rows and doc label, at font size
+  px."
+  [t px]
+  (str "popover.jonquil-popover > contents, popover.jonquil-popover > arrow { "
+       "background-color: " (:background t) "; "
+       "color: " (:text t) "; } "
+       "popover.jonquil-popover list, popover.jonquil-popover row { "
+       "background-color: " (:background t) "; "
+       "color: " (:text t) "; "
+       "font-size: " px "px; } "
+       "popover.jonquil-popover row:selected { "
+       "background-color: " (get-in t [:row-selected :background] (:selection t)) "; "
+       "color: " (get-in t [:row-selected :text] (:text t)) "; } "
+       "popover.jonquil-popover label.jonquil-doc { "
+       "font-family: monospace; "
+       "font-size: " px "px; } "))
+
+(defn- popover-entry-css
+  "The rules for the rename popover's entry and its selection."
+  [t]
+  (str "popover.jonquil-popover entry { "
+       "background-color: " (:background t) "; "
+       "color: " (:text t) "; } "
+       "popover.jonquil-popover entry selection { "
+       "background-color: " (:selection t) "; "
+       "color: " (:text t) "; }"))
+
 (defn code-css
   "The CSS for both code views, and for every caret-anchored popover, at
   font size px. Measured on GTK 4.22.4 (2026-09-25): background-color,
@@ -129,29 +169,4 @@
   name reads against the theme's own selection colour rather than GTK's
   default blue."
   [t px]
-  (str ".jonquil-code { font-size: " px "px; "
-       "background-color: " (:background t) "; "
-       "color: " (:text t) "; "
-       "caret-color: " (:caret t) "; } "
-       ".jonquil-code text selection { "
-       "background-color: " (:selection t) "; "
-       "color: " (:text t) "; } "
-       "popover.jonquil-popover > contents, popover.jonquil-popover > arrow { "
-       "background-color: " (:background t) "; "
-       "color: " (:text t) "; } "
-       "popover.jonquil-popover list, popover.jonquil-popover row { "
-       "background-color: " (:background t) "; "
-       "color: " (:text t) "; "
-       "font-size: " px "px; } "
-       "popover.jonquil-popover row:selected { "
-       "background-color: " (get-in t [:row-selected :background] (:selection t)) "; "
-       "color: " (get-in t [:row-selected :text] (:text t)) "; } "
-       "popover.jonquil-popover label.jonquil-doc { "
-       "font-family: monospace; "
-       "font-size: " px "px; } "
-       "popover.jonquil-popover entry { "
-       "background-color: " (:background t) "; "
-       "color: " (:text t) "; } "
-       "popover.jonquil-popover entry selection { "
-       "background-color: " (:selection t) "; "
-       "color: " (:text t) "; }"))
+  (str (code-view-css t px) (popover-list-css t px) (popover-entry-css t)))

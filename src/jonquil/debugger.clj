@@ -257,18 +257,24 @@
           (instance? InterruptedException c) true
           :else (recur (.getCause ^Throwable c)))))
 
+(defn- capped-append!
+  "Appends s to sb while it fits within OUT-MAX characters. The first s that
+  doesn't fit gets its fitting head and a note that the output was cut (cut?
+  is the atom remembering that); later ones are dropped."
+  [^StringBuilder sb cut? ^String s]
+  (let [room (- OUT-MAX (.length sb))]
+    (cond
+      (<= (count s) room) (.append sb s)
+      (not @cut?) (do (reset! cut? true)
+                      (.append sb (subs s 0 (max 0 room)))
+                      (.append sb (str "\n; output cut at " OUT-MAX " characters\n"))))))
+
 (defn- capped-writer
   "A Writer appending to sb up to OUT-MAX characters, then noting the cut
   once and dropping the rest."
   [^StringBuilder sb]
   (let [cut? (atom false)
-        add! (fn [^String s]
-               (let [room (- OUT-MAX (.length sb))]
-                 (cond
-                   (<= (count s) room) (.append sb s)
-                   (not @cut?) (do (reset! cut? true)
-                                   (.append sb (subs s 0 (max 0 room)))
-                                   (.append sb (str "\n; output cut at " OUT-MAX " characters\n"))))))]
+        add! (fn [s] (capped-append! sb cut? s))]
     (proxy [java.io.Writer] []
       (close [] nil)
       (flush [] nil)
@@ -353,14 +359,20 @@
   []
   {:queue (LinkedBlockingQueue.) :paused (atom nil)})
 
+(defn- reject-eval!
+  "Answers m, if it is an {:eval [i code reply]} request, with NOT-PAUSED.
+  A reply that throws is ignored."
+  [m]
+  (when-let [[_ _ reply] (:eval m)]
+    (try (reply {:error NOT-PAUSED}) (catch Throwable _ nil))))
+
 (defn- drain!
   "Answers every request still queued with NOT-PAUSED: one that arrived as
   a pause ended, or before the next began."
   [^LinkedBlockingQueue q]
   (loop []
     (when-let [m (.poll q)]
-      (when-let [[_ _ reply] (:eval m)]
-        (try (reply {:error NOT-PAUSED}) (catch Throwable _ nil)))
+      (reject-eval! m)
       (recur))))
 
 (defn- serve-eval!

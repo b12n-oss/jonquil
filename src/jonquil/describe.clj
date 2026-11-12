@@ -91,25 +91,29 @@
        (empty? (disj (held state) :shift))))
 
 (defn recent-entry
-  "One recent key: {:typing 1} for typing (typing?'s answer), so what was
-  typed is never kept; otherwise the chord and the command that actually
-  ran for it, nil when the window passed the key on."
-  [key-name state os typing ran]
+  "One recent key: {:typing 1} for typing (typing?'s answer, the :typing
+  option), so what was typed is never kept; otherwise the chord and the
+  command that actually ran for it (:ran), nil when the window passed the
+  key on. Takes {:key-name :state :os :typing :ran}."
+  [{:keys [key-name state os typing ran]}]
   (if typing
     {:typing 1}
     {:chord (chord-text key-name state os) :command ran}))
+
+(defn- recent-line
+  "The console line for one recent entry: a typing count, or a chord and the
+  command that ran for it."
+  [{:keys [typing chord command]}]
+  (if typing
+    (str "; typing (" typing (if (= 1 typing) " key)" " keys)"))
+    (str "; " chord "  " (if command (str command) "passed on (editor or GTK)"))))
 
 (defn recent-lines
   "Console lines listing the recent keys, oldest first."
   [ring]
   (if (empty? ring)
     ["; No keys yet."]
-    (into ["; Recent keys, oldest first:"]
-          (map (fn [{:keys [typing chord command]}]
-                 (if typing
-                   (str "; typing (" typing (if (= 1 typing) " key)" " keys)"))
-                   (str "; " chord "  " (if command (str command) "passed on (editor or GTK)"))))
-               ring))))
+    (into ["; Recent keys, oldest first:"] (map recent-line) ring)))
 
 (defn binding-lines
   "Console lines listing every bound command, window keys then editor keys,

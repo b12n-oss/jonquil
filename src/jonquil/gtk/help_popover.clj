@@ -292,8 +292,3 @@
   for the entry's own \"activate\" handler and for rows."
   [rp]
   (or (g/editable-text (:entry rp)) ""))
-
-(defn rename-problem-text
-  "rp's problem label text -- for rows."
-  [rp]
-  (g/label-text (:problem-label rp)))

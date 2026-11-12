@@ -15,26 +15,39 @@
   [^String text a b]
   (str/replace (subs text a b) #"[\s,]" ""))
 
+(defn- form-pieces
+  "The key pieces of one form spanning start..end: its non-comment tokens
+  (inside, in offset order) and the reader-macro characters between them."
+  [text start end inside]
+  (loop [pos start ts inside out []]
+    (if-let [[t s e] (first ts)]
+      (let [g (gap text pos (max pos s))]
+        (recur e (rest ts) (cond-> out
+                             (seq g) (conj g)
+                             (not= :comment t) (conj (subs text s e)))))
+      (let [g (gap text (min pos end) end)] (cond-> out (seq g) (conj g))))))
+
+(defn- form-entry
+  "One {:start :end :key} for the top-level form f, plus the tokens left
+  after it, as [entry after]. toks must start at or before f in offset
+  order."
+  [text {:keys [start end]} toks]
+  (let [toks (drop-while (fn [[_ _ e]] (<= e start)) toks)
+        [inside after] (split-with (fn [[_ s]] (< s end)) toks)
+        pieces (form-pieces text start end inside)]
+    [{:start start :end end :key (str/join " " pieces)} after]))
+
 (defn forms
   "text's top-level forms as [{:start :end :key}], (comment ...) blocks
   left out. The key is every token but comments, and the reader-macro
   characters between them, joined by a space."
   [text]
-  (let [tops (remove #(commands/comment-form? text %) (commands/top-level-forms text))
-        toks (syntax/tokenize text)]
+  (let [tops (remove #(commands/comment-form? text %) (commands/top-level-forms text))]
     ;; one sweep: forms and tokens are both in offset order
-    (loop [tops tops toks toks acc []]
-      (if-let [{:keys [start end]} (first tops)]
-        (let [toks (drop-while (fn [[_ _ e]] (<= e start)) toks)
-              [inside after] (split-with (fn [[_ s]] (< s end)) toks)
-              pieces (loop [pos start ts inside out []]
-                       (if-let [[t s e] (first ts)]
-                         (let [g (gap text pos (max pos s))]
-                           (recur e (rest ts) (cond-> out
-                                                (seq g) (conj g)
-                                                (not= :comment t) (conj (subs text s e)))))
-                         (let [g (gap text (min pos end) end)] (cond-> out (seq g) (conj g)))))]
-          (recur (rest tops) after (conj acc {:start start :end end :key (str/join " " pieces)})))
+    (loop [tops tops toks (syntax/tokenize text) acc []]
+      (if-let [f (first tops)]
+        (let [[entry after] (form-entry text f toks)]
+          (recur (rest tops) after (conj acc entry)))
         acc))))
 
 (defn- ident

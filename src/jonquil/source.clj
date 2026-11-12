@@ -35,6 +35,25 @@
   (try (.getPath (java.net.URI. s))
        (catch :default _ (subs s 5))))
 
+(defn- jar-location
+  "location's map for a jar: URL string file at line, nil when it has no !/
+  entry."
+  [file line]
+  (when-let [bang (str/index-of file "!/")]
+    (let [jar (uri-path (subs file 4 bang))
+          entry (subs file (+ bang 2))]
+      {:jar jar :entry entry :line line :editable? false
+       :label (str (file-name entry) " in " (file-name jar))})))
+
+(defn- file-location
+  "location's map for a file: URL or absolute path file at line, editable
+  when it lies under project-dir."
+  [file line project-dir]
+  (let [path (if (str/starts-with? file "file:") (uri-path file) file)]
+    {:path path :line line
+     :editable? (boolean (and project-dir (under? path project-dir)))
+     :label (file-name path)}))
+
 (defn location
   "Where lookup-info's definition lives, or nil when it carries no
   resolvable :file. opts is {:project-dir dir-or-nil}. A plain file gives
@@ -58,15 +77,14 @@
                  (str/starts-with? file "/")))
     (let [line (if (and (integer? line) (pos? line)) line 1)]
       (if (str/starts-with? file "jar:")
-        (when-let [bang (str/index-of file "!/")]
-          (let [jar (uri-path (subs file 4 bang))
-                entry (subs file (+ bang 2))]
-            {:jar jar :entry entry :line line :editable? false
-             :label (str (file-name entry) " in " (file-name jar))}))
-        (let [path (if (str/starts-with? file "file:") (uri-path file) file)]
-          {:path path :line line
-           :editable? (boolean (and project-dir (under? path project-dir)))
-           :label (file-name path)})))))
+        (jar-location file line)
+        (file-location file line project-dir)))))
+
+(defn- existing-file-path
+  "The canonical path of p when it names a file, else nil (also for nil p)."
+  [p]
+  (when p
+    (let [f (io/file p)] (when (.isFile f) (.getCanonicalPath f)))))
 
 (defn classpath-file
   "A bare classpath name (\"demo/util.clj\") as something location can read,
@@ -87,9 +105,7 @@
       (let [s (str u)]
         (cond
           (and (str/starts-with? s "jar:file:") (str/includes? s "!/")) s
-          (str/starts-with? s "file:")
-          (when-let [p (uri-path s)]
-            (let [f (io/file p)] (when (.isFile f) (.getCanonicalPath f)))))))
+          (str/starts-with? s "file:") (existing-file-path (uri-path s)))))
     (catch :default _ nil)))
 
 (defn- classpath-name?

@@ -12,34 +12,48 @@
   object, so Earlier and Later can't go back to another one."
   "This server keeps only the object it shows now.")
 
+(defn- wire
+  "The wire map for op-name: {:op op-name} plus each wire key in renames
+  mapped to args' value for the arg key it names (nil when args lacks it)."
+  [op-name args renames]
+  (reduce-kv (fn [m wire-key arg-key] (assoc m wire-key (get args arg-key)))
+             {:op op-name}
+             renames))
+
+(def ^:private pane-size {:rows :rows :cols :cols})
+
+(def ^:private requests
+  "Each request op's wire builder, a fn of the call's args."
+  {:start #(wire "inspect-start" % pane-size)
+   ;; a local of the last error's frame: only Jonquil's Jolt middleware
+   :start-local #(wire "inspect-local" %
+                       (assoc pane-size :frame :frame :local :local :error-id :error-id :label :label))
+   ;; a traced call's value (jonquil.trace-rt): only Jonquil's Jolt middleware.
+   ;; trace-id, never id, which is the nREPL message's own
+   :start-trace #(assoc (wire "inspect-trace" % (assoc pane-size :trace-id :id :label :label))
+                        :part (name (:part %)))
+   ;; a console result's value (jonquil.results-rt): only Jonquil's Jolt middleware
+   :start-result #(wire "inspect-result" %
+                        (assoc pane-size :result-id :id :result-epoch :epoch :label :label))
+   :in #(wire "inspect-in" % {:idx :idx})
+   :out #(wire "inspect-out" % {})
+   :page #(wire "inspect-page" % {:delta :delta})
+   :meta #(wire "inspect-toggle-meta" % {:cursor :cursor})
+   :table #(wire "inspect-toggle-table" % {})
+   :def #(wire "inspect-def" % {:name :name})
+   ;; Jonquil's own history ops: only its Jolt middleware answers them
+   :earlier #(wire "inspect-earlier" % {})
+   :later #(wire "inspect-later" % {})})
+
 (defn request
   "The wire op for a jonquil.evaluator/Inspector call: op/args to the
   server's inspect-* op and its keys, before :session is merged in. The
   JVM's clojure-cli.repl inspector and Jonquil's own Jolt middleware
   (jonquil.nrepl.inspect-middleware) answer the same ops."
   [op args]
-  (case op
-    :start {:op "inspect-start" :rows (:rows args) :cols (:cols args)}
-    ;; a local of the last error's frame: only Jonquil's Jolt middleware
-    :start-local {:op "inspect-local" :frame (:frame args) :local (:local args)
-                  :rows (:rows args) :cols (:cols args) :error-id (:error-id args)
-                  :label (:label args)}
-    ;; a traced call's value (jonquil.trace-rt): only Jonquil's Jolt middleware.
-    ;; trace-id, never id, which is the nREPL message's own
-    :start-trace {:op "inspect-trace" :trace-id (:id args) :part (name (:part args))
-                  :rows (:rows args) :cols (:cols args) :label (:label args)}
-    ;; a console result's value (jonquil.results-rt): only Jonquil's Jolt middleware
-    :start-result {:op "inspect-result" :result-id (:id args) :result-epoch (:epoch args)
-                   :rows (:rows args) :cols (:cols args) :label (:label args)}
-    :in {:op "inspect-in" :idx (:idx args)}
-    :out {:op "inspect-out"}
-    :page {:op "inspect-page" :delta (:delta args)}
-    :meta {:op "inspect-toggle-meta" :cursor (:cursor args)}
-    :table {:op "inspect-toggle-table"}
-    :def {:op "inspect-def" :name (:name args)}
-    ;; Jonquil's own history ops: only its Jolt middleware answers them
-    :earlier {:op "inspect-earlier"}
-    :later {:op "inspect-later"}))
+  (if-let [build (get requests op)]
+    (build args)
+    (throw (IllegalArgumentException. (str "No matching clause: " op)))))
 
 (def ^:private LABEL-MAX 40)
 
@@ -92,30 +106,37 @@
                {:state (assoc state :note "No later object.") :request nil}
                {:state (assoc state :pending :first) :request [:later]}))))
 
+(defn- step-down
+  "The :down key on a view with entries: the next row, else the next page,
+  else nothing."
+  [{:keys [view selected] :as state}]
+  (let [{:keys [start total entries]} view
+        n-entries (count entries)]
+    (cond
+      (< selected (dec n-entries)) {:state (assoc state :selected (inc selected)) :request nil}
+      (< (+ start n-entries) total) {:state (assoc state :pending :first) :request [:page {:delta 1}]}
+      :else {:state state :request nil})))
+
+(defn- step-up
+  "The :up key on a view with entries: the previous row, else the previous
+  page (landing on its last row), else nothing."
+  [{:keys [view selected] :as state}]
+  (cond
+    (pos? selected) {:state (assoc state :selected (dec selected)) :request nil}
+    (pos? (:start view)) {:state (assoc state :pending :last) :request [:page {:delta -1}]}
+    :else {:state state :request nil}))
+
 (defn- row-key-step
   "Row keys on a view with entries: move the selection, page, or go in."
   [state key]
-  (let [{:keys [view selected]} state
-        {:keys [start total entries]} view
-        n-entries (count entries)
-        none {:state state :request nil}]
+  (let [{:keys [view selected]} state]
     (case key
-      :down
-      (cond
-        (< selected (dec n-entries)) {:state (assoc state :selected (inc selected)) :request nil}
-        (< (+ start n-entries) total) {:state (assoc state :pending :first) :request [:page {:delta 1}]}
-        :else none)
-
-      :up
-      (cond
-        (pos? selected) {:state (assoc state :selected (dec selected)) :request nil}
-        (pos? start) {:state (assoc state :pending :last) :request [:page {:delta -1}]}
-        :else none)
-
+      :down (step-down state)
+      :up (step-up state)
       :page-down {:state (assoc state :pending :first) :request [:page {:delta 1}]}
       :page-up {:state (assoc state :pending :first) :request [:page {:delta -1}]}
-      :in {:state state :request [:in {:idx (+ start selected)}]}
-      none)))
+      :in {:state state :request [:in {:idx (+ (:start view) selected)}]}
+      {:state state :request nil})))
 
 (defn key-step
   "Handle a key press. Returns {:state s :request r} where r is nil when there's no request.

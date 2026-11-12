@@ -88,6 +88,38 @@
     true
     (catch Exception _ false)))
 
+(defn- write-temp!
+  "Writes text to the temp file tmp. With owner-only? the file is created
+  rw------- first; when that can't be done it is set to rw------- after the
+  write (a failure to set that is ignored)."
+  [tmp text owner-only?]
+  (let [private? (and owner-only? (create-owner-only! tmp))]
+    (if private?
+      ;; not spit: on Linux, Jolt's spit replaces the file, dropping the
+      ;; rw------- it was created with; Files/write keeps the inode
+      (java.nio.file.Files/write
+       (.toPath (java.io.File. ^String tmp))
+       (.getBytes ^String text "UTF-8")
+       (into-array java.nio.file.OpenOption
+                   [java.nio.file.StandardOpenOption/WRITE
+                    java.nio.file.StandardOpenOption/TRUNCATE_EXISTING]))
+      (spit tmp text))
+    (when (and owner-only? (not private?))
+      (try (java.nio.file.Files/setPosixFilePermissions
+            (.toPath (java.io.File. ^String tmp))
+            (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
+           (catch Exception _ nil)))))
+
+(defn- move-over!
+  "Moves the file tmp over target in one atomic step."
+  [tmp target]
+  (java.nio.file.Files/move
+   (.toPath (java.io.File. ^String tmp))
+   (.toPath (java.io.File. ^String target))
+   (into-array java.nio.file.CopyOption
+               [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                java.nio.file.StandardCopyOption/ATOMIC_MOVE])))
+
 (defn write-atomically!
   "Writes text to path atomically (temp file beside the target, then
   ATOMIC_MOVE over it), rewriting a symlink's real target in place. nil on
@@ -102,28 +134,8 @@
        (let [target (resolved-target path)]
          (reset! tmp (str target ".tmp-" (System/nanoTime)))
          (io/make-parents target)
-         (let [private? (and (:owner-only? opts) (create-owner-only! @tmp))]
-           (if private?
-            ;; not spit: on Linux, Jolt's spit replaces the file, dropping the
-            ;; rw------- it was created with; Files/write keeps the inode
-             (java.nio.file.Files/write
-              (.toPath (java.io.File. ^String @tmp))
-              (.getBytes ^String text "UTF-8")
-              (into-array java.nio.file.OpenOption
-                          [java.nio.file.StandardOpenOption/WRITE
-                           java.nio.file.StandardOpenOption/TRUNCATE_EXISTING]))
-             (spit @tmp text))
-           (when (and (:owner-only? opts) (not private?))
-             (try (java.nio.file.Files/setPosixFilePermissions
-                   (.toPath (java.io.File. ^String @tmp))
-                   (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
-                  (catch Exception _ nil))))
-         (java.nio.file.Files/move
-          (.toPath (java.io.File. ^String @tmp))
-          (.toPath (java.io.File. ^String target))
-          (into-array java.nio.file.CopyOption
-                      [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                       java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+         (write-temp! @tmp text (:owner-only? opts))
+         (move-over! @tmp target)
          nil)
        (catch Exception e
          (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))

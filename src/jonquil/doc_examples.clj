@@ -103,6 +103,26 @@
 (def ^:private title-re #"(?m)^== (.*)$")
 (def ^:private example-re #"(?m)^= example (\d+)\n")
 
+(defn- example-heads
+  "Every '= example N' header in rest-text as {:n :start :end}, in order."
+  [rest-text]
+  (let [em (re-matcher example-re rest-text)]
+    (loop [acc []]
+      (if (.find em)
+        (recur (conj acc {:n (parse-long (.group em 1)) :start (.start em) :end (.end em)}))
+        acc))))
+
+(defn- examples-of
+  "The [{:n :body :code}] examples of rest-text, one per header in heads: the
+  body runs from the header's end to the next header (or the text's end)."
+  [rest-text heads]
+  (vec (map-indexed
+        (fn [i {:keys [n end]}]
+          (let [stop (if-let [nxt (nth heads (inc i) nil)] (:start nxt) (count rest-text))
+                body (str/replace (subs rest-text end stop) #"\n\n\z" "")]
+            {:n n :body body :code (clean body)}))
+        heads)))
+
 (defn split
   "Split a doc result into {:doc :title :examples [{:n :body :code} ...]}.
   The server's shape is the doc, a blank line, a '== ns/name' line, a blank
@@ -114,24 +134,14 @@
         tm (re-matcher title-re text)]
     (if-not (.find tm)
       none
-      (let [title (str/trim (.group tm 1))
-            rest-text (subs text (.end tm))
-            em (re-matcher example-re rest-text)
-            heads (loop [acc []]
-                    (if (.find em)
-                      (recur (conj acc {:n (parse-long (.group em 1)) :start (.start em) :end (.end em)}))
-                      acc))]
+      (let [rest-text (subs text (.end tm))
+            heads (example-heads rest-text)]
         (if (or (empty? heads)
                 (not (str/blank? (subs rest-text 0 (:start (first heads))))))
           none
           {:doc (str/replace (subs text 0 (.start tm)) #"\n+\z" "")
-           :title title
-           :examples (vec (map-indexed
-                           (fn [i {:keys [n end]}]
-                             (let [stop (if-let [nxt (nth heads (inc i) nil)] (:start nxt) (count rest-text))
-                                   body (str/replace (subs rest-text end stop) #"\n\n\z" "")]
-                               {:n n :body body :code (clean body)}))
-                           heads))})))))
+           :title (str/trim (.group tm 1))
+           :examples (examples-of rest-text heads)})))))
 
 ;; Inserting
 
@@ -156,6 +166,30 @@
         indented (str "  " code)]
     {:edits [[pos pos (str prefix indented suffix)]] :caret (+ pos (count prefix) (count indented))}))
 
+(defn- form-at-caret
+  "The form of forms holding caret, else the one ending right at it, else nil."
+  [forms caret]
+  (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
+      (first (filter (fn [{:keys [end]}] (= end caret)) forms))))
+
+(defn- insert-prefix
+  "What goes before inserted code at pos, the end of a line (ls its start):
+  a blank line already gives one of the two newlines."
+  [text pos ls]
+  (cond (not (str/blank? (subs text ls pos))) "\n\n"
+        (zero? ls) ""
+        (str/blank? (subs text (line-start text (dec ls)) (dec ls))) ""
+        :else "\n"))
+
+(defn- insert-suffix
+  "A newline when non-blank text follows the line ending at pos, else \"\"."
+  [text pos]
+  (let [next-start (inc pos)]
+    (if (and (< next-start (count text))
+             (not (str/blank? (subs text next-start (eol text next-start)))))
+      "\n"
+      "")))
+
 (defn insert-op
   "The edit that puts code after the top-level form holding the caret (a
   caret just past its last character counts), else after the caret's line.
@@ -166,22 +200,10 @@
   jonquil.gtk.editor/apply-op! takes; :caret is the end of the code. A caret in
   a (comment ...) block puts the code inside it instead (insert-in-comment-op)."
   [{:keys [text caret]} code]
-  (let [forms (commands/top-level-forms text)
-        form (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
-                 (first (filter (fn [{:keys [end]}] (= end caret)) forms)))
+  (let [form (form-at-caret (commands/top-level-forms text) caret)
         pos (eol text (if form (:end form) caret))
-        ls (line-start text pos)
-        blank-line? (str/blank? (subs text ls pos))
-        ;; a blank line already gives one of the two newlines
-        prefix (cond (not blank-line?) "\n\n"
-                     (zero? ls) ""
-                     (str/blank? (subs text (line-start text (dec ls)) (dec ls))) ""
-                     :else "\n")
-        next-start (inc pos)
-        suffix (if (and (< next-start (count text))
-                        (not (str/blank? (subs text next-start (eol text next-start)))))
-                 "\n"
-                 "")]
+        prefix (insert-prefix text pos (line-start text pos))
+        suffix (insert-suffix text pos)]
     (if (and form (commands/comment-form? text form))
       (insert-in-comment-op text form code)
       {:edits [[pos pos (str prefix code suffix)]] :caret (+ pos (count prefix) (count code))})))

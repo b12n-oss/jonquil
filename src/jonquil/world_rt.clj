@@ -65,6 +65,34 @@
                            (re-find #"^(clojure|jolt|jonquil|nrepl)\." %))))
         (all-ns)))
 
+(defn- save-op
+  "The :save answer for path: what was saved and the placeholders, or
+  {:error :unwritable} with nothing written. nil namespaces means
+  child-namespaces."
+  [path namespaces]
+  (let [nss (or namespaces (child-namespaces))
+        vars (data-vars nss)
+        ps (problems vars)
+        bad (filterv #(= :unwritable (:disposition %)) ps)]
+    (if (seq bad)
+      {:error (str "Nothing was saved: " (str/join ", " (map :var bad)) " can't be written, even as a placeholder.")
+       :unwritable (mapv #(select-keys % [:var :kind]) bad)}
+      (do (io/make-parents (io/file path))
+          (img/dump-world! path nss)
+          {:saved (count vars)
+           :placeholders (mapv #(select-keys % [:var :kind]) ps)}))))
+
+(defn- restore-op
+  "The :restore answer for the saved world at path: how many vars came back
+  and the placeholders, or {:missing true} without the file."
+  [path]
+  (if-not (.isFile (io/file path))
+    {:missing true}
+    (let [n (img/restore-world! path)]
+      {:restored n
+       :placeholders (mapv (fn [s] {:var (:var s) :kind (:kind s) :description (:description s)})
+                           (img/stubs))})))
+
 (defn op
   "One world op, answered as plain data:
   :save {:path :namespaces} -> {:saved n :placeholders [...]}, or
@@ -74,22 +102,5 @@
   :namespaces nil means child-namespaces."
   [op {:keys [path namespaces]}]
   (case op
-    :save
-    (let [nss (or namespaces (child-namespaces))
-          vars (data-vars nss)
-          ps (problems vars)
-          bad (filterv #(= :unwritable (:disposition %)) ps)]
-      (if (seq bad)
-        {:error (str "Nothing was saved: " (str/join ", " (map :var bad)) " can't be written, even as a placeholder.")
-         :unwritable (mapv #(select-keys % [:var :kind]) bad)}
-        (do (io/make-parents (io/file path))
-            (img/dump-world! path nss)
-            {:saved (count vars)
-             :placeholders (mapv #(select-keys % [:var :kind]) ps)})))
-    :restore
-    (if-not (.isFile (io/file path))
-      {:missing true}
-      (let [n (img/restore-world! path)]
-        {:restored n
-         :placeholders (mapv (fn [s] {:var (:var s) :kind (:kind s) :description (:description s)})
-                             (img/stubs))}))))
+    :save (save-op path namespaces)
+    :restore (restore-op path)))

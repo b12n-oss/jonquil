@@ -142,6 +142,14 @@
                 (seq good) (assoc :layouts good)
                 (< (count good) (count v)) (assoc :warning (str path "'s :layouts has entries that aren't a name and a layout, ignoring them")))))))
 
+(defn- settings-parts
+  "Each settings key's part of the file map m read from path, in a fixed
+  order: {key value, :warning msg} maps, either one absent when empty."
+  [path m]
+  (map #(% path m)
+       [theme-part dialect-part file-tree-part reopen-tabs-part remember-session-part
+        mcp-listen-part plugins-part parinfer-part layouts-part]))
+
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
   :file-tree when it holds a usable one, :reopen-tabs?, :remember-session? and
@@ -154,21 +162,9 @@
   (let [f (io/file path)]
     (if-not (.exists f)
       {:theme theme/default-theme}
-      (let [m (try (edn/read-string (slurp f)) (catch Exception _ ::unreadable))
-            t (theme-part path m)
-            d (dialect-part path m)
-            ft (file-tree-part path m)
-            rt (reopen-tabs-part path m)
-            rs (remember-session-part path m)
-            ml (mcp-listen-part path m)
-            pl (plugins-part path m)
-            pi (parinfer-part path m)
-            ly (layouts-part path m)
-            warnings (remove nil? [(:warning t) (:warning d) (:warning ft) (:warning rt) (:warning rs)
-                                   (:warning ml) (:warning pl) (:warning pi) (:warning ly)])]
-        (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning)
-                       (dissoc rt :warning) (dissoc rs :warning) (dissoc ml :warning) (dissoc pl :warning)
-                       (dissoc pi :warning) (dissoc ly :warning))
+      (let [parts (settings-parts path (try (edn/read-string (slurp f)) (catch Exception _ ::unreadable)))
+            warnings (keep :warning parts)]
+        (cond-> (apply merge (map #(dissoc % :warning) parts))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 
 (defn- resolved-target
@@ -186,6 +182,38 @@
       (str (.toRealPath p (make-array java.nio.file.LinkOption 0)))
       path)))
 
+(defn- existing-settings
+  "The settings map in file f (at target) to merge a save into, nil when
+  there's none to keep. Throws, with the message save-settings! reports,
+  when it can't be read or isn't EDN, so nothing gets overwritten."
+  [target ^java.io.File f]
+  (when (.exists f)
+    (let [content (try (slurp target)
+                       (catch Exception _
+                         ;; IO failure: the file is unreadable, so its
+                         ;; other keys can't be kept. Signal an error.
+                         (throw (Exception.
+                                 (str "couldn't read " target
+                                      " to keep its other settings; nothing saved")))))
+          ;; Malformed EDN: refuse rather than overwrite the file's
+          ;; other keys (toggling the tree saves too). Valid EDN that isn't a map has
+          ;; nothing to keep.
+          v (try (edn/read-string content)
+                 (catch Exception _
+                   (throw (Exception.
+                           (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it")))))]
+      (when (map? v) v))))
+
+(defn- move-over!
+  "Moves the file tmp over target in one atomic step."
+  [tmp target]
+  (java.nio.file.Files/move
+   (.toPath (java.io.File. ^String tmp))
+   (.toPath (java.io.File. ^String target))
+   (into-array java.nio.file.CopyOption
+               [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                java.nio.file.StandardCopyOption/ATOMIC_MOVE])))
+
 (defn save-settings!
   "Merges map m (say {:theme k}, or {:file-tree {...}}) into the settings
   file at path and writes it atomically, so a save keeps every key the file
@@ -200,32 +228,11 @@
   (let [tmp (atom nil)]
     (try
       (let [target (resolved-target path)
-            f (io/file target)
-            existing (when (.exists f)
-                       (let [content (try (slurp target)
-                                          (catch Exception _
-                                            ;; IO failure: the file is unreadable, so its
-                                            ;; other keys can't be kept. Signal an error.
-                                            (throw (Exception.
-                                                    (str "couldn't read " target
-                                                         " to keep its other settings; nothing saved")))))
-                             ;; Malformed EDN: refuse rather than overwrite the file's
-                             ;; other keys (toggling the tree saves too). Valid EDN that isn't a map has
-                             ;; nothing to keep.
-                             v (try (edn/read-string content)
-                                    (catch Exception _
-                                      (throw (Exception.
-                                              (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it")))))]
-                         (when (map? v) v)))]
+            existing (existing-settings target (io/file target))]
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
         (spit @tmp (pr-str (merge existing m)))
-        (java.nio.file.Files/move
-         (.toPath (java.io.File. ^String @tmp))
-         (.toPath (java.io.File. ^String target))
-         (into-array java.nio.file.CopyOption
-                     [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                      java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+        (move-over! @tmp target)
         nil)
       (catch Exception e
         (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))
@@ -244,6 +251,17 @@
            (catch Exception _
              (throw (Exception. (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it"))))))))
 
+(defn- plugins-problem
+  "Why the settings file at target can't take a plugin change, nil when it
+  can: plugins (its :plugins) must be a map and d (its :disabled) a set of
+  plugin ids when they are there at all."
+  [target plugins d]
+  (cond
+    (and (some? plugins) (not (map? plugins)))
+    (str target "'s :plugins isn't a map, so it wasn't changed; fix it by hand")
+    (and (some? d) (not (and (set? d) (every? keyword? d))))
+    (str target "'s :plugins :disabled isn't a set of plugin ids, so it wasn't changed; fix it by hand")))
+
 (defn save-plugin-disabled!
   "Adds plugin id (a keyword) to the settings file's :plugins :disabled, or
   with disabled? false takes it out, keeping every other key, :plugins'
@@ -258,11 +276,6 @@
           m (read-for-update target)
           plugins (when (map? m) (:plugins m))
           d (when (map? plugins) (:disabled plugins))]
-      (cond
-        (and (some? plugins) (not (map? plugins)))
-        (str target "'s :plugins isn't a map, so it wasn't changed; fix it by hand")
-        (and (some? d) (not (and (set? d) (every? keyword? d))))
-        (str target "'s :plugins :disabled isn't a set of plugin ids, so it wasn't changed; fix it by hand")
-        :else
-        (save-settings! path {:plugins (update (or plugins {}) :disabled (fnil (if disabled? conj disj) #{}) id)})))
+      (or (plugins-problem target plugins d)
+          (save-settings! path {:plugins (update (or plugins {}) :disabled (fnil (if disabled? conj disj) #{}) id)})))
     (catch Exception e (str "couldn't save " path ": " (.getMessage e)))))

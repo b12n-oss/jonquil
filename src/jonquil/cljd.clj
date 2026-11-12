@@ -294,14 +294,13 @@
   acc. Returns [next-index acc]; next-index is just past the closing ]."
   [toks [j lib acc]]
   (loop [j j acc acc]
-    (if-let [[t2 w2] (get toks j)]
-      (if (and (= :bracket t2) (= "]" w2))
-        [(inc j) acc]
-        (recur (inc j)
-               (if (#{:symbol :special-form :builtin} t2)
-                 (assoc-in acc [:refers w2] lib)
-                 acc)))
-      [j acc])))
+    (let [[t2 w2] (get toks j)]
+      (cond
+        (nil? t2) [j acc]
+        (and (= :bracket t2) (= "]" w2)) [(inc j) acc]
+        :else (recur (inc j)
+                     (cond-> acc
+                       (#{:symbol :special-form :builtin} t2) (assoc-in [:refers w2] lib)))))))
 
 (defn- ns-ref-step
   "One step of buffer-ns-refs' walk over toks at index i, with the walk's
@@ -355,6 +354,33 @@
    (str/lower-case symbol)
    symbol])
 
+(defn- candidate-user-symbols
+  "The buffer's own names for candidates: tokens and definitions of text and
+  of extra-context (when a string), each alias of the ns form followed by /,
+  without prefix itself. Returns a set."
+  [text prefix extra-context]
+  (let [data (syntax/get-cached-or-compute-buffer-symbols (or text ""))
+        extra (when (string? extra-context) (syntax/get-cached-or-compute-buffer-symbols extra-context))]
+    (-> #{}
+        (into (:all-tokens data)) (into (:defs data))
+        (into (:all-tokens extra)) (into (:defs extra))
+        (into (map (fn [a] (str a "/")) (buffer-aliases text)))
+        (disj prefix))))
+
+(defn- candidate-entries
+  "The unsorted {:symbol :category} maps for the typed prefix: user names
+  that aren't special forms or builtins, special forms, and builtins that
+  aren't special forms, each matching prefix case-insensitively."
+  [{:keys [special-forms builtins]} prefix user]
+  (let [lower (str/lower-case prefix)
+        match? (fn [s] (str/starts-with? (str/lower-case s) lower))]
+    (concat
+     (map (fn [s] {:symbol s :category :user})
+          (->> user (filter match?) (remove special-forms) (remove builtins)))
+     (map (fn [s] {:symbol s :category :special}) (filter match? special-forms))
+     (map (fn [s] {:symbol s :category :builtin})
+          (->> builtins (filter match?) (remove special-forms))))))
+
 (defn candidates
   "Offline completion for a ClojureDart buffer, in jonquil.docs/candidates'
   shape ([{:symbol :category}]): the buffer's own definitions and symbols,
@@ -367,20 +393,6 @@
   builtins."
   [profile prefix text _pos extra-context]
   (let [prefix (or prefix "")
-        lower (str/lower-case prefix)
-        match? (fn [s] (str/starts-with? (str/lower-case s) lower))
-        {:keys [special-forms builtins]} profile
-        data (syntax/get-cached-or-compute-buffer-symbols (or text ""))
-        extra (when (string? extra-context) (syntax/get-cached-or-compute-buffer-symbols extra-context))
-        user (-> #{}
-                 (into (:all-tokens data)) (into (:defs data))
-                 (into (:all-tokens extra)) (into (:defs extra))
-                 (into (map (fn [a] (str a "/")) (buffer-aliases text)))
-                 (disj prefix))
-        cands (concat
-               (for [s user :when (and (match? s) (not (contains? special-forms s)) (not (contains? builtins s)))]
-                 {:symbol s :category :user})
-               (for [s special-forms :when (match? s)] {:symbol s :category :special})
-               (for [s builtins :when (and (match? s) (not (contains? special-forms s)))]
-                 {:symbol s :category :builtin}))]
-    (vec (sort-by (fn [c] (candidate-sort-key prefix c)) cands))))
+        user (candidate-user-symbols text prefix extra-context)]
+    (vec (sort-by (fn [c] (candidate-sort-key prefix c))
+                  (candidate-entries profile prefix user)))))

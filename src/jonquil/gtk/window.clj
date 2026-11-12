@@ -252,7 +252,7 @@
   Shift+F6/F2 clauses and the rename popover's own entry \"activate\"
   signal call; :rename-popover is the jonquil.gtk.help-popover map those
   two act on -- jonquil.gtk.popover/open? and help-popover/rename-entry-
-  text/rename-problem-text read it back. :activate-menu-action!*/:repl-
+  text read it back. :activate-menu-action!*/:repl-
   activate-menu-action!* fire one of the editor's/the console's own
   context-menu items by its unprefixed action name, exactly as
   install-context-menu!'s own docstring describes. :palette is
