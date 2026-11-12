@@ -419,7 +419,7 @@
    :step-fn (fn [] (step! ctx :step))
    :step-over-fn (fn [] (step! ctx :over))
    :step-out-fn (fn [] (step! ctx :out))
-   ;; F10's :when: a breakpoint's pause is showing (GTK thread)
+   ;; the step keys' :when (F7, F10, Shift+F7): a breakpoint's pause is showing (GTK thread)
    :breakpoint-paused? (fn [] (let [fs @(:frames-state ctx)] (boolean (and (:paused? fs) (:breakpoint fs)))))})
 
 (defn- install

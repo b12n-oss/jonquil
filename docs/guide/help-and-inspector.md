@@ -691,7 +691,14 @@ from a Step to the next pause. So:
   at the same depth or above, so a call on the line runs through, and Out
   pauses only above, once the function returned. Out from the outermost
   instrumented function runs to the next dot or the end, as Continue. A dot
-  pauses whichever step is running.
+  pauses whichever step is running. Both keep to the call they started
+  in: when a loop such as `mapv` calls the function again, Step Over from
+  its last line goes on to the caller's next line, not into the next call.
+  Jonquil tells calls apart by their arguments, so a next call with the very
+  same argument values (a small number, say) can still pause. An inline
+  `fn` or `#()`, and a `for`, `lazy-seq`, `delay` or `with-redefs` body
+  inside a defn, run as calls of their own, so Step Over steps over them,
+  as JVM debuggers do.
 - **Continue** turns stepping off and runs to the next breakpoint.
 - **Stop** ends the run, as at any pause, and stepping with it.
 

@@ -788,3 +788,56 @@
             (is (true? (step-sync s :out)))
             (is (= "5" (:printed (deref done 5000 :timeout))))))
         (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
+
+(defn- over-run
+  "Instruments text with dots, calls call, and answers the titles of the
+  pauses as steps (a seq of :step/:over/:out) are taken one by one after
+  the first pause, then the printed value once it Continues."
+  [text dots call steps]
+  (let [s (session/make-session)
+        paused (atom (promise))
+        next-pause (fn [] (let [d (deref @paused 5000 nil)] (reset! paused (promise)) (:title d)))]
+    (try
+      (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+      (set-breakpoints-sync s true)
+      (repl-sync s (:text (bp/instrument text dots (debugger/macro-heads "user" (bp/head-symbols text)))))
+      (let [done (promise)
+            _ (session/submit-repl! s call {:on-complete (fn [r] (deliver done r))})
+            titles (into [(next-pause)]
+                         (map (fn [mode] (step-sync s mode) (next-pause)))
+                         steps)]
+        (ev/continue-break! s)
+        (conj titles (:printed (deref done 5000 :timeout))))
+      (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false)))))
+
+(deftest over-skips-a-recursive-call-and-returns-to-the-caller-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (is (= ["Breakpoint at line 8" "Stepped to line 2" "Stepped to line 4" "Stepped to line 5" "Stepped to line 9" "2"]
+           (over-run (str "(defn r [n]\n  (when (neg? n)\n    (str \"never\"))\n  (if (pos? n)\n"
+                          "    (+ 1 (r (dec n)))\n    0))\n(defn rc []\n  (let [v (r 2)]\n    v))")
+                     [3 8] "(rc)" [:step :over :over :over])))))
+
+(deftest over-leaves-a-function-a-library-loop-calls-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (is (= ["Breakpoint at line 6" "Stepped to line 2" "Stepped to line 4" "Stepped to line 7" "3"]
+           (over-run (str "(defn f [x]\n  (when (neg? x)\n    (str \"never\"))\n  (inc x))\n"
+                          "(defn c []\n  (let [v (mapv f [1 2 3])]\n    (count v)))")
+                     [3 6] "(c)" [:step :over :over]))
+        "from f's last line, the next pause is c's next line, not f again for the loop's next item")))
+
+(deftest over-runs-a-lazy-call-through-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (is (= ["Breakpoint at line 6" "Stepped to line 7" "11"]
+           (over-run (str "(defn g [x]\n  (when (neg? x)\n    (str \"never\"))\n  (* x 10))\n"
+                          "(defn h [xs]\n  (let [v (first (map g xs))]\n    (inc v)))")
+                     [3 6] "(h [1 2])" [:over])))))
+
+(deftest over-stops-at-a-dot-in-the-callee-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (is (= ["Breakpoint at line 4" "Breakpoint at line 2" "2"]
+           (over-run "(defn k [x]\n  (inc x))\n(defn kc []\n  (let [v (k 1)]\n    v))"
+                     [2 4] "(kc)" [:over])))))

@@ -1142,6 +1142,11 @@
                 (is (true? (step-sync e :out)))
                 (is (= "Stepped to line 8" (:title (next-pause))))
                 (ev/continue-break! e)
+                (is (= "5" (:printed (deref done 20000 :timeout))))))
+            (testing "Step Out from the outermost frame runs to the end, as Continue"
+              (let [done (start-run e "(b 1)" {})]
+                (is (= "Breakpoint at line 7" (:title (next-pause))))
+                (is (true? (step-sync e :out)))
                 (is (= "5" (:printed (deref done 20000 :timeout)))))))))
       (finally (ev/stop! e)))))
 

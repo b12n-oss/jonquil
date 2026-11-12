@@ -62,7 +62,10 @@ Known rough edges, parked for later:
   nothing inside it is wrapped, and a dot there doesn't pause. A breakpoint pauses only
   during an evaluation you started, and in process only on its own thread.
 - Stepping reaches only the forms that hold a breakpoint: a call into a
-  form without a dot runs through.
+  form without a dot runs through. Step Over and Step Out tell one call of a
+  function from the next by its arguments, so a next call with the very
+  same argument values can still pause, and a `recur` to the function's
+  head counts as a new call.
 - A `(catch Exception _)` in your code can swallow Stop at a breakpoint, as
   it can with Break on error: Stop ends a pause by throwing on the paused
   thread.
