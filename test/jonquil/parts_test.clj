@@ -14,6 +14,7 @@
             [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.live-results :as live-results-part]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.help :as help]
             [jonquil.gtk.parts.messages :as messages-part]
             [jonquil.gtk.parts.plugins :as plugins-part]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -82,7 +83,7 @@
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
            :panel/processes :processes/show
            :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
-           :result/inspect :result/copy :result/define :result/jump
+           :result/inspect :result/copy :result/define :result/jump :result/doc
            :panel/locations :locations/uses :locations/definitions :locations/matches
            :locations/usages-in-project :locations/next :locations/previous
            :compare/disk :compare/head :compare/take :compare/last-run
@@ -622,7 +623,8 @@
     (is (= [:result-copy-fn] (get-in spec [:commands :result/copy :call])))
     (is (= [:result-define-fn] (get-in spec [:commands :result/define :call])))
     (is (= [:result-jump-fn] (get-in spec [:commands :result/jump :call])))
-    (is (= 4 (count (:commands spec))))))
+    (is (= [:result-doc-fn] (get-in spec [:commands :result/doc :call])))
+    (is (= 5 (count (:commands spec))))))
 
 (deftest live-results-say-no-result
   (let [statuses (atom [])
@@ -640,11 +642,40 @@
                   g/g-signal-connect-data (fn [& _] 1)
                   g/gtk-widget-add-controller (fn [& _])]
       (let [c ((deref #'live-results-part/install) wctx)]
-        (doseq [k [:result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn]]
+        (doseq [k [:result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn]]
           (reset! statuses [])
           ((get-in c [:fns k]))
           (is (= ["; No result here."] @statuses) (str k)))
         (is (= #{:result-click!* :result-release!* :console-right-press!*} (set (keys (:ui c)))))))))
+
+(deftest live-results-doc-prints-the-var-doc
+  (testing "the quick-doc verb looks the var up and prints its doc on the
+           console as comment lines; nothing found goes to the status bar"
+    (let [statuses (atom []) printed (atom []) asked (atom [])
+          answer (atom {:doc "Returns one more."})
+          wctx {:cv {:view :view :buf :buf :results (atom [])}
+                :set-status! #(swap! statuses conj %) :status-label :lbl
+                :ev* (atom nil) :active-tab (fn [] nil)
+                :inspect! (fn [_]) :jump-to! (fn [& _]) :source-ctx (fn [_] {})
+                :ask-lookup! (fn [_ sym _ _ _ label on-doc] (swap! asked conj [sym label]) (on-doc @answer))}]
+      (with-redefs [cview/result-at (fn [_ _] {:id 1 :epoch "e" :kind :var})
+                    cview/result-text-at (fn [_ _] "=> #'clojure.core/inc\n")
+                    cview/append! (fn [_ style s] (swap! printed conj [style s]))
+                    help/doc-text (fn [sym doc] (str sym "\n\n" (:doc doc)))
+                    g/cursor-offset (fn [_] 0)
+                    g/gtk-gesture-click-new (fn [] :gesture)
+                    g/gtk-gesture-single-set-button (fn [& _])
+                    g/gtk-event-controller-set-propagation-phase (fn [& _])
+                    g/g-signal-connect-data (fn [& _] 1)
+                    g/gtk-widget-add-controller (fn [& _])]
+        (let [doc! (get-in ((deref #'live-results-part/install) wctx) [:fns :result-doc-fn])]
+          (doc!)
+          (is (= [["clojure.core/inc" "quick doc"]] @asked))
+          (is (= [[:system "; clojure.core/inc\n;\n; Returns one more.\n"]] @printed))
+          (reset! answer nil)
+          (doc!)
+          (is (= ["No documentation found for clojure.core/inc."] @statuses))
+          (is (= 1 (count @printed)) "nothing printed when nothing was found"))))))
 
 (deftest run-tab-hooks-calls-each-part
   (let [seen (atom [])

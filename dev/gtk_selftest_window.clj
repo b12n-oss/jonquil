@@ -404,6 +404,7 @@
    results-rows/row-result-click-waits-double-click-time
    results-rows/row-result-verbs
    results-rows/row-result-menu-verbs
+   results-rows/row-result-quick-doc
    results-rows/row-result-right-click-moves-caret
    trace-rows/row-trace-toggle-and-show
    trace-rows/row-trace-throw
