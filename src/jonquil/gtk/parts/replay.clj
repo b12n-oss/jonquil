@@ -9,6 +9,7 @@
   (:require [jolt.ffi :as ffi]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
+            [jonquil.dialect :as dialect]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -21,16 +22,19 @@
 ;; tab map (tab-ctx) with this part's state and wctx's tab fns added (see
 ;; part-ctx): :replay*, an atom holding
 ;; {:root :path :record :dirty?} for the root the window records under (nil
-;; until a root opens with :remember-session? on).
+;; until a root opens with :remember-session? on for it).
 
 ;; The roots a window of this process has opened: only the first window to
 ;; open one moves its :current to :previous.
 (defonce ^:private opened-roots (atom #{}))
 
 (defn- remember-session?
-  "False only when the settings file holds :remember-session? false."
-  [settings-path]
-  (not (false? (:remember-session? (settings/load-settings settings-path)))))
+  "Whether root's evaluations are recorded: its project's .jonquil.edn
+  :remember-session? when it names one, else the settings file's (on
+  unless it says false)."
+  [settings-path root]
+  (replay/remember-session? (dialect/project-remember-session root)
+                            (:remember-session? (settings/load-settings settings-path))))
 
 (defn- replayable?
   "Whether the window's dialect gets a replay: Jolt and JVM Clojure."
@@ -100,11 +104,11 @@
   the first window of the process on this root, moves its :current to
   :previous (saved at once). Then the root's prompt history goes into the
   evaluator and the console offers :previous when it isn't empty. Does
-  nothing with :remember-session? off, or when the record is already this
-  root's. GTK thread. Never throws; a failure is said on the console."
+  nothing with :remember-session? off for root, or when the record is
+  already this root's. GTK thread. Never throws; a failure is said on the console."
   [{:keys [cv ev* sel* settings-path* tree-pane replay*] :as ctx}]
   (let [root (:root @(:state tree-pane))]
-    (when (and (remember-session? @settings-path*)
+    (when (and (remember-session? @settings-path* root)
                (not (and @replay* (= root (:root @replay*)))))
       (try
         (flush-replay! ctx)
@@ -177,7 +181,7 @@
   are still behind #_ in the Run's text (the record's :code), ahead of what
   the Run recorded."
   [{:keys [cv sel* settings-path* replay*] :as ctx} {:keys [source tab-id root] :as record} result]
-  (when (remember-session? @settings-path*)
+  (when (remember-session? @settings-path* root)
     (let [ok? (= :ok (:status result))
           es (when ok?
                (replay/entries (assoc (select-keys record [:source :code :path :ns])
@@ -243,7 +247,7 @@
   "Forget last session: empties :previous (the prompt history stays), saves
   at once and says so. GTK thread."
   [{:keys [cv replay* settings-path*] :as ctx}]
-  (if (and @replay* (remember-session? @settings-path*))
+  (if (and @replay* (remember-session? @settings-path* (:root @replay*)))
     (do (swap! replay* (fn [s] (-> s (update :record replay/forget) (assoc :dirty? true))))
         (flush-replay! ctx)
         (cview/append! cv :system "; Forgot the last session. Your prompt history stays.\n"))
