@@ -644,3 +644,39 @@
                                     :after-run after-run :uninst uninst? :undone undone :inst2 inst2?
                                     :cleared cleared? :disarmed disarmed? :status (status ui)})))
           (finally (breakpoints-off! ui true)))))))
+
+(defn row-instrument-reads-the-text-at-send
+  "Instrument this tab for stepping, then text typed before the runtime
+  answers (in the same GTK tick, so the answer can only come after): the
+  forms sent are cut from the text as it is when they go, so both defns
+  are defined again whole, and the runtime was asked which heads are
+  macros, though the tab has no dot."
+  [ui]
+  (go-row :instrument-reads-the-text-at-send support/check
+    (if-not (debugger/break-available?)
+      (on-gtk (support/check :instrument-reads-the-text-at-send true {:available false}))
+      (try
+        (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-instrument-typing-") "typing.clj")
+              _ (spit f "(defn ia [x]\n  (inc x))\n(defn ib [x]\n  (ia (dec x)))\n")
+              m0 (on-gtk (let [m (support/out-end-offset ui)] ((:open-file! ui) (.getPath f)) ((:run!* ui)) m))
+              ran? (await-until 8000 20 #(and (support/idle? ui) (str/includes? (support/since ui m0) "#'user/ib")))
+              m (on-gtk (let [m (support/out-end-offset ui)
+                              ed (active-ed ui)]
+                          (run-palette! ui "instrument this tab for stepping")
+                          (g/with-iters* (:buf ed) 0 0
+                            (fn [a _] (g/gtk-text-buffer-insert (:buf ed) a ";; typed while it armed\n" -1)))
+                          m))
+              inst? (await-until 8000 20 #(str/starts-with? (status ui) "; Instrumented 2 forms for stepping"))
+              out (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "#'user/ib")))
+              text (on-gtk (support/since ui m))
+              heads? (on-gtk (some? (some-> (active-ed ui) :changed :bp-heads deref)))]
+          (on-gtk (support/check :instrument-reads-the-text-at-send
+                                 ;; one entry: both forms echoed whole, the last one's value
+                                 (and ran? inst? out
+                                      (str/includes? text "(defn ia [x]\n  (inc x))\n(defn ib [x]\n  (ia (dec x)))")
+                                      (not (str/includes? text "rror")) heads?)
+                                 {:ran ran? :inst inst? :out out :heads heads? :text text :status (status ui)})))
+        ;; the typed line made the tab dirty: marked saved, so closing it
+        ;; doesn't ask about saving (and leave it, instrumented, open)
+        (finally (on-gtk (editor/mark-saved! (active-ed ui)))
+                 (breakpoints-off! ui true))))))

@@ -232,8 +232,9 @@
       (disarm-and-resend! ctx tab ranges (cleared-head n all?)))))
 
 (defn- step-all-plan
-  "tab's defining forms as {:send :skipped} (split-edited): what the two
-  instrument commands send again, and what they leave for a Run."
+  "tab's defining forms as {:send :skipped} (split-edited), read from its
+  text as it is now: what the two instrument commands send again, and
+  what they leave for a Run."
   [tab]
   (let [text (editor/editor-text (:ed tab))]
     (split-edited tab text (bp/step-all-ranges text))))
@@ -246,25 +247,41 @@
                                             :sent sent})
                     suffix)))
 
+(defn- resend-plan!
+  "Sends tab's defining forms again (step-all-plan, read now, so text
+  typed while the runtime answered can't shift them), then says how it
+  went (on? for Instrument), with suffix."
+  [ctx tab on? suffix]
+  (let [plan (step-all-plan tab)]
+    (resend! ctx tab (:send plan)
+             (fn [sent _] (say-instrumented! ctx {:on? on? :plan plan :sent sent :suffix suffix})))))
+
 (defn- send-instrumented!
-  "Once arming tab's runtime answered r: plan's forms are sent again with
-  step points, or, when arming failed, the tab's flag goes off again."
-  [ctx tab plan r]
-  (if-let [err (:error r)]
-    (do (gbp/set-step-all! (:ed tab) false)
-        ((:set-status! ctx) (str "; " err)))
-    (resend! ctx tab (:send plan) (fn [sent _] (say-instrumented! ctx {:on? true :plan plan :sent sent})))))
+  "Once arming tab's runtime answered r: the forms are sent again with
+  step points, or, when arming failed, the tab's flag goes off again.
+  note is with-heads!' sentence about a partial answer, nil for none."
+  [ctx tab note r]
+  (cond
+    @(:destroyed? (:ed tab)) nil
+    (:error r) (do (gbp/set-step-all! (:ed tab) false)
+                   ((:set-status! ctx) (str "; " (:error r))))
+    :else (resend-plan! ctx tab true note)))
 
 (defn- instrument-tab!
-  "Instruments tab: with a defining form in it, its flag goes on (every
-  later Run fills its defining forms with step points too), the runtime
-  is armed, and the forms without edits that haven't run are sent again."
+  "Instruments tab: the runtime is asked which heads are macros (so step
+  points go wherever they can, dot or not), then, with a defining form in
+  the tab, its flag goes on (every later Run fills its defining forms with
+  step points too), the runtime is armed, and the forms without edits
+  that haven't run are sent again."
   [ctx tab]
-  (let [plan (step-all-plan tab)]
-    (if (and (empty? (:send plan)) (empty? (:skipped plan)))
-      (say-instrumented! ctx {:on? true :plan plan})
-      (do (gbp/set-step-all! (:ed tab) true)
-          (arm! ctx #(send-instrumented! ctx tab plan %))))))
+  (let [ed (:ed tab)]
+    (with-heads! ctx ed (editor/editor-text ed)
+      (fn [_ note _]
+        (cond
+          @(:destroyed? ed) nil
+          (empty? (bp/step-all-ranges (editor/editor-text ed))) (say-instrumented! ctx {:on? true :plan {}})
+          :else (do (gbp/set-step-all! ed true)
+                    (arm! ctx #(send-instrumented! ctx tab note %))))))))
 
 (defn- instrument!
   "Instrument this tab for stepping, on the active tab: Step Into goes
@@ -280,10 +297,8 @@
   haven't run are sent again without step points (a dot's form keeps its
   dot)."
   [ctx tab]
-  (let [plan (step-all-plan tab)
-        said! (fn [r] (fn [sent _] (say-instrumented! ctx {:on? false :plan plan :sent sent :suffix (arm-note r)})))]
-    (gbp/set-step-all! (:ed tab) false)
-    (arm! ctx #(resend! ctx tab (:send plan) (said! %)))))
+  (gbp/set-step-all! (:ed tab) false)
+  (arm! ctx #(resend-plan! ctx tab false (arm-note %))))
 
 (defn- uninstrument!
   "Stop instrumenting this tab, on the active tab."
@@ -299,7 +314,7 @@
   have loaded its namespace or defined macros), and says which dots that
   leaves inside a macro."
   [{:keys [ev* set-status!] :as ctx} {:keys [ed]}]
-  (when (and (or (seq (gbp/marks ed)) (some-> (get-in ed [:changed :bp-heads]) deref))
+  (when (and (or (seq (gbp/marks ed)) (gbp/step-all? ed) (some-> (get-in ed [:changed :bp-heads]) deref))
              (gbp/supported? @ev*) (not @(:destroyed? ed)))
     (let [text (editor/editor-text ed)]
       (with-heads! ctx ed text

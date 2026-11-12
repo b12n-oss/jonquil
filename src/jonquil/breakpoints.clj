@@ -547,6 +547,46 @@
       [[start (str bp " ") 0]]
       [[start (str "(do " bp " ") 0] [end ")" 1]])))
 
+(defn- prepare
+  "What instrument reads from the whole text, once for any number of
+  ranges: its spots (opts' :heads), the first spot on each line, its
+  stepping units and, with :step-all?, its defining forms."
+  [text {:keys [step-all?] :as opts}]
+  (let [all (spots text (select-keys opts [:heads]))]
+    {:all all
+     :first-on (reduce (fn [m sp] (if (contains? m (:line sp)) m (assoc m (:line sp) sp))) {} all)
+     :units (units text)
+     :defining (when step-all? (defining-forms text))}))
+
+(defn- overlaps? [start end x] (and (< (:start x) end) (< start (:end x))))
+
+(defn- within? [outer x] (and (<= (:start outer) (:start x)) (< (:start x) (:end outer))))
+
+(defn- instrument-range
+  "instrument for one range, from prepare's p."
+  [text lines {:keys [start end tab] :or {start 0}} {:keys [all first-on units defining]}]
+  (let [end (or end (count text))
+        inside? #(and (<= start (:start %)) (<= (:end %) end))
+        dots (->> (distinct lines) (keep first-on) (filter inside?))
+        dotted (set (map :line dots))
+        held (concat (filter (fn [u] (some #(within? u %) dots)) (filter #(overlaps? start end %) units))
+                     (filter #(overlaps? start end %) defining))
+        steps (->> all
+                   (filter (fn [sp] (some #(within? % sp) held)))
+                   (remove #(dotted (:line %)))
+                   (map :line) distinct
+                   (keep first-on)
+                   (filter inside?)
+                   (map #(assoc % :step? true)))
+        ;; from the end back, so earlier offsets stay good; at one offset
+        ;; an opening goes in first, so the closing ) inserted after it
+        ;; ends up in front of it
+        ins (sort-by (fn [[o _ order]] [(- o) order]) (mapcat #(edits tab %) (concat dots steps)))
+        sb (StringBuilder. ^String (subs text start end))]
+    (doseq [[o s] ins]
+      (.insert sb (int (- o start)) ^String s))
+    {:text (str sb) :lines (vec (sort (map :line dots))) :steps (vec (sort (map :line steps)))}))
+
 (defn instrument
   "text with a breakpoint at each of lines (1-based) that holds one, as
   {:text :lines}, :lines being the lines that got one. With range
@@ -563,31 +603,15 @@
   only defines code (defines-code?, never one inside a comment block) is
   filled too, dot or not."
   ([text lines] (instrument text lines {}))
-  ([text lines {:keys [start end tab step-all?] :or {start 0} :as opts}]
-   (let [end (or end (count text))
-         all (spots text (select-keys opts [:heads]))
-         inside? #(and (<= start (:start %)) (<= (:end %) end))
-         dots (->> (distinct lines) (keep #(spot-on all %)) (filter inside?))
-         dotted (set (map :line dots))
-         held (concat (filter (fn [u] (some #(and (<= (:start u) (:start %)) (< (:start %) (:end u))) dots))
-                              (units text))
-                      (when step-all? (defining-forms text)))
-         steps (->> all
-                    (filter (fn [sp] (some #(and (<= (:start %) (:start sp)) (< (:start sp) (:end %))) held)))
-                    (remove #(dotted (:line %)))
-                    (map :line) distinct
-                    (keep #(spot-on all %))
-                    (filter inside?)
-                    (map #(assoc % :step? true)))
-         chosen (concat dots steps)
-         ;; from the end back, so earlier offsets stay good; at one offset
-         ;; an opening goes in first, so the closing ) inserted after it
-         ;; ends up in front of it
-         ins (sort-by (fn [[o _ order]] [(- o) order]) (mapcat #(edits tab %) chosen))
-         sb (StringBuilder. ^String (subs text start end))]
-     (doseq [[o s] ins]
-       (.insert sb (int (- o start)) ^String s))
-     {:text (str sb) :lines (vec (sort (map :line dots))) :steps (vec (sort (map :line steps)))})))
+  ([text lines opts] (instrument-range text lines opts (prepare text opts))))
+
+(defn instrument-ranges
+  "instrument's :text for each of ranges ({:start :end}) of text, reading
+  the whole text once: what Live at once and the instrument commands send
+  for many forms at a time. opts as instrument takes them, less the range."
+  [text lines ranges opts]
+  (let [p (prepare text opts)]
+    (mapv #(:text (instrument-range text lines (merge opts (select-keys % [:start :end])) p)) ranges)))
 
 ;; --- Live at once: which top-level form a toggle sends again -------------------
 

@@ -680,8 +680,7 @@
   [{:keys [tab cv ev*] :as ctx} ranges then]
   (let [ed (:ed tab)
         text (editor/editor-text ed)
-        joined (fn [f] (str/join "\n" (map f ranges)))
-        forms (joined (fn [{:keys [start end]}] (subs text start end)))]
+        forms (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) ranges))]
     (cond
       (refuse-foreign! ctx) :refused
       (ev/evaluating? @ev*) :busy
@@ -689,7 +688,7 @@
       :else
       (do (cview/echo-entry! cv forms true)
           (gbp/record-sent! ed text)
-          (do-repl-eval! ctx ed (joined (fn [r] (gbp/sent-text ed @ev* text r (:id tab))))
+          (do-repl-eval! ctx ed (str/join "\n" (gbp/sent-texts ed @ev* text ranges (:id tab)))
                          {:ns-source text :owner (:id tab) :hook-code forms
                           :hook-source :form :hook-tab (:id tab) :then then
                           :record (tab-record tab ev* {:source :form :code forms :buffer-text text})})

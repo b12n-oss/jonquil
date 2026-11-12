@@ -625,6 +625,21 @@
     (is (= [2 8 9] steps) "sa and g get step points; the def of an atom, the call and the comment block's cf get none")
     (is (= [] (:steps (instrument-h t []))) "without :step-all? nothing changes")))
 
+(deftest instrument-ranges-reads-the-text-once-test
+  (let [t (lines "(defn sa [x]"
+                 "  (inc x))"
+                 "(swap! hits inc)"
+                 "(defn sb [y]"
+                 "  (let [z (dec y)]"
+                 "    (str z)))"
+                 "(def g (fn [y]"
+                 "  (str y)))")
+        rs (bp/step-all-ranges t)]
+    (doseq [opts [{:step-all? true} {}]]
+      (is (= (mapv #(:text (instrument-h t [5] (merge opts %))) rs)
+             (bp/instrument-ranges t [5] rs (merge opts (heads t))))
+          (str "one text per range, as instrument gives it " opts)))))
+
 (deftest step-all-ranges-test
   (let [t (lines "(defn sa [x] x)" "(swap! a inc)" "(comment (defn cf [] 1))" "(defmethod m :k [_] 2)")]
     (is (= ["(defn sa [x] x)" "(defmethod m :k [_] 2)"]
