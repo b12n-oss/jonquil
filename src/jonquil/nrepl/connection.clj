@@ -178,6 +178,22 @@
           (finish-handshake! (assoc ctx :port port) conn d))))
     {:status :notice :text (message-text messages :refused port)}))
 
+(defn- locate-port
+  "The port to attach to: the endpoint's, else the one in the port file. A
+  {:status :notice ...} result when the file is missing, absent or holds no
+  port."
+  [ev ep {:keys [messages] :as policy}]
+  (if (:port ep)
+    (:port ep)
+    (let [f (if-let [pf (:port-file policy)] (pf ev) (port-file ev))]
+      (cond
+        (nil? f) {:status :notice :text (message-text messages :no-project nil)}
+        (not (.exists ^java.io.File f))
+        {:status :notice :text (message-text messages :not-running (:project-dir (:selection ev)))}
+        :else
+        (or (parse-port (try (slurp f) (catch Exception _ nil)))
+            {:status :notice :text (message-text messages :bad-port-file nil)})))))
+
 (defn connect!
   "The connect rules, run only when there's no live connection. nil once
   connected, else the result to finish the evaluation with (a :notice: a
@@ -212,16 +228,10 @@
       (let [ep (when-let [e (:endpoint policy)] (e ev))
             ctx {:ev ev :state state :on-output on-output :host (or (:host ep) "127.0.0.1")
                  :stop? stop? :messages messages :on-connect on-connect :timings timings}
-            f (when-not (:port ep) (if-let [pf (:port-file policy)] (pf ev) (port-file ev)))]
-        (cond
-          (:port ep) (attach! ctx (:port ep))
-          (nil? f) {:status :notice :text (message-text messages :no-project nil)}
-          (not (.exists ^java.io.File f))
-          {:status :notice :text (message-text messages :not-running (:project-dir (:selection ev)))}
-          :else
-          (if-let [port (parse-port (try (slurp f) (catch Exception _ nil)))]
-            (attach! ctx port)
-            {:status :notice :text (message-text messages :bad-port-file nil)}))))))
+            port (locate-port ev ep policy)]
+        (if (map? port)
+          port
+          (attach! ctx port))))))
 
 (defn detach!
   "Forgets the session and closes the socket: pending requests fail with

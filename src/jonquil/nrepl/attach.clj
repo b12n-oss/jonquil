@@ -140,31 +140,54 @@
   (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
   (try (when on-complete (on-complete result)) (catch Throwable _ nil)))
 
+(defn- connect-problem
+  "The result that ends the run before any evaluation (save-first for a run
+  with no path, a connect failure, or a wake failure), or nil when the
+  connection is ready."
+  [ev {:keys [run? path on-output]}]
+  (if (and run? (nil? path))
+    {:status :error :error-text cljd/save-first-message}
+    (or (connection/connect! ev on-output cljd-policy) (wake! ev on-output))))
+
+(defn- switch-ns-result
+  "Evaluates the ns switch when the buffer's ns differs from the session's.
+  Returns nil when no switch is needed, else the eval result."
+  [ev {:keys [run? ns-source on-output]}]
+  (let [target (when (and (not run?) ns-source (not (stop-requested? ev))) (cljd/target-ns ns-source))]
+    (when (and target (not= (:name target) (:session-ns @(:state ev))))
+      (cljd/eval-result (request! ev {:op "eval" :code (:text target)} on-output)
+                        (stop-requested? ev)))))
+
+(defn- load-file-result
+  "Loads the saved file through the app's load-file op and returns the
+  resolved result."
+  [ev code {:keys [path on-output]}]
+  (let [msgs (request! ev {:op "load-file" :file code
+                           :file-path (.getAbsolutePath (io/file path))
+                           :file-name (.getName (io/file path))}
+                       on-output)]
+    (cljd/load-result msgs (or (:name (cljd/ns-form code)) (.getName (io/file path)))
+                      (stop-requested? ev))))
+
+(defn- run-connected!
+  "Runs the evaluation or file load on a ready connection, then finishes."
+  [ev code {:keys [run? on-output] :as opts}]
+  (let [switch (switch-ns-result ev opts)]
+    (finish! ev opts
+             (cond
+               (stop-requested? ev) {:status :interrupted}
+               (and switch (not= :ok (:status switch))) switch
+               run? (load-file-result ev code opts)
+               :else (cljd/eval-result (request! ev {:op "eval" :code code} on-output)
+                                       (stop-requested? ev))))))
+
 (defn- run-worker!
-  [ev code {:keys [run? path ns-source on-output on-status-change] :as opts}]
+  [ev code {:keys [on-status-change] :as opts}]
   (try
     (when on-status-change (on-status-change :running))
-    (if (and run? (nil? path))
-      (finish! ev opts {:status :error :error-text cljd/save-first-message})
-      (if-let [problem (or (connection/connect! ev on-output cljd-policy) (wake! ev on-output))]
-        (finish! ev opts problem)
-        (let [target (when (and (not run?) ns-source (not (stop-requested? ev))) (cljd/target-ns ns-source))
-              switch (when (and target (not= (:name target) (:session-ns @(:state ev))))
-                       (cljd/eval-result (request! ev {:op "eval" :code (:text target)} on-output)
-                                         (stop-requested? ev)))]
-          (cond
-            (stop-requested? ev) (finish! ev opts {:status :interrupted})
-            (and switch (not= :ok (:status switch))) (finish! ev opts switch)
-            run?
-            (let [msgs (request! ev {:op "load-file" :file code
-                                     :file-path (.getAbsolutePath (io/file path))
-                                     :file-name (.getName (io/file path))}
-                                 on-output)]
-              (finish! ev opts (cljd/load-result msgs (or (:name (cljd/ns-form code)) (.getName (io/file path)))
-                                                 (stop-requested? ev))))
-            :else
-            (finish! ev opts (cljd/eval-result (request! ev {:op "eval" :code code} on-output)
-                                               (stop-requested? ev)))))))
+    (if-let [problem (connect-problem ev opts)]
+      (finish! ev opts problem)
+      (run-connected! ev code opts))
     (catch Throwable e
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
 

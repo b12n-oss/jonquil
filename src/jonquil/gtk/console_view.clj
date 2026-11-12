@@ -287,6 +287,35 @@
       (reset! (:last-entry-active? cv) false)))
   nil)
 
+(defn- move-mark-to!
+  "Moves mark to offset, explicitly (gtk_text_buffer_move_mark)."
+  [buf mark offset]
+  (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-move-mark buf mark a))))
+
+(defn- tag-as-prompt!
+  "Makes the span start..end of cv's buffer read-only and tagged :prompt."
+  [{:keys [buf tags readonly-tag]} start end]
+  (g/with-iters* buf start end
+    (fn [a b]
+      (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
+      (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b))))
+
+(defn- rewrite-prompt-span!
+  "Replaces the prompt span start..old-end with new-text: strips any
+  inherited tag, tags the new text as a prompt, and moves out-end and
+  input-start to their exact post-edit offsets."
+  [{:keys [buf readonly-tag tags out-end input-start]} start old-end new-text]
+  (g/with-iters* buf start old-end (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+  (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a new-text -1)))
+  (let [end (+ start (count new-text))]
+    (g/with-iters* buf start end
+      (fn [a b]
+        (g/gtk-text-buffer-remove-all-tags buf a b)
+        (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
+        (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
+    (move-mark-to! buf out-end start)
+    (move-mark-to! buf input-start end)))
+
 (defn set-prompt!
   "Rewrites the live prompt -- the region between out-end and input-start
   -- to (str ns-name \"=> \"), clj style. GTK-thread only. A no-op when
@@ -313,7 +342,7 @@
   either side of the edit point (insert-chunk!'s own citation on why that
   can happen at a tag boundary)."
   [cv ns-name]
-  (let [{:keys [buf tags readonly-tag out-end input-start prompt-text]} cv
+  (let [{:keys [buf out-end input-start prompt-text]} cv
         new-text (str ns-name "=> ")]
     (when (not= new-text @prompt-text)
       (let [start (mark-offset buf out-end)
@@ -326,19 +355,10 @@
                                 (>= o start) start
                                 :else o))
             in-input? (or (>= caret old-end) (>= bound old-end))]
-        (g/with-iters* buf start old-end (fn [a b] (g/gtk-text-buffer-delete buf a b)))
-        (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a new-text -1)))
-        (let [end (+ start (count new-text))]
-          (g/with-iters* buf start end
-            (fn [a b]
-              (g/gtk-text-buffer-remove-all-tags buf a b)
-              (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
-              (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
-          (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-move-mark buf out-end a)))
-          (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-move-mark buf input-start a)))
-          (when in-input?
-            (g/with-iters* buf (remap caret) (remap bound)
-              (fn [a b] (g/gtk-text-buffer-select-range buf a b)))))
+        (rewrite-prompt-span! cv start old-end new-text)
+        (when in-input?
+          (g/with-iters* buf (remap caret) (remap bound)
+            (fn [a b] (g/gtk-text-buffer-select-range buf a b))))
         (reset! prompt-text new-text))))
   nil)
 
@@ -542,6 +562,18 @@
     (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-move-mark buf end-mark a)))
     (g/gtk-text-view-scroll-to-mark view end-mark 0.0 1 0.0 1.0)))
 
+(defn- drain-chunk!
+  "Applies one coalesced queue entry in order: a :mark resolves
+  set-entry-start-mark!, anything else is clipped to the cap and inserted,
+  recording its span when it carries a result ref."
+  [cv [kind text ref]]
+  (if (= kind :mark)
+    (set-entry-start-mark! cv)
+    (let [text (clip-to-cap text MAX-OUTPUT-CHARS)
+          [start end] (insert-chunk! cv kind text)]
+      (when ref
+        (swap! (:results cv) conj {:start start :end end :ref ref :text text})))))
+
 (defn- drain!
   "Runs on the GTK thread via on-gui!. Flips the scheduled flag BEFORE
   taking the queue (as jonquil.gtk.callbacks/drain-pending does), so a chunk that lands in the gap between the flip and the take
@@ -564,13 +596,8 @@
   (reset! (:drain-scheduled? cv) false)
   (let [chunks (first (reset-vals! (:queue cv) []))]
     (when (seq chunks)
-      (doseq [[kind text ref] (coalesce chunks)]
-        (if (= kind :mark)
-          (set-entry-start-mark! cv)
-          (let [text (clip-to-cap text MAX-OUTPUT-CHARS)
-                [start end] (insert-chunk! cv kind text)]
-            (when ref
-              (swap! (:results cv) conj {:start start :end end :ref ref :text text})))))
+      (doseq [chunk (coalesce chunks)]
+        (drain-chunk! cv chunk))
       (trim! cv)
       (scroll-to-end! cv))))
 
@@ -667,29 +694,39 @@
   Cmd/Ctrl+Shift+L, called before anything else here moves out-end."
   [cv]
   (set-entry-start-mark! cv)
-  (let [{:keys [buf tags readonly-tag out-end input-start prompt-text]} cv
+  (let [{:keys [buf out-end input-start prompt-text]} cv
         prompt @prompt-text
         prompt-len (count prompt)
         prompt-start (mark-offset buf out-end)
         old-end (g/gtk-text-buffer-get-char-count buf)]
     (g/with-iters* buf old-end old-end (fn [a _] (g/gtk-text-buffer-insert buf a "\n" -1)))
-    (let [end (inc old-end)]
+    (let [end (inc old-end)
+          fresh-end (+ end prompt-len)]
       ;; 1: prompt + input + its closing newline -> read-only, :prompt style
-      (g/with-iters* buf prompt-start end
-        (fn [a b]
-          (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
-          (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
+      (tag-as-prompt! cv prompt-start end)
       ;; 3: a fresh prompt at the end, out-end moved to just before it
       (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-insert buf a prompt -1)))
-      (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-move-mark buf out-end a)))
-      (g/with-iters* buf end (+ end prompt-len)
-        (fn [a b]
-          (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
-          (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
-      (g/with-iters* buf (+ end prompt-len) (+ end prompt-len)
-        (fn [a _] (g/gtk-text-buffer-move-mark buf input-start a)))
-      (g/with-iters* buf (+ end prompt-len) (+ end prompt-len)
+      (move-mark-to! buf out-end end)
+      (tag-as-prompt! cv end fresh-end)
+      (move-mark-to! buf input-start fresh-end)
+      (g/with-iters* buf fresh-end fresh-end
         (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))))
+
+(defn- apply-input-action!
+  "Carries out the console/input-action result for text, and returns the
+  key result: 0 when GTK should insert a newline, 1 when handled."
+  [cv action text]
+  (case action
+    :newline 0
+    :noop 1
+    :leftover (do (append! cv :system "This was typed while the program ran. Press Return again to evaluate it.\n")
+                  1)
+    :busy (do (when (compare-and-set! (:busy-hint-shown? cv) false true)
+                (append! cv :system "A program is running. Press Stop (Esc) to cancel it.\n"))
+              1)
+    (:eval :send-stdin) (do (commit-input! cv)
+                            ((:on-submit cv) {:action action :text text})
+                            1)))
 
 (defn handle-return!
   "console/input-action applied to cv's live state, with the real Shift bit
@@ -720,17 +757,7 @@
                                         :shift? shift?
                                         :leftover @(:leftover cv)})]
       (reset! (:leftover cv) nil)
-      (case action
-        :newline 0
-        :noop 1
-        :leftover (do (append! cv :system "This was typed while the program ran. Press Return again to evaluate it.\n")
-                      1)
-        :busy (do (when (compare-and-set! (:busy-hint-shown? cv) false true)
-                    (append! cv :system "A program is running. Press Stop (Esc) to cancel it.\n"))
-                  1)
-        (:eval :send-stdin) (do (commit-input! cv)
-                                ((:on-submit cv) {:action action :text text})
-                                1)))))
+      (apply-input-action! cv action text))))
 
 ;; --- Up/Down -----------------------------------------------------------
 
@@ -761,6 +788,23 @@
     (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a text -1)))
     (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
 
+(defn- history-key-applies?
+  "Whether Up/Down (dir :prev or :next) browses history: caret at or after
+  start, not waiting on stdin, and on the input's first (Up) or last (Down)
+  line. The caret test goes first, see handle-history!."
+  [cv dir caret start]
+  (and (>= caret start) (not ((:waiting? cv)))
+       (case dir
+         :prev (on-first-line-of-input? cv caret)
+         :next (on-last-line-of-input? cv caret))))
+
+(defn- history-replacement
+  "history-prev's (of the current input) or history-next's result, or nil."
+  [cv dir]
+  (case dir
+    :prev ((:history-prev cv) (input-text cv))
+    :next ((:history-next cv))))
+
 (defn handle-history!
   "Up/Down in the console input. dir is :prev or :next. Replaces the input
   with history-prev/history-next's result when ALL of: the caret is at or
@@ -788,15 +832,9 @@
     (let [buf (:buf cv)
           caret (g/cursor-offset buf)
           start (mark-offset buf (:input-start cv))]
-      (if (and (>= caret start) (not ((:waiting? cv)))
-               (case dir
-                 :prev (on-first-line-of-input? cv caret)
-                 :next (on-last-line-of-input? cv caret)))
-        (if-let [replacement (case dir
-                               :prev ((:history-prev cv) (input-text cv))
-                               :next ((:history-next cv)))]
-          (do (replace-input! cv start replacement) true)
-          false)
+      (if-let [replacement (when (history-key-applies? cv dir caret start)
+                             (history-replacement cv dir))]
+        (do (replace-input! cv start replacement) true)
         false))))
 
 ;; --- keys: Return/KP-Enter, a command-chord D, Up/Down, Ctrl+Space --------
@@ -826,6 +864,24 @@
   (and (not (zero? (bit-and state g/CONTROL-MASK)))
        (zero? (bit-and state g/META-MASK))))
 
+(defn- completion-key-handled?
+  "True when the completion popup's own key handler (cfns' :handle-key!)
+  consumed the key; never while an IME preedit composition is active."
+  [cv cfns keyval state]
+  (boolean (and (not @(:preedit-active? cv))
+                (when-let [f (:handle-key! cfns)] (= 1 (f keyval state))))))
+
+(defn- eof-chord?
+  "Ctrl/Cmd+D while the program waits on stdin."
+  [cv keyval state]
+  (and (= keyval KEY-D) (command-chord? state) ((:waiting? cv))))
+
+(defn- complete-chord?
+  "Ctrl+Space with the caret inside the input, outside a preedit."
+  [cv keyval state]
+  (and (not @(:preedit-active? cv)) (control-only? state) (= keyval KEY-SPACE)
+       (some? (input-snapshot cv))))
+
 (defn handle-key!
   "The console's key dispatch, first match wins -- mirrors jonquil.gtk.
   editor/handle-key!'s own shape (a public fn, so self-test rows call this
@@ -850,21 +906,19 @@
   [cv keyval state]
   (let [cfns @(:completion-fns cv)]
     (cond
-      (and (not @(:preedit-active? cv))
-           (when-let [f (:handle-key! cfns)] (= 1 (f keyval state))))
+      (completion-key-handled? cv cfns keyval state)
       1
 
       (contains? #{KEY-RETURN KEY-KP-ENTER} keyval)
       (handle-return! cv (not (zero? (bit-and state g/SHIFT-MASK))))
 
-      (and (= keyval KEY-D) (command-chord? state) ((:waiting? cv)))
+      (eof-chord? cv keyval state)
       (do ((:on-submit cv) {:action :eof}) 1)
 
       (= keyval KEY-UP) (if (handle-history! cv :prev) 1 0)
       (= keyval KEY-DOWN) (if (handle-history! cv :next) 1 0)
 
-      (and (not @(:preedit-active? cv)) (control-only? state) (= keyval KEY-SPACE)
-           (some? (input-snapshot cv)))
+      (complete-chord? cv keyval state)
       (do (when-let [f (:complete! cfns)] (f)) 1)
 
       :else 0)))
@@ -944,40 +998,37 @@
   (g/with-iters* buf (count default-prompt) (count default-prompt)
     (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
 
-(defn- console-state
-  "The console's state map: its marks, queues and registrations."
-  [{:keys [view buf scroll tags readonly-tag on-submit history-prev history-next
-           evaluating? waiting?]}]
-  {:view view
-   :buf buf
-   :scroll scroll
-   :tags tags
-   :readonly-tag readonly-tag
-   :prompt-text (atom default-prompt)
-   :out-end (create-mark! buf "jonquil-console-out-end" 0 false)
-   :input-start (create-mark! buf "jonquil-console-input-start" (count default-prompt) true)
-   :end-mark (create-mark! buf "jonquil-console-scroll-end" (count default-prompt) false)
-   ;; Cmd/Ctrl+Shift+L: left gravity, like input-start -- text
-   ;; inserted at its own position (this entry's own output,
-   ;; landing right where it sits) must end up AFTER it, so the
-   ;; mark stays fixed at the entry's start throughout its own
-   ;; lifetime. :last-entry-active? is false until mark-entry-
-   ;; start! first arms it; see that fn's own docstring.
-   :last-entry-start (create-mark! buf "jonquil-console-last-entry-start" 0 true)
-   :last-entry-active? (atom false) :prev-entry (atom nil)
+(defn- console-marks!
+  "The console's four buffer marks, as {:out-end :input-start :end-mark
+  :last-entry-start}."
+  [buf]
+  (let [out-end (create-mark! buf "jonquil-console-out-end" 0 false)
+        input-start (create-mark! buf "jonquil-console-input-start" (count default-prompt) true)
+        end-mark (create-mark! buf "jonquil-console-scroll-end" (count default-prompt) false)
+        ;; Cmd/Ctrl+Shift+L: left gravity, like input-start -- text
+        ;; inserted at its own position (this entry's own output,
+        ;; landing right where it sits) must end up AFTER it, so the
+        ;; mark stays fixed at the entry's start throughout its own
+        ;; lifetime. :last-entry-active? is false until mark-entry-
+        ;; start! first arms it; see that fn's own docstring.
+        last-entry-start (create-mark! buf "jonquil-console-last-entry-start" 0 true)]
+    {:out-end out-end :input-start input-start :end-mark end-mark
+     :last-entry-start last-entry-start}))
+
+(defn- console-atoms
+  "The console's fresh mutable state, as a map of atoms."
+  []
+  {:prompt-text (atom default-prompt)
+   :last-entry-active? (atom false)
+   :prev-entry (atom nil)
    :queue (atom [])
    ;; live results (LM1): [{:start :end :ref :text}], oldest first
    :results (atom [])
    :drain-scheduled? (atom false)
-   :waiting? waiting?
-   :evaluating? evaluating?
    :busy-hint-shown? (atom false)
    :run-start-input (atom "")
    :leftover (atom nil)
    :preedit-active? (atom false)
-   :on-submit on-submit
-   :history-prev history-prev
-   :history-next history-next
    ;; Single-slot completion registration (set-
    ;; completion-fns!) plus the on-input-changed!/on-focus-
    ;; lost! registration lists -- see the ns docstring.
@@ -987,6 +1038,23 @@
    ;; Single-slot registration for error reporting -- see
    ;; set-error-fn!. nil until jonquil.gtk.window wires it.
    :on-error-fn (atom nil)})
+
+(defn- console-state
+  "The console's state map: its marks, queues and registrations."
+  [{:keys [view buf scroll tags readonly-tag on-submit history-prev history-next
+           evaluating? waiting?]}]
+  (merge {:view view
+          :buf buf
+          :scroll scroll
+          :tags tags
+          :readonly-tag readonly-tag
+          :waiting? waiting?
+          :evaluating? evaluating?
+          :on-submit on-submit
+          :history-prev history-prev
+          :history-next history-next}
+         (console-marks! buf)
+         (console-atoms)))
 
 (defn- connect-input!
   "Connects the key controller (capture phase) and the preedit signal."

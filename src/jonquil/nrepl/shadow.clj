@@ -208,6 +208,21 @@
                              :ns (clj/help-ns text (or session-ns "cljs.user"))}
                        timeout-ms))
 
+(defn- full-doc-result
+  "full-doc's result for eldoc reply r of sym: :timeout without a reply,
+  :not-attached for a disconnected one, :ok with the joined text, or
+  :not-found."
+  [sym r]
+  (cond
+    (not (vector? r)) {:status :timeout}
+    ((ops/statuses r) ops/disconnected) {:status :not-attached}
+    :else (if-let [d (eldoc-info sym r)]
+            {:status :ok
+             :text (str/join "\n" (remove str/blank? [(str (:ns d) "/" (:name d))
+                                                      (:arglists d)
+                                                      (:doc d)]))}
+            {:status :not-found})))
+
 (defrecord Shadow [selection state history listeners timings]
   ev/Evaluator
   ;; Connecting happens on demand, when an evaluation finds no live
@@ -301,16 +316,7 @@
           (future
             (try
               (let [r (eldoc! s sym text (:help-timeout-ms timings))]
-                (on-result
-                 (cond
-                   (not (vector? r)) {:status :timeout}
-                   ((ops/statuses r) ops/disconnected) {:status :not-attached}
-                   :else (if-let [d (eldoc-info sym r)]
-                           {:status :ok
-                            :text (str/join "\n" (remove str/blank? [(str (:ns d) "/" (:name d))
-                                                                     (:arglists d)
-                                                                     (:doc d)]))}
-                           {:status :not-found}))))
+                (on-result (full-doc-result sym r)))
               (catch Throwable _ (on-result {:status :timeout}))))))
       (catch Throwable _ (on-result {:status :timeout})))
     nil)

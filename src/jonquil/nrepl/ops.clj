@@ -124,6 +124,23 @@
                (keep #(second (re-find #"^\s*message: (.*)$" %)))
                last str/trim not-empty))))
 
+(defn- ex-class
+  "The class name in an :ex that is a class (\"class X\"), else nil."
+  [ex]
+  (when (and ex (str/starts-with? ex "class "))
+    (some-> ex (subs (count "class ")) str/trim not-empty)))
+
+(defn- named-line
+  "The LAST line of err naming cls, trimmed, or nil."
+  [err cls]
+  (some-> (last (filter #(str/includes? % cls) (str/split-lines err))) str/trim))
+
+(defn- python-message
+  "Basilisp's message: a traceback's exception line in err, else its labelled
+  block, else a traceback in ex."
+  [err ex]
+  (or (exception-line err) (compiler-message err) (exception-line ex)))
+
 (defn- error-message
   "An eval-error's message: the first non-blank line after the last err->msg
   header in the err text (the last, so the program's own *err* output
@@ -146,15 +163,12 @@
         header (last (re-seq err-header err))
         after (when header (subs err (+ (str/last-index-of err header) (count header))))
         ex (some :ex msgs)
-        cls (when (and ex (str/starts-with? ex "class "))
-              (some-> ex (subs (count "class ")) str/trim not-empty))
-        named (when (and (not header) cls)
-                (some-> (last (filter #(str/includes? % cls) (str/split-lines err))) str/trim))
-        python (when-not (or header cls)
-                 (or (exception-line err) (compiler-message err) (exception-line ex)))]
+        cls (ex-class ex)]
     (or (not-empty (first-line after))
-        named
-        python
+        (when-not header
+          (if cls
+            (named-line err cls)
+            (python-message err ex)))
         (first-line (or ex err)))))
 
 (defn eval-result

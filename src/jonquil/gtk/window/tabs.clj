@@ -68,6 +68,11 @@
   (when-let [f (:parinfer-label-update! ctx)] (f))
   (win-session/session-changed! ctx))
 
+(defn- tab-by-root
+  "The tab in tabs whose page root is root, or nil."
+  [tabs root]
+  (some (fn [t] (when (= root (:root t)) t)) @tabs))
+
 (defn switch-page-fn
   "The notebook's switch-page handler. The tab is found from the
   page argument, never get_current_page (which reads -1 while a current
@@ -75,7 +80,7 @@
   append, or a tab already taken out) is ignored."
   [{:keys [tabs] :as ctx}]
   (fn [_nb page _n _data]
-    (when-let [t (some (fn [t] (when (= page (:root t)) t)) @tabs)]
+    (when-let [t (tab-by-root tabs page)]
       (on-switch! ctx t))
     nil))
 
@@ -113,13 +118,24 @@
            (catch :default e
              (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))
 
+(defn- forget-tab!
+  "remove-tab!'s bookkeeping for tab id: out of the recent tab ids, tabs
+  and the popover registry (gone is the set of its popovers), and, when
+  it was the active one (a :neighbour is given), the neighbour becomes
+  the active id. ctx is remove-tab!'s."
+  [{:keys [tabs active-id popovers] :as ctx} id {:keys [gone neighbour]}]
+  (when-let [r (:recent-tabs ctx)] (swap! r (fn [v] (vec (remove #{id} v)))))
+  (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
+  (when neighbour (reset! active-id (:id neighbour)))
+  (swap! popovers (fn [ps] (vec (remove gone ps)))))
+
 (defn- remove-tab!
   "Takes tab id out of the window, in this order: out of tabs first
   (so the switch-page remove_page fires never resolves to it), its five
   popovers out of the registry and unparented (unparenting drops their
   last reference, and a page removed with a popover still parented spins
   GTK in a warning loop), then the page, then the neighbour selected."
-  [{:keys [tabs active-id notebook popovers] :as ctx} id]
+  [{:keys [tabs active-id notebook] :as ctx} id]
   (when-let [t (tab-by-id tabs id)]
     (let [ts @tabs
           i (.indexOf ^java.util.List (mapv :id ts) id)
@@ -128,10 +144,7 @@
           gone (set (tab/popovers t))]
       ;; while the buffer is alive, so the list's marks can be deleted
       (parts/run-tab-hooks! ctx :on-tab-removed t)
-      (when-let [r (:recent-tabs ctx)] (swap! r (fn [v] (vec (remove #{id} v)))))
-      (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
-      (when was-active? (reset! active-id (:id neighbour)))
-      (swap! popovers (fn [ps] (vec (remove gone ps))))
+      (forget-tab! ctx id {:gone gone :neighbour (when was-active? neighbour)})
       (release-tab! ctx t)
       (tab/dispose-popovers! t)
       (g/gtk-notebook-remove-page notebook (g/gtk-notebook-page-num notebook (:root t)))
@@ -215,6 +228,14 @@
         (future (draw-changed! {:ed ed :ran ran :gutter gutter :r r :text text})))
       (gutter/set-ranges! gutter []))))
 
+(defn- debounce-refresh!
+  "Counts an edit in pending and, on a future, calls refresh! once 150 ms
+  pass with no later edit. Returns the future."
+  [pending refresh!]
+  (let [n (swap! pending inc)]
+    (future (Thread/sleep 150)
+            (when (= n @pending) (refresh!)))))
+
 (defn- wire-changed-marks!
   "LM3 for t's editor: its :refresh atom gets refresh!, which redraws the changed-form marks (refresh-changed!), and every edit after a first run calls it 150 ms after the last change. Does nothing for an editor without :changed."
   [{:keys [ed]}]
@@ -229,44 +250,55 @@
       (reset! refresh refresh!)
       (g/g-signal-connect-data (:buf ed) "changed"
                                (callable (fn [_buf _data]
-                                           (when @ran
-                                             (let [n (swap! pending inc)]
-                                               (future (Thread/sleep 150)
-                                                       (when (= n @pending) (refresh!)))))
+                                           (when @ran (debounce-refresh! pending refresh!))
                                            nil)
                                          [:pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT))))
 
+(defn- make-quick-doc-fn
+  "t's quick doc action: a no-arg fn calling win-help/do-quick-doc! with
+  t's popovers and a ctx for its example buttons. ctx is tab-actions's."
+  [{:keys [win cv ev* status-label close-popovers-fn active? sel*]}
+   {:keys [ed help-pop full-doc-pop last-shown] :as t}]
+  (fn []
+    (win-help/do-quick-doc! {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
+                             :full-doc-pop full-doc-pop :last-shown last-shown
+                             :example-ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                           :full-doc-pop full-doc-pop}
+                             :close-popovers-fn close-popovers-fn :win win
+                             :active? (fn [] (active? t))})))
+
+(defn- install-editor-menu!
+  "Builds ed's context menu. Its ctx (jonquil.command-registry/editor-menu)
+  is the tab's own fns, each the one its key calls: acts is {:run-form!
+  :jump! :rename! :quick-doc! :complete!}, joined by the window's inspector
+  and find fns from ctx (tab-actions's). Returns the menu's action group."
+  [{:keys [status-label inspect-last-fn inspect-form-fn open-find-fn open-replace-fn]} ed acts]
+  (let [menu-ctx (merge acts
+                        {:inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn
+                         :toggle-comment! (fn [] (editor/do-toggle-comment! ed))
+                         :format-all! (fn [] (editor/do-format-all! ed))
+                         :format-selection! (fn [] (editor/do-format-selection! ed))
+                         :indent! (fn [] (editor/do-indent! ed))
+                         :unindent! (fn [] (editor/do-unindent! ed))
+                         :open-find-fn open-find-fn :open-replace-fn open-replace-fn})]
+    (win-keys/install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
+                                    (fn [msg] (win-status/set-status! status-label msg)))))
+
 (defn- tab-actions
   "t's own actions, each a fn bound to this tab: the Run Form flash fns, quick doc, jump, rename, rename-to, complete and Run Form, and the editor's context menu built from them (its action group is :menu-group). Returns them under wire-tab!'s names for them."
-  [{:keys [win cv ev* status-label close-popovers-fn active? source-ctx sel* inspect-last-fn inspect-form-fn open-find-fn open-replace-fn]}
-   {:keys [ed help-pop full-doc-pop rename-pop completion last-shown] :as t}]
+  [{:keys [cv ev* status-label close-popovers-fn source-ctx sel*] :as ctx}
+   {:keys [ed rename-pop completion] :as t}]
   (let [flash-fns (win-run/make-flash-fn ed)
-        quick-doc-fn (fn [] (win-help/do-quick-doc! {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
-                                                     :full-doc-pop full-doc-pop :last-shown last-shown
-                                                     :example-ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
-                                                                   :full-doc-pop full-doc-pop}
-                                                     :close-popovers-fn close-popovers-fn :win win
-                                                     :active? (fn [] (active? t))}))
+        quick-doc-fn (make-quick-doc-fn ctx t)
         jump-fn (fn [] (win-help/do-jump! (source-ctx t)))
         rename-fn (fn [] (win-help/do-rename! ed rename-pop status-label close-popovers-fn))
         rename-to-fn (fn [name] (win-help/do-rename-to! ed rename-pop name status-label))
         complete-fn (fn [] (win-help/do-complete! ed completion status-label))
         run-form-fn (fn [] (win-run/do-run-form! {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                   :flash-fns flash-fns}))
-        ;; The editor menu's ctx (jonquil.command-registry/editor-menu),
-        ;; this tab's own fns, each the one its key calls
-        menu-ctx {:run-form! run-form-fn :jump! jump-fn :rename! rename-fn :quick-doc! quick-doc-fn
-                  :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn :complete! complete-fn
-                  :toggle-comment! (fn [] (editor/do-toggle-comment! ed))
-                  :format-all! (fn [] (editor/do-format-all! ed))
-                  :format-selection! (fn [] (editor/do-format-selection! ed))
-                  :indent! (fn [] (editor/do-indent! ed))
-                  :unindent! (fn [] (editor/do-unindent! ed))
-                  :open-find-fn open-find-fn :open-replace-fn open-replace-fn}
-        menu-group
-        (win-keys/install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
-                                        (fn [msg] (win-status/set-status! status-label msg)))]
+        menu-group (install-editor-menu! ctx ed {:run-form! run-form-fn :jump! jump-fn :rename! rename-fn
+                                                 :quick-doc! quick-doc-fn :complete! complete-fn})]
     {:flash-fns flash-fns :quick-doc-fn quick-doc-fn :jump-fn jump-fn :rename-fn rename-fn
      :rename-to-fn rename-to-fn :complete-fn complete-fn :run-form-fn run-form-fn
      :menu-group menu-group}))
@@ -337,21 +369,28 @@
   (editor/set-jump-fn! ed jump-fn)
   (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop)))))
 
+(defn- caret-hint
+  "What keys do at ed's caret, as the key hints label's text, or nil when
+  there is nothing to say. Reads only the caret's line, a window of the
+  buffer around it."
+  [ed]
+  (let [buf (:buf ed)
+        pos (g/cursor-offset buf)
+        a (max 0 (- pos 1000))
+        text (g/buffer-text-range buf a (min (g/gtk-text-buffer-get-char-count buf) (+ pos 1000)))
+        [line at] (hints/line-at text (- pos a))
+        plugins @plugin-registry/live]
+    (hints/hint {:at (hints/at-caret line at)
+                 :keymap {:editor (plugin-registry/editor-bindings plugins)
+                          :window (plugin-registry/window-bindings plugins)}
+                 :os (System/getProperty "os.name")})))
+
 (defn- hint-tick!
   "One LM6 key hint timeout: while it is still the newest move, hints are on, t is active and its editor alive, shows what keys do at the caret in hint-label, or hides it; a throw hides it and is said on the console once. Answers 0, so the timeout runs once."
   [{:keys [n pending failed? hints-on? active? t ed hint-label cv]}]
   (when (and (= n @pending) @hints-on? (active? t) (not @(:destroyed? ed)))
     (try
-      (let [buf (:buf ed)
-            pos (g/cursor-offset buf)
-            a (max 0 (- pos 1000))
-            text (g/buffer-text-range buf a (min (g/gtk-text-buffer-get-char-count buf) (+ pos 1000)))
-            [line at] (hints/line-at text (- pos a))
-            plugins @plugin-registry/live
-            h (hints/hint {:at (hints/at-caret line at)
-                           :keymap {:editor (plugin-registry/editor-bindings plugins)
-                                    :window (plugin-registry/window-bindings plugins)}
-                           :os (System/getProperty "os.name")})]
+      (let [h (caret-hint ed)]
         (g/gtk-label-set-text hint-label (or h ""))
         (g/gtk-widget-set-visible hint-label (if h 1 0)))
                         ;; said once on the console, then quiet
@@ -392,28 +431,25 @@
     ;; Rename is autohide ON, so GTK's own grab closes it.
   (register-popover-fn rename-pop))
 
+(def ^:private palette-entry-fns
+  ;; A palette entry that is a vector ([:tab/switch id]) is the window's own,
+  ;; not a registry command: the window-key-args fn that runs it, by the
+  ;; entry's first element. The tab, panel (as its key does), Compare with
+  ;; tab (LM3), named layout (LM8) and Restore an Earlier World entries.
+  {:tab/switch :switch-tab-fn
+   :panel/switch :panel-focus-fn
+   :compare/tab :compare-tab-fn
+   :layout/use :layout-use-fn
+   :world/restore-from :world-restore-from-fn})
+
 (defn- palette-run!
   "The command palette's run of id, as its key would: a tab, panel, layout or earlier-world entry through window-key-args' fns, anything else as a registry command with the window's, this editor's and the console's ctx. A throw is said on the status line."
   [{:keys [id window-key-args ed repl-complete-fn status-label]}]
   (try
                   ;; a tab entry ([:tab/switch id]) is the window's own,
                   ;; not a registry command
-    (cond
-      (and (vector? id) (= :tab/switch (first id)))
-      ((:switch-tab-fn window-key-args) (second id))
-                    ;; a panel entry ([:panel/switch k]), as its key does
-      (and (vector? id) (= :panel/switch (first id)))
-      ((:panel-focus-fn window-key-args) (second id))
-                    ;; Compare with tab (LM3)
-      (and (vector? id) (= :compare/tab (first id)))
-      ((:compare-tab-fn window-key-args) (second id))
-                    ;; a named layout (LM8)
-      (and (vector? id) (= :layout/use (first id)))
-      ((:layout-use-fn window-key-args) (second id))
-                    ;; an earlier world, from Restore an Earlier World
-      (and (vector? id) (= :world/restore-from (first id)))
-      ((:world-restore-from-fn window-key-args) (second id))
-      :else
+    (if-let [k (and (vector? id) (get palette-entry-fns (first id)))]
+      ((k window-key-args) (second id))
       (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
                                    id {:window (win-keys/window-key-ctx window-key-args 0 0)
                                        :editor (editor/key-ctx ed)
@@ -434,14 +470,11 @@
                              :repl-complete-fn repl-complete-fn :status-label status-label}))
     :on-error (fn [msg] (win-status/set-status! status-label msg))}))
 
-(defn- wire-editor-actions!
-  "The editor's rename, Run Form and flash cancel fns, the rename entry's Enter, and t's completion."
-  [{:keys [status-label register-popover-fn]}
-   {:keys [ed rename-pop completion]}
-   {:keys [flash-fns rename-fn rename-to-fn complete-fn run-form-fn]}]
-  (editor/set-rename-fn! ed rename-fn)
-  (editor/set-run-form-fn! ed run-form-fn)
-  (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
+(defn- connect-rename-entry!
+  "Connects the rename popover's entry Enter (activate) to rename-to-fn
+  with the entry's text. A throw is said on the status line, never raised
+  into GTK."
+  [status-label rename-pop rename-to-fn]
   (g/g-signal-connect-data (:entry rename-pop) "activate"
                            (callable (fn [_entry _data]
                                        (try
@@ -450,11 +483,23 @@
                                            (win-status/set-status! status-label (str "; rename: " (ex-message e)))))
                                        nil)
                                      [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (win-help/wire-completion! completion complete-fn status-label register-popover-fn
-                             (fn [fns] (editor/set-completion-fns! ed fns))
-                             (fn [f] (editor/on-cursor-moved! ed f))
-                             (fn [f] (editor/on-focus-lost! ed f))))
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- wire-editor-actions!
+  "The editor's rename, Run Form and flash cancel fns, the rename entry's Enter, and t's completion."
+  [{:keys [status-label register-popover-fn]}
+   {:keys [ed rename-pop completion]}
+   {:keys [flash-fns rename-fn rename-to-fn complete-fn run-form-fn]}]
+  (editor/set-rename-fn! ed rename-fn)
+  (editor/set-run-form-fn! ed run-form-fn)
+  (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
+  (connect-rename-entry! status-label rename-pop rename-to-fn)
+  (win-help/wire-completion! completion
+                             {:complete-fn complete-fn :status-label status-label
+                              :register-popover-fn register-popover-fn
+                              :set-fns! (fn [fns] (editor/set-completion-fns! ed fns))
+                              :on-moved! (fn [f] (editor/on-cursor-moved! ed f))
+                              :on-focus-lost! (fn [f] (editor/on-focus-lost! ed f))}))
 
 (defn- watch-tab-path!
   "Re-selection whenever t's path changes (Open, Save As): t's project, the window's when t is its only tab, the editor's profile, the labels and the tree."
@@ -485,6 +530,16 @@
                                  (when-let [f (:parinfer-label-update! ctx)] (f))
                                  (when tree-saved! (tree-saved! t)))))))))
 
+(defn- with-actions
+  "t with tab-actions's acts on it: :flash-fns, :menu-group and :actions
+  {:quick-doc! :jump! :rename! :rename-to! :complete! :run-form!}."
+  [t {:keys [flash-fns quick-doc-fn jump-fn rename-fn rename-to-fn complete-fn run-form-fn menu-group]}]
+  (assoc t
+         :flash-fns flash-fns
+         :menu-group menu-group
+         :actions {:quick-doc! quick-doc-fn :jump! jump-fn :rename! rename-fn
+                   :rename-to! rename-to-fn :complete! complete-fn :run-form! run-form-fn}))
+
 (defn- wire-tab!
   "Connects one tab to the window, doing for its editor everything the
   window needs of an editor, and returns the tab with
@@ -500,8 +555,7 @@
   ;; first, so its "changed" handler connects before LM3's
   (parts/run-tab-hooks! ctx :on-tab-wired t)
   (wire-changed-marks! t)
-  (let [{:keys [flash-fns quick-doc-fn jump-fn rename-fn rename-to-fn complete-fn run-form-fn menu-group] :as acts}
-        (tab-actions ctx t)]
+  (let [acts (tab-actions ctx t)]
     (wire-editor-fns! ctx t)
     (wire-tab-status! ctx t)
     (wire-doc-popovers! ctx t acts)
@@ -510,11 +564,7 @@
     (wire-palette! ctx t)
     (wire-editor-actions! ctx t acts)
     (watch-tab-path! ctx t)
-    (assoc t
-           :flash-fns flash-fns
-           :menu-group menu-group
-           :actions {:quick-doc! quick-doc-fn :jump! jump-fn :rename! rename-fn
-                     :rename-to! rename-to-fn :complete! complete-fn :run-form! run-form-fn})))
+    (with-actions t acts)))
 
 (defn add-tab!
   "Builds a tab for path (nil for Untitled) holding text, with the

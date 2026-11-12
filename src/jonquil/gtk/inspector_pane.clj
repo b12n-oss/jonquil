@@ -361,6 +361,17 @@
     (try (f) (catch :default e (report-error! pane (ex-message e))))
     nil))
 
+(defn- toolbar-buttons
+  "The seven toolbar buttons, returned by name."
+  []
+  {:back-btn (g/gtk-button-new-with-label "Back")
+   :earlier-btn (g/gtk-button-new-with-label "Earlier")
+   :later-btn (g/gtk-button-new-with-label "Later")
+   :meta-btn (g/gtk-button-new-with-label "Meta")
+   :table-btn (g/gtk-button-new-with-label "Table")
+   :def-btn (g/gtk-button-new-with-label "Def")
+   :close-btn (g/gtk-button-new-with-label "Close")})
+
 (defn- inspector-widgets
   "Creates the panel's GTK widgets, returned by name."
   []
@@ -368,13 +379,6 @@
         header (g/gtk-label-new "")
         info (g/gtk-label-new "")
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        back-btn (g/gtk-button-new-with-label "Back")
-        earlier-btn (g/gtk-button-new-with-label "Earlier")
-        later-btn (g/gtk-button-new-with-label "Later")
-        meta-btn (g/gtk-button-new-with-label "Meta")
-        table-btn (g/gtk-button-new-with-label "Table")
-        def-btn (g/gtk-button-new-with-label "Def")
-        close-btn (g/gtk-button-new-with-label "Close")
         table-header (g/gtk-label-new "")
         view (g/gtk-text-view-new)
         buf (g/gtk-text-view-get-buffer view)
@@ -391,13 +395,12 @@
         def-popover (popover/make-popover view {:autohide? true :position :bottom})
         keyctl (g/gtk-event-controller-key-new)
         click (g/gtk-gesture-click-new)]
-    {:root root :header header :info info :toolbar toolbar
-     :back-btn back-btn :earlier-btn earlier-btn :later-btn later-btn
-     :meta-btn meta-btn :table-btn table-btn :def-btn def-btn
-     :close-btn close-btn :table-header table-header :view view :buf buf
-     :scroll scroll :footer footer :selected-tag selected-tag
-     :def-entry def-entry :def-popover def-popover :keyctl keyctl
-     :click click}))
+    (merge {:root root :header header :info info :toolbar toolbar
+            :table-header table-header :view view :buf buf
+            :scroll scroll :footer footer :selected-tag selected-tag
+            :def-entry def-entry :def-popover def-popover :keyctl keyctl
+            :click click}
+           (toolbar-buttons))))
 
 (defn- note-clear-callback
   "The pane's one note-clear timer callable."
@@ -474,31 +477,24 @@
   (g/gtk-box-append root footer)
   (g/gtk-widget-set-size-request root WIDTH-REQUEST -1))
 
+(defn- connect-click!
+  "Connects btn's \"clicked\" signal to the thunk f, errors reported into
+  pane's footer."
+  [btn pane f]
+  (g/g-signal-connect-data btn "clicked"
+                           (callable (guarded-click pane f) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
 (defn- connect-toolbar!
   "Connects the seven toolbar buttons' \"clicked\" signals."
   [{:keys [back-btn earlier-btn later-btn meta-btn table-btn def-btn close-btn on-close] :as pane}]
-  ;; buttons
-  (g/g-signal-connect-data back-btn "clicked"
-                           (callable (guarded-click pane #(step! pane :out)) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data earlier-btn "clicked"
-                           (callable (guarded-click pane #(step! pane :earlier)) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data later-btn "clicked"
-                           (callable (guarded-click pane #(step! pane :later)) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data meta-btn "clicked"
-                           (callable (guarded-click pane #(step! pane :meta)) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data table-btn "clicked"
-                           (callable (guarded-click pane #(step! pane :table)) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data def-btn "clicked"
-                           (callable (guarded-click pane #(open-def-prompt! pane)) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
-  (g/g-signal-connect-data close-btn "clicked"
-                           (callable (guarded-click pane on-close) [:pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT))
+  (connect-click! back-btn pane #(step! pane :out))
+  (connect-click! earlier-btn pane #(step! pane :earlier))
+  (connect-click! later-btn pane #(step! pane :later))
+  (connect-click! meta-btn pane #(step! pane :meta))
+  (connect-click! table-btn pane #(step! pane :table))
+  (connect-click! def-btn pane #(open-def-prompt! pane))
+  (connect-click! close-btn pane on-close))
 
 (defn- connect-def-prompt!
   "Wires the def prompt's close refocus and its entry's \"activate\"."
@@ -544,25 +540,16 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   (g/gtk-widget-add-controller view click))
 
-(defn make-pane
-  "Builds the inspector panel widget tree. f/g/h below are on-request/
-  on-close/on-def -- f is called on the GTK thread with [op args] whenever
-  a key or button asks for a request key-step didn't resolve locally; g
-  and h take no state, the pane's own current state living entirely in
-  the returned map's :state atom.
+(def ^:private pane-widget-keys
+  [:root :view :buf :header :info :table-header :footer :selected-tag
+   :back-btn :earlier-btn :later-btn :meta-btn :table-btn :def-btn :close-btn])
 
-  Returns {:root :view :buf :header :info :table-header :footer
-  :def-popover :state (atom nil)} plus internal bookkeeping (:back-btn
-  etc, :selected-tag, :note-clear-cb/:note-clear-deadline/:note-clear-
-  armed?, :on-request/:on-close/:on-def) show-state!/measure/focus!/
-  focused? and this namespace's own button/key/click handlers read
-  back."
-  [{:keys [on-request on-close on-def] :as opts}]
-  (let [{:keys [root header info toolbar back-btn earlier-btn later-btn meta-btn
-                table-btn def-btn close-btn table-header view buf scroll footer
-                selected-tag def-entry def-popover keyctl click]}
-        (inspector-widgets)
-        ;; state/note-clear-deadline/armed? are hoisted out of the pane
+(defn- pane-timers
+  "The pane's state atom, its note-clear and measure-wait timer callables
+  and their atoms, built before the pane map exists. Returns the pane's
+  own keys plus :pane*, the atom the pane map is put into once built."
+  [opts footer]
+  (let [;; state/note-clear-deadline/armed? are hoisted out of the pane
         ;; map literal (rather than built as `(atom nil)` inline there)
         ;; so note-clear-cb, below, can close over the SAME atoms before
         ;; pane itself exists -- one callable for the pane's whole
@@ -578,25 +565,41 @@
                                             :note-clear-armed? note-clear-armed?})
         ;; measure-when-ready!'s wait, one callable for the pane's
         ;; lifetime as note-clear-cb is; it reads the pane through pane*,
-        ;; set once the map below exists
+        ;; set once the map exists
         pane* (atom nil)
         ready-waiters (atom [])
         ready-armed? (atom false)
         ready-cb (ready-callback {:pane* pane* :ready-waiters ready-waiters
-                                  :ready-armed? ready-armed?})
-        pane {:root root :view view :buf buf :header header :info info
-              :table-header table-header :footer footer
-              :def-popover (assoc def-popover :entry def-entry)
-              :state state
-              :note-clear-cb note-clear-cb
-              :note-clear-deadline note-clear-deadline
-              :note-clear-armed? note-clear-armed?
-              :ready-cb ready-cb :ready-waiters ready-waiters
-              :ready-armed? ready-armed? :ready-start (atom 0)
-              :selected-tag selected-tag
-              :back-btn back-btn :earlier-btn earlier-btn :later-btn later-btn :meta-btn meta-btn :table-btn table-btn
-              :def-btn def-btn :close-btn close-btn
-              :on-request on-request :on-close on-close :on-def on-def}]
+                                  :ready-armed? ready-armed?})]
+    {:state state
+     :note-clear-cb note-clear-cb
+     :note-clear-deadline note-clear-deadline
+     :note-clear-armed? note-clear-armed?
+     :ready-cb ready-cb :ready-waiters ready-waiters
+     :ready-armed? ready-armed?
+     :pane* pane*}))
+
+(defn make-pane
+  "Builds the inspector panel widget tree. f/g/h below are on-request/
+  on-close/on-def -- f is called on the GTK thread with [op args] whenever
+  a key or button asks for a request key-step didn't resolve locally; g
+  and h take no state, the pane's own current state living entirely in
+  the returned map's :state atom.
+
+  Returns {:root :view :buf :header :info :table-header :footer
+  :def-popover :state (atom nil)} plus internal bookkeeping (:back-btn
+  etc, :selected-tag, :note-clear-cb/:note-clear-deadline/:note-clear-
+  armed?, :on-request/:on-close/:on-def) show-state!/measure/focus!/
+  focused? and this namespace's own button/key/click handlers read
+  back."
+  [{:keys [on-request on-close on-def] :as opts}]
+  (let [{:keys [toolbar scroll def-entry def-popover keyctl click] :as widgets} (inspector-widgets)
+        {:keys [pane*] :as timers} (pane-timers opts (:footer widgets))
+        pane (merge (select-keys widgets pane-widget-keys)
+                    (dissoc timers :pane*)
+                    {:def-popover (assoc def-popover :entry def-entry)
+                     :ready-start (atom 0)
+                     :on-request on-request :on-close on-close :on-def on-def})]
     (reset! pane* pane)
     (style-widgets! pane {:scroll scroll :def-entry def-entry :def-popover def-popover})
     (lay-out! pane toolbar scroll)

@@ -44,6 +44,18 @@
   (reset! open? false)
   (notify-closed! conn))
 
+(defn- open-socket!
+  "A socket connected to host:port within connect-timeout-ms. A failed
+  connect closes the socket before rethrowing."
+  [host port]
+  (let [sock (java.net.Socket.)]
+    (try
+      (.connect sock (java.net.InetSocketAddress. ^String host (int port)) (int connect-timeout-ms))
+      (catch Throwable e
+        (try (.close sock) (catch Throwable _ nil))
+        (throw e)))
+    sock))
+
 (defn connect!
   "Connects to host:port and starts the reader thread. Throws
   java.io.IOException when nothing listens (or the connect takes longer than
@@ -51,25 +63,20 @@
   reader thread (or from close!), never concurrently, and {:tag :closed} is
   its last call."
   [host port on-reply]
-  (let [sock (java.net.Socket.)]
-    (try
-      (.connect sock (java.net.InetSocketAddress. ^String host (int port)) (int connect-timeout-ms))
-      (catch Throwable e
-        (try (.close sock) (catch Throwable _ nil))
-        (throw e)))
-    (let [conn {:socket sock
-                :in (java.io.BufferedReader.
-                     (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
-                :out (java.io.OutputStreamWriter. (.getOutputStream sock) "UTF-8")
-                :lock (Object.)
-                :deliver-lock (Object.)
-                :on-reply on-reply
-                :open? (atom true)
-                :closed-sent? (atom false)}
-          t (Thread. ^Runnable (fn [] (read-loop conn)))]
-      (.setDaemon t true)
-      (.start t)
-      (assoc conn :thread t))))
+  (let [sock (open-socket! host port)
+        conn {:socket sock
+              :in (java.io.BufferedReader.
+                   (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
+              :out (java.io.OutputStreamWriter. (.getOutputStream sock) "UTF-8")
+              :lock (Object.)
+              :deliver-lock (Object.)
+              :on-reply on-reply
+              :open? (atom true)
+              :closed-sent? (atom false)}
+        t (Thread. ^Runnable (fn [] (read-loop conn)))]
+    (.setDaemon t true)
+    (.start t)
+    (assoc conn :thread t)))
 
 (defn open? [conn] (boolean (and conn @(:open? conn))))
 

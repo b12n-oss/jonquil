@@ -164,6 +164,30 @@
   ;; :after-save hooks
   (atom nil))
 
+(defn- write-over!
+  "Writes ed's text to the temp file tmp (created like target), copies
+  target's permissions onto it, then atomically moves it over target.
+  Throws on any failure; the caller cleans up tmp. Returns the move's result."
+  [ed tmp target]
+  (save-path/create-temp! tmp target)
+  (spit tmp (editor/editor-text ed))
+  (copy-permissions! target tmp)
+  (java.nio.file.Files/move
+   (.toPath (java.io.File. ^String tmp))
+   (.toPath (java.io.File. ^String target))
+   (into-array java.nio.file.CopyOption
+               [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                java.nio.file.StandardCopyOption/ATOMIC_MOVE])))
+
+(defn- run-saved-hook!
+  "Calls the on-saved hook (when set) with path and ed. A throw from it is
+  reported on the console as an :error line, never raised. Returns nil."
+  [cv path ed]
+  (when-let [f @on-saved]
+    (try (f path ed)
+         (catch :default e
+           (cview/append! cv :error (str "; reloading the saved plugin failed: " (ex-message e) "\n"))))))
+
 (defn save-to!
   "Writes the editor text to path without ever truncating it in place,
   and without breaking a symlink or dropping the target's
@@ -196,21 +220,10 @@
     (when target
       (let [tmp (temp-path-for target)]
         (try
-          (save-path/create-temp! tmp target)
-          (spit tmp (editor/editor-text ed))
-          (copy-permissions! target tmp)
-          (java.nio.file.Files/move
-           (.toPath (java.io.File. ^String tmp))
-           (.toPath (java.io.File. ^String target))
-           (into-array java.nio.file.CopyOption
-                       [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                        java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+          (write-over! ed tmp target)
           (editor/mark-saved! ed)
           (reset! path-atom path)
-          (when-let [f @on-saved]
-            (try (f path ed)
-                 (catch :default e
-                   (cview/append! cv :error (str "; reloading the saved plugin failed: " (ex-message e) "\n")))))
+          (run-saved-hook! cv path ed)
           (catch :default e
             (let [f (java.io.File. ^String tmp)]
               (when (.exists f) (.delete f)))
@@ -275,8 +288,9 @@
   (file-dialog! :open win (fn [result] (contained-open-result! {:cv cv :open! open!} result))))
 
 (defn- handle-save-result!
-  "handle-open-result!'s counterpart for file-dialog! :save."
-  [ed cv win path-atom {:keys [path error] :as result}]
+  "handle-open-result!'s counterpart for file-dialog! :save. ctx is
+  {:ed :cv :win :path-atom}, as contained-save-result! takes."
+  [{:keys [ed cv win path-atom]} {:keys [path error] :as result}]
   (cond
     path (do (save-to! ed cv path-atom path)
              (update-title! ed win path-atom))
@@ -285,8 +299,8 @@
 
 (defn contained-save-result!
   "contained-open-result!'s counterpart for :save."
-  [{:keys [ed cv win path-atom]} result]
-  (try (handle-save-result! ed cv win path-atom result)
+  [{:keys [cv] :as ctx} result]
+  (try (handle-save-result! ctx result)
        (catch :default e
          (cview/append! cv :error (str "; save: " (ex-message e) "\n")))))
 

@@ -665,6 +665,29 @@
         (try (on-output :error (str "; Stop failed: " (ex-message e) "\n"))
              (catch Throwable _ nil))))))
 
+(defn- interrupt-running!
+  "Stop for the running evaluation, if any: flags it stop-requested in one
+  swap keyed by the identity of the exact :running map read here (separate
+  swaps against a separately-read :running let a finish! landing between the
+  read and a write recreate {:running {...}} out of nil, and eval! then
+  refused every later Run as busy forever): if finish! (or a new eval!) has
+  already cleared or replaced it by the time this runs, the swap is a no-op
+  instead of rebuilding it. The same swap does the once-per-id restart CAS,
+  so repeated Stop presses for one id still trigger only one future."
+  [{:keys [state] :as ev}]
+  (when-let [{:keys [id opts] :as running} (:running @state)]
+    (let [[old _] (swap-vals! state
+                              (fn [s]
+                                (if (identical? running (:running s))
+                                  (cond-> (assoc-in s [:running :stop-requested?] true)
+                                    id (assoc-in [:running :restart-triggered?] true))
+                                  s)))]
+      ;; No :id yet means the request hasn't gone out: run-worker! sees
+      ;; the flag and finishes as :interrupted without sending it, and
+      ;; send-main! re-checks it once the id lands.
+      (when (and id (identical? running (:running old)) (not (:restart-triggered? running)))
+        (future (interrupt-or-restart! ev id (:on-output opts)))))))
+
 (defn frames-reply
   "The child's jonquil-frames responses as the Frames panel's data, or
   {:error s}: its own error, or a reply without data (the middleware
@@ -707,6 +730,29 @@
       {:error "The Jolt child didn't say whether debug mode is on."})))
 
 (def ^:private not-running-yet "The Jolt child isn't running yet: Run something first.")
+
+(defn- break-check-result
+  "Asks the child whether it can break: {:on? true} (and break-on? set) when
+  it can, else {:error s}."
+  [{:keys [state]} {:keys [conn session]}]
+  (let [r (client/request-sync conn {:op "jonquil-break-check" :session session} request-timeout-ms)]
+    (cond (not (vector? r)) {:error inspect/timeout-message}
+          (= "true" (some :available r)) {:on? (:break-on? (swap! state assoc :break-on? true))}
+          :else {:error (or (some :reason r) "Frames need a Jolt with jolt.debug (newer than this one).")})))
+
+(defn- toggle-break-result
+  "Break on error's toggle as {:on? b} or {:error s}. Throws when the child
+  round trip does."
+  [{:keys [state] :as ev}]
+  (let [{:keys [ops] :as rt} (runtime ev)]
+    (cond
+      ;; turning it off needs no child
+      (:break-on? @state) {:on? (:break-on? (swap! state assoc :break-on? false))}
+      (nil? rt) {:error not-running-yet}
+      (not (live? ev)) {:error inspect-lost}
+      (not (contains? ops "jonquil-break-check"))
+      {:error "This Jolt child can't break: it runs without jolt-lang/nrepl's session middleware."}
+      :else (break-check-result ev rt))))
 
 (defn- child-op!
   "One request for the child's middleware op op, off the caller's thread:
@@ -795,26 +841,7 @@
             nil))))
   (interrupt! [this]
     (interrupt-frame-eval! this)
-    ;; One swap, keyed by identity of the exact :running map read here
-    ;; (separate swaps against a separately-read :running let a finish!
-    ;; landing between the read and a write recreate {:running {...}} out
-    ;; of nil, and eval! then refused every later Run as busy forever): if
-    ;; finish! (or a new eval!) has already cleared or replaced it by the
-    ;; time this runs, the swap is a no-op instead of
-    ;; rebuilding it. The same swap does the once-per-id restart CAS, so
-    ;; repeated Stop presses for one id still trigger only one future.
-    (when-let [{:keys [id opts] :as running} (:running @state)]
-      (let [[old _] (swap-vals! state
-                                (fn [s]
-                                  (if (identical? running (:running s))
-                                    (cond-> (assoc-in s [:running :stop-requested?] true)
-                                      id (assoc-in [:running :restart-triggered?] true))
-                                    s)))]
-        ;; No :id yet means the request hasn't gone out: run-worker! sees
-        ;; the flag and finishes as :interrupted without sending it, and
-        ;; send-main! re-checks it once the id lands.
-        (when (and id (identical? running (:running old)) (not (:restart-triggered? running)))
-          (future (interrupt-or-restart! this id (:on-output opts))))))
+    (interrupt-running! this)
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] (boolean (get-in @state [:running :waiting?])))
@@ -951,19 +978,7 @@
   (toggle-break! [this on-done]
     (future
       (let [r (try
-                (let [{:keys [conn session ops] :as rt} (runtime this)]
-                  (cond
-                    ;; turning it off needs no child
-                    (:break-on? @state) {:on? (:break-on? (swap! state assoc :break-on? false))}
-                    (nil? rt) {:error not-running-yet}
-                    (not (live? this)) {:error inspect-lost}
-                    (not (contains? ops "jonquil-break-check"))
-                    {:error "This Jolt child can't break: it runs without jolt-lang/nrepl's session middleware."}
-                    :else
-                    (let [r (client/request-sync conn {:op "jonquil-break-check" :session session} request-timeout-ms)]
-                      (cond (not (vector? r)) {:error inspect/timeout-message}
-                            (= "true" (some :available r)) {:on? (:break-on? (swap! state assoc :break-on? true))}
-                            :else {:error (or (some :reason r) "Frames need a Jolt with jolt.debug (newer than this one).")}))))
+                (toggle-break-result this)
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)

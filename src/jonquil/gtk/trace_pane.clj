@@ -61,38 +61,47 @@
   (when-let [e (get @(:entries pane) i)]
     (when-let [f (:on-activate @(:handlers pane))] (f e))))
 
+(defn- lay-out!
+  "Sets up the list and the labels and packs the widgets into the root."
+  [{:keys [root title scroll close-btn footer] lb :list}]
+  (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
+  (g/gtk-scrolled-window-set-child scroll lb)
+  (g/gtk-widget-set-vexpand scroll 1)
+  (doseq [l [title footer]]
+    (g/gtk-label-set-xalign l 0.0)
+    (g/gtk-label-set-wrap l 1))
+  (doseq [w [title scroll close-btn footer]] (g/gtk-box-append root w))
+  (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
+
+(defn- connect-list-and-close!
+  "Connects the list's row-activated and the Close button's clicked to their
+  handlers."
+  [{:keys [close-btn] lb :list :as pane}]
+  (g/g-signal-connect-data lb "row-activated"
+                           (callable (fn [_box row _data]
+                                       (try (activate! pane (g/gtk-list-box-row-get-index row))
+                                            (catch :default e (report! pane (str "; " (ex-message e)))))
+                                       nil)
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT)
+  (g/g-signal-connect-data close-btn "clicked"
+                           (callable (fn [_button _data]
+                                       (try (when-let [f (:on-close @(:handlers pane))] (f))
+                                            (catch :default e (report! pane (str "; " (ex-message e)))))
+                                       nil)
+                                     [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
 (defn make-pane
   "Builds the panel: {:root :title :list :scroll :close-btn :footer :rows
   :entries :handlers}. :root starts visible; the window hides it."
   []
-  (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
-        title (g/gtk-label-new "Calls of traced functions")
-        lb (g/gtk-list-box-new)
-        scroll (g/gtk-scrolled-window-new)
-        close-btn (g/gtk-button-new-with-label "Close")
-        footer (g/gtk-label-new "")
-        pane {:root root :title title :list lb :scroll scroll :close-btn close-btn
-              :footer footer :rows (atom []) :entries (atom []) :handlers (atom {})}]
-    (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
-    (g/gtk-scrolled-window-set-child scroll lb)
-    (g/gtk-widget-set-vexpand scroll 1)
-    (doseq [l [title footer]]
-      (g/gtk-label-set-xalign l 0.0)
-      (g/gtk-label-set-wrap l 1))
-    (doseq [w [title scroll close-btn footer]] (g/gtk-box-append root w))
-    (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
-    (g/g-signal-connect-data lb "row-activated"
-                             (callable (fn [_box row _data]
-                                         (try (activate! pane (g/gtk-list-box-row-get-index row))
-                                              (catch :default e (report! pane (str "; " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-signal-connect-data close-btn "clicked"
-                             (callable (fn [_button _data]
-                                         (try (when-let [f (:on-close @(:handlers pane))] (f))
-                                              (catch :default e (report! pane (str "; " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+  (let [pane {:root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
+              :title (g/gtk-label-new "Calls of traced functions")
+              :list (g/gtk-list-box-new) :scroll (g/gtk-scrolled-window-new)
+              :close-btn (g/gtk-button-new-with-label "Close")
+              :footer (g/gtk-label-new "")
+              :rows (atom []) :entries (atom []) :handlers (atom {})}]
+    (lay-out! pane)
+    (connect-list-and-close! pane)
     pane))

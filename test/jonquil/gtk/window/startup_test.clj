@@ -95,7 +95,7 @@
               [:show-model [:model [:root {:dir "/d" :file nil :cwd "/c"}]]]
               [:tree-start {:tree-settings ::tree-settings :dir "/d"}]
               [:switch-page-fn true] [:connect ::notebook "switch-page"] [:theme ::theme-ctx "/s.edn"]
-              [:show-selection ::cv ::dl ::sel] [:watch 6] [:reset-toggle ::reset ::reset-state ::sel]
+              [:show-selection ::cv ::dl ::sel] [:watch 2] [:reset-toggle ::reset ::reset-state ::sel]
               [:label ::dl [:dialect ::sel ::ev]] [:prompt ::cv] [:start ::cv ::sl ::ev ::sel]
               [:entry true {:reroot? true}] [:title ::ed ::win ::path] [:present ::win] [:focus ::ed]
               [:hooks :on-start []] [:plugins-start]]
