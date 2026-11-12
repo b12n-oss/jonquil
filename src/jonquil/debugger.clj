@@ -548,14 +548,19 @@
   pauses there through brk as Break on error does, unless something is
   paused already (that thread then runs on). frames' first entry is
   jolt.debug/with-break-handler's own thunk, which has no locals, so it
-  is dropped. Answers true when it paused."
-  [{:keys [brk callbacks t frames]}]
+  is dropped. (can-pause?), when given, is asked again once the pause is
+  published: false means the evaluation that allowed it ended while it was
+  being claimed, and its end may have missed the claim, so the pause is
+  let go at once rather than wait for a Continue nobody can send. Answers
+  true when it paused."
+  [{:keys [brk callbacks t frames can-pause?]}]
   (let [{:keys [paused]} brk
         frames (vec (rest frames))]
     (when (claim-pause! brk)
       (let [d (try (breakpoint-data t frames (:resolve-file callbacks))
                    (catch Throwable e (reset! paused nil) (throw e)))]
         (publish-pause! brk t frames d)
+        (when (and can-pause? (not (can-pause?))) (continue! brk))
         (serve-pause {:brk brk :callbacks callbacks :t t :frames frames :d d})
         true))))
 
@@ -566,7 +571,8 @@
   [brk callbacks-fn can-pause?]
   (fn [t frames]
     (when (and (breakpoint-line t) (can-pause?))
-      (pause-at-breakpoint {:brk brk :callbacks (callbacks-fn) :t t :frames frames}))))
+      (pause-at-breakpoint {:brk brk :callbacks (callbacks-fn) :t t :frames frames
+                            :can-pause? can-pause?}))))
 
 (defn arm-breakpoints!
   "Installs hook as breakpoint-hook, after turning debug mode on when it's
@@ -591,16 +597,20 @@
   {:on? false})
 
 (defn macro-heads
-  "What each symbol text in syms names in namespace ns-name (user when
-  that isn't loaded), for jonquil.breakpoints' :heads: {:var \"ns/name\"
-  :macro true} for a macro, {:var \"ns/name\"} for any other var, nil for
-  nothing (a local, a special form, interop, a class). A symbol that
-  throws when resolved names nothing."
+  "What each symbol text in syms names in namespace ns-name, for
+  jonquil.breakpoints' opts: {:heads {sym info} :ns-found? b}. info is
+  {:var \"ns/name\" :macro true} for a macro, {:var \"ns/name\"} for any
+  other var, nil for nothing (a local, a special form, interop, a class,
+  or a symbol that throws when resolved). A namespace not loaded yet (the
+  buffer before its first Run) is resolved in user, with :ns-found? false:
+  what its :refer brings in can't be known then."
   [ns-name syms]
-  (let [n (or (some-> ns-name str symbol find-ns) (the-ns 'user))]
-    (into {} (map (fn [s]
-                    [s (try (let [v (ns-resolve n (symbol s))]
-                              (when (var? v)
-                                (cond-> {:var (str (symbol v))} (:macro (meta v)) (assoc :macro true))))
-                            (catch Throwable _ nil))]))
-          syms)))
+  (let [found (some-> ns-name str symbol find-ns)
+        n (or found (the-ns 'user))]
+    {:heads (into {} (map (fn [s]
+                            [s (try (let [v (ns-resolve n (symbol s))]
+                                      (when (var? v)
+                                        (cond-> {:var (str (symbol v))} (:macro (meta v)) (assoc :macro true))))
+                                    (catch Throwable _ nil))]))
+                  syms)
+     :ns-found? (some? found)}))

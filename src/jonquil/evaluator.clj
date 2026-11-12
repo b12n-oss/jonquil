@@ -231,8 +231,8 @@
     set-breakpoints! answered: only then does a Run send breakpoint code.")
   (macro-heads! [ev ns-name syms on-done]
     "What each symbol text in syms names in namespace ns-name, off the
-    caller's thread: on-done gets {:heads m} (jonquil.debugger/macro-heads)
-    or {:error s}."))
+    caller's thread: on-done gets {:heads m :ns-found? b}
+    (jonquil.debugger/macro-heads) or {:error s}."))
 
 (defprotocol Trace
   "Tracing functions where the code runs (jonquil.trace-rt): the two Jolt

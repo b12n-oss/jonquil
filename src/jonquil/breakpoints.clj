@@ -21,6 +21,7 @@
   evaluated, it holds none."
   (:require [clojure.string :as str]
             [jonquil.changed :as changed]
+            [jonquil.clj :as clj]
             [jonquil.commands :as commands]))
 
 ;; --- the inserted form --------------------------------------------------------
@@ -261,9 +262,11 @@
   :heads absent when the runtime didn't answer):
   [:known n] for a form list-parts knows by name n, :macro for any other
   macro (nothing inside is touched), :call for a fn or an unresolved name
-  (a local, interop). With no answer, a head that isn't a known core name
-  counts as a macro."
-  [text node {:keys [heads text-macros]}]
+  (a local, interop). An unresolved name counts as a macro when the
+  runtime didn't find the buffer's namespace (:ns-found? false), since it
+  may come from that namespace's :refer. With no answer, a head that isn't
+  a known core name counts as a macro."
+  [text node {:keys [heads text-macros ns-found?]}]
   (let [s (head-symbol text node)
         [ns-part nm] (when s (split-sym s))]
     (cond
@@ -275,7 +278,7 @@
       (let [{v :var m :macro} (get heads s)
             [vns vname] (when v (split-sym v))]
         (cond
-          (nil? v) :call
+          (nil? v) (if (false? ns-found?) :macro :call)
           (= "clojure.core" vns) (if (known-core vname) [:known vname] (if m :macro :call))
           (known-elsewhere v) [:known (known-elsewhere v)]
           m :macro
@@ -371,7 +374,7 @@
                       (when-let [nm (second (:kids f))] (atom-text text nm)))))
         (commands/top-level-forms text)))
 
-(defn- line-starts
+(defn line-starts
   "The offset each line starts at, line 1 first."
   [text]
   (loop [i 0 acc [0]]
@@ -416,6 +419,31 @@
 (def NOWHERE
   "What place says when no line from there on can hold a breakpoint."
   "No code from this line on can hold a breakpoint.")
+
+(defn cached-heads
+  "The spots opts a tab's cached answer gives for text: {:heads :ns-found?}
+  when cache ({:ns :heads :ns-found?}) was asked for the namespace text's
+  ns form names now (user without one), else {} (every head the window
+  doesn't know counts as a macro)."
+  [cache text]
+  (if (and cache (= (:ns cache) (or (clj/buffer-ns text) "user")))
+    (select-keys cache [:heads :ns-found?])
+    {}))
+
+(defn dropped-lines
+  "The lines of lines (each once, in order) where nothing can hold a
+  breakpoint now, read with opts: a Run leaves them out."
+  [text lines opts]
+  (let [all (spots text opts)]
+    (vec (remove #(spot-on all %) (sort (distinct lines))))))
+
+(defn dropped-message
+  "The status line naming dropped lines (dropped-lines), nil for none."
+  [ls]
+  (case (count ls)
+    0 nil
+    1 (str "; Breakpoint at line " (first ls) " is inside a macro, so it won't pause.")
+    (str "; Breakpoints at lines " (str/join ", " ls) " are inside a macro, so they won't pause.")))
 
 (defn place
   "Where a breakpoint asked for on line goes: {:line l}, l being line when
@@ -500,12 +528,19 @@
 
 (defn edited?
   "True when the form at rng ({:start :end}) of text has edits that
-  haven't run: LM3's changed forms, against ran (the tab's record, nil
-  when it never ran) mark it."
-  [text ran rng]
-  (boolean (and ran rng
-                (some #(and (= (:start rng) (:start %)) (= (:end rng) (:end %)))
-                      (changed/changed text ran)))))
+  haven't run. After a Run, LM3's changed forms against ran (the tab's
+  record) say so. In a tab that never ran (ran nil) the form counts as
+  edited when the buffer has unsaved edits (:dirty?) or the form isn't in
+  the file on disk as it stands (:disk-text, nil without a file)."
+  ([text ran rng] (edited? text ran rng {}))
+  ([text ran rng {:keys [dirty? disk-text]}]
+   (boolean
+    (and rng
+         (if ran
+           (some #(and (= (:start rng) (:start %)) (= (:end rng) (:end %)))
+                 (changed/changed text ran))
+           (or dirty?
+               (and disk-text (not (str/includes? disk-text (subs text (:start rng) (:end rng)))))))))))
 
 ;; --- what a toggle says ------------------------------------------------------------
 

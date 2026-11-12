@@ -11,7 +11,7 @@
   "The runtime's answer about text's heads, from this process's user
   namespace: what the window asks before placing a breakpoint."
   [text]
-  {:heads (debugger/macro-heads "user" (bp/head-symbols text))})
+  (debugger/macro-heads "user" (bp/head-symbols text)))
 
 (defn- at
   "[snippet kind] of the spot a breakpoint on line attaches to, or nil
@@ -476,4 +476,61 @@
             (debugger/end-stale-pause! brk {} {:other-thread :wake})
             (is (= 41 (deref fut 5000 :blocked)))
             (is (= [{:continued? true}] @resumed))))
+        (finally (debugger/disarm-breakpoints! hook) (debugger/set-debug-mode! false))))))
+
+;; --- re-review: heads the runtime couldn't resolve, stale heads, dropped dots ----
+
+(deftest unresolved-heads-are-macros-when-the-namespace-wasnt-found-test
+  (let [t (lines "(do"
+                 "  (go-loop [x"
+                 "           (init)]"
+                 "    (body x)))")
+        h {"do" nil "go-loop" nil "init" nil "body" nil}]
+    (is (= ["(init)" :expression] (at t 3 {:heads h})) "found namespace: unresolved is a call")
+    (is (nil? (at t 3 {:heads h :ns-found? false}))
+        "the buffer's namespace isn't loaded: go-loop may come from its :refer")))
+
+(deftest cached-heads-follow-the-ns-form-test
+  (let [cache {:ns "demo.a" :heads {"go-loop" {:var "clojure.core.async/go-loop" :macro true}} :ns-found? true}]
+    (is (= {:heads (:heads cache) :ns-found? true} (bp/cached-heads cache "(ns demo.a)\n(f)")))
+    (is (= {} (bp/cached-heads cache "(ns demo.b)\n(f)")) "the ns form changed: the answer is stale")
+    (is (= {} (bp/cached-heads nil "(f)")))
+    (is (= {:heads {"f" nil} :ns-found? true} (bp/cached-heads {:ns "user" :heads {"f" nil} :ns-found? true} "(f)"))
+        "no ns form: user")))
+
+(deftest dropped-lines-name-dots-that-wont-pause-test
+  (let [t (lines "(defn f [x]"
+                 "  (mm"
+                 "    (g x)))")
+        h {:heads {"defn" {:var "clojure.core/defn" :macro true} "mm" {:var "user/mm" :macro true} "g" nil}
+           :ns-found? true}]
+    (is (= [3] (bp/dropped-lines t [2 3] h)) "line 3 is inside a macro now")
+    (is (= [] (bp/dropped-lines t [2] h)))
+    (is (= "; Breakpoint at line 3 is inside a macro, so it won't pause." (bp/dropped-message [3])))
+    (is (= "; Breakpoints at lines 3, 7 are inside a macro, so they won't pause." (bp/dropped-message [3 7])))))
+
+(deftest a-tab-that-never-ran-counts-unsaved-or-changed-forms-as-edited-test
+  (let [t (lines "(defn f [x]" "  (inc x))")
+        rng (bp/resend-range t 2)]
+    (is (false? (bp/edited? t nil rng {:dirty? false :disk-text t})) "saved and as on disk")
+    (is (true? (bp/edited? t nil rng {:dirty? true :disk-text nil})) "unsaved edits")
+    (is (true? (bp/edited? t nil rng {:dirty? false :disk-text (lines "(defn f [x]" "  (dec x))")}))
+        "the form differs from the file on disk")
+    (is (false? (bp/edited? t nil rng {:dirty? false :disk-text nil})) "no file, nothing typed since")))
+
+(deftest a-claim-that-outlives-its-eval-runs-on-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [brk (debugger/make-break)
+          paused (promise)
+          answers (atom [true false])
+          ;; true when the claim is taken, false by the time it publishes:
+          ;; the eval ended in between
+          can-pause? (fn [] (let [[a & more] @answers] (reset! answers (or more [false])) a))
+          hook (debugger/breakpoint-handler brk (fn [] {:on-pause (fn [d] (deliver paused d))}) can-pause?)]
+      (try
+        (debugger/arm-breakpoints! hook)
+        (is (= 41 (deref (future ((compile-instrumented adder [3]) 20)) 5000 :blocked))
+            "the pause is let go at once instead of waiting for a Continue nobody can send")
+        (is (nil? @(:paused brk)))
         (finally (debugger/disarm-breakpoints! hook) (debugger/set-debug-mode! false))))))

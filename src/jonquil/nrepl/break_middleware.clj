@@ -119,9 +119,16 @@
     (reset! (:armed? e) (= "1" (str (get request "jonquil-break"))))
     (let [bp? (= "1" (str (get request "jonquil-breakpoints")))]
       ;; a restarted child, or one that never heard the op: arm before
-      ;; the code compiles, so it keeps its locals
-      (when (and bp? (not (identical? (:hook e) @debugger/breakpoint-hook)))
-        (debugger/arm-breakpoints! (:hook e)))
+      ;; the code compiles, so it keeps its locals, and say how it went
+      ;; on the eval's own reply (the client's pending breakpoints)
+      (when bp?
+        (let [r (if (identical? (:hook e) @debugger/breakpoint-hook)
+                  {:on? true}
+                  (debugger/arm-breakpoints! (:hook e)))]
+          (try ((:reply request) (if-let [err (:error r)]
+                                   {"jonquil-breakpoints-error" err}
+                                   {"jonquil-breakpoints-armed" "true"}))
+               (catch Throwable _ nil))))
       (reset! (:bp-ok? e) bp?))
     (reset! (:reply e) (:reply request)))
   (next request))

@@ -1035,6 +1035,26 @@
               (is (= "41" (:printed (first (run e "(bpf 20)" false)))))))))
       (finally (ev/stop! e)))))
 
+(deftest breakpoints-armed-before-the-child-starts-test
+  (let [e (make (temp-project))]
+    (try
+      (is (= {:on? true :pending? true} (set-breakpoints-sync e true)) "no child yet: pending")
+      (let [paused (promise)
+            failed (atom nil)]
+        (ev/set-break-handlers! e {:on-pause (fn [d] (deliver paused d)) :on-resume (fn [_])})
+        (swap! (:state e) update :breakpoints-pending (fn [f] (fn [r] (reset! failed r) (f r))))
+        (let [r (first (run e (:text (bp/instrument "(defn bpg [x]\n  (let [y (* x 2)]\n    (+ y 1)))" [3])) false))]
+          (if (some-> @failed :error)
+            (do (println "SKIP breakpoints-armed-before-the-child-starts-test:" (:error @failed))
+                (is (false? (ev/breakpoints-on? e)) "a child that can't arm turns them off"))
+            (do (is (= :ok (:status r)) (pr-str r))
+                (is (nil? (:breakpoints-pending @(:state e))) "the first eval's reply confirmed them")
+                (let [done (start-run e "(bpg 20)" {})]
+                  (is (= "Breakpoint at line 3" (:title (deref paused 20000 nil))))
+                  (is (true? (ev/continue-break! e)))
+                  (is (= "41" (:printed (deref done 20000 :timeout)))))))))
+      (finally (ev/stop! e)))))
+
 ;; --- trace in the child (LM4) ----------------------------------------------------
 
 (defn- trace-sync [e op args]
@@ -1210,7 +1230,22 @@
 
 (deftest breakpoints-wait-for-a-child-test
   (let [e (nrepl/make-nrepl {:dialect :jolt :project-dir (str (temp-project))})
-        p (promise)]
-    (ev/set-breakpoints! e true (fn [r] (deliver p r)))
-    (is (:error (deref p 3000 :timeout)) "no child yet: nothing to arm, and it says so")
-    (is (false? (ev/breakpoints-on? e)) "so no Run sends breakpoint code")))
+        answers (atom [])
+        first-answer (promise)]
+    (ev/set-breakpoints! e true (fn [r] (swap! answers conj r) (deliver first-answer r)))
+    (is (= {:on? true :pending? true} (deref first-answer 3000 :timeout))
+        "no child yet: pending, armed by the first evaluation")
+    (is (true? (ev/breakpoints-on? e)) "so the first Run sends breakpoint code and arms them")
+    (testing "that evaluation's reply confirms them"
+      (nrepl/breakpoints-watch! e {:jonquil-breakpoints-armed "true"})
+      (is (true? (ev/breakpoints-on? e)))
+      (is (= 1 (count @answers))))
+    (testing "or says why it couldn't, once"
+      (let [second-answer (promise)]
+        (ev/set-breakpoints! e true (fn [r] (swap! answers conj r) (deliver second-answer r)))
+        (is (= {:on? true :pending? true} (deref second-answer 3000 :timeout))))
+      (nrepl/breakpoints-watch! e {:jonquil-breakpoints-error "no jolt.debug"})
+      (is (false? (ev/breakpoints-on? e)))
+      (is (= {:error "no jolt.debug" :pending-failed? true} (last @answers)))
+      (nrepl/breakpoints-watch! e {:jonquil-breakpoints-error "no jolt.debug"})
+      (is (= 1 (count (filter :pending-failed? @answers)))))))

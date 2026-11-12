@@ -206,7 +206,7 @@
   (breakpoints-on? [_] (boolean (:breakpoints-on? @state)))
   (macro-heads! [_ ns-name syms on-done]
     (future
-      (let [r (try {:heads (debugger/macro-heads ns-name syms)}
+      (let [r (try (debugger/macro-heads ns-name syms)
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)

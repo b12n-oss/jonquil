@@ -10,6 +10,7 @@
   Run Changed fns, in its order."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jonquil.breakpoints :as bp]
             [jonquil.changed :as changed]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
@@ -118,6 +119,14 @@
                                                  :idle "Ready")))
    :on-complete (fn [result] (complete-eval! ctx result))})
 
+(defn- say-dropped!
+  "LM5: names on the console the tab's breakpoints in range ({:start :end},
+  nil for all of text) that the Run leaves out, being inside a macro by
+  the runtime's last answer, so none is dropped without a word."
+  [cv ed e text range]
+  (when-let [msg (bp/dropped-message (gbp/dropped ed e text range))]
+    (cview/append! cv :system (str msg "\n"))))
+
 (defn refuse-foreign!
   "The refusal message (truthy), after printing it, when
   tab belongs to another project or dialect than the window
@@ -165,6 +174,10 @@
   ;; LM3: the text Compare with the last Run compares against
   (when-let [lr (:last-run changed)]
     (swap! lr changed/last-run-after hook-code hook-source (:status result)))
+  ;; LM5: the breakpoints' macro answer, asked again once the Run has
+  ;; loaded what it defines
+  (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
+    (try (some-> (:bp-refresh changed) deref (apply [])) (catch :default _ nil)))
   ;; LM4: the lines that ran, whether it ended well or not
   (when (and changed (#{:run :form :selection} hook-source))
     (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil))))
@@ -299,6 +312,7 @@
               (when notify (notify {:problem problem})))
           (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                 ;; LM5: the tab's breakpoints go in the text sent
+                _ (say-dropped! cv ed @ev* text nil)
                 warning (ev/eval! @ev* (gbp/sent-text ed @ev* text nil) (opts))]
             (say-busy! cv notify warning)))))))
 
@@ -437,6 +451,7 @@
                     (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab text)))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         ;; LM5: sent with the breakpoints in its range; echoed and recorded as typed
+        (say-dropped! cv ed @ev* (:text snap) (selection-range snap text))
         (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) (selection-range snap text))
                        {:ns-source (:text snap) :owner (:id tab) :hook-code text
                         :hook-source :selection :hook-tab (:id tab)
@@ -646,6 +661,7 @@
         ((:flash! flash-fns) start end (:caret snap))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         ;; LM5: sent with the breakpoints in the form
+        (say-dropped! cv ed @ev* (:text snap) {:start start :end end})
         (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) {:start start :end end})
                        {:ns-source (:text snap) :owner (:id tab) :hook-code text
                         :hook-source :form :hook-tab (:id tab)

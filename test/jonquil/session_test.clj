@@ -551,7 +551,7 @@
 
 (defn- define-bp-fn! [s]
   (let [{t :text} (bp/instrument bp-fn-text [3]
-                                 {:heads (debugger/macro-heads "user" (bp/head-symbols bp-fn-text))})]
+                                 (debugger/macro-heads "user" (bp/head-symbols bp-fn-text)))]
     (repl-sync s t)))
 
 (deftest breakpoints-pause-only-the-worker-of-a-persons-eval-test
@@ -586,7 +586,11 @@
   (let [s (session/make-session)
         p (promise)]
     (ev/macro-heads! s "user" ["when" "nope"] (fn [r] (deliver p r)))
-    (is (= {:heads {"when" {:var "clojure.core/when" :macro true} "nope" nil}} (deref p 3000 :timeout)))
+    (is (= {:heads {"when" {:var "clojure.core/when" :macro true} "nope" nil} :ns-found? true}
+           (deref p 3000 :timeout)))
+    (let [p2 (promise)]
+      (ev/macro-heads! s "no.such.buffer-ns" ["when" "go-loop"] (fn [r] (deliver p2 r)))
+      (is (false? (:ns-found? (deref p2 3000 :timeout))) "a namespace not loaded yet is said so"))
     (is (false? (ev/breakpoints-on? s)) "off until armed")
     (if-not (debugger/break-available?)
       (is (:error (set-breakpoints-sync s true)))

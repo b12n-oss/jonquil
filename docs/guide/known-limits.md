@@ -57,9 +57,9 @@ Known rough edges, parked for later:
 - A top-level expression typed at the prompt keeps no frame of its own: its
   error shows frames only inside a function it called.
 - Breakpoints live in the code a Run or a toggle sent: `require :reload` or
-  `load-file` puts back the saved code without them. A macro Jonquil doesn't
-  know is treated as one that reads its arguments as code, so nothing
-  inside its arguments can hold a breakpoint. A breakpoint pauses only
+  `load-file` puts back the saved code without them. A macro whose shape
+  Jonquil doesn't know is treated as reading its arguments as data, so
+  nothing inside it is wrapped, and a dot there doesn't pause. A breakpoint pauses only
   during an evaluation you started, and in process only on its own thread.
 - A `(catch Exception _)` in your code can swallow Stop at a breakpoint, as
   it can with Break on error: Stop ends a pause by throwing on the paused

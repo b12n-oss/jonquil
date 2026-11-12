@@ -15,7 +15,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
-            [jonquil.gtk.popover :as popover]))
+            [jonquil.gtk.popover :as popover]
+            [temp-dirs]))
 
 (defn row-debugger-pane-shows
   "show! lists a row per frame and per local under the error's title, a
@@ -355,25 +356,32 @@
 
 ;; --- breakpoints (LM5) ------------------------------------------------------------
 
-(defn- dots [ui] @(:dots (:gutter (:changed (:editor ui)))))
+(defn- active-ed [ui] (:ed ((:active-tab* ui))))
+
+(defn- dots [ui] @(:dots (:gutter (:changed (active-ed ui)))))
 
 (defn- caret-to-line!
-  "The caret at the start of line n (1-based) of the editor's text."
+  "The caret at the start of line n (1-based) of the active tab's text."
   [ui n]
-  (let [ed (:editor ui)
+  (let [ed (active-ed ui)
         text (editor/editor-text ed)
         at (loop [i 0 l 1] (if (= l n) i (recur (inc (str/index-of text "\n" i)) (inc l))))]
     (support/place-cursor! (:buf ed) at)))
 
 (defn- breakpoints-off!
-  "Never leaves a dot, a pause, the hook or debug mode behind for later rows."
-  [ui]
-  (break-off! ui)
-  (on-gtk (doseq [m (dots ui)] (g/gtk-text-buffer-delete-mark (:buf (:editor ui)) m))
-          (reset! (:dots (:gutter (:changed (:editor ui)))) [])
-          (editor/set-text! (:editor ui) ""))
-  (reset! debugger/breakpoint-hook nil)
-  (debugger/set-debug-mode! false))
+  "Never leaves a dot, a pause, the hook or debug mode behind for later
+  rows. The active tab is emptied, or with close? closed (a file's tab)."
+  ([ui] (breakpoints-off! ui false))
+  ([ui close?]
+   (break-off! ui)
+   (on-gtk (let [ed (active-ed ui)]
+             (doseq [m (dots ui)] (g/gtk-text-buffer-delete-mark (:buf ed) m))
+             (reset! (:dots (:gutter (:changed ed))) [])
+             (if close?
+               ((:close-tab! ui) (:id ((:active-tab* ui))))
+               (editor/set-text! ed ""))))
+   (reset! debugger/breakpoint-hook nil)
+   (debugger/set-debug-mode! false)))
 
 (defn row-breakpoint-live-at-once
   "Toggle Breakpoint alone, no Run: the dot is drawn and the defn holding
@@ -389,12 +397,13 @@
             (on-gtk (support/check :breakpoint-live-at-once said? {:available false :status (status ui)}))))
       (let [dp (:debugger-pane ui)]
         (try
-          ;; as a tab that never ran: earlier rows ran code here, and a
-          ;; form that changed since the tab's last run isn't sent again
-          (on-gtk (reset! (:ran (:changed (:editor ui))) nil)
-                  (editor/set-text! (:editor ui) "(defn bpw [x]\n  (let [y (* x 2)]\n    (+ y 1)))")
-                  (caret-to-line! ui 3)
-                  (run-palette! ui "toggle a breakpoint"))
+          ;; a saved file's tab that never ran: a form with edits that
+          ;; haven't run (unsaved, or changed since the last Run) isn't sent
+          (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-bp-") "bpw.clj")]
+            (spit f "(defn bpw [x]\n  (let [y (* x 2)]\n    (+ y 1)))\n")
+            (on-gtk ((:open-file! ui) (.getPath f))
+                    (caret-to-line! ui 3)
+                    (run-palette! ui "toggle a breakpoint")))
           (let [live? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 3; it's live now."))
                 set-status (on-gtk (status ui))
                 dot? (on-gtk (= 1 (count (dots ui))))
@@ -420,7 +429,7 @@
                                     :rows (take 4 rows) :local local? :field field? :ran-on ran-on? :off off?
                                     :gone gone? :through through? :not-paused not-paused?
                                     :status (status ui) :title (dpane/title-text dp)})))
-          (finally (breakpoints-off! ui)))))))
+          (finally (breakpoints-off! ui true)))))))
 
 (defn row-breakpoint-placement
   "A toggle on a line that can't pause moves the dot to the next one that
@@ -469,3 +478,34 @@
           (on-gtk (support/check :breakpoint-waits-for-unrun-edits (and ran? said? dot? same?)
                                  {:ran ran? :said said? :dot dot? :same same? :status (status ui)})))
         (finally (breakpoints-off! ui))))))
+
+(defn row-breakpoint-asks-again-after-a-run
+  "Before the file's namespace is loaded, a name it defines can't be told
+  from a macro, so a line inside a call to it holds no breakpoint and the
+  status bar says why. A Run asks the runtime again (a stale answer gets
+  replaced), and then the same toggle sets the dot."
+  [ui]
+  (go-row :breakpoint-asks-again-after-a-run support/check
+    (if-not (debugger/break-available?)
+      (on-gtk (support/check :breakpoint-asks-again-after-a-run true {:available false}))
+      (try
+        (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-bpns-") "r.clj")
+              _ (spit f "(ns bpns.r)\n(defn frob [x] x)\n(defn h [x]\n  (frob\n    (inc x)))\n")
+              _ (on-gtk ((:open-file! ui) (.getPath f))
+                        (caret-to-line! ui 5)
+                        (run-palette! ui "toggle a breakpoint"))
+              refused? (await-until 8000 20 #(and (str/starts-with? (status ui) "; No code from this line on can hold a breakpoint.")
+                                                  (str/includes? (status ui) "namespace isn't loaded yet")))
+              none? (on-gtk (empty? (dots ui)))
+              ;; a stale answer: the Run must replace it
+              _ (on-gtk (reset! (:bp-heads (:changed (active-ed ui)))
+                                {:ns "bpns.r" :ns-found? true :heads {"frob" {:var "bpns.r/frob" :macro true}}}))
+              _ (on-gtk ((:run!* ui)))
+              asked? (await-until 8000 20 #(= {:var "bpns.r/frob"}
+                                              (get-in @(:bp-heads (:changed (active-ed ui))) [:heads "frob"])))
+              _ (on-gtk (caret-to-line! ui 5) (run-palette! ui "toggle a breakpoint"))
+              set? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 5; it's live now."))]
+          (on-gtk (support/check :breakpoint-asks-again-after-a-run (and refused? none? asked? set?)
+                                 {:refused refused? :none none? :asked asked? :set set? :status (status ui)
+                                  :heads @(:bp-heads (:changed (active-ed ui)))})))
+        (finally (breakpoints-off! ui true))))))

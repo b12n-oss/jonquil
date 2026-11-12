@@ -75,16 +75,31 @@
   (boolean (and e (satisfies? ev/Breakpoints e))))
 
 (defn heads
-  "The :heads the runtime last gave for ed's text (a toggle asks), or nil:
-  then every head that isn't a known core form counts as a macro."
-  [ed]
-  (some-> (get-in ed [:changed :bp-heads]) deref))
+  "The spots opts the runtime's last answer about ed's heads gives for text
+  (jonquil.breakpoints/cached-heads): {} when there's none, or it was for
+  another ns form, so every head that isn't a known core form counts as a
+  macro. A toggle asks, and so does each Run that ends well."
+  [ed text]
+  (bp/cached-heads (some-> (get-in ed [:changed :bp-heads]) deref) text))
 
 (defn set-heads!
-  "Keeps the runtime's answer about ed's heads, merged into the last one."
-  [ed m]
-  (when-let [a (get-in ed [:changed :bp-heads])] (swap! a merge m))
+  "Keeps the runtime's answer r ({:heads :ns-found?}) about ed's heads in
+  namespace ns, merged into the last one when it was for the same ns."
+  [ed ns r]
+  (when-let [a (get-in ed [:changed :bp-heads])]
+    (swap! a (fn [c] (if (= ns (:ns c))
+                       (-> c (update :heads merge (:heads r)) (assoc :ns-found? (:ns-found? r)))
+                       (assoc r :ns ns)))))
   nil)
+
+(defn dropped
+  "The lines of ed's breakpoints in range that nothing can hold now (inside
+  a macro, by the runtime's last answer), when evaluator e has them armed."
+  [ed e text range]
+  (let [{:keys [start end] :or {start 0 end (count text)}} range
+        ls (when (and (supported? e) (ev/breakpoints-on? e)) (lines ed text))
+        starts-in (fn [l] (let [s (nth (bp/line-starts text) (dec l) nil)] (and s (<= start s) (< s end))))]
+    (bp/dropped-lines text (filter starts-in ls) (heads ed text))))
 
 (defn sent-text
   "What a Run sends from ed: text's range ({:start :end}, the whole text
@@ -94,6 +109,5 @@
   (let [{:keys [start end] :or {start 0 end (count text)}} range
         ls (when (and (supported? e) (ev/breakpoints-on? e)) (seq (lines ed text)))]
     (if ls
-      (:text (bp/instrument text ls (cond-> {:start start :end end}
-                                      (heads ed) (assoc :heads (heads ed)))))
+      (:text (bp/instrument text ls (merge {:start start :end end} (heads ed text))))
       (subs text start end))))

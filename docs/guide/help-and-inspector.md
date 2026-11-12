@@ -540,8 +540,14 @@ form's head names in the buffer's namespace. Code inside a macro call is
 left alone, since the macro may read it as data (`s/def`, `go-loop`, a
 `defmacro` earlier in the same file), except for the core forms Jonquil
 knows the shape of (`let`, `when`, `cond`, `try` and the like). A head that
-names nothing loaded stays a call. When the runtime can't answer, every head
-Jonquil doesn't know counts as a macro, and the status bar says so.
+names nothing loaded stays a call, unless the buffer's namespace isn't loaded
+yet (before its first Run), since a name it refers could be a macro: then
+every head Jonquil doesn't know counts as one, and the status bar says so, as
+it does when the runtime can't answer at all. The answer is taken when you
+toggle and again after each Run that ends well, and Runs in between reuse it.
+When a Run leaves a dot out because its line is now inside a macro (a name
+typed since, or one the Run turned out to define), the console says so, and
+after the Run the status bar names the dots that won't pause.
 
 **It works at once.** Toggling sends the top-level form holding the line
 again, the way Run Form does (the console shows it), with every breakpoint
@@ -555,8 +561,10 @@ anything else, so on a form like `(def db (connect!))`, a top-level call, a
 `deftype`, `defrecord`, `defprotocol` or `defmulti` (sending those again makes
 a new class or dispatch table) or a form inside a `(comment ...)` block the
 status bar says `it takes effect when you next run this form.` A form with
-edits that haven't run (the changed-form mark) isn't sent either, so the
-toggle never runs your unfinished edit: the status bar says
+edits that haven't run isn't sent either, so the toggle never runs your
+unfinished edit: after a Run that's what the changed-form mark shows, and in
+a tab that never ran it's unsaved edits, or a form that differs from the
+file on disk. The status bar then says
 `this form has edits that haven't run, so Run Form to apply both.` If
 sending the form again fails, the status bar says so and the dot stays.
 
@@ -581,6 +589,11 @@ evaluation you started (a Run or a console entry):
 - In the Jolt child, on any of its threads while it runs, since that is how
   the pause reaches the window. A thread still paused when the evaluation
   ends is let go, because the window can't reach it after that.
+
+Toggling before the Jolt child is running (or right after a switch to it)
+keeps the dot: the first evaluation sent to the child arms the breakpoints.
+If that child can't (its Jolt has no `jolt.debug`), every dot goes and the
+status bar says why.
 
 ### Restarts
 

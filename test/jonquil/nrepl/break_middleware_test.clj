@@ -242,7 +242,21 @@
 (deftest breakpoints-op-answers-heads-test
   (let [{:keys [h]} (setup)
         [r] (ask h {"op" "jonquil-breakpoints" "session" "s1" "ns" "user" "heads" (pr-str ["when" "nope"])})]
-    (is (= {"when" {:var "clojure.core/when" :macro true} "nope" nil} (edn/read-string (get r "heads"))))))
+    (is (= {:heads {"when" {:var "clojure.core/when" :macro true} "nope" nil} :ns-found? true}
+           (edn/read-string (get r "heads"))))))
+
+(deftest a-marked-eval-answers-whether-it-armed-test
+  (let [{:keys [h]} (setup)
+        sent (atom [])]
+    (with-redefs [debugger/break-available? (constantly false)]
+      (h {"op" "eval" "session" "s1" "jonquil-breakpoints" "1" :reply (fn [m] (swap! sent conj m))})
+      (is (string? (some #(get % "jonquil-breakpoints-error") @sent)) "on its own reply, before the eval runs"))
+    (when (debugger/break-available?)
+      (try
+        (reset! sent [])
+        (h {"op" "eval" "session" "s1" "jonquil-breakpoints" "1" :reply (fn [m] (swap! sent conj m))})
+        (is (= "true" (some #(get % "jonquil-breakpoints-armed") @sent)))
+        (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))
 
 (deftest breakpoints-op-on-a-jolt-without-jolt-debug-test
   (with-redefs [debugger/break-available? (constantly false)]
