@@ -64,20 +64,28 @@
   ["Jonquil attaches to a server you started: it never starts or stops it."
    "Reset on Run isn't available: Jonquil doesn't unload namespaces in a server you started."])
 
+(def ^:private op-limits
+  "Each limit once connected: the ops whose absence triggers it (any one
+  present is enough) and its sentence."
+  [[["interrupt"]
+    "This server has no interrupt op, so Stop disconnects: the evaluation keeps running in the server, and the next Run connects a fresh session."]
+   [["stdin"]
+    "This server has no stdin op, so Jonquil can't send a read any input: babashka's read waits until Stop, and Basilisp's reads the server's own stdin, the terminal it was started in."]
+   [["completions" "complete"]
+    "Completion offers only this buffer's names: the server has no completion op."]
+   ;; jonquil.nrepl.jvm's quick doc sends lookup, else info
+   [["lookup" "info"]
+    "No quick docs: the server has no lookup or info op."]])
+
 (defn limitations
   "Sentences naming what this server can't do: always-limits, and once
   connected, one for each missing op the window would use."
   [ops connected?]
-  (cond-> always-limits
-    (and connected? (not (contains? ops "interrupt")))
-    (conj "This server has no interrupt op, so Stop disconnects: the evaluation keeps running in the server, and the next Run connects a fresh session.")
-    (and connected? (not (contains? ops "stdin")))
-    (conj "This server has no stdin op, so Jonquil can't send a read any input: babashka's read waits until Stop, and Basilisp's reads the server's own stdin, the terminal it was started in.")
-    (and connected? (not (or (contains? ops "completions") (contains? ops "complete"))))
-    (conj "Completion offers only this buffer's names: the server has no completion op.")
-    ;; jonquil.nrepl.jvm's quick doc sends lookup, else info
-    (and connected? (not (or (contains? ops "lookup") (contains? ops "info"))))
-    (conj "No quick docs: the server has no lookup or info op.")))
+  (into always-limits
+        (when connected?
+          (for [[names text] op-limits
+                :when (not-any? #(contains? ops %) names)]
+            text))))
 
 (defn local-file?
   "True when a lookup's :file names a file that exists on this machine: a

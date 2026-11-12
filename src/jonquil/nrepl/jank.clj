@@ -91,13 +91,35 @@
          ((:kill hooks) child)))
      nil)))
 
+(defn- launch-child!
+  "Starts jank from binary and stores the child in state. nil once it is
+  stored, else the result to finish the evaluation with. A Stop that lands
+  after the launch returned kills what it produced: the child is stored
+  before the check, so either this check or the Stop's own kill-child! sees
+  it."
+  [{:keys [state hooks selection] :as ev} binary {:keys [on-output run-path run-ns]}]
+  (connection/say! on-output :system (str (jank/starting-message binary) "\n"))
+  (let [started ((:launch hooks)
+                 {:binary binary
+                  :module-path (jank-child/module-path
+                                {:project-dir (:project-dir selection)
+                                 :file-dir (some-> run-path io/file .getParent)
+                                 :file-path run-path
+                                 :ns-name run-ns})
+                  :cancelled? (fn [] (stopping? ev))})]
+    (cond
+      (= :cancelled (:error started)) {:status :interrupted}
+      (:error started) {:status :notice :text (jank/start-failed-message (:error started))}
+      :else (do (swap! state assoc :child started)
+                (when (stopping? ev) (kill-child! ev))
+                nil))))
+
 (defn- ensure-child!
   "nil once a live child is stored in state, else the result to finish the
   evaluation with. A stored child that died is killed first. A Stop that
   lands during the launch, or after it returned, kills what the launch
-  produced: the child is stored before the check, so either this check or
-  the Stop's own kill-child! sees it."
-  [{:keys [state hooks selection] :as ev} on-output run-path run-ns]
+  produced (see launch-child!)."
+  [{:keys [state hooks] :as ev} on-output run-path run-ns]
   (let [{:keys [alive?]} hooks
         child (:child @state)]
     (if (and child (alive? child))
@@ -105,22 +127,7 @@
       (do
         (when child (kill-child! ev))
         (if-let [binary ((:find-binary hooks))]
-          (do
-            (connection/say! on-output :system (str (jank/starting-message binary) "\n"))
-            (let [started ((:launch hooks)
-                           {:binary binary
-                            :module-path (jank-child/module-path
-                                          {:project-dir (:project-dir selection)
-                                           :file-dir (some-> run-path io/file .getParent)
-                                           :file-path run-path
-                                           :ns-name run-ns})
-                            :cancelled? (fn [] (stopping? ev))})]
-              (cond
-                (= :cancelled (:error started)) {:status :interrupted}
-                (:error started) {:status :notice :text (jank/start-failed-message (:error started))}
-                :else (do (swap! state assoc :child started)
-                          (when (stopping? ev) (kill-child! ev))
-                          nil))))
+          (launch-child! ev binary {:on-output on-output :run-path run-path :run-ns run-ns})
           {:status :notice :text jank/no-binary-message})))))
 
 (defn- connect-policy [child ev]
