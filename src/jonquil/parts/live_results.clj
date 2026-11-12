@@ -1,5 +1,5 @@
 (ns jonquil.parts.live-results
-  "LM1's live console results as a window part's data half: the five result
+  "LM1's live console results as a window part's data half: the six result
   commands (their chords stay in keymap.edn). The install half is
   jonquil.gtk.parts.live-results.")
 
@@ -15,4 +15,6 @@
     :result/jump {:doc "Jump to the definition of the var the console result at the caret names." :scope :window
                   :call [:result-jump-fn]}
     :result/doc {:doc "Show the quick doc of the var the console result at the caret names, in the console."
-                 :scope :window :call [:result-doc-fn]}}})
+                 :scope :window :call [:result-doc-fn]}
+    :result/open-location {:doc "Open the file and line the console text at the caret names, such as src/app/core.clj:12."
+                           :scope :window :call [:result-open-location-fn]}}})

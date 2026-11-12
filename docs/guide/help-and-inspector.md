@@ -342,6 +342,18 @@ placeholder. Live results come from Jolt, in process or in a
 project's Jolt child, and quiet evaluations (completion, help) keep nothing;
 other runtimes print results as plain text.
 
+A file and line in console output, such as `src/app/core.clj:12:3` in an
+error's location or `(core.clj:12)` in a JVM stack frame, opens there with
+a click, with the same wait for a double-click, or with **Open This File and
+Line** from the console's menu or the palette, the caret in it. This works
+for any runtime, since it reads the text. A path under the project folder,
+or an absolute one, opens as written; a bare name opens the project file
+that ends with it, and when several do, the namespace in a stack frame
+(`demo.core$f.invoke` means `demo/core.clj`) picks one. Otherwise the status
+bar says how many files could be meant and opens none. A project file opens
+in a tab and any other file in the source panel, as a jump to a definition
+does.
+
 ## Tracing a function
 
 **Trace the function at the caret**, in the palette, wraps that function so

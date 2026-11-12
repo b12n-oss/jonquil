@@ -92,6 +92,17 @@
 
 ;; --- public reads ----------------------------------------------------------
 
+(defn line-at
+  "{:text :start} of the console line holding offset: its text without the
+  newline, and the offset it starts at."
+  [cv offset]
+  (let [buf (:buf cv)
+        n (g/gtk-text-buffer-get-char-count buf)
+        text (text-range buf 0 n)
+        s (inc (or (str/last-index-of text "\n" (dec offset)) -1))
+        e (or (str/index-of text "\n" offset) n)]
+    {:text (subs text s e) :start s}))
+
 (defn input-text
   "The input region's text: from input-start to the end of the buffer."
   [cv]
