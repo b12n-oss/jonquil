@@ -3,7 +3,8 @@
   window's commands after an error. On a Jolt with jolt.debug the row sees
   frames and locals and opens a local in the inspector; on one without, it
   sees the sentence that says so."
-  (:require [clojure.string :as str]
+  (:require [selftest-keys]
+            [clojure.string :as str]
             [clojure.core.async :refer [<! timeout]]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -24,6 +25,7 @@
     (let [{:keys [win pane]} (on-gtk (let [win (g/gtk-window-new)
                                            pane (dpane/make-pane)]
                                        (g/gtk-window-set-child win (:root pane))
+                                       (selftest-keys/watch! win)
                                        (g/gtk-window-present win)
                                        {:win win :pane pane}))
           calls (atom [])
@@ -65,6 +67,7 @@
     (let [{:keys [win pane]} (on-gtk (let [win (g/gtk-window-new)
                                            pane (dpane/make-pane)]
                                        (g/gtk-window-set-child win (:root pane))
+                                       (selftest-keys/watch! win)
                                        (g/gtk-window-present win)
                                        {:win win :pane pane}))
           calls (atom [])]

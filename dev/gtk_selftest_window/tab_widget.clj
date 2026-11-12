@@ -5,7 +5,8 @@
   parented on its view spun GTK in a warning loop).
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
-  (:require [gtk-async :refer [go-row on-gtk]]
+  (:require [selftest-keys]
+            [gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
             [jonquil.dialect :as dialect]
@@ -53,6 +54,7 @@
                                         t (make)]
                                     (g/gtk-window-set-default-size win 400 300)
                                     (g/gtk-window-set-child win (:root t))
+                                    (selftest-keys/watch! win)
                                     (g/gtk-window-present win)
                                     {:win win :t t}))]
       (try

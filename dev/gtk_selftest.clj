@@ -9,7 +9,8 @@
   The driver is gtk-async/run-rows: rows run strictly in order, and a row
   that doesn't finish within PER-ROW-MS is recorded as a :row-timeout FAIL
   while the run goes on."
-  (:require [clojure.core.async :refer [<! go timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :refer [<! go timeout]]
             [clojure.string :as str]
             [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [jolt.ffi :as ffi]
@@ -566,6 +567,7 @@
                                        ed (editor/make-editor)]
                                    (g/gtk-window-set-default-size win 500 400)
                                    (g/gtk-window-set-child win (:scroll ed))
+                                   (selftest-keys/watch! win)
                                    (g/gtk-window-present win)
                                    {:win win :ed ed}))]
     (try (f ed)
@@ -756,6 +758,7 @@
                                          ed (editor/make-editor)]
                                      (g/gtk-window-set-default-size win 500 400)
                                      (g/gtk-window-set-child win (:scroll ed))
+                                     (selftest-keys/watch! win)
                                      (g/gtk-window-present win)
                                      {:win win :ed ed}))
           text (big-text 8000)]
@@ -2434,6 +2437,7 @@ b" text) eq (pos? @splices))
   (go (<! (ga/run-rows steps PER-ROW-MS check))
       (let [passed (count (filter second @results)) total (count @results)]
         (reset! finished? true)
+        (selftest-keys/print-warning!)
         (println (str "SUMMARY " passed " of " total " passed")))
       (<! (timeout 50))
       (on-gtk (g/g-application-quit app))))
@@ -2465,6 +2469,7 @@ b" text) eq (pos? @splices))
     (g/gtk-window-set-default-size win 700 700)
     (g/gtk-window-set-child win paned)
     (editor/on-dirty-changed! ed (fn [dirty] (when dirty (swap! true-fire-count inc))))
+    (selftest-keys/watch! win)
     (g/gtk-window-present win)
     ;; recording a demo: JONQUIL_SELFTEST_MAXIMIZE fills the screen
     (when (System/getenv "JONQUIL_SELFTEST_MAXIMIZE") (g/gtk-window-maximize win))
