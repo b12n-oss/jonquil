@@ -433,3 +433,81 @@
               (editor/mark-saved! ed)
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
+(defn- run-active-palette!
+  "run-palette! on the active tab's own palette, which is the one
+  :open-palette!* opens: (:palette ui) is the first tab's, so a row with
+  several tabs open must use this. GTK-thread only."
+  [ui query]
+  ((:open-palette!* ui))
+  (let [p (:palette ((:active-tab* ui)))]
+    (palette/set-query! p query)
+    (palette/run-selected! p)
+    (when (popover/open? p) (popover/hide! p))))
+
+(defn row-compare-with-tab
+  "Compare with tab: b.clj lists the active tab's difference from b.clj's
+  tab, saved or not. Take reads the other tab as it is now, so an edit made
+  there after the compare is what comes back, and with no differences left
+  the list goes."
+  [ui]
+  (go-row :compare-with-tab support/check
+    (let [d (temp-dirs/temp-dir! "jonquil-selftest-compare-tab-")
+          fa (io/file d "a.clj")
+          fb (io/file d "b.clj")
+          _ (spit fa "(ns a)\n(def x 1)\n(def y 2)\n")
+          _ (spit fb "(ns a)\n(def x 10)\n(def y 2)\n")
+          _ (on-gtk ((:open-file! ui) (.getPath fb)))
+          eb (on-gtk (:ed ((:active-tab* ui))))
+          _ (on-gtk ((:open-file! ui) (.getPath fa)))
+          ea (on-gtk (:ed ((:active-tab* ui))))
+          _ (on-gtk (run-active-palette! ui "compare with tab: b.clj"))
+          listed? (await-until 3000 20 #(= ["2: 1 line here, 1 line in b.clj: (def x 10)"]
+                                           (lpane/row-texts (:locations-pane ui))))
+          _ (on-gtk (editor/apply-op-plain! eb {:edits [[7 17 "(def x 20)"]] :caret 7})
+                    (support/place-cursor! (:buf ea) 9)
+                    (run-active-palette! ui "take the other version here"))
+          took? (await-until 3000 20 #(= "(ns a)\n(def x 20)\n(def y 2)\n" (editor/editor-text ea)))
+          cleared? (await-until 3000 20 #(and (empty? (lpane/row-texts (:locations-pane ui)))
+                                              (= "; No differences from b.clj." (status ui))))]
+      (on-gtk (support/check :compare-with-tab (and listed? took? cleared?)
+                             {:listed listed? :took took? :cleared cleared?
+                              :rows (lpane/row-texts (:locations-pane ui)) :status (status ui)
+                              :a (editor/editor-text ea) :b (editor/editor-text eb)})
+              ;; b.clj may have filled the launch tab, so keep the first
+              ;; tab, as the usages rows do: closing the last closes the window
+              (doseq [t ((:tabs* ui))] (editor/mark-saved! (:ed t)))
+              (doseq [t (rest ((:tabs* ui)))] ((:close-tab! ui) (:id t)))
+              ((:select-tab! ui) (:id (first ((:tabs* ui)))))))))
+
+(defn row-compare-with-last-run
+  "Before a whole Run there's nothing to compare with; after one, Compare
+  with the last Run lists the line edited since, and Take puts the run
+  version back, after which there are no differences."
+  [ui]
+  (go-row :compare-with-last-run support/check
+    (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-compare-run-") "r.clj")
+          ran "(ns lrun)\n(def a 1)\n"
+          _ (spit f ran)
+          _ (on-gtk ((:open-file! ui) (.getPath f)))
+          ed (on-gtk (:ed ((:active-tab* ui))))
+          _ (on-gtk (run-active-palette! ui "compare with the last run"))
+          not-yet? (await-until 3000 20 #(= "; This tab hasn't had a whole Run that ended well yet." (status ui)))
+          _ (on-gtk ((:run!* ui)))
+          recorded? (await-until 8000 20 #(= ran @(:last-run (:changed ed))))
+          _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count (editor/editor-text ed)) "(ns lrun)\n(def a 2)\n"]] :caret 0})
+                    (run-active-palette! ui "compare with the last run"))
+          listed? (await-until 3000 20 #(= ["2: 1 line here, 1 line in the last Run: (def a 1)"]
+                                           (lpane/row-texts (:locations-pane ui))))
+          _ (on-gtk (support/place-cursor! (:buf ed) 12)
+                    (run-active-palette! ui "take the other version here"))
+          took? (await-until 3000 20 #(= ran (editor/editor-text ed)))
+          cleared? (await-until 3000 20 #(and (empty? (lpane/row-texts (:locations-pane ui)))
+                                              (= "; No differences from the last Run." (status ui))))]
+      (on-gtk (support/check :compare-with-last-run (and not-yet? recorded? listed? took? cleared?)
+                             {:not-yet not-yet? :recorded recorded? :listed listed? :took took? :cleared cleared?
+                              :rows (lpane/row-texts (:locations-pane ui)) :status (status ui)
+                              :text (editor/editor-text ed)})
+              ;; r.clj may have filled the launch tab: keep the first tab
+              (doseq [t ((:tabs* ui))] (editor/mark-saved! (:ed t)))
+              (doseq [t (rest ((:tabs* ui)))] ((:close-tab! ui) (:id t)))
+              ((:select-tab! ui) (:id (first ((:tabs* ui)))))))))

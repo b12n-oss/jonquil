@@ -85,6 +85,10 @@ and selection falls through to the next rule.
   pass over the formatter's output, `:plain` never does. Left out, a
   format follows the tab's mode (see
   [Parinfer](../using-jonquil.md#parinfer)).
+- `:remember-session?` decides whether the project's evaluations are
+  recorded for [last session's replay](../using-jonquil.md#last-sessions-replay),
+  overriding the setting in `settings.edn` either way: `false` keeps this
+  project off disk, and `true` records it even when the setting is off.
 
 ## Running Jolt out of process
 

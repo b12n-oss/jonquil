@@ -1,11 +1,12 @@
 (ns jonquil.gtk.parts.live-results
   "LM1's live console results as a window part (the commands are
-  jonquil.parts.live-results/spec). Moved out of jonquil.gtk.window: the four
+  jonquil.parts.live-results/spec). Moved out of jonquil.gtk.window: the
   result verbs, the right-click caret move and the click-to-inspect gesture."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
+            [jonquil.help :as help]
             [jonquil.inspect :as inspect]
             [jonquil.results :as results]))
 
@@ -69,6 +70,24 @@
     (fn [_ text]
       (if-let [sym (results/var-name text)]
         (jump-to-var! ctx sym)
+        (set-status! "; That result isn't a var.")))))
+
+(defn- show-var-doc!
+  "Looks sym up and prints its quick doc in the console as comment lines,
+  or says none was found."
+  [{:keys [ev* cv set-status! ask-lookup! status-label]} sym]
+  (ask-lookup! {:ev* ev* :status-label status-label} sym "" 0 (constantly true) "quick doc"
+               (fn [doc]
+                 (if doc
+                   (cview/append! cv :system (results/doc-console-text (help/doc-text sym doc)))
+                   (set-status! (str "No documentation found for " sym "."))))))
+
+(defn- result-doc!
+  [{:keys [set-status!] :as ctx}]
+  (with-result ctx {:verb :doc :not-offered "; That result isn't a var."}
+    (fn [_ text]
+      (if-let [sym (results/var-name text)]
+        (show-var-doc! ctx sym)
         (set-status! "; That result isn't a var.")))))
 
 ;; GTK's own right-click opens the menu without moving the caret
@@ -155,7 +174,7 @@
     (g/gtk-widget-add-controller (:view cv) click)))
 
 (defn- install
-  "The live-results part for one window: answers the four result fns and the
+  "The live-results part for one window: answers the five result fns and the
   three gesture fns, and adds the right-press and click gestures to the
   console's view, each callable built once."
   [wctx]
@@ -163,7 +182,8 @@
     (add-right-click! ctx)
     (add-click! ctx)
     {:fns {:result-inspect-fn (fn [] (result-inspect! ctx)) :result-copy-fn (fn [] (result-copy! ctx))
-           :result-define-fn (fn [] (result-define! ctx)) :result-jump-fn (fn [] (result-jump! ctx))}
+           :result-define-fn (fn [] (result-define! ctx)) :result-jump-fn (fn [] (result-jump! ctx))
+           :result-doc-fn (fn [] (result-doc! ctx))}
      :ui {:result-click!* (fn [offset] (result-click! ctx offset))
           :result-release!* (fn [off] (result-release! ctx off))
           :console-right-press!* (fn [x y] (console-right-press! ctx x y))}}))

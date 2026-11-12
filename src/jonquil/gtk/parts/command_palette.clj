@@ -29,17 +29,18 @@
   "The palette lists the registry's commands and opens on
   the active tab, whose palette runs the picked one"
   [{:keys [active-tab tabs tab-by-id recent-tabs right showing-panel settings-path*]}]
-  (palette/open! (:palette (active-tab))
-                 (into
-                  (pal-data/tab-entries
-                   (keep (fn [id] (when-let [t (tab-by-id tabs id)]
-                                    {:id id :label (g/label-text (:label t))}))
-                         @recent-tabs)
-                   (:id (active-tab)))
-                  (into (into (pal-data/panel-entries @(:recent-panels right)
-                                                      (showing-panel right))
-                              (layouts/entries (:layouts (settings/load-settings @settings-path*))))
-                        (palette-entries)))))
+  (let [recent (keep (fn [id] (when-let [t (tab-by-id tabs id)]
+                                {:id id :label (g/label-text (:label t))}))
+                     @recent-tabs)
+        current (:id (active-tab))]
+    (palette/open! (:palette (active-tab))
+                   (into
+                    (into (pal-data/tab-entries recent current)
+                          (pal-data/compare-tab-entries recent current))
+                    (into (into (pal-data/panel-entries @(:recent-panels right)
+                                                        (showing-panel right))
+                                (layouts/entries (:layouts (settings/load-settings @settings-path*))))
+                          (palette-entries))))))
 
 (defn- run-bang!
   "The console's ! line: runs the palette command text names, or says what

@@ -240,6 +240,22 @@
     (catch :default e
       ((:on-error c) (str "; complete: " (ex-message e))))))
 
+(defn- preview-text
+  "The doc preview's text for sym: a plain evaluator's doc at once; a
+  server evaluator's through ev/ask-help!, or loading-text until a late
+  answer lands (doc-arrived!)."
+  [c {:keys [sym text pos]}]
+  (let [token (swap! (:doc-gen c) inc)]
+    (if-let [e (server-ev c)]
+      ;; A request a newer one superseded before it went out is skipped,
+      ;; so a slow connection doesn't queue stale lookups ahead of the
+      ;; current one.
+      (let [[k doc] (ev/ask-help! ev/help-grace-ms
+                                  (fn [] (when (= token @(:doc-gen c)) (ev/lookup e sym text pos)))
+                                  (fn [doc] (on-gui! (fn [] (doc-arrived! c e token sym doc)))))]
+        (if (= k :now) (doc-label-text sym doc) (loading-text sym)))
+      (help/doc-text sym ((:doc-fn c) sym text pos)))))
+
 (defn- select!
   "Selects st's own index row and sets the doc-preview label to help/
   doc-text for the selected candidate: docs/symbol-doc looked up with st's
@@ -253,7 +269,7 @@
   server evaluator's doc comes through ev/ask-help!, with loading-text
   until a late answer lands (doc-arrived!)."
   [c st]
-  (let [{:keys [list-box doc-label doc-fn]} c
+  (let [{:keys [list-box doc-label]} c
         text (:text st)
         pos (get-in st [:prefix-info :start])
         sym (:symbol (help/selected st))]
@@ -261,17 +277,7 @@
       (g/gtk-label-set-text doc-label waiting-text)
       (do
         (g/gtk-list-box-select-row list-box (g/gtk-list-box-get-row-at-index list-box (:index st)))
-        (let [token (swap! (:doc-gen c) inc)]
-          (if-let [e (server-ev c)]
-            ;; A request a newer one superseded before it went out is
-            ;; skipped, so a slow connection doesn't queue stale lookups
-            ;; ahead of the current one.
-            (let [[k doc] (ev/ask-help! ev/help-grace-ms
-                                        (fn [] (when (= token @(:doc-gen c)) (ev/lookup e sym text pos)))
-                                        (fn [doc] (on-gui! (fn [] (doc-arrived! c e token sym doc)))))]
-              (g/gtk-label-set-text doc-label (if (= k :now) (doc-label-text sym doc) (loading-text sym))))
-            (g/gtk-label-set-text doc-label
-                                  (help/doc-text sym (doc-fn sym text pos)))))))))
+        (g/gtk-label-set-text doc-label (preview-text c {:sym sym :text text :pos pos}))))))
 
 (defn- render!
   "Rebuilds c's list-box rows from st's candidates (removing every old row
@@ -447,6 +453,25 @@
         ((:on-error c) (str "; complete: " (ex-message e)))
         1))))
 
+(defn- refined-state
+  "refine!'s next state for st at snap, prefix p, or nil when the popup
+  should close: fresh local candidates, or a server's answer (its offline
+  names while a late one is on its way)."
+  [c st snap p]
+  (let [e (server-ev c)]
+    (cond
+      (not e)
+      (do (swap! (:gen c) inc)
+          (help/refine st snap ((:candidates-fn c) (:prefix p) (:text snap) (:end p)
+                                                   (:extra-context snap))))
+      (not (help/still-valid? st snap)) nil
+      :else
+      (let [[k cands] (ask-candidates! c e snap p)]
+        (if (= k :now)
+          (help/refine st snap cands)
+          (help/refine-waiting st snap (ev/offline-candidates e (:prefix p) (:text snap) (:end p)
+                                                              (:extra-context snap))))))))
+
 (defn refine!
   "Called on every editor/on-cursor-moved! tick (jonquil.gtk.window.tabs's
   own wiring, not a new editor.clj hook -- see the ns docstring): a no-op
@@ -471,19 +496,7 @@
     (let [snap ((:snapshot-fn c))
           st @(:state c)]
       (if-let [p (help/prefix-at snap)]
-        (let [e (server-ev c)
-              st2 (cond
-                    (not e)
-                    (do (swap! (:gen c) inc)
-                        (help/refine st snap ((:candidates-fn c) (:prefix p) (:text snap) (:end p)
-                                                                 (:extra-context snap))))
-                    (not (help/still-valid? st snap)) nil
-                    :else
-                    (let [[k cands] (ask-candidates! c e snap p)]
-                      (if (= k :now)
-                        (help/refine st snap cands)
-                        (help/refine-waiting st snap (ev/offline-candidates e (:prefix p) (:text snap) (:end p)
-                                                                            (:extra-context snap))))))]
+        (let [st2 (refined-state c st snap p)]
           (if st2
             (let [st2 (assoc st2 :text (:text snap))]
               (reset! (:state c) st2)

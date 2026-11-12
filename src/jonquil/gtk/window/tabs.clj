@@ -87,13 +87,39 @@
     (g/gtk-notebook-set-current-page notebook (g/gtk-notebook-page-num notebook (:root t)))
     (when-not (= id @active-id) (on-switch! ctx t))))
 
+(defn- release-tab!
+  "Lets go of what tab t holds outside its widgets: a pending Run Form
+  flash, its namespaces in the REPL and its place as the replay tab."
+  [{:keys [cv ev*]} t]
+  (let [id (:id t)]
+    ;; A Run Form flash still pending would restore the selection on
+    ;; this tab's buffer after it's destroyed.
+    (when-let [cancel! (:cancel! (:flash-fns t))] (cancel!))
+    ;; Nothing will Run as this tab again, so
+    ;; its namespaces go to the REPL's set for the next Run to clear.
+    (let [e @ev*] (when (satisfies? ev/Owners e) (ev/release-owner! e id)))
+    ;; LM7: a closed replay tab is no longer the one whose Run forgets
+    (when (= id (:id @(:replay-tab* cv))) (reset! (:replay-tab* cv) nil))))
+
+(defn- adopt-last-tab!
+  "One tab left, from another project: the window adopts it (a runtime
+  switch, with its \"Switched to\" line)."
+  [{:keys [tabs sel* sel-ctx cv]}]
+  (let [[only & more] @tabs
+        osel (when only @(:project only))]
+    (when (and only (not more) osel
+               (not (tabs/runnable-here? @sel* osel)))
+      (try (win-runtime/apply-selection! sel-ctx osel)
+           (catch :default e
+             (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))
+
 (defn- remove-tab!
   "Takes tab id out of the window, in this order: out of tabs first
   (so the switch-page remove_page fires never resolves to it), its five
   popovers out of the registry and unparented (unparenting drops their
   last reference, and a page removed with a popover still parented spins
   GTK in a warning loop), then the page, then the neighbour selected."
-  [{:keys [tabs active-id notebook popovers sel* sel-ctx cv ev*] :as ctx} id]
+  [{:keys [tabs active-id notebook popovers] :as ctx} id]
   (when-let [t (tab-by-id tabs id)]
     (let [ts @tabs
           i (.indexOf ^java.util.List (mapv :id ts) id)
@@ -106,67 +132,61 @@
       (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
       (when was-active? (reset! active-id (:id neighbour)))
       (swap! popovers (fn [ps] (vec (remove gone ps))))
-      ;; A Run Form flash still pending would restore the selection on
-      ;; this tab's buffer after it's destroyed.
-      (when-let [cancel! (:cancel! (:flash-fns t))] (cancel!))
-      ;; Nothing will Run as this tab again, so
-      ;; its namespaces go to the REPL's set for the next Run to clear.
-      (let [e @ev*] (when (satisfies? ev/Owners e) (ev/release-owner! e id)))
-      ;; LM7: a closed replay tab is no longer the one whose Run forgets
-      (when (= id (:id @(:replay-tab* cv))) (reset! (:replay-tab* cv) nil))
+      (release-tab! ctx t)
       (tab/dispose-popovers! t)
       (g/gtk-notebook-remove-page notebook (g/gtk-notebook-page-num notebook (:root t)))
       (refresh-labels! ctx)
       (when was-active?
         (g/gtk-notebook-set-current-page notebook (g/gtk-notebook-page-num notebook (:root neighbour)))
         (on-switch! ctx neighbour))
-      ;; One tab left, from another project: the window adopts it (a
-      ;; runtime switch, with its "Switched to" line).
-      (let [[only & more] @tabs
-            osel (when only @(:project only))]
-        (when (and only (not more) osel
-                   (not (tabs/runnable-here? @sel* osel)))
-          (try (win-runtime/apply-selection! sel-ctx osel)
-               (catch :default e
-                 (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))))
+      (adopt-last-tab! ctx))))
+
+(defn- save-then-close!
+  "The close alert's Save: saves to the tab's path, or asks for one
+  first, then close-if-saved!. A dismissed dialog does nothing."
+  [{:keys [cv win]} {:keys [ed path close-if-saved!]}]
+  (if-let [p @path]
+    (do (win-files/save-to! ed cv path p) (close-if-saved!))
+    (win-files/file-dialog! :save win
+                            (fn [{p :path err :error :as r}]
+                              (cond
+                                p (do (win-files/save-to! ed cv path p) (close-if-saved!))
+                                (win-files/dialog-dismissed? r) nil
+                                :else (cview/append! cv :error (str "; save: " err "\n")))))))
 
 (defn close-tab-choice!
   "The close-tab alert's decision: 0 Save (then close once saved), 1 Don't
   Save (close), 2 Cancel or a dismissal (nothing)."
-  [{:keys [tabs cv win] :as ctx} id {:keys [index error]}]
+  [{:keys [tabs] :as ctx} id {:keys [index error]}]
   (when-let [{:keys [ed path]} (tab-by-id tabs id)]
     (let [close-if-saved! (fn [] (refresh-labels! ctx) (when-not (editor/dirty? ed) (remove-tab! ctx id)))]
       (cond
         error nil
         (= index 1) (remove-tab! ctx id)
-        (= index 0)
-        (if-let [p @path]
-          (do (win-files/save-to! ed cv path p) (close-if-saved!))
-          (win-files/file-dialog! :save win
-                                  (fn [{p :path err :error :as r}]
-                                    (cond
-                                      p (do (win-files/save-to! ed cv path p) (close-if-saved!))
-                                      (win-files/dialog-dismissed? r) nil
-                                      :else (cview/append! cv :error (str "; save: " err "\n"))))))
+        (= index 0) (save-then-close! ctx {:ed ed :path path :close-if-saved! close-if-saved!})
         :else nil))))
+
+(defn- ask-close!
+  "Shows the close alert for dirty tab id, saved at p (nil: Untitled);
+  close-tab-choice! acts on the answer."
+  [{:keys [win cv] :as ctx} id p]
+  (reset! win-alerts/alert-pending? true)
+  (try
+    (win-alerts/show-alert! win (tabs/close-alert [(if p (win-files/file-name p) "Untitled")]) win-alerts/CLOSE-ALERT
+                            (fn [result] (close-tab-choice! ctx id result)))
+    (catch :default e
+      (reset! win-alerts/alert-pending? false)
+      (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
 
 (defn close-tab!
   "Cmd/Ctrl+W and a tab's ×: on the last tab, closes the window (with its
   own alert). Otherwise a dirty tab asks first, with the
   same alert the window uses for one file; a clean one closes."
-  [{:keys [tabs win cv] :as ctx} id]
+  [{:keys [tabs win] :as ctx} id]
   (when-let [{:keys [ed path]} (tab-by-id tabs id)]
     (cond
       (= 1 (count @tabs)) (g/gtk-window-close win)
-      (editor/dirty? ed)
-      (when-not @win-alerts/alert-pending?
-        (reset! win-alerts/alert-pending? true)
-        (try
-          (win-alerts/show-alert! win (tabs/close-alert [(if-let [p @path] (win-files/file-name p) "Untitled")]) win-alerts/CLOSE-ALERT
-                                  (fn [result] (close-tab-choice! ctx id result)))
-          (catch :default e
-            (reset! win-alerts/alert-pending? false)
-            (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
+      (editor/dirty? ed) (when-not @win-alerts/alert-pending? (ask-close! ctx id @path))
       :else (remove-tab! ctx id))))
 
 ;; --- tabs ---------------------------------------------------------------------
@@ -384,6 +404,9 @@
                     ;; a panel entry ([:panel/switch k]), as its key does
       (and (vector? id) (= :panel/switch (first id)))
       ((:panel-focus-fn window-key-args) (second id))
+                    ;; Compare with tab (LM3)
+      (and (vector? id) (= :compare/tab (first id)))
+      ((:compare-tab-fn window-key-args) (second id))
                     ;; a named layout (LM8)
       (and (vector? id) (= :layout/use (first id)))
       ((:layout-use-fn window-key-args) (second id))

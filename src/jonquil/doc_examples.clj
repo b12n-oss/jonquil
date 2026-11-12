@@ -48,6 +48,32 @@
       (let [e (eol text i)]
         (if (output-line? (subs text i e)) (recur (min (count text) (inc e))) i)))))
 
+(defn- prompt-step
+  "clean's step over a line at i holding a named prompt: [next-i acc']. A
+  prompt with nothing after it on its line is dropped alone; else the form
+  after it, with the rest of its line, is kept and its printed output
+  skipped. A form that never ends keeps the rest of body and ends the walk."
+  [^String body line i acc]
+  (let [n (count body)
+        p (skip-blanks body (+ i (.end (doto (re-matcher named-prompt-re line) .find))))]
+    (if (or (>= p n) (contains? #{\newline \;} (.charAt body (int p))))
+      ;; nothing after the prompt on its line: drop the prompt only
+      [p acc]
+      (if-let [fe (form-end body p)]
+        (let [le (eol body fe)]
+          ;; the form's whole line stays (a second form, a ; comment)
+          [(skip-output body (min n (inc le))) (conj acc (subs body p le))])
+        [n (conj acc (subs body p))]))))
+
+(defn- past-marker
+  "Where clean goes on after a line at i holding a bare => marker: past the
+  form after it, or past the marker's line."
+  [body line i]
+  (let [n (count body)
+        p (skip-blanks body (+ i (.end (doto (re-matcher bare-marker-re line) .find))))
+        fe (when (< p n) (form-end body p))]
+    (min n (inc (eol body (or fe p))))))
+
 (defn clean
   "An example body as code: REPL prompts (user=> ), printed output and => result
   markers dropped, the rest as written. See the design spec's 'Splitting and
@@ -63,20 +89,9 @@
                   next-i (min n (inc e))]
               (cond
                 (re-find named-prompt-re line)
-                (let [p (skip-blanks body (+ i (.end (doto (re-matcher named-prompt-re line) .find))))]
-                  (if (or (>= p n) (contains? #{\newline \;} (.charAt ^String body (int p))))
-                    ;; nothing after the prompt on its line: drop the prompt only
-                    (recur p acc)
-                    (if-let [fe (form-end body p)]
-                      (let [le (eol body fe)]
-                        ;; the form's whole line stays (a second form, a ; comment)
-                        (recur (skip-output body (min n (inc le))) (conj acc (subs body p le))))
-                      (conj acc (subs body p)))))
+                (let [[i' acc'] (prompt-step body line i acc)] (recur i' acc'))
 
-                (re-find bare-marker-re line)
-                (let [p (skip-blanks body (+ i (.end (doto (re-matcher bare-marker-re line) .find))))
-                      fe (when (< p n) (form-end body p))]
-                  (recur (min n (inc (eol body (or fe p)))) acc))
+                (re-find bare-marker-re line) (recur (past-marker body line i) acc)
 
                 :else (recur next-i (conj acc line))))))]
     (-> (str/join "\n" out)

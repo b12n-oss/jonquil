@@ -294,6 +294,8 @@
    locations-rows/row-compare-with-disk-and-take
    locations-rows/row-compare-with-head
    locations-rows/row-compare-line-only-on-disk
+   locations-rows/row-compare-with-tab
+   locations-rows/row-compare-with-last-run
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named
@@ -402,6 +404,7 @@
    results-rows/row-result-click-waits-double-click-time
    results-rows/row-result-verbs
    results-rows/row-result-menu-verbs
+   results-rows/row-result-quick-doc
    results-rows/row-result-right-click-moves-caret
    trace-rows/row-trace-toggle-and-show
    trace-rows/row-trace-throw

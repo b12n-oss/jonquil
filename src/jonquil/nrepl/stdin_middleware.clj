@@ -92,6 +92,26 @@
                      :else (do (reset! current (StringReader. (str item))) (recur)))))
              n)))))))
 
+(defn- clone!
+  "Hands a clone on to next with *in* over a fresh entry, which is
+  registered under the new session's id once next answers with it."
+  [sessions next request]
+  (let [e (entry)]
+    (binding [*in* (LineNumberingPushbackReader. (reader e))]
+      (next (assoc request :reply (fn [m]
+                                    (when-let [new-sid (get m "new-session")]
+                                      (swap! sessions assoc new-sid e))
+                                    ((:reply request) m)))))))
+
+(defn- stdin-status
+  "A stdin request's status for session entry e: done once offered to a
+  waiting read, not-waiting when nothing reads, an error for an unknown
+  session."
+  [e request]
+  (cond (nil? e) ["done" "error"]
+        (offer! e (str (get request "stdin"))) ["done"]
+        :else ["done" "not-waiting"]))
+
 (defn handler
   "The middleware's request handler over sessions (an atom, session id ->
   entry), handing everything but stdin on to next."
@@ -99,21 +119,11 @@
   (fn [request]
     (let [sid (get request "session")]
       (case (get request "op")
-        "clone"
-        (let [e (entry)]
-          (binding [*in* (LineNumberingPushbackReader. (reader e))]
-            (next (assoc request :reply (fn [m]
-                                          (when-let [new-sid (get m "new-session")]
-                                            (swap! sessions assoc new-sid e))
-                                          ((:reply request) m))))))
+        "clone" (clone! sessions next request)
         ("eval" "load-file")
         (do (when-let [e (get @sessions sid)] (new-eval! e (:reply request)))
             (next request))
-        "stdin"
-        (let [e (get @sessions sid)]
-          (server/respond request {"status" (cond (nil? e) ["done" "error"]
-                                                  (offer! e (str (get request "stdin"))) ["done"]
-                                                  :else ["done" "not-waiting"])}))
+        "stdin" (server/respond request {"status" (stdin-status (get @sessions sid) request)})
         "interrupt"
         (do (when-let [e (get @sessions sid)] (interrupt! e))
             (next request))

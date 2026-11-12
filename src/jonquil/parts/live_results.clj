@@ -1,10 +1,10 @@
 (ns jonquil.parts.live-results
-  "LM1's live console results as a window part's data half: the four result
+  "LM1's live console results as a window part's data half: the five result
   commands (their chords stay in keymap.edn). The install half is
   jonquil.gtk.parts.live-results.")
 
 (def spec
-  "The live-results part: its commands, run through the four fns the install
+  "The live-results part: its commands, run through the five fns the install
   half answers."
   {:id :live-results
    :commands
@@ -13,4 +13,6 @@
     :result/define {:doc "Define a var holding the console result at the caret." :scope :window
                     :call [:result-define-fn]}
     :result/jump {:doc "Jump to the definition of the var the console result at the caret names." :scope :window
-                  :call [:result-jump-fn]}}})
+                  :call [:result-jump-fn]}
+    :result/doc {:doc "Show the quick doc of the var the console result at the caret names, in the console."
+                 :scope :window :call [:result-doc-fn]}}})

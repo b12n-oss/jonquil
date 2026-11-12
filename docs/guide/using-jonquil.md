@@ -195,7 +195,10 @@ dialects still record, and their Up/Down history comes back, but the console
 says replay isn't available for them yet. That history also survives a
 dialect switch. `:remember-session? false` in `settings.edn` turns off the
 recording, the offer, loading the history and Forget, and leaves any file
-already written alone.
+already written alone. A project can decide for itself with
+`:remember-session?` in its `.jonquil.edn`: `false` keeps that project off
+disk while the others record, and `true` records it even with the setting
+off.
 
 ## The REPL prompt, and how it differs from Run
 

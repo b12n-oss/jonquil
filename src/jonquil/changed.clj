@@ -53,6 +53,14 @@
   [text ran]
   (if (nil? ran) [] (filterv #(not (contains? ran (:key %))) (forms text))))
 
+(defn last-run-after
+  "The tab's last-run text after an evaluation of source (:run, :form or
+  :selection) that sent text and ended with status: a whole Run that ended
+  :ok replaces it with the buffer text it ran, anything else keeps prev.
+  What Compare with the last Run compares the buffer against."
+  [prev text source status]
+  (if (and (= :run source) (= :ok status)) text prev))
+
 (defn record
   "ran after a run that ended :ok: a :run replaces it with every form's key
   in text; :form and :selection add the keys of the forms in text, the

@@ -130,7 +130,7 @@
         complete (fn [] :complete) clear-last (fn [] :clear-last)
         in {:cv {:view ::view} :repl-complete-fn complete :clear-last-fn clear-last :status-label ::sl
             :part-contribution {:fns {:result-inspect-fn ::ri :result-copy-fn ::rc :result-define-fn ::rd
-                                      :result-jump-fn ::rj :other-fn ::other}}
+                                      :result-jump-fn ::rj :result-doc-fn ::rdoc :other-fn ::other}}
             :x 1}
         w (with-redefs [cmd-registry/menu-items (fn [menu fns] {:menu menu :fns fns})
                         win-keys/install-context-menu! (fn [view items say] (reset! got [view items say]) ::group)]
@@ -140,7 +140,7 @@
     (is (= ::view view))
     (is (= {:menu cmd-registry/console-menu
             :fns {:complete! complete :clear-last-fn clear-last :result-inspect-fn ::ri :result-copy-fn ::rc
-                  :result-define-fn ::rd :result-jump-fn ::rj}}
+                  :result-define-fn ::rd :result-jump-fn ::rj :result-doc-fn ::rdoc}}
            items))
     (with-redefs [win-status/set-status! (fn [lab s] (l [:status lab s]))
                   g/g-action-group-activate-action (fn [group name _] (l [:activate group name]))]

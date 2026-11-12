@@ -215,6 +215,19 @@ doesn't track, gets git's reason on the status bar. Line endings and trailing
 blank lines don't count as differences, and a Take keeps the tab's own line
 endings.
 
+**Compare with tab:** does the same against another open tab, as that tab
+is right now, saved or not. The palette has one entry per open tab, such as
+**Compare with tab: core.clj**, the tab you used most recently first. Take
+reads that tab again, so an edit made there after the compare is what
+comes back. If the tab has closed since, Take uses the text it had at the
+compare.
+
+**Compare with the last Run** compares the tab with what its last whole Run
+sent, so you can see what you've changed since the code that's running was
+loaded. Only a Run of the whole tab that ended without an error counts; Run
+Form and Run Selection don't move it. Before the first such Run the status
+bar says there's nothing to compare with yet.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System
@@ -291,10 +304,13 @@ it, and the console's menu and the palette act on that result:
   argument names the runtime that kept it.
 - **Jump to This Var**, for a var such as `#'demo.core/area`, opens its
   definition as F12 does.
+- **Quick Doc for This Var**, for a var, prints the doc quick doc would
+  show into the console, as `;` comment lines under the result, so it
+  stays there to scroll back to.
 
 The kinds are a value, a var, a namespace and an exception. Each verb asks a
-table of what each kind offers before it acts, so Jump to This Var on a
-number says the result isn't a var. The last 100 results are kept; an older
+table of what each kind offers before it acts, so Jump to This Var or Quick
+Doc for This Var on a number says the result isn't a var. The last 100 results are kept; an older
 one, or one kept by a runtime that has since restarted, says it's gone, and
 Define's form throws "That result is gone." for it rather than defining a
 placeholder. Live results come from Jolt, in process or in a
