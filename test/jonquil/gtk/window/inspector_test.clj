@@ -66,14 +66,18 @@
                   inspect/on-reply (fn [s r] [:reply s r])
                   inspector-pane/show-state! (fn [pane s] (swap! log conj [:show-state pane s]))
                   cview/append! (fn [cv kind text] (swap! log conj [cv kind text]))]
-      (#'win-inspector/on-inspect-view! ::pane state inspecting? (atom nil) ::cv ::l {:v 1 :defd "user/a"})
+      (#'win-inspector/on-inspect-view! {:pane ::pane :inspector-state state :inspecting? inspecting?
+                                         :inspect-queued (atom nil) :cv ::cv :status-label ::l}
+                                        {:v 1 :defd "user/a"})
       (is (false? @inspecting?))
       (is (= [:open {:v 1 :defd "user/a"}] @state))
       (is (= [[:show-state ::pane [:open {:v 1 :defd "user/a"}]]
               [::cv :system "; Defined user/a\n"]]
              @log))
       (reset! log [])
-      (#'win-inspector/on-inspect-view! ::pane state inspecting? (atom nil) ::cv ::l {:v 2})
+      (#'win-inspector/on-inspect-view! {:pane ::pane :inspector-state state :inspecting? inspecting?
+                                         :inspect-queued (atom nil) :cv ::cv :status-label ::l}
+                                        {:v 2})
       (is (= [:reply [:open {:v 1 :defd "user/a"}] {:v 2}] @state))
       (is (= [[:show-state ::pane @state]] @log)))))
 
@@ -84,13 +88,17 @@
     (with-redefs [inspect/open (fn [r] [:open r])
                   inspector-pane/show-state! (fn [_ _] (throw (ex-info "boom" {})))
                   win-status/set-status! (fn [l text] (swap! log conj [l text]))]
-      (#'win-inspector/on-inspect-view! ::pane (atom nil) inspecting? queued ::cv ::l {:v 1})
+      (#'win-inspector/on-inspect-view! {:pane ::pane :inspector-state (atom nil) :inspecting? inspecting?
+                                         :inspect-queued queued :cv ::cv :status-label ::l}
+                                        {:v 1})
       (is (= [[::l "; inspect: boom"] :queued] @log))
       (is (false? @inspecting?))
       (is (nil? @queued))
       (reset! log [])
       (reset! queued (fn [] (throw (ex-info "late" {}))))
-      (#'win-inspector/on-inspect-view! ::pane (atom nil) inspecting? queued ::cv ::l {:v 1})
+      (#'win-inspector/on-inspect-view! {:pane ::pane :inspector-state (atom nil) :inspecting? inspecting?
+                                         :inspect-queued queued :cv ::cv :status-label ::l}
+                                        {:v 1})
       (is (= [[::l "; inspect: boom"] [::l "; inspect: late"]] @log)))))
 
 (deftest inspect-last-unavailable-and-pending-test

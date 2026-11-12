@@ -63,41 +63,51 @@
 (defn diff-text [pane] (editor/editor-text (:editor pane)))
 (defn footer-text [pane] (g/label-text (:footer pane)))
 
+(defn- lay-out!
+  "Makes the editor read-only and code-styled, sets up the labels and the
+  note field, and packs the widgets into the root, the buttons into bar
+  first."
+  [{:keys [root summary note footer accept-btn reject-btn next-btn close-btn] ed :editor} bar]
+  (editor/set-read-only! ed true)
+  (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
+  (g/gtk-label-set-xalign summary 0.0)
+  (g/gtk-label-set-wrap summary 1)
+  (g/gtk-label-set-xalign footer 0.0)
+  (g/gtk-label-set-wrap footer 1)
+  (g/gtk-entry-set-placeholder-text note "Note for Reject (optional)")
+  (g/gtk-widget-set-vexpand (:scroll ed) 1)
+  (doseq [b [accept-btn reject-btn next-btn close-btn]] (g/gtk-box-append bar b))
+  (g/gtk-box-append root summary)
+  (g/gtk-box-append root (:scroll ed))
+  (g/gtk-box-append root note)
+  (g/gtk-box-append root bar)
+  (g/gtk-box-append root footer)
+  (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
+
+(defn- connect-buttons!
+  "Connects each button's clicked signal to its handler."
+  [{:keys [accept-btn reject-btn next-btn close-btn] :as pane}]
+  (doseq [[b k] [[accept-btn :on-accept] [reject-btn :on-reject] [next-btn :on-next] [close-btn :on-close]]]
+    (g/g-signal-connect-data b "clicked" (callable (handler-click pane k) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)))
+
 (defn make-pane
   "Builds the panel: {:root :summary :editor :note :accept-btn :reject-btn
   :next-btn :close-btn :footer :handlers (atom {})}. :root starts visible;
   the window hides it. The editor is read-only and carries the
   jonquil-code CSS class, so the window's zoom reaches it."
   []
-  (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
-        summary (g/gtk-label-new "")
-        ed (editor/make-editor)
-        note (g/gtk-entry-new)
-        bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        accept-btn (g/gtk-button-new-with-label "Accept")
-        reject-btn (g/gtk-button-new-with-label "Reject")
-        next-btn (g/gtk-button-new-with-label "Next")
-        close-btn (g/gtk-button-new-with-label "Close")
-        footer (g/gtk-label-new "")
-        pane {:root root :summary summary :editor ed :note note :accept-btn accept-btn
-              :reject-btn reject-btn :next-btn next-btn :close-btn close-btn :footer footer
+  (let [bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
+        pane {:root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
+              :summary (g/gtk-label-new "")
+              :editor (editor/make-editor)
+              :note (g/gtk-entry-new)
+              :accept-btn (g/gtk-button-new-with-label "Accept")
+              :reject-btn (g/gtk-button-new-with-label "Reject")
+              :next-btn (g/gtk-button-new-with-label "Next")
+              :close-btn (g/gtk-button-new-with-label "Close")
+              :footer (g/gtk-label-new "")
               :handlers (atom {})}]
-    (editor/set-read-only! ed true)
-    (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
-    (g/gtk-label-set-xalign summary 0.0)
-    (g/gtk-label-set-wrap summary 1)
-    (g/gtk-label-set-xalign footer 0.0)
-    (g/gtk-label-set-wrap footer 1)
-    (g/gtk-entry-set-placeholder-text note "Note for Reject (optional)")
-    (g/gtk-widget-set-vexpand (:scroll ed) 1)
-    (doseq [b [accept-btn reject-btn next-btn close-btn]] (g/gtk-box-append bar b))
-    (g/gtk-box-append root summary)
-    (g/gtk-box-append root (:scroll ed))
-    (g/gtk-box-append root note)
-    (g/gtk-box-append root bar)
-    (g/gtk-box-append root footer)
-    (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
-    (doseq [[b k] [[accept-btn :on-accept] [reject-btn :on-reject] [next-btn :on-next] [close-btn :on-close]]]
-      (g/g-signal-connect-data b "clicked" (callable (handler-click pane k) [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT))
+    (lay-out! pane bar)
+    (connect-buttons! pane)
     pane))

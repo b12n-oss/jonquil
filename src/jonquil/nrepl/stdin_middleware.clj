@@ -63,34 +63,46 @@
   (reset! (:current e) (StringReader. ""))
   (.clear ^LinkedBlockingQueue (:queue e)))
 
-(defn reader
-  "A java.io.Reader over e: buffered text first; with none, flush *out* (the
+(defn- await-item!
+  "Blocks until a queued item arrives for a read in e: flushes *out* (the
   eval's own writer, which jolt only sends on a flush, so a print of a
-  prompt shows before the wait), mark the read waiting, need-input on the
-  current eval's reply, then a blocking take. Waiting is set before
-  need-input goes out, so a stdin or an interrupt answering it always
-  finds the read waiting."
-  [{:keys [queue reply current waiting?]}]
+  prompt shows before the wait), marks the read waiting, sends need-input on
+  the current eval's reply, then takes from the queue. Waiting is set before
+  need-input goes out, so a stdin or an interrupt answering it always finds
+  the read waiting."
+  [{:keys [queue reply waiting?]}]
+  (try (flush) (catch Throwable _ nil))
+  (reset! waiting? true)
+  (try (when-let [r @reply] (r {"status" ["need-input"]}))
+       (.take ^LinkedBlockingQueue queue)
+       (finally (reset! waiting? false))))
+
+(defn- read-chars
+  "Reads into cbuf from e's buffered text; with none, waits for an item:
+  -1 at eof, a throw on interrupt, else the text becomes the buffer and the
+  read goes again."
+  [{:keys [current] :as e} cbuf off len]
+  (loop []
+    (let [n (.read ^StringReader @current cbuf off len)]
+      (if (neg? n)
+        (let [item (await-item! e)]
+          (cond
+            (= ::eof item) -1
+            (= ::interrupt item) (throw (ex-info "interrupted" {:jolt/interrupted true}))
+            :else (do (reset! current (StringReader. (str item))) (recur))))
+        n))))
+
+(defn reader
+  "A java.io.Reader over e: buffered text first; with none, wait for stdin
+  (await-item!)."
+  [e]
   (proxy [Reader] []
     (close [] nil)
     (read
       ([] (let [buf (make-array Character/TYPE 1)
                 n (.read ^Reader this buf 0 1)]
             (if (neg? n) -1 (int (aget ^chars buf 0)))))
-      ([cbuf off len]
-       (loop []
-         (let [n (.read ^StringReader @current cbuf off len)]
-           (if (neg? n)
-             (do (try (flush) (catch Throwable _ nil))
-                 (reset! waiting? true)
-                 (let [item (try (when-let [r @reply] (r {"status" ["need-input"]}))
-                                 (.take ^LinkedBlockingQueue queue)
-                                 (finally (reset! waiting? false)))]
-                   (cond
-                     (= ::eof item) -1
-                     (= ::interrupt item) (throw (ex-info "interrupted" {:jolt/interrupted true}))
-                     :else (do (reset! current (StringReader. (str item))) (recur)))))
-             n)))))))
+      ([cbuf off len] (read-chars e cbuf off len)))))
 
 (defn- clone!
   "Hands a clone on to next with *in* over a fresh entry, which is

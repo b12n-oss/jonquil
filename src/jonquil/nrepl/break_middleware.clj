@@ -50,28 +50,36 @@
   (when-let [r @(:reply e)]
     (try (r m) (catch Throwable _ nil))))
 
+(defn- break-callbacks
+  "The debugger hooks for session e: pause and resume notify the client
+  through e's reply, and frames resolve through the classpath."
+  [e]
+  {:on-pause (fn [d]
+               (send! e {"jonquil-paused" (binding [*print-length* nil *print-level* nil] (pr-str d))}))
+   :on-resume (fn [{:keys [continued?]}]
+                (send! e {"jonquil-resumed" (if continued? "continued" "stopped")}))
+   :resolve-file resource-url})
+
+(defn- run-armed
+  "Runs ev under session e's break, then drops the arming."
+  [e ev]
+  (try
+    ((debugger/break-wrapper (:break e) (break-callbacks e)) ev)
+    (finally
+      ;; the arming was this eval's: nothing else the worker runs
+      ;; after it counts as the person's. A pause a Stop's interrupt
+      ;; left published (its cleanup skipped) ends here too; the
+      ;; client drops its own when the eval finishes.
+      (reset! (:armed? e) false)
+      (debugger/end-stale-pause! (:break e) {}))))
+
 (defn session-wrapper
   "Session e's jolt.nrepl/*eval-wrapper*: runs the evaluation's thunk under
   the session's break when the eval was armed, else just runs it."
   [e]
   (fn [ev]
     (if @(:armed? e)
-      (try
-        ((debugger/break-wrapper
-          (:break e)
-          {:on-pause (fn [d]
-                       (send! e {"jonquil-paused" (binding [*print-length* nil *print-level* nil] (pr-str d))}))
-           :on-resume (fn [{:keys [continued?]}]
-                        (send! e {"jonquil-resumed" (if continued? "continued" "stopped")}))
-           :resolve-file resource-url})
-         ev)
-        (finally
-          ;; the arming was this eval's: nothing else the worker runs
-          ;; after it counts as the person's. A pause a Stop's interrupt
-          ;; left published (its cleanup skipped) ends here too; the
-          ;; client drops its own when the eval finishes.
-          (reset! (:armed? e) false)
-          (debugger/end-stale-pause! (:break e) {})))
+      (run-armed e ev)
       (ev))))
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))

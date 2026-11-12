@@ -293,17 +293,28 @@
     (when-let [[k t] (cljs-node/output-of r)]
       (connection/say! f k t))))
 
+(defn- setup-answer?
+  "True when form is the setup's own form, still pending in s, answered
+  through the drain or the sink."
+  [s form]
+  (and form (= form cljs-node/setup-form) (true? (:setup-pending s))
+       (or (= form (:drain s)) (= form (:sink-form s)))))
+
+(defn- record-setup-answer
+  "s with the setup's answer from reply r recorded when form is that
+  answer, else s. It is recorded whether or not its exchange is still
+  waiting."
+  [s form r]
+  (if (setup-answer? s form)
+    (assoc s :setup-pending (if (:exception r) :failed nil)
+           :ready? (not (:exception r)))
+    s))
+
 (defn- settle-reply-state
   "The state after reply r (a ret of form) arrived: the setup's answer, then
   the drain or the done-forms bookkeeping."
   [s form r]
-  (let [s (if (and form (= form cljs-node/setup-form) (true? (:setup-pending s))
-                   (or (= form (:drain s)) (= form (:sink-form s))))
-            ;; The setup's answer is recorded here whether
-            ;; or not its exchange is still waiting.
-            (assoc s :setup-pending (if (:exception r) :failed nil)
-                   :ready? (not (:exception r)))
-            s)]
+  (let [s (record-setup-answer s form r)]
     (cond
       (and form (= form (:drain s))) (assoc s :drain nil)
       (and form (= form (:sink-form s))) (update s :done-forms conj form)
@@ -341,6 +352,13 @@
     :else
     (route-reply! ev r)))
 
+(defn- say-output!
+  "Hands reply r's output line to on-output, when both exist."
+  [on-output r]
+  (when on-output
+    (when-let [[k t] (cljs-node/output-of r)]
+      (connection/say! on-output k t))))
+
 (defn- exchange-sink
   "exchange!'s sink: collects each reply into replies, hands output to
   on-output when given, and delivers p :done once done? holds (:closed on
@@ -350,9 +368,7 @@
     (if (= :closed (:tag r))
       (deliver p :closed)
       (do (swap! replies conj r)
-          (when on-output
-            (when-let [[k t] (cljs-node/output-of r)]
-              (connection/say! on-output k t)))
+          (say-output! on-output r)
           (when (done? r) (deliver p :done))))))
 
 (defn- end-exchange
@@ -495,29 +511,49 @@
                   :sentinel cljs-node/setup-form}
                  {:timeout-ms (:setup-timeout-ms timings)}))))
 
+(defn- browser-setup-verdict
+  "How a browser's setup exchange went, from its pending flag and outcome:
+  :no-page, :page-ready or :failed."
+  [pending outcome]
+  (cond
+    (and (true? pending) (= :timeout outcome)) :no-page
+    (and (nil? pending) (#{:done :timeout} outcome)) :page-ready
+    :else :failed))
+
+(defn- node-setup-verdict
+  "How a node setup exchange went: :node-ready or :failed."
+  [outcome replies]
+  (if (and (= :done outcome) (not-any? :exception replies))
+    :node-ready
+    :failed))
+
+(defn- setup-verdict
+  "Classifies the setup exchange: :interrupted, :no-page, :page-ready,
+  :node-ready or :failed."
+  [{:keys [state] :as ev} outcome replies]
+  (cond
+    (stopping? ev) :interrupted
+    (browser? ev) (browser-setup-verdict (:setup-pending @state) outcome)
+    :else (node-setup-verdict outcome replies)))
+
 (defn- settle-setup!
   "The result of the setup exchange: nil when ready, else the result to
   finish with."
   [{:keys [state] :as ev} {:keys [child outcome replies]}]
-  (let [browser? (browser? ev)]
-    (cond
-      (stopping? ev) {:status :interrupted}
-      (and browser? (true? (:setup-pending @state)) (= :timeout outcome))
-      ;; Keep the child: the setup ret is drained when it arrives and
-      ;; the next evaluation waits for it (await-setup!).
-      {:status :notice :text (cljs-node/no-page-message (:await-page @state))}
-      (and browser? (nil? (:setup-pending @state)) (#{:done :timeout} outcome))
-      (do (connection/notify! ev true)
-          nil)
-      (and (not browser?) (= :done outcome) (not-any? :exception replies))
-      (do (swap! state assoc :ready? true)
-          (setup-read-line! ev)
-          (connection/notify! ev true)
-          nil)
-      :else
-      (do (kill-child! ev {:keep-log? true})
-          (setup-failed (str "the session setup " (if (= :timeout outcome) "timed out" "failed"))
-                        child)))))
+  (case (setup-verdict ev outcome replies)
+    :interrupted {:status :interrupted}
+    ;; Keep the child: the setup ret is drained when it arrives and
+    ;; the next evaluation waits for it (await-setup!).
+    :no-page {:status :notice :text (cljs-node/no-page-message (:await-page @state))}
+    :page-ready (do (connection/notify! ev true)
+                    nil)
+    :node-ready (do (swap! state assoc :ready? true)
+                    (setup-read-line! ev)
+                    (connection/notify! ev true)
+                    nil)
+    (do (kill-child! ev {:keep-log? true})
+        (setup-failed (str "the session setup " (if (= :timeout outcome) "timed out" "failed"))
+                      child))))
 
 (defn- connect!
   "Connects the prepl to the stored child and runs the setup form. nil when
@@ -554,6 +590,11 @@
           (> (System/currentTimeMillis) deadline) {:status :notice :text (cljs-node/no-page-message url)}
           :else (do (Thread/sleep 20) (recur)))))))
 
+(defn- cancel-help!
+  "Cancels the in-flight help exchange, when one has stored its cancel fn."
+  [state]
+  (when-let [cancel (:help-cancel @state)] (cancel)))
+
 (defn- wait-not-helping!
   "An evaluation outranks help: cancels an in-flight help exchange (its
   sentinel drains like a timeout's, see exchange!), then waits out the
@@ -565,7 +606,7 @@
       (when (and (:helping @state) (< n 700))
         ;; re-read each tick: the helper claims :helping a moment before
         ;; exchange! stores the cancel fn, and deliver is idempotent
-        (when-let [cancel (:help-cancel @state)] (cancel))
+        (cancel-help! state)
         (Thread/sleep 10)
         (recur (inc n))))))
 

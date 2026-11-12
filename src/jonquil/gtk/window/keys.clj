@@ -99,6 +99,58 @@
                               (or (focus-in-popover? win (:rename-pop t))
                                   (focus-in-popover? win (:palette t)))))))
 
+(defn- describe-key!
+  "Answers a pending Describe Key: prints what the key chord is and runs
+  nothing. k is on-window-key's key map ({:keyval :state :os :kname
+  :physical :key?}). Returns 1, the key used."
+  [ctx {:keys [keyval state os kname physical]}]
+  (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
+                                             :state state :physical physical))]
+    ((:print-lines! ctx) (describe/describe-lines (describe/chord-text kname state os) matches))
+    1))
+
+(defn- remember-key!
+  "Adds the key k (on-window-key's key map) to the recent keys, with ran,
+  the command that took it (or nil). Recording never throws."
+  [ctx {:keys [keyval state os kname]} ran]
+  (try
+    (swap! (:recent-keys ctx) describe/remember
+           (describe/recent-entry
+            {:key-name kname :state state :os os
+             :typing (describe/typing? kname state (g/printable-key? keyval))
+             :ran ran}))
+    (catch :default _ nil)))
+
+(defn- answer-window-key!
+  "Runs the window keymap for the key k (on-window-key's key map) through
+  jonquil.command-registry/window-answer, the live plugins' :window
+  bindings ahead of the shipped ones (a plugin may bind a built-in window
+  command), then records the key. kctx is window-key-ctx's. Returns the
+  registry's answer."
+  [ctx kctx {:keys [keyval state physical key?] :as k}]
+  (let [;; one read per key: the bindings and commands agree
+        plugins @plugin-registry/live
+        ;; the command that took the key, for recent keys
+        ran (volatile! nil)
+        answer (cmd-registry/window-answer
+                (plugin-registry/window-bindings plugins) keyval state
+                {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
+                 ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
+                 ;; keyval, and the keycode names the key (editor/physical-key)
+                 :physical physical
+                 ;; plugins' window-scope commands run too, so a :run one bound
+                 ;; to a key runs
+                 :run! (fn [b]
+                         (let [o (cmd-registry/run-command! (merge cmd-registry/window-commands
+                                                                   (plugin-registry/commands plugins))
+                                                            b kctx)]
+                           (when (= :handled o) (vreset! ran (:command b)))
+                           o))})]
+    ;; Every key but a lone modifier goes into recent keys, after the fact
+    ;; and on its own, so recording never blocks a key
+    (when key? (remember-key! ctx k @ran))
+    answer))
+
 (defn on-window-key
   "The window's capture-phase key handler. Every key goes through
   jonquil.command-registry/window-answer: one fixed stage (while the
@@ -145,46 +197,14 @@
       (try
         (let [keyval (g/gdk-keyval-to-lower keyval0)
               kctx (window-key-ctx ctx keyval0 state)
-            ;; one read per key: the bindings and commands agree
-              plugins @plugin-registry/live
-              physical (editor/physical-key os keyval0 keycode state)
               kname (g/keyval-name keyval)
-              key? (and kname (not (describe/modifier-key? kname)))
-            ;; the command that took the key, for recent keys
-              ran (volatile! nil)]
-          (if (and key? (some-> (:describe-pending ctx) (compare-and-set! true false)))
-          ;; it answers a pending Describe Key: described, never run
-            (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
-                                                       :state state :physical physical))]
-              ((:print-lines! ctx) (describe/describe-lines (describe/chord-text kname state os) matches))
-              1)
-          ;; The live plugins' :window bindings ahead of the shipped ones
-          ;; (a plugin may bind a built-in window command)
-            (let [answer (cmd-registry/window-answer
-                          (plugin-registry/window-bindings plugins) keyval state
-                          {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
-                         ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
-                         ;; keyval, and the keycode names the key (editor/physical-key)
-                           :physical physical
-                         ;; plugins' window-scope commands run too, so a :run one bound
-                         ;; to a key runs
-                           :run! (fn [b]
-                                   (let [o (cmd-registry/run-command! (merge cmd-registry/window-commands
-                                                                             (plugin-registry/commands plugins))
-                                                                      b kctx)]
-                                     (when (= :handled o) (vreset! ran (:command b)))
-                                     o))})]
-            ;; Every key but a lone modifier goes into recent keys, after
-            ;; the fact and on its own, so recording never blocks a key
-              (when key?
-                (try
-                  (swap! (:recent-keys ctx) describe/remember
-                         (describe/recent-entry
-                          {:key-name kname :state state :os os
-                           :typing (describe/typing? kname state (g/printable-key? keyval))
-                           :ran @ran}))
-                  (catch :default _ nil)))
-              answer)))
+              k {:keyval keyval :state state :os os :kname kname
+                 :physical (editor/physical-key os keyval0 keycode state)
+                 :key? (and kname (not (describe/modifier-key? kname)))}]
+          (if (and (:key? k) (some-> (:describe-pending ctx) (compare-and-set! true false)))
+            ;; it answers a pending Describe Key: described, never run
+            (describe-key! ctx k)
+            (answer-window-key! ctx kctx k)))
         (catch :default e
           (win-status/set-status! status-label (str "; key: " (ex-message e)))
           1)))))

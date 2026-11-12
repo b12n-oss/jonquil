@@ -55,22 +55,25 @@
   [ns-name]
   (or (when ns-name (find-ns (symbol ns-name))) (the-ns 'user)))
 
+(def ^:private view-ops
+  "The inspect-* view ops: each is a fn of the request getter g returning
+  [view-op args] for jonquil.inspect.view/run-op."
+  {"inspect-start" (fn [g] [:start {:value *1 :rows (as-long (g "rows")) :cols (as-long (g "cols"))}])
+   "inspect-in" (fn [g] [:in {:idx (as-long (g "idx"))}])
+   "inspect-out" (fn [_] [:out {}])
+   "inspect-page" (fn [g] [:page {:delta (as-long (g "delta"))}])
+   "inspect-toggle-meta" (fn [g] [:meta {:cursor (as-long (g "cursor"))}])
+   "inspect-toggle-table" (fn [_] [:table {}])
+   "inspect-def" (fn [g] [:def {:name (g "name") :target-ns (target-ns (g "ns"))}])
+   "inspect-earlier" (fn [_] [:earlier {}])
+   "inspect-later" (fn [_] [:later {}])})
+
 (defn- view-reply
   "The response map for an inspect-* view op, or nil for any other op.
   state is an atom holding the view (jonquil.inspect.view's own state)."
   [state request]
   (let [g (fn [k] (get request k))
-        args (case (g "op")
-               "inspect-start" [:start {:value *1 :rows (as-long (g "rows")) :cols (as-long (g "cols"))}]
-               "inspect-in" [:in {:idx (as-long (g "idx"))}]
-               "inspect-out" [:out {}]
-               "inspect-page" [:page {:delta (as-long (g "delta"))}]
-               "inspect-toggle-meta" [:meta {:cursor (as-long (g "cursor"))}]
-               "inspect-toggle-table" [:table {}]
-               "inspect-def" [:def {:name (g "name") :target-ns (target-ns (g "ns"))}]
-               "inspect-earlier" [:earlier {}]
-               "inspect-later" [:later {}]
-               nil)]
+        args (when-let [f (get view-ops (g "op"))] (f g))]
     (when-let [[op op-args] args]
       {"status" ["done"] "view" (pr-str (view/run-op state op op-args))})))
 
@@ -207,24 +210,29 @@
   (some-> @frame-token debugger/interrupt-token!)
   {"status" ["done"]})
 
+(def ^:private op-handlers
+  "Each op the middleware answers beyond the view ops: a fn of the state
+  and the request."
+  {"jonquil-frames" (fn [_ _] (frames-reply))
+   "jonquil-line-counts" (fn [_ request] (line-counts-reply request))
+   "jonquil-debug-mode" (fn [_ _] (debug-mode-reply))
+   "inspect-local" (fn [state request] (inspect-local-reply state request))
+   "jonquil-frame-eval" (fn [_ request] (frame-eval-reply request))
+   "jonquil-trace" (fn [_ request] (trace-reply request))
+   "jonquil-fibers" (fn [_ request] (fibers-reply request))
+   "jonquil-world" (fn [_ request] (world-reply request))
+   "jonquil-keep-result" (fn [_ request] (keep-result-reply request))
+   "inspect-result" (fn [state request] (inspect-result-reply state request))
+   "inspect-trace" (fn [state request] (inspect-trace-reply state request))
+   "jonquil-frame-interrupt" (fn [_ _] (frame-interrupt-reply))})
+
 (defn handle
   "The response map for one of ops, or nil for any other op. The frames
   ops read jolt.nrepl's global *e, the last error, as inspect-start reads
   *1. state is an atom holding the view."
   [state request]
-  (case (get request "op")
-    "jonquil-frames" (frames-reply)
-    "jonquil-line-counts" (line-counts-reply request)
-    "jonquil-debug-mode" (debug-mode-reply)
-    "inspect-local" (inspect-local-reply state request)
-    "jonquil-frame-eval" (frame-eval-reply request)
-    "jonquil-trace" (trace-reply request)
-    "jonquil-fibers" (fibers-reply request)
-    "jonquil-world" (world-reply request)
-    "jonquil-keep-result" (keep-result-reply request)
-    "inspect-result" (inspect-result-reply state request)
-    "inspect-trace" (inspect-trace-reply state request)
-    "jonquil-frame-interrupt" (frame-interrupt-reply)
+  (if-let [f (get op-handlers (get request "op"))]
+    (f state request)
     (view-reply state request)))
 
 (defonce ^:private state (atom nil))

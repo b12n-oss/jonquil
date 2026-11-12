@@ -23,6 +23,14 @@
             [jonquil.settings :as settings]
             [jonquil.tabs :as tabs]))
 
+(defn- initial-selection
+  "The window's starting dialect selection: a directory launch resolves
+  the directory's own project, anything else the launch file's."
+  [file dir settings-path]
+  (if (and dir (not file))
+    (ft/project-selection dir (:dialect (settings/load-settings settings-path)))
+    (win-runtime/select-for file settings-path)))
+
 (defn build
   "activate!'s first bindings, in activate!'s order: the settings path, whether the window runs plugins, the dialect selection, the evaluator and the session it starts with, evaluating-fn, the tab list with the active id, the next id, active-tab and active?, the notebook, *tab-ctx, the recent tab ids and the window. w holds activate!'s app and the options they read: :app :file :dir :settings-path :plugins?. Returns w with :settings-path* :plugins-on* :sel* :ev* :session :evaluating-fn :tabs :active-id :next-id :active-tab :active? :notebook :tab-ctx* (the *tab-ctx atom) :recent-tabs and :win added."
   [{:keys [app file dir settings-path plugins?] :as w}]
@@ -48,9 +56,7 @@
         ;; A directory launch resolves the directory's own project;
         ;; find-project starts at a path's parent, so it's given a child
         ;; of dir (measured 2026-10-09).
-        sel* (atom (if (and dir (not file))
-                     (ft/project-selection dir (:dialect (settings/load-settings @settings-path*)))
-                     (win-runtime/select-for file @settings-path*)))
+        sel* (atom (initial-selection file dir @settings-path*))
         ev* (atom (doto (ev/make @sel*) registry/register!))
         session @ev*
         evaluating-fn (fn [] (ev/evaluating? @ev*))
@@ -94,49 +100,80 @@
                                               (some-> c :session-restoring? (reset! false))
                                               (when-not restoring? (win-session/save-session! c))))}))
 
+(defn- make-sel-ctx
+  "The runtime switch's context (apply-selection!'s): the window's selection
+  and evaluator, the Reset on Run box and the panels a switch hides. w is
+  build-tab-ctx's."
+  [{:keys [cv status-label dialect-label sel* ev* reset-chk reset-state right inspector-state active-tab]}]
+  {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
+   :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
+   :active-ed (fn [] (:ed (active-tab)))
+   :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))})
+
+(defn- make-tree-saved!
+  "tree-saved!: the fn that shows a saved tab's file in the tree, expanding
+  to it and, when its tab is active, highlighting it."
+  [tree-pane active?]
+  (fn [t]
+    (let [p @(:path t)
+          m @(:state tree-pane)]
+      (when (and p (ft/under-root? m p))
+        (file-tree-pane/show-model! tree-pane (ft/expand-to m p))
+        (when (active? t) (file-tree-pane/select-path! tree-pane p))))))
+
+(defn- read-launch-file
+  "{:text :file-nul} for the launch file: its text, nil when there is no
+  file or it can't be read, and the line of a NUL in it. A file argument
+  that doesn't exist opens an empty editor with the path remembered
+  anyway, so Save creates it. A launch file holding a NUL is refused like
+  any open: its path must NOT be remembered (Save would write \"\" over
+  the binary), but `file` stays bound so the session-reopen gate (when-not
+  file) is untouched."
+  [file]
+  (let [text (when file (try (slurp file) (catch :default _ nil)))]
+    {:text text :file-nul (when text (tabs/nul-line text))}))
+
+(defn- new-session-state
+  "The tab ctx's live session saving state: whether it is live, the last
+  snapshot written, the last error said, and whether a reopen is under
+  way. Each an atom."
+  []
+  {:session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
+   :session-restoring? (atom false)})
+
+(defn- status-bar-ctx
+  "The tab ctx's status bar keys: the Parinfer mode read fn, the hook's
+  status fn and the label's update, and the key hints label with its
+  toggle state. w is build-tab-ctx's."
+  [{:keys [parinfer-mode* parinfer-status-fn update-parinfer-label! hint-label hints-on?]}]
+  {:parinfer-mode-read (fn [] @parinfer-mode*)
+   :parinfer-status-fn parinfer-status-fn
+   :parinfer-label-update! update-parinfer-label!
+   :hint-label hint-label :hints-on? hints-on?})
+
 (defn- build-tab-ctx
   "startup!'s first bindings, in activate!'s order: sel-ctx (the runtime switch's context), the launch file's text and the line of a NUL in it, tree-saved!, which shows a saved file in the tree, and tab-ctx, the tab operations' context. w holds activate!'s bindings they read, under activate!'s names, with :folder-result* (tree-ops' *folder-result atom). Returns w with :sel-ctx :text :file-nul and :tab-ctx added."
-  [{:keys [cv status-label dialect-label sel* ev* reset-chk reset-state right inspector-state active-tab file tree-pane active? win line-col-label close-popovers-fn register-popover-fn source-ctx settings-path* inspect-last-fn inspect-form-fn open-find-fn open-replace-fn tabs next-id notebook theme-name completion-opts active-id popovers window-key-args repl-complete-fn parinfer-mode* parinfer-status-fn update-parinfer-label! part-contribution part-error! recent-tabs hint-label hints-on?] *folder-result :folder-result* :as w}]
-  (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
-                 :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
-                 :active-ed (fn [] (:ed (active-tab)))
-                 :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}
-        ;; A file argument that doesn't exist opens an empty editor with
-        ;; the path remembered anyway, so Save creates it -- unlike the
-        ;; Open button's dialog result, this is the documented normal
-        ;; case, not an error to report.
-        text (when file (try (slurp file) (catch :default _ nil)))
-        ;; A launch file holding a NUL is refused like any open. Its path must NOT be remembered (Save would write
-        ;; "" over the binary), but `file` stays bound so the
-        ;; session-reopen gate below (when-not file) is untouched.
-        file-nul (when text (tabs/nul-line text))
-        ;; A save (or a path change) under the root
-        ;; expands to the file and highlights it when its tab is active.
-        tree-saved! (fn [t]
-                      (let [p @(:path t)
-                            m @(:state tree-pane)]
-                        (when (and p (ft/under-root? m p))
-                          (file-tree-pane/show-model! tree-pane (ft/expand-to m p))
-                          (when (active? t) (file-tree-pane/select-path! tree-pane p)))))
-        tab-ctx {:win win :cv cv :ev* ev* :sel* sel* :status-label status-label
-                 :line-col-label line-col-label :close-popovers-fn close-popovers-fn
-                 :register-popover-fn register-popover-fn :active? active? :source-ctx source-ctx
-                 :sel-ctx sel-ctx :settings-path* settings-path* :inspect-last-fn inspect-last-fn
-                 :inspect-form-fn inspect-form-fn :open-find-fn open-find-fn
-                 :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook
-                 :theme-name theme-name :completion-opts completion-opts
-                 :active-id active-id :active-tab active-tab :popovers popovers
-                 :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result
-                 :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
-                 :session-restoring? (atom false)
-                 :window-key-args window-key-args :repl-complete-fn repl-complete-fn
-                 :parinfer-mode-read (fn [] @parinfer-mode*)
-                 :parinfer-status-fn parinfer-status-fn
-                 :parinfer-label-update! update-parinfer-label!
-                 :part-contribution part-contribution :part-error! part-error!
-                 :recent-tabs recent-tabs
-                 :hint-label hint-label :hints-on? hints-on?}]
-    (assoc w :sel-ctx sel-ctx :text text :file-nul file-nul :tab-ctx tab-ctx)))
+  [{:keys [cv status-label sel* ev* active-tab file tree-pane active? win line-col-label close-popovers-fn register-popover-fn source-ctx settings-path* inspect-last-fn inspect-form-fn open-find-fn open-replace-fn tabs next-id notebook theme-name completion-opts active-id popovers window-key-args repl-complete-fn part-contribution part-error! recent-tabs] *folder-result :folder-result* :as w}]
+  (let [sel-ctx (make-sel-ctx w)
+        tab-ctx (merge
+                 (new-session-state)
+                 (status-bar-ctx w)
+                 {:win win :cv cv :ev* ev* :sel* sel* :status-label status-label
+                  :line-col-label line-col-label :close-popovers-fn close-popovers-fn
+                  :register-popover-fn register-popover-fn :active? active? :source-ctx source-ctx
+                  :sel-ctx sel-ctx :settings-path* settings-path* :inspect-last-fn inspect-last-fn
+                  :inspect-form-fn inspect-form-fn :open-find-fn open-find-fn
+                  :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook
+                  :theme-name theme-name :completion-opts completion-opts
+                  :active-id active-id :active-tab active-tab :popovers popovers
+                  ;; A save (or a path change) under the root
+                  ;; expands to the file and highlights it when its tab is active.
+                  :tree-pane tree-pane :tree-saved! (make-tree-saved! tree-pane active?)
+                  :folder-result* *folder-result
+                  :window-key-args window-key-args :repl-complete-fn repl-complete-fn
+                  :part-contribution part-contribution :part-error! part-error!
+                  :recent-tabs recent-tabs})]
+    (assoc (merge w (read-launch-file file)) :sel-ctx sel-ctx :tab-ctx tab-ctx)))
 
 (defn- build-first-tab
   "startup!'s next bindings, in activate!'s order: the first tab, made from the launch file (empty when it holds a NUL), the tree's saved settings, and folder-result!, Open Folder...'s result handler. w holds what they read: :tab-ctx :file-nul :file :text :settings-path* :tree-pane :tabs :sel-ctx :part-contribution :part-error! :cv. Returns w with :first-tab :tree-settings and :folder-result! added."
@@ -236,13 +273,46 @@
     (win-runtime/show-selection! cv dialect-label @sel*)
     ;; The starting evaluator's connection, label and Reset on Run, as
     ;; apply-selection! does for every later one.
-    (win-runtime/watch-connection! @ev* ev* sel* dialect-label cv status-label)
+    (win-runtime/watch-connection! @ev* {:ev* ev* :sel* sel* :dialect-label dialect-label :cv cv :status-label status-label})
     (win-runtime/apply-reset-toggle! reset-chk reset-state @sel*)
     (g/gtk-label-set-text dialect-label (win-runtime/dialect-text @sel* @ev*))
     (win-runtime/refresh-prompt! cv ev*)
     (catch :default e
       (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
   (win-runtime/start-and-report! cv status-label @ev* @sel*))
+
+(defn- launch-session-entry
+  "The last quit's session entry for the launch's project, with the tree
+  re-rooted to it, or nil when there is none or reading it threw (said on
+  the console)."
+  [tab-ctx cv]
+  (try (win-reopen/session-entry! tab-ctx {:reroot? true})
+       (catch :default e
+         (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
+         nil)))
+
+(defn- say-login-path!
+  "Says where the child tools' PATH came from on the console. The wait for
+  the lookup is off the GTK thread; the append goes through on-gui!, and a
+  window closed meanwhile must not throw out of the future. Returns the
+  future."
+  [cv]
+  (future
+    (try (when-let [line (login-path/console-line)]
+           (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
+         (catch :default _ nil))))
+
+(defn- go-live!
+  "The launch's tabs are open, so from here on every change to them is
+  saved as it happens (session-changed!). The state the launch ends in
+  isn't written: a launch on one file would otherwise replace the folder's
+  remembered tabs before anything changed. A re-root alone doesn't save
+  either, for the same reason; the next tab change does. Runs the parts'
+  :on-start hooks."
+  [tab-ctx part-contribution part-error!]
+  (reset! (:session-last tab-ctx) (win-session/session-snapshot tab-ctx))
+  (reset! (:session-live? tab-ctx) true)
+  (parts/run-hooks! part-contribution :on-start [] part-error!))
 
 (defn- reopen!
   "startup!'s last step: a launch that named no file reopens the last quit's tabs; then the child tools' PATH line, the window shown with the active tab focused, and live session saving once the reopen is done."
@@ -251,28 +321,18 @@
   ;; tabs open at the last quit in this project. The entry, and any
   ;; re-root, come now, so the tree shows its folder from the first
   ;; frame. The files open after the window is up (reopen-later!).
-  (let [entry (when-not file
-                (try (win-reopen/session-entry! tab-ctx {:reroot? true})
-                     (catch :default e
-                       (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
-                       nil)))
+  (let [entry (when-not file (launch-session-entry tab-ctx cv))
         ;; The launch's tabs are open, so from here on every change to
         ;; them is saved as it happens (session-changed!). The state the
         ;; launch ends in isn't written: a launch on one file would
         ;; otherwise replace the folder's remembered tabs before
         ;; anything changed. A re-root alone doesn't save either, for the
         ;; same reason; the next tab change does.
-        live! (fn []
-                (reset! (:session-last tab-ctx) (win-session/session-snapshot tab-ctx))
-                (reset! (:session-live? tab-ctx) true)
-                (parts/run-hooks! part-contribution :on-start [] part-error!))]
+        live! (fn [] (go-live! tab-ctx part-contribution part-error!))]
     ;; Say where the child tools' PATH came from. The wait for the
     ;; lookup is off the GTK thread; the append goes through on-gui!, and
     ;; a window closed meanwhile must not throw out of the future.
-    (future
-      (try (when-let [line (login-path/console-line)]
-             (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
-           (catch :default _ nil)))
+    (say-login-path! cv)
     (let [t (active-tab)]
       (win-files/update-title! (:ed t) win (:path t))
       (g/gtk-window-present win)

@@ -58,18 +58,23 @@
 (defn- next! [src]
   (let [b (src)] (if (neg? b) (truncated) b)))
 
+(defn- parse-integer
+  "The long that digit text s spells, or throws ::malformed for an empty
+  text, a lone minus, or an out-of-range number."
+  [s]
+  (letfn [(malformed [] (throw (ex-info "bencode: malformed integer" {:type ::malformed :text s})))]
+    (if (or (empty? s) (= s "-"))
+      (malformed)
+      (try (Long/parseLong s)
+           (catch NumberFormatException _ (malformed))))))
+
 (defn- read-digits
   "Reads decimal digits (and a leading minus) up to the terminator byte t,
   consuming t. first-b is a byte already read."
   [src first-b t]
   (loop [b first-b acc (StringBuilder.) pos 0]
     (cond
-      (= b (int t)) (let [s (str acc)]
-                      (if (or (empty? s) (= s "-"))
-                        (throw (ex-info "bencode: malformed integer" {:type ::malformed :text s}))
-                        (try (Long/parseLong s)
-                             (catch NumberFormatException _
-                               (throw (ex-info "bencode: malformed integer" {:type ::malformed :text s}))))))
+      (= b (int t)) (parse-integer (str acc))
       (and (= b (int \-)) (zero? pos)) (recur (next! src) (.append acc (char b)) (inc pos))
       (<= (int \0) b (int \9)) (recur (next! src) (.append acc (char b)) (inc pos))
       (= b (int \-)) (throw (ex-info "bencode: malformed integer" {:type ::malformed :text (str acc (char b))}))

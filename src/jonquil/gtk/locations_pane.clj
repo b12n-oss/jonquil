@@ -24,6 +24,16 @@
   (reset! (:handlers pane) m)
   nil)
 
+(defn- sync-filter!
+  "Ticks the filter buttons to lst's kinds. Setting a button fires toggled;
+  :syncing? keeps that from reaching on-hows."
+  [pane lst]
+  (reset! (:syncing? pane) true)
+  (try
+    (doseq [[k btn] (:filter-btns pane)]
+      (g/gtk-check-button-set-active btn (if (contains? (:hows lst) k) 1 0)))
+    (finally (reset! (:syncing? pane) false))))
+
 (defn show!
   "Shows lst (a jonquil.locations list): its title, one row per entry,
   its current entry selected, and its position on the footer."
@@ -34,14 +44,7 @@
     (reset! (:rows pane) rows)
     (g/gtk-label-set-text (:title pane) (:title lst))
     (g/gtk-widget-set-visible (:filter-box pane) (if project? 1 0))
-    (when project?
-      ;; setting a button fires toggled; :syncing? keeps that from
-      ;; reaching on-hows
-      (reset! (:syncing? pane) true)
-      (try
-        (doseq [[k btn] (:filter-btns pane)]
-          (g/gtk-check-button-set-active btn (if (contains? (:hows lst) k) 1 0)))
-        (finally (reset! (:syncing? pane) false))))
+    (when project? (sync-filter! pane lst))
     (g/gtk-list-box-remove-all lb)
     (doseq [r rows]
       ;; plain text, never markup: a row carries the buffer's own text
@@ -94,6 +97,14 @@
 
 (defn footer-text [pane] (g/label-text (:footer pane)))
 
+(defn- notify-hows!
+  "Passes the ticked kinds to :on-hows, unless the buttons are being synced
+  by show!."
+  [pane]
+  (when-not @(:syncing? pane)
+    (when-let [f (:on-hows @(:handlers pane))]
+      (f (ticked pane)))))
+
 (defn- connect-filter-btns!
   "Ticks each filter button, adds it to the filter row and connects its
   toggled signal to :on-hows."
@@ -103,9 +114,7 @@
     (g/gtk-box-append filter-box btn)
     (g/g-signal-connect-data btn "toggled"
                              (callable (fn [_btn _data]
-                                         (try (when-not @(:syncing? pane)
-                                                (when-let [f (:on-hows @(:handlers pane))]
-                                                  (f (ticked pane))))
+                                         (try (notify-hows! pane)
                                               (catch :default e (report! pane (str "; " (ex-message e)))))
                                          nil)
                                        [:pointer :pointer] :void)

@@ -38,6 +38,36 @@
     (= index 1) (do (reset! time-confirmed? true) (start-timing! ctx snap text))
     :else nil))
 
+(defn- confirm-timing!
+  "Asks the timing alert for the form text in snap, through ask-time!, holding
+  the alert-pending? guard until the person decides."
+  [{:keys [cv ev* ask-time! set-status! alert-pending?] :as ctx} snap text]
+  (reset! alert-pending? true)
+  ;; an older message (a No form at the caret. from a miss, say)
+  ;; shouldn't sit under the alert; a running eval keeps its own
+  (when-not (ev/evaluating? @ev*) (set-status! "Ready"))
+  ;; complete-alert! releases the guard for the real alert; this
+  ;; also releases it for a stand-in, and a throw while building
+  ;; the alert releases it too
+  (try
+    (ask-time! (timing/confirm-alert text)
+               (fn [result] (reset! alert-pending? false) (time-choice! ctx snap text result)))
+    (catch :default e
+      (reset! alert-pending? false)
+      (cview/append! cv :error (str "; time: " (ex-message e) "\n")))))
+
+(defn- time-snapshot!
+  "Times the form at the caret of the active tab, asking first unless Don't
+  Ask Again is set, and says when there is no form."
+  [{:keys [tab time-confirmed? set-status! alert-pending?] :as ctx}]
+  (let [snap (editor/snapshot (:ed tab))]
+    (if-let [{:keys [text]} (commands/run-form snap)]
+      (cond
+        @time-confirmed? (start-timing! ctx snap text)
+        @alert-pending? (set-status! "Another alert is open.")
+        :else (confirm-timing! ctx snap text))
+      (set-status! "No form at the caret."))))
+
 (defn- time-form!
   "Time the form at the caret: Run Form's form, wrapped in
   jonquil.timing/code. The form runs many times, side effects and all, so
@@ -46,33 +76,12 @@
   the other alerts' alert-pending? guard, as the tree's trash alert does,
   so it never opens over a close alert. Dialects without the harness's
   System/nanoTime say so and evaluate nothing."
-  [{:keys [tab cv ev* sel* ask-time! time-confirmed? set-status! alert-pending? refuse-foreign!] :as ctx}]
-  (let [{:keys [ed]} tab]
-    (cond
-      (refuse-foreign! ctx) nil
-      (not (timing/supported? (:id (:profile @sel*))))
-      (set-status! "; Timing needs Jolt or JVM Clojure.")
-      :else
-      (let [snap (editor/snapshot ed)]
-        (if-let [{:keys [text]} (commands/run-form snap)]
-          (cond
-            @time-confirmed? (start-timing! ctx snap text)
-            @alert-pending? (set-status! "Another alert is open.")
-            :else
-            (do (reset! alert-pending? true)
-                ;; an older message (a No form at the caret. from a miss, say)
-                ;; shouldn't sit under the alert; a running eval keeps its own
-                (when-not (ev/evaluating? @ev*) (set-status! "Ready"))
-                ;; complete-alert! releases the guard for the real alert; this
-                ;; also releases it for a stand-in, and a throw while building
-                ;; the alert releases it too
-                (try
-                  (ask-time! (timing/confirm-alert text)
-                             (fn [result] (reset! alert-pending? false) (time-choice! ctx snap text result)))
-                  (catch :default e
-                    (reset! alert-pending? false)
-                    (cview/append! cv :error (str "; time: " (ex-message e) "\n"))))))
-          (set-status! "No form at the caret."))))))
+  [{:keys [sel* set-status! refuse-foreign!] :as ctx}]
+  (cond
+    (refuse-foreign! ctx) nil
+    (not (timing/supported? (:id (:profile @sel*))))
+    (set-status! "; Timing needs Jolt or JVM Clojure.")
+    :else (time-snapshot! ctx)))
 
 (defn- install
   "The time-form part for one window. Answers :time-form-fn, and the ui

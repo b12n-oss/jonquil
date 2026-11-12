@@ -20,28 +20,41 @@
 (defn- text-lines [s]
   (if (empty? s) [] (str/split-lines s)))
 
+(defn- lcs-table
+  "The longest-common-subsequence table of vectors a and b: t[i][j] is the
+  length for a's suffix from i and b's from j."
+  [a b]
+  (let [n (count a)
+        m (count b)
+        t (make-array Long/TYPE (inc n) (inc m))]
+    (doseq [i (range (dec n) -1 -1) j (range (dec m) -1 -1)]
+      (aset t i j (if (= (nth a i) (nth b j))
+                    (inc (aget t (inc i) (inc j)))
+                    (max (aget t (inc i) j) (aget t i (inc j))))))
+    t))
+
+(defn- walk-diff
+  "The [:same|:del|:add line] ops that turn a into b, read off table t."
+  [a b t]
+  (let [n (count a)
+        m (count b)]
+    (loop [i 0 j 0 out []]
+      (cond
+        (and (< i n) (< j m) (= (nth a i) (nth b j))) (recur (inc i) (inc j) (conj out [:same (nth a i)]))
+        (and (< i n) (or (= j m) (>= (aget t (inc i) j) (aget t i (inc j)))))
+        (recur (inc i) j (conj out [:del (nth a i)]))
+        (< j m) (recur i (inc j) (conj out [:add (nth b j)]))
+        :else out))))
+
 (defn line-diff
   "The line diff from old-text to new-text (nil is no text): a vector of
   [:same|:del|:add line], a change's removed lines before its added ones."
   [old-text new-text]
   (let [a (vec (text-lines old-text))
-        b (vec (text-lines new-text))
-        n (count a)
-        m (count b)]
-    (if (> (* n m) DIFF-MAX-CELLS)
+        b (vec (text-lines new-text))]
+    (if (> (* (count a) (count b)) DIFF-MAX-CELLS)
       (into (mapv #(vector :del %) a) (map #(vector :add %) b))
-      (let [t (make-array Long/TYPE (inc n) (inc m))]
-        (doseq [i (range (dec n) -1 -1) j (range (dec m) -1 -1)]
-          (aset t i j (if (= (nth a i) (nth b j))
-                        (inc (aget t (inc i) (inc j)))
-                        (max (aget t (inc i) j) (aget t i (inc j))))))
-        (loop [i 0 j 0 out []]
-          (cond
-            (and (< i n) (< j m) (= (nth a i) (nth b j))) (recur (inc i) (inc j) (conj out [:same (nth a i)]))
-            (and (< i n) (or (= j m) (>= (aget t (inc i) j) (aget t i (inc j)))))
-            (recur (inc i) j (conj out [:del (nth a i)]))
-            (< j m) (recur i (inc j) (conj out [:add (nth b j)]))
-            :else out))))))
+      (walk-diff a b (lcs-table a b)))))
 
 (defn diff-text
   "line-diff as text, lines prefixed \"+ \", \"- \" or two spaces. An
@@ -72,6 +85,11 @@
     :else (str "Based on " (if based-on (str "v" based-on) "no version") ", live is v" live-n
                ": the diff is against live.")))
 
+(defn- effect-text
+  "e as text, marked (new) when live-effects doesn't hold it."
+  [live-effects e]
+  (str e (when-not (contains? (set live-effects) e) " (new)")))
+
 (defn- effects-line
   "review's line naming the effects check reported, each not in
   live-effects marked (new)."
@@ -81,8 +99,7 @@
     (str "Effects, as its check reported: "
          (if (empty? (:effects plugin))
            "none"
-           (str/join ", " (for [e (sort-by str (:effects plugin))]
-                            (str e (when-not (contains? (set live-effects) e) " (new)"))))))))
+           (str/join ", " (map #(effect-text live-effects %) (sort-by str (:effects plugin))))))))
 
 (defn- check-lines
   "review's lines from a run check: the MCP tools an agent could call once
@@ -127,6 +144,27 @@
   (str/join "\n" (cond-> (:lines review)
                    (> count 1) (conj (str "Proposal " (inc index) " of " count ".")))))
 
+(defn- pending-review
+  "The review of one pending proposal for plugin id, or a short review saying
+  why it couldn't be built."
+  [plugins-dir registry {:keys [id] :as proposal}]
+  (try
+    (let [hdir (history/history-dir plugins-dir id)
+          {:keys [entries error]} (history/read-entries hdir)
+          live-n (:n (history/latest-accepted entries))
+          loaded (get-in registry [:plugins (keyword id)])]
+      (when-not error
+        (review {:id id :proposal (dissoc proposal :id)
+                 :source (history/version-source hdir (:n proposal))
+                 :live-n live-n
+                 :live-source (or (:source loaded) (when live-n (history/version-source hdir live-n)))
+                 :live-effects (get-in loaded [:definition :effects])
+                 :live-tools (map :name (get-in loaded [:definition :mcp-tools]))})))
+    (catch Throwable e
+      {:id id :n (:n proposal) :diff ""
+       :lines [(str id " v" (:n proposal) ": its review couldn't be built: " (or (ex-message e) (str e)))
+               "Pressing Accept runs this code in Jonquil."]})))
+
 (defn pending-reviews
   "The review of every pending proposal under plugins-dir, sorted by id.
   Live is registry's source and declared effects when the plugin is
@@ -136,22 +174,5 @@
   counted and can be rejected. Never throws."
   [{:keys [plugins-dir registry]}]
   (try
-    (vec (keep (fn [{:keys [id] :as proposal}]
-                 (try
-                   (let [hdir (history/history-dir plugins-dir id)
-                         {:keys [entries error]} (history/read-entries hdir)
-                         live-n (:n (history/latest-accepted entries))
-                         loaded (get-in registry [:plugins (keyword id)])]
-                     (when-not error
-                       (review {:id id :proposal (dissoc proposal :id)
-                                :source (history/version-source hdir (:n proposal))
-                                :live-n live-n
-                                :live-source (or (:source loaded) (when live-n (history/version-source hdir live-n)))
-                                :live-effects (get-in loaded [:definition :effects])
-                                :live-tools (map :name (get-in loaded [:definition :mcp-tools]))})))
-                   (catch Throwable e
-                     {:id id :n (:n proposal) :diff ""
-                      :lines [(str id " v" (:n proposal) ": its review couldn't be built: " (or (ex-message e) (str e)))
-                              "Pressing Accept runs this code in Jonquil."]})))
-               (history/all-pending plugins-dir)))
+    (vec (keep #(pending-review plugins-dir registry %) (history/all-pending plugins-dir)))
     (catch Throwable _ [])))

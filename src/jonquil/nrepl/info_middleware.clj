@@ -56,27 +56,38 @@
       (let [x (io/file f)] (when (.isFile x) (.getCanonicalPath x)))
       :else (try (classpath-file f) (catch Throwable _ nil)))))
 
+(defn- resolve-var
+  "The var sym names in the namespace ns-str names (user when that isn't
+  loaded), or nil."
+  [ns-str sym]
+  (let [the-ns* (or (when (and ns-str (not (str/blank? ns-str))) (find-ns (symbol ns-str)))
+                    (the-ns 'user))]
+    (when (and sym (not (str/blank? sym)))
+      (try (ns-resolve the-ns* (symbol sym)) (catch Throwable _ nil)))))
+
+(defn- var-fields
+  "The reply fields for var v, named sym by the caller."
+  [v sym]
+  (let [m (meta v)
+        file (file-of (:file m))]
+    ;; :name falls back to sym, and a missing :ns is left out rather
+    ;; than thrown on, as jolt-lang/nrepl's lookup does.
+    (cond-> {"name" (str (or (:name m) sym))}
+      (:ns m) (assoc "ns" (str (ns-name (:ns m))))
+      (:doc m) (assoc "doc" (:doc m))
+      (:arglists m) (assoc "arglists-str" (pr-str (:arglists m)))
+      file (assoc "file" file)
+      (and file (:line m)) (assoc "line" (:line m)))))
+
 (defn info
   "The reply fields for sym resolved in the namespace named ns-str (user
   when that isn't loaded): name, ns, doc, arglists-str, and file and line
   when the var records a file that opens here. nil when sym isn't a var
   there."
   [ns-str sym]
-  (let [the-ns* (or (when (and ns-str (not (str/blank? ns-str))) (find-ns (symbol ns-str)))
-                    (the-ns 'user))
-        v (when (and sym (not (str/blank? sym)))
-            (try (ns-resolve the-ns* (symbol sym)) (catch Throwable _ nil)))]
+  (let [v (resolve-var ns-str sym)]
     (when (var? v)
-      (let [m (meta v)
-            file (file-of (:file m))]
-        ;; :name falls back to sym, and a missing :ns is left out rather
-        ;; than thrown on, as jolt-lang/nrepl's lookup does.
-        (cond-> {"name" (str (or (:name m) sym))}
-          (:ns m) (assoc "ns" (str (ns-name (:ns m))))
-          (:doc m) (assoc "doc" (:doc m))
-          (:arglists m) (assoc "arglists-str" (pr-str (:arglists m)))
-          file (assoc "file" file)
-          (and file (:line m)) (assoc "line" (:line m)))))))
+      (var-fields v sym))))
 
 (defn handle
   "The response for a jonquil-info request, or nil for any other op: info's

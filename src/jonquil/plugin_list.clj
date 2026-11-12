@@ -20,27 +20,42 @@
                                 :when (loader/plugin-id? n)]
                             n)))))
 
+(defn- live-text
+  "The line's live-version part."
+  [error entries]
+  (let [latest (when-not error (history/latest-accepted entries))]
+    (cond error "history unreadable"
+          latest (str "live v" (:n latest))
+          :else "no live version")))
+
+(defn- pending-text
+  "The line's pending-proposal part."
+  [error entries]
+  (let [pending (when-not error (history/pending entries))]
+    (cond error "history unreadable"
+          pending (str "pending v" (:n pending))
+          :else "no pending proposal")))
+
+(defn- effects-text
+  "The line's effects part: unknown when not loaded, none, or the sorted set."
+  [loaded effects]
+  (cond (not loaded) "unknown"
+        (empty? effects) "none"
+        :else (str/join " " (map str (sort-by str effects)))))
+
 (defn- list-line [{:keys [plugins-dir registry disabled]} id]
   (let [{:keys [entries error]} (history/read-entries (history/history-dir plugins-dir id))
         loaded (get-in registry [:plugins (keyword id)])
         {:keys [doc effects]} (:definition loaded)
-        live (cond error "history unreadable"
-                   (history/latest-accepted entries) (str "live v" (:n (history/latest-accepted entries)))
-                   :else "no live version")
-        pending (cond error "history unreadable"
-                      (history/pending entries) (str "pending v" (:n (history/pending entries)))
-                      :else "no pending proposal")
         state (cond (contains? (set disabled) (keyword id)) "disabled"
                     loaded "loaded"
                     :else "not loaded")
         ;; went live once, and its file is gone now
         deleted (when (and (not error) (history/latest-accepted entries)
                            (not (.isFile (io/file plugins-dir (str id ".clj")))))
-                  ", file deleted")
-        effects (cond (not loaded) "unknown"
-                      (empty? effects) "none"
-                      :else (str/join " " (map str (sort-by str effects))))]
-    (str id ": " live ", " state deleted ", effects " effects ", " pending "."
+                  ", file deleted")]
+    (str id ": " (live-text error entries) ", " state deleted
+         ", effects " (effects-text loaded effects) ", " (pending-text error entries) "."
          (when doc (str " " doc)))))
 
 (defn row

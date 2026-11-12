@@ -14,22 +14,36 @@
 
 (defn- near? [a b] (<= (abs (- a b)) 2))
 
+(defn- tree-target?
+  "True when the target carries a tree width to set."
+  [{:keys [tree? tree-width]}]
+  (boolean (and tree? tree-width)))
+
+(defn- push-targets!
+  "Sets the tree's width and the split to the target's."
+  [{:keys [tree-paned paned]} {:keys [tree-width split] :as target}]
+  (when (tree-target? target) (g/gtk-paned-set-position tree-paned tree-width))
+  (when split (g/gtk-paned-set-position paned split)))
+
+(defn- positions-read-back?
+  "True when the tree's width and the split read back as the target's, or
+  the target doesn't set them."
+  [{:keys [tree-paned paned]} {:keys [tree-width split] :as target}]
+  (and (or (not (tree-target? target)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
+       (or (not split) (near? split (g/gtk-paned-get-position paned)))))
+
 (defn- settle!
   "One tick of the settle timer: sets the tree's width and the split toward
   pending*'s target and answers 1 to run again, or 0 when they read back
   or the tries run out. Whenever it answers 0 it clears running?, so the next use can arm a timer. A throw clears running? and is
   rethrown, so the callable's :on-throw 0 reports it and answers 0."
-  [{:keys [pending* running? right tree-paned paned showing-panel]}]
+  [{:keys [pending* running? right showing-panel] :as ctx}]
   (try
-    (let [{:keys [tree? tree-width panel split]} @pending*
+    (let [{:keys [panel] :as target} @pending*
           ready? (or (nil? panel) (= panel (showing-panel right)))]
-      (when ready?
-        (when (and tree? tree-width) (g/gtk-paned-set-position tree-paned tree-width))
-        (when split (g/gtk-paned-set-position paned split)))
+      (when ready? (push-targets! ctx target))
       (if (or (>= (:tries (swap! pending* update :tries inc)) 20)
-              (and ready?
-                   (or (not (and tree? tree-width)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
-                   (or (not split) (near? split (g/gtk-paned-get-position paned)))))
+              (and ready? (positions-read-back? ctx target)))
         (do (reset! running? false) 0)
         1))
     (catch :default e

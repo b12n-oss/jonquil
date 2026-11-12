@@ -78,6 +78,33 @@
   [ev]
   (satisfies? ev/QuietEval ev))
 
+(defn- eval-callbacks
+  "The {:on-output :on-wait-input :on-complete} handed to the evaluator.
+  Output lands in the out and err atoms, or goes to on-notice for Jonquil's
+  own lines; a console read delivers ::input to p when input-stops?."
+  [{:keys [p out err on-notice input-stops?]}]
+  {:on-output (fn [k text]
+                (case k
+                  :out (swap! out conj text)
+                  :err (swap! err conj text)
+                  ;; Jonquil's own lines (a Stop's restart,
+                  ;; auto-require) are for the person
+                  (when on-notice (on-notice k text))))
+   :on-wait-input (fn [waiting?] (when (and waiting? input-stops?) (deliver p ::input)))
+   :on-complete (fn [r] (deliver p r))})
+
+(defn- eval-answer
+  "The {:value :out :err & [:error]} for a completed eval result r."
+  [r out err]
+  (let [base {:value nil :out (apply str @out) :err (apply str @err)}]
+    (case (:status r)
+      :ok (assoc base :value (:printed r))
+      :interrupted (assoc base :error "the eval was interrupted")
+      ;; a dialect saying it can't run this now (no runtime, the app
+      ;; asleep): its sentence
+      :notice (assoc base :error (:text r))
+      (assoc base :error (console/error-text r)))))
+
 (defn await-eval!
   "Runs one plugin eval and waits for it, on the plugin's worker. (fire
   callbacks) starts it, handing the evaluator {:on-output :on-wait-input
@@ -96,15 +123,7 @@
         p (promise)
         out (atom [])
         err (atom [])
-        busy (fire {:on-output (fn [k text]
-                                 (case k
-                                   :out (swap! out conj text)
-                                   :err (swap! err conj text)
-                                   ;; Jonquil's own lines (a Stop's restart,
-                                   ;; auto-require) are for the person
-                                   (when on-notice (on-notice k text))))
-                    :on-wait-input (fn [waiting?] (when (and waiting? input-stops?) (deliver p ::input)))
-                    :on-complete (fn [r] (deliver p r))})]
+        busy (fire (eval-callbacks {:p p :out out :err err :on-notice on-notice :input-stops? input-stops?}))]
     (when busy (throw (ex-info "the REPL is busy" {})))
     (let [r (deref p timeout-ms ::timeout)]
       (case r
@@ -112,14 +131,7 @@
                       (throw (ex-info (str "the eval took longer than " timeout-ms " ms and was stopped") {})))
         ::input (do (interrupt!)
                     (throw (ex-info "the eval asked for console input, so it was stopped" {})))
-        (let [base {:value nil :out (apply str @out) :err (apply str @err)}]
-          (case (:status r)
-            :ok (assoc base :value (:printed r))
-            :interrupted (assoc base :error "the eval was interrupted")
-            ;; a dialect saying it can't run this now (no runtime, the app
-            ;; asleep): its sentence
-            :notice (assoc base :error (:text r))
-            (assoc base :error (console/error-text r))))))))
+        (eval-answer r out err)))))
 
 (defn- in-order [reg] (sort-by key (:plugins reg)))
 
@@ -268,7 +280,7 @@
   the GTK thread), its answer made a result there too, answered within
   deadline-ms. One call per tool at a time, as run-command's one
   run per command, since nothing can stop one that overran. Never throws."
-  [plugin-id served row declared deadline-ms]
+  [{:keys [plugin-id served row declared deadline-ms]}]
   (fn [args]
     (let [label (str "plugin " (name plugin-id) ": ")]
       (try
@@ -294,7 +306,8 @@
               :when (and (map? row) (string? (:name row)) (fn? (:run row)))
               :let [served (plugin-check/served-tool-name (name id) (:name row))]]
           {:name served :plugin id :def (tool-def served row)
-           :call (tool-call id served row (set (:effects definition)) (or deadline-ms PLUGIN-TOOL-DEADLINE-MS))}))))
+           :call (tool-call {:plugin-id id :served served :row row :declared (set (:effects definition))
+                             :deadline-ms (or deadline-ms PLUGIN-TOOL-DEADLINE-MS)})}))))
 
 (defn- tool-defs [reg] (mapv :def (mcp-tools reg)))
 

@@ -15,39 +15,27 @@
             [jonquil.gtk.window.tree-ops :as win-tree-ops]
             [jonquil.parts :as parts]))
 
-(defn- window-keys
-  "The ui map's window keys: the first tab's editor, the console, the session, the window and its notebook and tabs, the app, the status bar's labels, the evaluator and dialect selection, Reset on Run, the find bar, the palette and its context keys, the window key handler and the toolbar's buttons."
-  [{:keys [ed cv session status-label win notebook tabs app active-tab parinfer-label parinfer-fn line-col-label ev* sel* dialect-label reset-chk fb window-key-args palette hint-label unread-label window-key-fn run-btn stop-btn open-btn save-btn]}]
-  {:editor ed
-   :console cv
-   :session session
-   :status-label status-label
-   :window win
-   ;; The notebook, the tab list and the active tab, read live.
-   :notebook notebook
-   :tabs* (fn [] @tabs)
-   :app app
-   :active-tab* active-tab
+(defn- status-bar-keys
+  "The window keys for the status bar: its status, Ln/Col, key hints and
+  Messages unread labels, and the Parinfer label with its command's fn."
+  [{:keys [status-label parinfer-label parinfer-fn line-col-label hint-label unread-label]}]
+  {:status-label status-label
    :parinfer-label parinfer-label
    :parinfer!* parinfer-fn
    :line-col-label line-col-label
-   ;; The window's evaluator and dialect selection, read live
-   ;; at call time (ev* is swapped on a runtime switch), and
-   ;; the dialect label itself.
-   :evaluator* (fn [] @ev*)
-   :selection* (fn [] @sel*)
-   :dialect-label dialect-label
-   ;; The Reset on Run checkbox, for rows that read its
-   ;; sensitivity and tooltip.
-   :reset-check reset-chk
-   :find-bar fb
+   :hint-label hint-label
+   :unread-label unread-label})
+
+(defn- input-keys
+  "The window keys for what takes input: the find bar, the palette and its
+  context keys, the window key handler and the toolbar's buttons."
+  [{:keys [fb window-key-args palette window-key-fn run-btn stop-btn open-btn save-btn]}]
+  {:find-bar fb
    ;; the palette's window context keys, the parts' :fns merged in
    :palette-ctx-keys (set (keys window-key-args))
    ;; The first tab's command palette, and what
    ;; Cmd/Ctrl+Shift+P calls to open it
    :palette palette
-   :hint-label hint-label
-   :unread-label unread-label
    ;; Self-test hook: the exact fn the "key-pressed" signal
    ;; calls, so a row can invoke it directly with a synthetic
    ;; keyval/state -- an ordinary function call, not a
@@ -56,6 +44,31 @@
    ;; The toolbar's own buttons, so a row can fire their real
    ;; "clicked" handlers (g/g-signal-emit-by-name).
    :toolbar {:run run-btn :stop stop-btn :open open-btn :save save-btn}})
+
+(defn- window-keys
+  "The ui map's window keys: the first tab's editor, the console, the session, the window and its notebook and tabs, the app, the status bar's labels, the evaluator and dialect selection, Reset on Run, the find bar, the palette and its context keys, the window key handler and the toolbar's buttons."
+  [{:keys [ed cv session win notebook tabs app active-tab ev* sel* dialect-label reset-chk] :as m}]
+  (merge
+   (status-bar-keys m)
+   (input-keys m)
+   {:editor ed
+    :console cv
+    :session session
+    :window win
+    ;; The notebook, the tab list and the active tab, read live.
+    :notebook notebook
+    :tabs* (fn [] @tabs)
+    :app app
+    :active-tab* active-tab
+    ;; The window's evaluator and dialect selection, read live
+    ;; at call time (ev* is swapped on a runtime switch), and
+    ;; the dialect label itself.
+    :evaluator* (fn [] @ev*)
+    :selection* (fn [] @sel*)
+    :dialect-label dialect-label
+    ;; The Reset on Run checkbox, for rows that read its
+    ;; sensitivity and tooltip.
+    :reset-check reset-chk}))
 
 (defn- tree-keys
   "The ui map's file tree keys: the tree, its toggle and outer paned, Open Folder's result, the tree's menu and the trash alert's decision, and the window's open-paths fn."
@@ -81,28 +94,16 @@
    :trash-choice! (fn [path result] (win-tree-ops/trash-choice! @*tab-ctx path result))
    :open-paths! (fn [paths] (@current-open-paths paths))})
 
-(defn- tab-keys
-  "The ui map's tab and file keys: new, open, select and close a tab, open and save the active tab's file, and the Open and Save dialogs' results."
-  [{:keys [active-tab cv win] *tab-ctx :tab-ctx*}]
-   ;; The tab operations, exactly what the keys, the toolbar
-   ;; and the tabs' close buttons call.
-  {:new-tab!* (fn [] (win-tabs/new-tab! @*tab-ctx {}))
-   :open-file! (fn [p] (win-tabs/open-file! @*tab-ctx p))
-   :select-tab! (fn [id] (win-tabs/select-tab! @*tab-ctx id))
-   :close-tab! (fn [id] (win-tabs/close-tab! @*tab-ctx id))
-   :close-tab-choice! (fn [id result] (win-tabs/close-tab-choice! @*tab-ctx id result))
-   :open-path! (fn [p]
-                 (let [{ed :ed path :path :keys [discard-warned?]} (active-tab)]
-                   (win-files/guarded-open! ed cv discard-warned?
-                                            (fn [] (win-files/open-path! ed cv path p) (win-files/update-title! ed win path)))))
-   :save-to! (fn [p] (let [{ed :ed path :path} (active-tab)]
-                       (win-files/save-to! ed cv path p) (win-files/update-title! ed win path)))
-   ;; Self-test hook: the exact dialog-result decisions,
-   ;; driven with a synthetic result map shaped like
-   ;; g/finish-file's -- file-dialog! itself can't be driven
-   ;; without a live dialog. A simulated Open loads into the
-   ;; active tab, as :open-path! does.
-   :simulate-open-result! (fn [result]
+(defn- dialog-result-keys
+  "The tab keys that drive the Open and Save dialogs' decisions with a
+  synthetic result."
+  [{:keys [active-tab cv win]}]
+  ;; Self-test hook: the exact dialog-result decisions,
+  ;; driven with a synthetic result map shaped like
+  ;; g/finish-file's -- file-dialog! itself can't be driven
+  ;; without a live dialog. A simulated Open loads into the
+  ;; active tab, as :open-path! does.
+  {:simulate-open-result! (fn [result]
                             (win-files/contained-open-result!
                              {:cv cv
                               :open! (fn [p] (let [t (active-tab)]
@@ -112,12 +113,30 @@
    :simulate-save-result! (fn [result] (let [t (active-tab)]
                                          (win-files/contained-save-result! {:ed (:ed t) :cv cv :win win :path-atom (:path t)} result)))})
 
-(defn- run-keys
-  "The ui map's run keys: Run and Stop, the MCP server's notifying runs, Run Selection, Run Form, the focus toggle and the console's two clears."
-  [{:keys [run-fn stop-fn active-tab cv ev* sel* status-label run-selection-fn actions toggle-focus-fn clear-console-fn clear-last-fn]}]
-  {:run!* run-fn
-   :stop!* stop-fn
-   ;; Notifying hooks for the MCP server, each calls
+(defn- tab-keys
+  "The ui map's tab and file keys: new, open, select and close a tab, open and save the active tab's file, and the Open and Save dialogs' results."
+  [{:keys [active-tab cv win] *tab-ctx :tab-ctx* :as m}]
+   ;; The tab operations, exactly what the keys, the toolbar
+   ;; and the tabs' close buttons call.
+  (merge
+   (dialog-result-keys m)
+   {:new-tab!* (fn [] (win-tabs/new-tab! @*tab-ctx {}))
+    :open-file! (fn [p] (win-tabs/open-file! @*tab-ctx p))
+    :select-tab! (fn [id] (win-tabs/select-tab! @*tab-ctx id))
+    :close-tab! (fn [id] (win-tabs/close-tab! @*tab-ctx id))
+    :close-tab-choice! (fn [id result] (win-tabs/close-tab-choice! @*tab-ctx id result))
+    :open-path! (fn [p]
+                  (let [{ed :ed path :path :keys [discard-warned?]} (active-tab)]
+                    (win-files/guarded-open! ed cv discard-warned?
+                                             (fn [] (win-files/open-path! ed cv path p) (win-files/update-title! ed win path)))))
+    :save-to! (fn [p] (let [{ed :ed path :path} (active-tab)]
+                        (win-files/save-to! ed cv path p) (win-files/update-title! ed win path)))}))
+
+(defn- mcp-keys
+  "The run keys the MCP server calls: its notifying Run, eval and Run
+  Selection."
+  [{:keys [active-tab cv ev* sel* status-label]}]
+  {;; Notifying hooks for the MCP server, each calls
    ;; notify once and returns an output reader.
    :mcp-run!* (fn [notify]
                 (win-run/do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
@@ -130,19 +149,27 @@
    :mcp-run-selection!* (fn [start end notify]
                           (win-run/mcp-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
                                                        :status-label status-label}
-                                                      start end notify))
+                                                      start end notify))})
+
+(defn- run-keys
+  "The ui map's run keys: Run and Stop, the MCP server's notifying runs, Run Selection, Run Form, the focus toggle and the console's two clears."
+  [{:keys [run-fn stop-fn run-selection-fn actions toggle-focus-fn clear-console-fn clear-last-fn] :as m}]
+  (merge
+   (mcp-keys m)
+   {:run!* run-fn
+    :stop!* stop-fn
    ;; Self-test hooks: the exact fns the F6/Cmd+E/Cmd+L/
    ;; zoom key chords call, so rows can drive them directly.
-   :run-selection!* run-selection-fn
+    :run-selection!* run-selection-fn
    ;; Run Form's own fn, the one Cmd/Ctrl+Enter and the menu
    ;; item call.
-   :run-form!* (:run-form! actions)
-   :toggle-focus!* toggle-focus-fn
-   :clear-console!* clear-console-fn
+    :run-form!* (:run-form! actions)
+    :toggle-focus!* toggle-focus-fn
+    :clear-console!* clear-console-fn
    ;; Cmd/Ctrl+Shift+L's own fn, the one that clears only the
    ;; last entry's block -- same self-test-hook shape as
    ;; :clear-console!* just above.
-   :clear-last-output!* clear-last-fn})
+    :clear-last-output!* clear-last-fn}))
 
 (defn- theme-keys
   "The ui map's theme and settings keys: zoom, the theme and its auto appearance poll, the code CSS, the theme chord, and the window's settings path."
@@ -252,9 +279,22 @@
      :repl-complete!* repl-complete-fn
      :repl-completion repl-completion}))
 
+(defn- source-panel-keys
+  "The source panel's keys: the panel, the right-hand slot that holds it
+  and the inspector, and the window's own F12-inside, Open in window, back
+  and close actions, exactly what the panel's own keys and buttons call."
+  [{:keys [sp slot source-jump-fn source-open-fn source-back-fn jump-back-fn source-close-fn]}]
+  {:source-pane sp
+   :right-slot slot
+   :source-jump!* source-jump-fn
+   :source-open!* source-open-fn
+   :source-back!* source-back-fn
+   :jump-back!* jump-back-fn
+   :source-close!* source-close-fn})
+
 (defn- panel-keys
   "The ui map's right-hand slot keys: the inspector and its actions, the source panel, the slot, the review and plugin panels, the parts' owners, the recent panels and panel focus, and the source panel's actions."
-  [{:keys [pane inspect-last-fn inspect-form-fn inspector-state inspector-last-args sp slot rp pending-label lp part-contribution right panel-focus-fn on-inspector-close hp source-jump-fn source-open-fn source-back-fn jump-back-fn source-close-fn]}]
+  [{:keys [pane inspect-last-fn inspect-form-fn inspector-state inspector-last-args rp pending-label lp part-contribution right panel-focus-fn on-inspector-close hp] :as m}]
    ;; The inspector panel map (make-pane's return, including
    ;; its own :on-def -- rows drive the def prompt through it
    ;; directly), the window's own Cmd/Ctrl+I and
@@ -264,37 +304,27 @@
    ;; the args of the last inspect! request this window
    ;; actually sent (row-inspect-cols-match compares a
    ;; :start's own :cols against the pane's own measure).
-  {:inspector pane
-   :inspect-last!* inspect-last-fn
-   :inspect-form!* inspect-form-fn
-   :inspector-state* (fn [] @inspector-state)
-   :inspector-last-args* (fn [] @inspector-last-args)
-   ;; The jonquil.gtk.source-pane map, the
-   ;; GtkBox holding it and the inspector in the right-hand
-   ;; slot, and the window's own F12-inside/Open-in-window/
-   ;; back/close actions -- exactly what the panel's own keys
-   ;; and buttons call.
-   :source-pane sp
-   :right-slot slot
+  (merge
+   (source-panel-keys m)
+   {:inspector pane
+    :inspect-last!* inspect-last-fn
+    :inspect-form!* inspect-form-fn
+    :inspector-state* (fn [] @inspector-state)
+    :inspector-last-args* (fn [] @inspector-last-args)
    ;; The review panel and the status bar's pending count
-   :review-pane rp
-   :pending-label pending-label
+    :review-pane rp
+    :pending-label pending-label
    ;; The plugin list
-   :plugin-list-pane lp
-   :part-owners* (fn [] (:owners part-contribution))
+    :plugin-list-pane lp
+    :part-owners* (fn [] (:owners part-contribution))
    ;; the recent panels atom, most recent first, and the
    ;; panel keys' and Switch to panel's fn
-   :recent-panels* (fn [] (:recent-panels right))
-   :panel-focus!* panel-focus-fn
+    :recent-panels* (fn [] (:recent-panels right))
+    :panel-focus!* panel-focus-fn
    ;; the inspector's own Close
-   :close-inspector!* on-inspector-close
+    :close-inspector!* on-inspector-close
    ;; The plugin history
-   :plugin-history-pane hp
-   :source-jump!* source-jump-fn
-   :source-open!* source-open-fn
-   :source-back!* source-back-fn
-   :jump-back!* jump-back-fn
-   :source-close!* source-close-fn})
+    :plugin-history-pane hp}))
 
 (defn- close-keys
   "The ui map's close keys: the close alert's choice, the quit action, the close request and its self-test flags, and the alert dialogs' self-test hooks."

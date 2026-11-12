@@ -34,6 +34,27 @@
   ;; window has changed.
   (atom (fn [{:keys [done]}] (when done (deliver done true)))))
 
+(defn- publish-reviews!
+  "Builds the pending proposals' reviews, the plugin list's rows and the
+  open history's version rows, off the GTK thread, and hands them with
+  lines to plugin-reviews-changed. A throw is said on the plugin console
+  and still delivers done. m is plugin-step!'s map. Returns nil."
+  [{:keys [settings-path open? open-list? open-history? after done]} lines]
+  (try
+    (let [dir (plugin-loader/plugins-dir settings-path)
+          reg @plugin-registry/live]
+      (@plugin-reviews-changed
+       {:reviews (plugin-review/pending-reviews {:plugins-dir dir :registry reg})
+        :rows (plugin-list/rows {:plugins-dir dir :registry reg
+                                 :disabled (:disabled (:plugins (settings/load-settings settings-path)))})
+        :history (when-let [id @plugin-history-shown]
+                   (assoc (plugin-list/version-rows dir id) :id id))
+        :open? open? :open-list? open-list? :open-history? open-history?
+        :lines lines :after after :done done}))
+    (catch :default e
+      (when done (deliver done true))
+      (@plugin-console (str "reading the plugin proposals failed: " (or (ex-message e) (str e)))))))
+
 (defn plugin-step!
   "Queues step (a no-arg fn answering console lines) on plugin-loads. Its
   lines go to the console; then, still off the GTK thread, the pending
@@ -46,25 +67,12 @@
   open history's version rows (jonquil.plugin-list/version-rows for
   plugin-history-shown, with its :id) and open-history?. Returns the
   agent, whose state is the step's lines."
-  [{:keys [settings-path step open? open-list? open-history? after done]}]
+  [{:keys [step] :as m}]
   (send-off plugin-loads
             (fn [_]
               (let [lines (step)]
                 (try (doseq [l lines] (@plugin-console l))
                      (catch :default e
                        (binding [*out* *err*] (println "jonquil: plugin console:" (ex-message e)))))
-                (try
-                  (let [dir (plugin-loader/plugins-dir settings-path)
-                        reg @plugin-registry/live]
-                    (@plugin-reviews-changed
-                     {:reviews (plugin-review/pending-reviews {:plugins-dir dir :registry reg})
-                      :rows (plugin-list/rows {:plugins-dir dir :registry reg
-                                               :disabled (:disabled (:plugins (settings/load-settings settings-path)))})
-                      :history (when-let [id @plugin-history-shown]
-                                 (assoc (plugin-list/version-rows dir id) :id id))
-                      :open? open? :open-list? open-list? :open-history? open-history?
-                      :lines lines :after after :done done}))
-                  (catch :default e
-                    (when done (deliver done true))
-                    (@plugin-console (str "reading the plugin proposals failed: " (or (ex-message e) (str e))))))
+                (publish-reviews! m lines)
                 lines))))

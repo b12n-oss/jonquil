@@ -553,6 +553,19 @@
   ;; the way of the next keystroke.
   250)
 
+(defn- flash-restorer
+  "The fn that puts the caret back where the pending flash saved it,
+  unless the selection changed meanwhile, and clears pending. Returns true
+  when a flash was actually pending. pending is make-flash-fn's atom of
+  {:caret :sel}, buf the editor's buffer."
+  [pending buf]
+  (fn []
+    (boolean
+     (when-let [{:keys [caret sel]} (first (reset-vals! pending nil))]
+       (when (= sel (g/selection-offsets buf))
+         (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+       true))))
+
 (defn make-flash-fn
   "{:flash! (fn [start end caret]) :cancel! (fn [] -> boolean)}. :flash!
   selects start..end in ed's buffer, then FLASH-MS later puts the caret
@@ -580,15 +593,10 @@
   [ed]
   (let [pending (atom nil)
         buf (:buf ed)
-        restore! (fn []
-                   (boolean
-                    (when-let [{:keys [caret sel]} (first (reset-vals! pending nil))]
-                      (when (= sel (g/selection-offsets buf))
-                        (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
-                      true)))
+        restore! (flash-restorer pending buf)
         restore-cb (callable (fn [_data]
                                (try (restore!) (catch :default _ nil))
-                                ;; G_SOURCE_REMOVE: a one-shot timeout.
+                               ;; G_SOURCE_REMOVE: a one-shot timeout.
                                0)
                              [:pointer] :int)]
     {:flash! (fn [start end caret]
@@ -663,8 +671,9 @@
   view it will act on exists, so it takes an atom and derefs it lazily, at
   call time -- by then jonquil.gtk.window.console's build has reset! it to
   the real cv (the only forward reference; every other closure in
-  activate! is built after its pieces already exist)."
-  [tab-fn *cv ev* status-label bang*]
+  activate! is built after its pieces already exist). The arg is
+  {:tab-fn :*cv :ev* :status-label :bang*}."
+  [{:keys [tab-fn *cv ev* status-label bang*]}]
   (fn [{:keys [action text]}]
     (case action
       ;; LM1: a line starting with ! runs a palette command (@bang*)

@@ -52,7 +52,7 @@
   ever shows). on-error (opts) is the window's own (fn [msg] ->
   set-status!) -- handle-key!'s own try/catch (below) is the only caller.
 
-  handle-key! wraps its whole cond in try/catch and still returns 1 on a
+  handle-key! wraps its whole key dispatch in try/catch and still returns 1 on a
   throw from move!/commit!/close! -- editor.clj's own handle-key! only
   falls through to plain-return?/Tab-indent when the completion delegate
   returns 0, so an uncaught throw here would fall through into a SECOND,
@@ -132,6 +132,26 @@
 
 (defn- loading-text [sym] (str "Loading docs for " sym "..."))
 
+(defn- build-widgets!
+  "Builds and sizes the popover's contents: the candidate list-box inside
+  its scrolled window over the doc preview. Returns {:box :list-box
+  :doc-label}, :box being the vertical box to set as the popover's child."
+  []
+  (let [list-box (g/gtk-list-box-new)
+        list-scroll (g/gtk-scrolled-window-new)
+        {doc-label :label doc-scroll :scroll} (popover/make-doc-scroll DOC-WIDTH DOC-HEIGHT)
+        box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)]
+    (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
+    ;; Sized to its rows up to LIST-HEIGHT (eight rows), scrolling beyond,
+    ;; so two candidates don't leave a six-row gap above the doc preview.
+    (g/gtk-widget-set-size-request list-scroll LIST-WIDTH -1)
+    (g/gtk-scrolled-window-set-propagate-natural-height list-scroll 1)
+    (g/gtk-scrolled-window-set-max-content-height list-scroll LIST-HEIGHT)
+    (g/gtk-scrolled-window-set-child list-scroll list-box)
+    (g/gtk-box-append box list-scroll)
+    (g/gtk-box-append box doc-scroll)
+    {:box box :list-box list-box :doc-label doc-label}))
+
 (defn make-completion
   "Builds the completion popover on view (the editor's or the console's
   GtkTextView): autohide off, position given by opts (:bottom default),
@@ -167,20 +187,8 @@
               doc-fn (fn [sym text pos] (docs/symbol-doc (ns-fn) sym text pos))}}]
   (let [snapshot-fn (or snapshot-fn (fn [] (editor/snapshot ed)))
         apply-op! (or apply-op! (fn [result] (editor/apply-op! ed result)))
-        list-box (g/gtk-list-box-new)
-        list-scroll (g/gtk-scrolled-window-new)
-        {doc-label :label doc-scroll :scroll} (popover/make-doc-scroll DOC-WIDTH DOC-HEIGHT)
-        box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+        {:keys [box list-box doc-label]} (build-widgets!)
         pp (popover/make-popover view {:autohide? false :position position})]
-    (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
-    ;; Sized to its rows up to LIST-HEIGHT (eight rows), scrolling beyond,
-    ;; so two candidates don't leave a six-row gap above the doc preview.
-    (g/gtk-widget-set-size-request list-scroll LIST-WIDTH -1)
-    (g/gtk-scrolled-window-set-propagate-natural-height list-scroll 1)
-    (g/gtk-scrolled-window-set-max-content-height list-scroll LIST-HEIGHT)
-    (g/gtk-scrolled-window-set-child list-scroll list-box)
-    (g/gtk-box-append box list-scroll)
-    (g/gtk-box-append box doc-scroll)
     (popover/set-child! pp box)
     (assoc pp
            :ed ed
@@ -231,8 +239,8 @@
 (defn- doc-arrived!
   "A late doc-preview answer, on the GTK thread: shown only while it's
   still the newest doc request and sym is still the selected name of an
-  open popup."
-  [c e token sym doc]
+  open popup. answer is {:e :token :sym :doc}."
+  [c {:keys [e token sym doc]}]
   (try
     (when (and (current? c :doc-gen token e)
                (= sym (:symbol (help/selected (state c)))))
@@ -252,7 +260,7 @@
       ;; current one.
       (let [[k doc] (ev/ask-help! ev/help-grace-ms
                                   (fn [] (when (= token @(:doc-gen c)) (ev/lookup e sym text pos)))
-                                  (fn [doc] (on-gui! (fn [] (doc-arrived! c e token sym doc)))))]
+                                  (fn [doc] (on-gui! (fn [] (doc-arrived! c {:e e :token token :sym sym :doc doc})))))]
         (if (= k :now) (doc-label-text sym doc) (loading-text sym)))
       (help/doc-text sym ((:doc-fn c) sym text pos)))))
 
@@ -346,8 +354,9 @@
   (help/arrive, the selected name kept) only while it's still the newest
   request, the popup is still open and the text and caret are snapshot's.
   An answer with no names closes the popup; nil (the request threw) keeps
-  what's showing, unless that's nothing."
-  [c e token snapshot cands]
+  what's showing, unless that's nothing. answer is {:e :token :snapshot
+  :cands}."
+  [c {:keys [e token snapshot cands]}]
   (try
     (when (and (current? c :gen token e)
                (same-snapshot? snapshot ((:snapshot-fn c))))
@@ -370,7 +379,7 @@
                                 ;; skipped when superseded before it went out
                                 (fn [] (when (= token @(:gen c))
                                          (ev/complete e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot))))
-                                (fn [cands] (on-gui! (fn [] (arrived! c e token snapshot cands)))))]
+                                (fn [cands] (on-gui! (fn [] (arrived! c {:e e :token token :snapshot snapshot :cands cands})))))]
     (if (= k :now)
       [:now (offline-on-error c (offline) cands)]
       [:later])))
@@ -422,6 +431,21 @@
   [state-mask]
   (not (zero? (bit-and state-mask (bit-or g/CONTROL-MASK g/META-MASK g/ALT-MASK)))))
 
+;; Keys that move the selection, by how far (PageUp/PageDown by PAGE-STEP).
+(def ^:private move-deltas
+  {KEY-UP -1, KEY-DOWN 1, KEY-PAGE-UP (- PAGE-STEP), KEY-PAGE-DOWN PAGE-STEP})
+
+(def ^:private commit-keys #{KEY-RETURN KEY-KP-ENTER KEY-TAB})
+
+(defn- run-key!
+  "Runs the completion action for keyval (a move or a commit) and returns 1,
+  or returns 0 for any other key."
+  [c keyval]
+  (cond
+    (contains? move-deltas keyval) (do (move! c (move-deltas keyval)) 1)
+    (contains? commit-keys keyval) (do (commit! c) 1)
+    :else 0))
+
 (defn handle-key!
   "The navigation/commit keys, while c's popup is open (gated on (state
   c), see the ns docstring) and none of Control/Meta/Alt is held
@@ -433,7 +457,7 @@
   (typing continues).
 
   Once state c is non-nil (this key IS one completion owns), the whole
-  cond runs inside try/catch and still returns 1 on a throw from move!/
+  dispatch runs inside try/catch and still returns 1 on a throw from move!/
   commit!/close! -- reporting it through on-error rather than letting it
   escape to editor.clj's own dispatch, which would otherwise treat the
   key as unhandled and fall through into a second, unrelated edit -- see
@@ -442,13 +466,7 @@
   (if (or (not (state c)) (empty? (:candidates (state c))) (nav-modifier-held? state-mask))
     0
     (try
-      (cond
-        (= keyval KEY-UP) (do (move! c -1) 1)
-        (= keyval KEY-DOWN) (do (move! c 1) 1)
-        (= keyval KEY-PAGE-UP) (do (move! c (- PAGE-STEP)) 1)
-        (= keyval KEY-PAGE-DOWN) (do (move! c PAGE-STEP) 1)
-        (or (= keyval KEY-RETURN) (= keyval KEY-KP-ENTER) (= keyval KEY-TAB)) (do (commit! c) 1)
-        :else 0)
+      (run-key! c keyval)
       (catch :default e
         ((:on-error c) (str "; complete: " (ex-message e)))
         1))))

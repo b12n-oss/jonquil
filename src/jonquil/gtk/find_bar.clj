@@ -378,6 +378,17 @@
       (and (command-chord? state) (= keyval KEY-G)) (do (find-next! fb) 1)
       :else 0)))
 
+(defn- handle-return!
+  "Return inside the open bar: 0 on a focused Replace or Replace All button
+  (GTK presses it), a replace in the replacement entry, else previous match
+  with Shift held and next match without. Returns 1 when it acted."
+  [fb state]
+  (cond
+    (button-focused? fb) 0
+    (replacement-focused? fb) (do (replace-one! fb) 1)
+    (shift-held? state) (do (find-prev! fb) 1)
+    :else (do (find-next! fb) 1)))
+
 (defn handle-key!
   "Keys inside the bar, wired to its own capture-phase key controller: 1
   when handled, 0 otherwise -- always 0 while the bar is closed, and
@@ -393,19 +404,9 @@
     (cond
       @(:preedit-active? fb) 0
       (not (open? fb)) 0
-      :else
-      (cond
-        (= keyval KEY-ESCAPE) (do (close! fb) 1)
-
-        (and (= keyval KEY-RETURN) (button-focused? fb)) 0
-
-        (and (= keyval KEY-RETURN) (replacement-focused? fb))
-        (do (replace-one! fb) 1)
-
-        (and (= keyval KEY-RETURN) (shift-held? state)) (do (find-prev! fb) 1)
-        (= keyval KEY-RETURN) (do (find-next! fb) 1)
-
-        :else (handle-nav-key! fb keyval0 state)))))
+      (= keyval KEY-ESCAPE) (do (close! fb) 1)
+      (= keyval KEY-RETURN) (handle-return! fb state)
+      :else (handle-nav-key! fb keyval0 state))))
 
 ;; --- construction ----------------------------------------------------------
 
@@ -507,6 +508,27 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   (g/gtk-widget-add-controller box keyctl))
 
+(defn- new-find-bar
+  "The find bar map over ed with its widgets created, not yet laid out, and
+  the match tag tag."
+  [ed tag]
+  (let [replacement (g/gtk-entry-new)
+        replace-btn (g/gtk-button-new-with-label "Replace")
+        replace-all-btn (g/gtk-button-new-with-label "Replace All")]
+    {:box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
+     :query (g/gtk-search-entry-new)
+     :replacement replacement
+     :replace-btn replace-btn :replace-all-btn replace-all-btn
+     :replace-widgets [replacement replace-btn replace-all-btn]
+     :count-label (g/gtk-label-new "")
+     :ed ed :tag tag :matches (atom [])
+     ;; the match this bar last selected (select-match!)
+     :current (atom nil)
+     :selecting? (atom false)
+     :preedit-active? (atom false)
+     :replacing? (atom false)
+     :on-error-fn (atom nil)}))
+
 (defn make-find-bar
   "Builds the find-and-replace bar over ed (a jonquil.gtk.editor map).
   Returns {:box :query :replacement :replace-btn :replace-all-btn
@@ -514,26 +536,10 @@
   hidden until open! is called. Every handler it connects runs through
   contained, so a throw is reported (set-error-fn!) instead of escaping."
   [ed]
-  (let [box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        query (g/gtk-search-entry-new)
-        replacement (g/gtk-entry-new)
-        replace-btn (g/gtk-button-new-with-label "Replace")
-        replace-all-btn (g/gtk-button-new-with-label "Replace All")
-        count-label (g/gtk-label-new "")
-        table (g/gtk-text-buffer-get-tag-table (:buf ed))
+  (let [table (g/gtk-text-buffer-get-tag-table (:buf ed))
         tag (g/gtk-text-tag-new "search-match")
         keyctl (g/gtk-event-controller-key-new)
-        fb {:box box :query query :replacement replacement
-            :replace-btn replace-btn :replace-all-btn replace-all-btn
-            :replace-widgets [replacement replace-btn replace-all-btn]
-            :count-label count-label
-            :ed ed :tag tag :matches (atom [])
-            ;; the match this bar last selected (select-match!)
-            :current (atom nil)
-            :selecting? (atom false)
-            :preedit-active? (atom false)
-            :replacing? (atom false)
-            :on-error-fn (atom nil)}]
+        fb (new-find-bar ed tag)]
     (style-match-tag! tag table)
     (pack-bar! fb)
     (connect-edits! fb)
