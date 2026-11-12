@@ -182,6 +182,17 @@
 
 (defn- file-name [f] (last (str/split f #"/")))
 
+(defn- frame-rows
+  "Frame i's :frame row (its fn and file:line, or its line and \"(no
+  file)\") and a :local row per local."
+  [i {f :fn :keys [file line locals]}]
+  (cons {:kind :frame :frame i
+         :text (str f "  " (if file
+                             (str (file-name file) (when line (str ":" line)))
+                             (str (when line (str "line " line " ")) "(no file)")))}
+        (for [{:keys [name text]} locals]
+          {:kind :local :frame i :name name :text (str "    " name " = " text)})))
+
 (defn rows
   "The panel's rows for data: a :frame row per frame (its fn and file:line;
   code typed at the prompt or run from an unsaved buffer has no file, so
@@ -192,14 +203,7 @@
     note [{:kind :note :text note}]
     (empty? frames) [{:kind :note :text "No frames: the error came from code compiled without them."}]
     :else
-    (vec (mapcat (fn [i {f :fn :keys [file line locals]}]
-                   (cons {:kind :frame :frame i
-                          :text (str f "  " (if file
-                                              (str (file-name file) (when line (str ":" line)))
-                                              (str (when line (str "line " line " ")) "(no file)")))}
-                         (for [{:keys [name text]} locals]
-                           {:kind :local :frame i :name name :text (str "    " name " = " text)})))
-                 (range) frames))))
+    (vec (mapcat frame-rows (range) frames))))
 
 (def STALE
   "What a panel showing an older error gets when it asks for a local or
@@ -359,6 +363,15 @@
         (try (reply {:error NOT-PAUSED}) (catch Throwable _ nil)))
       (recur))))
 
+(defn- serve-eval!
+  "Answers one {:eval [i code reply]} request, evaluated on this thread with
+  frame i's locals bound; other requests are ignored."
+  [m t frames]
+  (when-let [[i code reply] (:eval m)]
+    (let [r (try (eval-in-frame t i code {:frames-fn (fn [_] frames)})
+                 (catch Throwable e {:error (title e)}))]
+      (try (reply r) (catch Throwable _ nil)))))
+
 (defn- serve!
   "The paused thread's loop: each {:eval [i code reply]} is evaluated here,
   on the throwing thread, with frame i's locals bound, until :continue.
@@ -369,10 +382,7 @@
     (let [m (.take q)]
       (when (= ::stop m) (throw (InterruptedException. "Stopped while paused.")))
       (when-not (= :continue m)
-        (when-let [[i code reply] (:eval m)]
-          (let [r (try (eval-in-frame t i code {:frames-fn (fn [_] frames)})
-                       (catch Throwable e {:error (title e)}))]
-            (try (reply r) (catch Throwable _ nil))))
+        (serve-eval! m t frames)
         (recur)))))
 
 (defn- serve-pause

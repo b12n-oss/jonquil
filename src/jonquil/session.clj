@@ -435,6 +435,39 @@
           :when (and (:line m) (nil? (:file m)) (not= m (get before v)))]
     (try (alter-meta! v assoc :file file) (catch Throwable _ nil))))
 
+(defn- prepare-run!
+  "What a Run does before it starts, when nothing is running (a running
+  evaluation refuses it, and its state is left alone)."
+  [{:keys [state] :as session} owner opts]
+  ;; A Run of a file in a project uses that project's source folders and
+  ;; dependencies (evaluate!'s :before-eval), and so do the REPL entries
+  ;; after it: a window keeps one in-process evaluator when it opens a
+  ;; file from another in-process project (selection-key leaves the
+  ;; project out), so make's own project isn't enough. A loose file leaves
+  ;; them as they are.
+  (when-let [dir (some-> (:path opts) dialect/find-project :dir)]
+    (swap! state assoc :project-dir dir))
+  (when (and (= :reset (:mode @state)) (not (false? (:reset? opts))))
+    (reset-namespaces! session owner))
+  ;; LM4: a Run counts its own lines alone. Cleared here, before the
+  ;; worker starts, so it can't race the Run
+  (when (:clear-line-counts? opts)
+    (line-counts/clear!)))
+
+(defn- run-opts
+  "A Run's opts for evaluate!. A Jolt whose eval-string takes a source
+  path evaluates the text as the file, so its vars get it from the reader.
+  Elsewhere they're marked in before-idle, on the Run's own worker before
+  the context goes idle, so a REPL entry or another Run can't define a var
+  in between and get this file."
+  [ctx code opts]
+  (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
+        before (when (and file (not (eval/source-path?))) (program-vars))]
+    (cond-> opts
+      file (assoc :source-path file)
+      before (assoc :before-idle
+                    (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))))
+
 (defn run-definitions!
   "Runs the Definitions text. In :reset mode, first removes what earlier
   evaluations created. Returns nil when started, or the engine's warning
@@ -443,37 +476,11 @@
   it as their :file (eval-string's source path, or mark-run-file! on a Jolt
   without one), so jump to definition from another tab can open it."
   ([session code] (run-definitions! session code {}))
-  ([{:keys [ctx state] :as session} code opts]
+  ([{:keys [ctx] :as session} code opts]
    (let [owner (:owner opts :run)]
-     ;; A Run of a file in a project uses that project's source folders and
-     ;; dependencies (evaluate!'s :before-eval), and so do the REPL entries
-     ;; after it: a window keeps one in-process evaluator when it opens a
-     ;; file from another in-process project (selection-key leaves the
-     ;; project out), so make's own project isn't enough. A loose file leaves them as they are.
-     (when-let [dir (and (not (eval/evaluating? ctx))
-                         (some-> (:path opts) dialect/find-project :dir))]
-       (swap! state assoc :project-dir dir))
-     (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state))
-                (not (false? (:reset? opts))))
-       (reset-namespaces! session owner))
+     (when-not (eval/evaluating? ctx) (prepare-run! session owner opts))
      (create-ns 'user)
-     ;; A Jolt whose eval-string takes a source path evaluates the text as
-     ;; the file, so its vars get it from the reader. Elsewhere they're
-     ;; marked in before-idle, on the Run's own worker before the context
-     ;; goes idle, so a REPL entry or another Run can't define a var in
-     ;; between and get this file.
-     ;; LM4: a Run counts its own lines alone. Cleared here, before the
-     ;; worker starts, so it can't race the Run (an evaluation already
-     ;; running is refused below, and its counts are left alone)
-     (when (and (:clear-line-counts? opts) (not (eval/evaluating? ctx)))
-       (line-counts/clear!))
-     (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
-           before (when (and file (not (eval/source-path?))) (program-vars))
-           opts (cond-> (assoc opts :owner owner)
-                  file (assoc :source-path file)
-                  before (assoc :before-idle
-                                (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))]
-       (evaluate! session code 'user opts)))))
+     (evaluate! session code 'user (run-opts ctx code (assoc opts :owner owner))))))
 
 (defn quiet-eval!
   "eval!'s :quiet path: code in the namespace of :ns-source's

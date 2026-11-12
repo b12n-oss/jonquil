@@ -202,23 +202,34 @@
     (or (not= (count ps) (count fs))
         (not= (map indent-width ps) (map indent-width fs)))))
 
+(defn- paren-reindent
+  "Paren mode's text for P when it changes some line's indentation, else
+  nil."
+  [P]
+  (let [pr (parinfer/paren-mode P)]
+    (when (and (:success pr) (reindents? P (:text pr))) (:text pr))))
+
+(defn- kept-rebase
+  "A rebased result r worth keeping: a success, or an \"unhandled\" error
+  (so the shim gap is named). nil otherwise, or for nil."
+  [r]
+  (when (and r (or (:success r) (= "unhandled" (get-in r [:error :name])))) r))
+
 (defn- run-mode
-  "Parinfer's result for the edited form R. P is the form before the edit.
-  prev-consistent? skips the re-indent probe: the editor only sets it
+  "Parinfer's result for the edited form R, from a map of :mode, :P, :R,
+  :change, :rel-caret, :opts and :prev-consistent?. P is the form before
+  the edit. prev-consistent? skips the re-indent probe: the editor only sets it
   when P is the form its own previous action produced, which Paren mode
   cannot want to change."
-  [mode P R change rel-caret opts prev-consistent?]
+  [{:keys [mode P R change rel-caret opts prev-consistent?]}]
   (if (= mode :paren)
     (parinfer/paren-mode R opts)
-    (let [mode-fn (if (= mode :indent) parinfer/indent-mode parinfer/smart-mode)
-          pr (when-not prev-consistent? (parinfer/paren-mode P))
-          fixed (when (and pr (:success pr) (reindents? P (:text pr))) (:text pr))]
-      (if fixed
+    (let [mode-fn (if (= mode :indent) parinfer/indent-mode parinfer/smart-mode)]
+      (if-let [fixed (when-not prev-consistent? (paren-reindent P))]
         ;; A refused re-apply is nil, so the Paren fallback really runs; an
         ;; "unhandled" one is kept, so the shim gap is named instead of
         ;; silently taking Paren mode's fix.
-        (or (when-let [r (rebased mode-fn P fixed change rel-caret)]
-              (when (or (:success r) (= "unhandled" (get-in r [:error :name]))) r))
+        (or (kept-rebase (rebased mode-fn P fixed change rel-caret))
             (parinfer/paren-mode R opts))
         (mode-fn R (assoc opts :changes [change]))))))
 
@@ -288,6 +299,31 @@
                                   (tokens-kept? %1 %2))
                             ps qs)))))
 
+(defn- top-level-spans
+  "The line spans of text's top-level bracket forms, in order, with forms
+  that share a line merged, the way region reads them."
+  [text bracket-tokens matches]
+  (reduce (fn [acc [s e]]
+            (let [[ps pend] (peek acc)]
+              (if (and ps (<= s pend))
+                (conj (pop acc) [ps (max pend e)])
+                (conj acc [s e]))))
+          []
+          (sort (for [[o _ depth kind] bracket-tokens
+                      :when (and (zero? depth) (= kind :open))]
+                  [(line-start text o) (line-end text (get matches o))]))))
+
+(defn- paren-stable-form
+  "form as Paren mode reads it, when that changes only spaces and tabs;
+  else form as given."
+  [form]
+  (let [r (parinfer/paren-mode form)]
+    (if (and (:success r) (string? (:text r))
+             (not= (:text r) form)
+             (whitespace-only? form (:text r)))
+      (:text r)
+      form)))
+
 (defn paren-stable
   "text with every top-level form the character range [a b] touches
   re-indented the way Paren mode reads it, so the first keystroke in a
@@ -305,29 +341,13 @@
    (let [{:keys [bracket-tokens matches unmatched]} (syntax/compute-brackets-equal text)]
      (if (seq unmatched)
        text
-       (let [spans (sort (for [[o _ depth kind] bracket-tokens
-                               :when (and (zero? depth) (= kind :open))]
-                           [(line-start text o) (line-end text (get matches o))]))
-             ;; forms sharing a line merge, the way region reads them
-             spans (reduce (fn [acc [s e]]
-                             (let [[ps pend] (peek acc)]
-                               (if (and ps (<= s pend))
-                                 (conj (pop acc) [ps (max pend e)])
-                                 (conj acc [s e]))))
-                           [] spans)]
-         (loop [pieces [] pos 0 spans (seq spans)]
-           (if-not spans
-             (apply str (conj pieces (subs text pos)))
-             (let [[s e] (first spans)
-                   form (subs text s e)
-                   r (when (and (< s b) (< a e))
-                       (parinfer/paren-mode form))
-                   fixed (when (and (:success r) (string? (:text r))
-                                    (not= (:text r) form)
-                                    (whitespace-only? form (:text r)))
-                           (:text r))]
-               (recur (conj pieces (subs text pos s) (or fixed form))
-                      e (next spans))))))))))
+       (loop [pieces [] pos 0 spans (seq (top-level-spans text bracket-tokens matches))]
+         (if-not spans
+           (apply str (conj pieces (subs text pos)))
+           (let [[s e] (first spans)
+                 form (subs text s e)]
+             (recur (conj pieces (subs text pos s) (if (and (< s b) (< a e)) (paren-stable-form form) form))
+                    e (next spans)))))))))
 
 (defn- caret-opts
   "Parinfer's cursor options for the caret inside the region: its place in R
@@ -372,7 +392,8 @@
         ctx (assoc ctx :e' e' :P P :R R)
         caret-in? (<= s caret e')
         opts (if caret-in? (caret-opts ctx caret) {})
-        result (run-mode mode P R (change-of ctx) (- caret s) opts prev-consistent?)
+        result (run-mode {:mode mode :P P :R R :change (change-of ctx) :rel-caret (- caret s) :opts opts
+                          :prev-consistent? prev-consistent?})
         NR (:text result)]
     (cond
       (and (:success result) (string? NR) (not= NR R))
