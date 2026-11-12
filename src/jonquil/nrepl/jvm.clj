@@ -626,7 +626,7 @@
           (not (lookup-op ops)) (cljd/no-docs sym clj/no-lookup-doc)
           :else
           (let [res (resolve-lookup! {:conn conn :session session :op (lookup-op ops) :sym sym :text text
-                                          :prompt-ns prompt-ns :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
+                                      :prompt-ns prompt-ns :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
             (case (:status res)
               :timeout (cljd/no-docs sym clj/lookup-timeout-doc)
               :not-attached (cljd/no-docs sym clj/not-attached-doc)
