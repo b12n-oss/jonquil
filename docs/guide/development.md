@@ -335,8 +335,12 @@ port.
   clj-kondo errors.
 - `jolt metrics` runs [jolt-metrics](https://github.com/jlt-commons/jolt-metrics)
   over the repo and prints its Markdown report: a refactoring queue worst
-  first, git hotspots, unused requires and functions nothing mentions, then
-  per-file numbers and coupling. `jolt metrics:edn` gives every finding as
+  first, git hotspots, unusual commits and files, unused requires and
+  functions nothing mentions, then per-file numbers and coupling. The queue
+  weighs each function by its reach, how many functions depend on it at any
+  distance (from jolt-lsp's call graph), so a complex function the rest of
+  the code goes through ranks first; the EDN and JSON reports also carry each
+  function's fan-in and fan-out. `jolt metrics:edn` gives every finding as
   data, `jolt metrics:json` a lean JSON report for tools, and `jolt
   metrics:html` one self-contained page (`target/metrics.html` unless a
   file comes first). Extra arguments go to its CLI (an output file, whose
@@ -344,7 +348,8 @@ port.
   does. `.jolt-metrics.edn` at the root counts `test` and `dev` as test code
   (measured, never queued) and leaves out build output, clj-kondo's cache,
   the smoke fixtures and `docs`. Upstream-lifted code (`src/jonquil/syntax.clj`,
-  `src/jonquil/parinfer.clj` and `test/jonquil/upstream/`) is left out too,
+  `src/jonquil/parinfer.clj`, `src/jonquil/inspect/view.clj` and
+  `test/jonquil/upstream/`) is left out too,
   since it follows DrClojure's source and is tracked in `UPSTREAM.md`. The
   `:metrics` alias pins the library's version.
 - `jolt lsp:format` / `jolt lsp:format-check` and `jolt lsp:clean-ns` /
