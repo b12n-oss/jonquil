@@ -12,7 +12,6 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
-            [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
@@ -311,7 +310,7 @@
                          (when code (editor/set-text! (:ed t) code))
                          ((:run!* ui))
                          m))
-          ok (await-until deadline-ms 20 #(and (not (ev/evaluating? ((:evaluator* ui))))
+          ok (await-until deadline-ms 20 #(and (support/idle? ui)
                                                (expect-fn (support/since ui mark))))]
       [ok mark])))
 
@@ -532,7 +531,7 @@
                          ((:run!* ui))
                          m))
           _ (on-gtk (editor/mark-saved! (:ed t2)) ((:close-tab! ui) (:id t2)))
-          done (await-until 5000 20 #(and (not (ev/evaluating? ((:evaluator* ui))))
+          done (await-until 5000 20 #(and (support/idle? ui)
                                           (str/includes? (support/since ui mark) "EOF")))]
       (on-gtk (let [out (support/since ui mark)]
                 (support/check :tab-close-while-running-eof

@@ -9,6 +9,7 @@
   (:require [gtk-async :refer [await-until on-gtk]]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.theme :as theme]
@@ -37,7 +38,22 @@
 
 (defn console-text [ui] (g/buffer-text (:buf (:console ui))))
 
-(defn idle? [ui] (not (eval/evaluating? (:ctx (:session ui)))))
+(defn idle?
+  "True once the session has nothing running, every run's on-complete has
+  returned (the session goes idle just before it, so evaluating? alone can
+  be false while a result line is still to come), and the console has
+  drained what on-complete queued. A row that waits on idle? and then reads
+  the console sees the run's result line."
+  [ui]
+  ;; the window's live evaluator, not the session the window started with:
+  ;; the tabs rows switch dialects and back, which leaves a new in-process
+  ;; evaluator. An in-process one (it has a :ctx) is asked settled?; any
+  ;; other only whether it's evaluating.
+  (let [cv (:console ui)
+        e ((:evaluator* ui))]
+    (and (if-let [ctx (:ctx e)] (eval/settled? ctx) (not (ev/evaluating? e)))
+         (empty? @(:queue cv))
+         (not @(:drain-scheduled? cv)))))
 
 (defn- mark-offset
   "mark's current character offset in buf -- console-view keeps its marks
