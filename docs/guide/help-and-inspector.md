@@ -250,8 +250,10 @@ dispatch value tells its methods apart, and just `comment` for a comment
 block), and by its place among forms that share them, so a second
 `(comment ...)` block matches the second one there. The list's title names
 the form, with its place when it isn't the first, Take works the same way,
-and a version with no such form says so on the status bar. Typing "this
-form" in the palette finds the three.
+and a version with no such form says so on the status bar. Adding or
+removing a form that starts the same way, above or below it, moves its
+place, so Take then asks you to compare again rather than guess. Typing
+"this form" in the palette finds the three.
 
 ### Freeing Ctrl+Space on macOS
 
