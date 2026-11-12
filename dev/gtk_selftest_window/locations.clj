@@ -319,6 +319,54 @@
                ((:close-tab! ui) (:id t)))
              ((:select-tab! ui) (:id (first ((:tabs* ui))))))))))))
 
+(defn row-find-usages-resolved
+  "With the caret on a/join where a is demo.a's alias, Find Usages in
+  Project lists only demo.a/join's own uses: its def and the a/join call,
+  not str/join, and not c.clj's join brought in by :use, which the file
+  can't decide. The title names the var, and a second row offers Other
+  vars (1) and Unresolved (1); ticking Unresolved adds c.clj's call, marked
+  as such. The tree's root, the tabs and the panel are put back after."
+  [ui]
+  (go-row :find-usages-resolved support/check
+    (let [root (fn [] (:root @(:state (:file-tree ui))))
+          original (on-gtk (root))
+          d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-usages-resolved-")))
+          ns-b "(ns demo.b (:require [demo.a :as a] [clojure.string :as str]))\n"
+          _ (spit (io/file d "a.clj") "(ns demo.a)\n(defn join [x] x)\n")
+          _ (spit (io/file d "b.clj") (str ns-b "(a/join 1)\n(str/join [2])\n"))
+          _ (spit (io/file d "c.clj") "(ns demo.c (:use demo.a))\n(join 3)\n")
+          pane (:locations-pane ui)]
+      (on-gtk ((:simulate-folder-result! ui) {:path d})
+              (editor/set-text! (:editor ui) (str ns-b "(a/join 9)"))
+              (support/place-cursor! (:buf (:editor ui)) (+ (count ns-b) 3))
+              (run-palette! ui "find usages in project"))
+      (let [_ (await-until 5000 20 #(= 2 (count (lpane/row-texts pane))))
+            rows (on-gtk (lpane/row-texts pane))
+            title (on-gtk (lpane/title-text pane))
+            match-row? (on-gtk (lpane/match-filter-shown? pane))
+            labels (on-gtk (lpane/match-labels-text pane))
+            with-unresolved (on-gtk (lpane/set-ticked! pane (conj (lpane/ticked pane) :unresolved))
+                                    (lpane/row-texts pane))]
+        (on-gtk
+         (try
+           (support/check :find-usages-resolved
+                          (and (= ["a.clj:2: def: (defn join [x] x)" "b.clj:2: call: (a/join 1)"] rows)
+                               (= "Usages of demo.a/join (2 in 2 files)" title)
+                               match-row?
+                               (= ["Other vars (1)" "Unresolved (1)"] labels)
+                               (= ["a.clj:2: def: (defn join [x] x)" "b.clj:2: call: (a/join 1)"
+                                   "c.clj:2: call, unresolved: (join 3)"]
+                                  with-unresolved))
+                          {:rows rows :title title :match-row match-row? :labels labels
+                           :with-unresolved with-unresolved})
+           (finally
+             (close-panel! ui)
+             ((:simulate-folder-result! ui) {:path original})
+             (doseq [t (rest ((:tabs* ui)))]
+               (editor/mark-saved! (:ed t))
+               ((:close-tab! ui) (:id t)))
+             ((:select-tab! ui) (:id (first ((:tabs* ui))))))))))))
+
 (defn row-find-usages-stale-file
   "A file that changed on disk after the search isn't anchored at offsets
   read from its old text: F8 opens it and says it changed, and selects

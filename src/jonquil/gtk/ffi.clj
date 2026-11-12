@@ -423,6 +423,8 @@
 (ffi/defcfn gtk-check-button-new-with-label "gtk_check_button_new_with_label" [:string] :pointer)
 (ffi/defcfn gtk-check-button-get-active "gtk_check_button_get_active" [:pointer] :int)
 (ffi/defcfn gtk-check-button-set-active "gtk_check_button_set_active" [:pointer :int] :void)
+(ffi/defcfn gtk-check-button-set-label "gtk_check_button_set_label" [:pointer :string] :void)
+(ffi/defcfn gtk-check-button-get-label "gtk_check_button_get_label" [:pointer] :pointer)
 ;; g_signal_emit_by_name (gsignal.h) is variadic; bound with no trailing
 ;; arguments, it emits a signal that takes none and returns nothing, such
 ;; as a GtkButton's "clicked", synchronously. (gtk_widget_activate on a
@@ -443,6 +445,12 @@
 (ffi/defcfn gtk-label-get-text "gtk_label_get_text" [:pointer] :pointer)
 (ffi/defcfn gtk-window-get-title "gtk_window_get_title" [:pointer] :pointer)
 (ffi/defcfn gtk-window-close "gtk_window_close" [:pointer] :void)
+
+(defn check-button-label
+  "A check button's label. gtk_check_button_get_label returns a borrowed
+  const char*, so no g_free."
+  [btn]
+  (ffi/ptr->string (gtk-check-button-get-label btn)))
 
 (defn label-text
   "label's text. gtk_label_get_text returns a borrowed const char* (unlike

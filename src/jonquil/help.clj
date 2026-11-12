@@ -467,7 +467,7 @@
         true)
       true)))
 
-(defn- local-binding
+(defn local-binding
   "The innermost binding of sym-name in scope at pos, as {:symbol :start
   :end}, or nil. Walks '(' forms enclosing pos outward; the first ancestor
   with a match wins, and within that ancestor's own name list the LAST

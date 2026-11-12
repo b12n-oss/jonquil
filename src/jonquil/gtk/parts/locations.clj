@@ -13,6 +13,7 @@
             [jonquil.gtk.locations-pane :as locations-pane]
             [jonquil.help :as help]
             [jonquil.locations :as loc]
+            [jonquil.resolve :as resolve]
             [jonquil.source :as source]
             [jonquil.usages :as usages]))
 
@@ -195,29 +196,43 @@
         (set-status! (str "; Find usages: " (or (ex-message e) (str e))))))))
 
 (defn- scan-usages!
-  "Scans on a future, landing the answer on the GUI thread."
-  [{:keys [gen set-status!] :as ctx} root name]
+  "Scans on a future, landing the answer on the GUI thread. opts is {:root
+  :name :target :features}, as usages/scan takes them."
+  [{:keys [gen set-status!] :as ctx} {:keys [root name] :as opts}]
   (let [gen-at (swap! gen inc)
         texts (open-texts ctx)]
     (set-status! (str "; Finding usages of " name "..."))
     (future
-      (let [r (try (usages/scan {:root root :name name :texts texts})
+      (let [r (try (usages/scan (assoc opts :texts texts))
                    (catch :default e {:error (or (ex-message e) (str e))}))]
         (on-gui! (fn [] (land-usages! ctx {:gen-at gen-at :r r :root root :name name})))))))
 
+(defn- caret-target
+  "The resolution of the symbol at the active tab's caret (resolve/resolve-at,
+  read with features), or nil when there's no symbol."
+  [{:keys [active-tab]} features]
+  (let [t (active-tab)
+        snap (editor/snapshot (:ed t))]
+    (when-let [{:keys [symbol start]} (help/target snap)]
+      (let [fs (resolve/features-for (or @(:path t) "") features)]
+        (resolve/resolve-at (resolve/file-context (:text snap) fs) start symbol)))))
+
 ;; Find Usages in Project (LM2): jonquil.usages/scan on a future,
 ;; open tabs' text in place of their files'; a newer search
-;; supersedes one still running
+;; supersedes one still running. The symbol at the caret is resolved
+;; first, so the list starts at that var's own uses
 (defn- project-usages!
-  [{:keys [tree-pane active-tab set-status!] :as ctx}]
+  [{:keys [tree-pane active-tab set-status! sel*] :as ctx}]
   (let [[_ sym] (symbol-at-caret ctx)
         t (active-tab)
         root (or (:root @(:state tree-pane))
-                 (some-> @(:path t) (java.io.File.) .getCanonicalFile .getParent))]
+                 (some-> @(:path t) (java.io.File.) .getCanonicalFile .getParent))
+        features (or (some-> sel* deref :profile :reader-features) #{:clj})]
     (cond
       (nil? sym) (set-status! "; No symbol at the caret.")
       (nil? root) (set-status! "; No project folder: open a folder, or save this file first.")
-      :else (scan-usages! ctx root (usages/search-name sym)))))
+      :else (scan-usages! ctx {:root root :name (usages/search-name sym)
+                               :target (caret-target ctx features) :features features}))))
 
 (defn- locations-matches!
   [{:keys [active-tab set-status!] :as ctx}]

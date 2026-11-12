@@ -9,8 +9,9 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 <details>
-<summary><strong>42 entries</strong></summary>
+<summary><strong>43 entries</strong></summary>
 
+- Find Usages in Project tells same-named symbols apart: it works out which var the symbol at the caret names from the file's `ns` form, its own definitions and the local bindings, and lists only that var's places at first. The **Other vars** and **Unresolved** check boxes, each with its count, bring back another var's or a local's places and the ones a file can't decide (`:refer :all`, `:use`, a name a macro defines).
 - Quick Doc for This Var: on a var result in the console, the right-click menu and the palette print that var's doc into the console as comment lines, below the result.
 - `jolt metrics`, `jolt metrics:edn`, `jolt metrics:json` and `jolt metrics:html` report code metrics with jolt-metrics (report only, never a gate), configured in `.jolt-metrics.edn`. The HTML report is one self-contained page, written to `target/metrics.html` by default. Since jolt-metrics v0.4.0 the queue ranks a function by how much of the code depends on it, and the report adds unusual commits and files.
 - ClojureDocs examples in JVM Clojure's full doc are runnable: each has Run in Interactions and Copy to Definitions. The example's `user=>` prompts and printed results are dropped first. Run always uses the `user` namespace (the console says `; in user` when the prompt is elsewhere, and the prompt doesn't move), honours plugin before-run vetoes and refuses while the console is busy. Copy puts the example after the top-level form at the caret, or inside a `(comment ...)` block when the caret is in one, as one undo step. The buttons are mouse-only.

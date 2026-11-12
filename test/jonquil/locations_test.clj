@@ -118,6 +118,48 @@
     (testing "ticking it again brings the rows back"
       (is (= 3 (count (:entries (loc/set-hows (loc/set-hows lst #{}) (set loc/hows)))))))))
 
+(def ^:private resolved-scan
+  {:entries [{:path "/p/a.clj" :start 1 :end 5 :line 1 :text "(join 1)" :how :call :match :this}
+             {:path "/p/a.clj" :start 9 :end 13 :line 2 :text "(str/join x)" :how :call :match :other}
+             {:path "/p/b.clj" :start 6 :end 10 :line 1 :text "(defn join [])" :how :definition :match :this}
+             {:path "/p/c.clj" :start 6 :end 10 :line 3 :text "(join 2)" :how :call :match :unresolved}]
+   :files 3 :matched 3 :target {:var 'my.text/join}})
+
+(deftest project-uses-resolved-test
+  (let [lst (loc/project-uses resolved-scan "join")]
+    (testing "the target var's own uses show; the title names the var and counts them"
+      (is (= "Usages of my.text/join (2 in 2 files)" (:title lst)))
+      (is (= ["(join 1)" "(defn join [])"] (map :text (:entries lst))))
+      (is (= #{:this} (:matches lst))))
+    (testing "the other kinds are counted for their buttons"
+      (is (= {:other 1 :unresolved 1} (:match-counts lst)))
+      (is (:target-var? lst)))
+    (testing "ticking a match kind brings its entries back, in order, with how still applied"
+      (is (= ["(join 1)" "(defn join [])" "(join 2)"]
+             (map :text (:entries (loc/set-hows lst (conj (set loc/hows) :unresolved))))))
+      (is (= ["(join 1)" "(str/join x)" "(join 2)"]
+             (map :text (:entries (loc/set-hows lst #{:call :other :unresolved}))))))
+    (testing "rows say when a place isn't the target var"
+      (let [l (assoc (loc/set-hows lst (into (set loc/hows) [:other :unresolved])) :root "/p")]
+        (is (= ["a.clj:1: call: (join 1)" "a.clj:2: call, other var: (str/join x)"
+                "b.clj:1: def: (defn join [])" "c.clj:3: call, unresolved: (join 2)"]
+               (map #(loc/row-text l %) (:entries l)))))))
+  (testing "a by-name list (no var target) shows every entry and no match buttons"
+    (let [lst (loc/project-uses scan-result "join")]
+      (is (not (:target-var? lst)))
+      (is (= 3 (count (:entries lst)))))))
+
+(deftest project-uses-keeps-target-entries-test
+  (testing "past LIST-MAX the target var's own entries are kept first"
+    (let [n (+ 5 loc/LIST-MAX)
+          es (vec (for [i (range n)]
+                    {:path "/p/a.clj" :start i :end (inc i) :line i :text "x" :how :call
+                     :match (if (< i (- n 3)) :other :this)}))
+          lst (loc/project-uses {:entries es :files 1 :matched 1 :target {:var 'a/x}} "x")]
+      (is (= loc/LIST-MAX (count (:all lst))))
+      (is (= 3 (count (:entries lst))) "all three of the var's own uses survive the cut")
+      (is (= (sort (map :start (:all lst))) (map :start (:all lst))) "still in file order"))))
+
 (deftest row-text-test
   (let [lst (assoc (loc/project-uses scan-result "join") :root "/p")]
     (is (= ["a.clj:1: call: (join 1)" "a.clj:2: value: (map join x)" "b.clj:1: def: (defn join [])"]
