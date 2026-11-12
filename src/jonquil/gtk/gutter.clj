@@ -80,7 +80,20 @@
              :let [[y h] (line-yrange gt (g/mark-offset buf m))]]
          [(/ DOT 2.0) (+ (to-gutter-y gt y) (/ h 2.0))])))
 
-(defn- dot-width [gt] (if (seq @(:dots gt)) DOT 0))
+(def ^:private ARROW-COLOR
+  ;; a choice: the paused line's arrow, apart from the red dots
+  "#2da44e")
+
+(defn arrow-spot
+  "[x y h] in the gutter's coordinates for the paused line's arrow (LM5's
+  stepping): the dot column's left edge, the top of the arrow's line and
+  its height; nil without an arrow."
+  [{:keys [arrow buf] :as gt}]
+  (when-let [m @arrow]
+    (let [[y h] (line-yrange gt (g/mark-offset buf m))]
+      [1.0 (double (to-gutter-y gt y)) (double h)])))
+
+(defn- dot-width [gt] (if (or (seq @(:dots gt)) @(:arrow gt)) DOT 0))
 
 (defn- label-width
   "label's pixel width in the gutter's own font."
@@ -118,6 +131,16 @@
       (doseq [[x y] (dot-spots gt)]
         (g/cairo-new-sub-path cr)
         (g/cairo-arc cr (double x) (double y) DOT-RADIUS 0.0 (* 2.0 Math/PI)))
+      (g/cairo-fill cr)))
+  (when-let [[x y h] (arrow-spot gt)]
+    (let [[r gr b] (rgb ARROW-COLOR)
+          mid (+ y (/ h 2.0))
+          half (min 5.0 (/ h 2.5))]
+      (g/cairo-set-source-rgb cr r gr b)
+      (g/cairo-move-to cr x (- mid half))
+      (g/cairo-line-to cr (+ x (- DOT 2.0)) mid)
+      (g/cairo-line-to cr x (+ mid half))
+      (g/cairo-close-path cr)
       (g/cairo-fill cr)))
   (when (seq @(:counts gt))
     (let [[r gr b] @(:count-color gt)]
@@ -182,15 +205,25 @@
   (g/gtk-widget-queue-draw (:area gt))
   nil)
 
+(defn set-arrow!
+  "Puts the paused line's arrow on the line holding offset, or takes it
+  away (nil). The arrow is a text mark, so it moves with edits."
+  [{:keys [arrow buf] :as gt} offset]
+  (when-let [m @arrow] (g/gtk-text-buffer-delete-mark buf m))
+  (reset! arrow (when offset
+                  (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-create-mark buf nil a 0)))))
+  (resize! gt)
+  nil)
+
 (defn attach!
   "Sets a gutter as ed's view's left gutter: {:area :view :buf :ranges
-  :counts :width :label-width :dots :color :count-color :draws}, :draws
+  :counts :width :label-width :dots :arrow :color :count-color :draws}, :draws
   counting the draws (for rows)."
   [ed]
   (let [area (g/gtk-drawing-area-new)
         gt {:area area :view (:view ed) :buf (:buf ed)
             :ranges (atom []) :draws (atom 0) :counts (atom []) :width (atom WIDTH)
-            :label-width (atom 0) :dots (atom [])
+            :label-width (atom 0) :dots (atom []) :arrow (atom nil)
             :color (atom (rgb (:changed-mark (theme/theme theme/default-theme))))
             :count-color (atom (rgb (get-in (theme/theme theme/default-theme) [:tokens :comment])))}]
     (g/gtk-widget-set-size-request area WIDTH -1)

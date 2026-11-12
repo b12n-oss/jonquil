@@ -106,13 +106,18 @@
   ;; did before the Evaluator protocol existed: nothing to end.
   ;; a paused break (Break on error) is let go, so closing the window or
   ;; switching runtimes never leaves its worker blocked
-  (stop! [_] (debugger/continue! (:break @state)) nil)
+  (stop! [_]
+    (debugger/stop-stepping! (:stepping @state))
+    (debugger/continue! (:break @state))
+    nil)
   (eval! [this code opts]
     (cond
       (:quiet opts) (quiet-eval! this code (dissoc opts :run?))
       (:run? opts) (run-definitions! this code (dissoc opts :run?))
       :else (submit-repl! this code (dissoc opts :run?))))
   (interrupt! [_]
+    ;; Stop ends stepping (LM5)
+    (debugger/stop-stepping! (:stepping @state))
     (eval/stop-eval! ctx)
     ;; Stop also reaches a form evaluated in a frame (jonquil.debugger)
     (some-> (:frame-token @state) debugger/interrupt-token!)
@@ -193,7 +198,10 @@
     nil)
   (break-eval! [_ i code on-result]
     (debugger/break-eval! (:break @state) i code (fn [r] (try (on-result r) (catch Throwable _)))))
-  (continue-break! [_] (debugger/continue! (:break @state)))
+  (continue-break! [_]
+    ;; Continue runs to the next breakpoint: no step point pauses
+    (debugger/stop-stepping! (:stepping @state))
+    (debugger/continue! (:break @state)))
   ev/Breakpoints
   (set-breakpoints! [_ on? on-done]
     (future
@@ -210,6 +218,10 @@
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)
+  (step-break! [_ on-done]
+    (let [r (debugger/step! (:break @state) (:stepping @state))]
+      (try (on-done r) (catch Throwable _))
+      nil))
   ev/Trace
   (trace-op! [_ op args on-result]
     (future
@@ -242,7 +254,9 @@
    brk
    (fn [] (assoc (:break-handlers @state)
                  :resolve-file (fn [f] (:file (source/resolve-file {:file f})))))
-   (fn [] (identical? (Thread/currentThread) (:eval-thread @state)))))
+   (fn [] (identical? (Thread/currentThread) (:eval-thread @state)))
+   ;; stepping: whether a step point pauses (step-break! turns it on)
+   (:stepping @state)))
 
 (defn make-session
   "A session in reset mode with the prompt in `user`."
@@ -251,7 +265,9 @@
         state (atom {:mode :reset :prompt-ns 'user :created {}
                      :inspect-view (atom nil)
                      ;; Break on error: off until toggled
-                     :break brk :break-on? false})]
+                     :break brk :break-on? false
+                     ;; LM5's stepping, from a Step to the next pause
+                     :stepping (atom nil)})]
     (swap! state assoc :breakpoint-hook (breakpoint-hook state brk))
     (->InProcess (eval/make-eval-context) state)))
 
@@ -406,8 +422,10 @@
   (fn [result]
     ;; the backstop for a pause whose cleanup a Stop skipped
     (debugger/end-stale-pause! (:break @state) (:break-handlers @state))
-    ;; this thread's evaluation is over: no breakpoint pauses it now
+    ;; this thread's evaluation is over: no breakpoint pauses it now, and
+    ;; a Step it ended in doesn't reach the next one
     (let [me (Thread/currentThread)]
+      (when (identical? me (:eval-thread @state)) (debugger/stop-stepping! (:stepping @state)))
       (swap! state (fn [s] (cond-> s (identical? me (:eval-thread s)) (dissoc :eval-thread)))))
     (let [ref (keep-result-ref opts result)
           result (cond-> result ref (assoc :ref ref))]

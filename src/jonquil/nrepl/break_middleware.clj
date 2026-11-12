@@ -65,11 +65,14 @@
   pause on an error (:armed?) or at a breakpoint (:bp-ok?), that eval's
   reply, and the session's breakpoint hook (LM5). A breakpoint pauses only
   while an eval the client marked runs, since the pause can only reach the
-  client on that eval's reply."
+  client on that eval's reply. :stepping is whether a step point pauses,
+  from a Step to the next pause."
   []
-  (let [e {:break (debugger/make-break) :armed? (atom false) :reply (atom nil) :bp-ok? (atom false)}]
+  (let [e {:break (debugger/make-break) :armed? (atom false) :reply (atom nil) :bp-ok? (atom false)
+           :stepping (atom nil)}]
     (assoc e :hook (debugger/breakpoint-handler (:break e) (fn [] (break-callbacks e))
-                                                (fn [] @(:bp-ok? e))))))
+                                                (fn [] @(:bp-ok? e))
+                                                (:stepping e)))))
 
 (defn- run-armed
   "Runs ev under session e's break, then drops the arming."
@@ -94,8 +97,10 @@
         (run-armed e ev)
         (ev))
       (finally
-        ;; a breakpoint reached after this eval can't reach the client
+        ;; a breakpoint reached after this eval can't reach the client,
+        ;; and a Step it ended in doesn't carry over to the next
         (reset! (:bp-ok? e) false)
+        (debugger/stop-stepping! (:stepping e))
         (debugger/end-stale-pause! (:break e) {} {:other-thread :wake})))))
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))
@@ -189,13 +194,20 @@
                                   (breakpoints-reply e (get request "on"))))
         "jonquil-break-eval" (break-eval! e request)
         "jonquil-break-continue"
+        (do (when e (debugger/stop-stepping! (:stepping e)))
+            (server/respond request {"status" ["done"]
+                                     "continued" (str (boolean (and e (debugger/continue! (:break e)))))}))
+        "jonquil-break-step"
         (server/respond request {"status" ["done"]
-                                 "continued" (str (boolean (and e (debugger/continue! (:break e)))))})
+                                 "stepped" (str (boolean (and e (debugger/step! (:break e) (:stepping e)))))})
         "interrupt"
-        (do (when e (debugger/break-stop! (:break e)))
+        (do (when e
+              (debugger/stop-stepping! (:stepping e))
+              (debugger/break-stop! (:break e)))
             (next request))
         "close"
-        (do (swap! sessions dissoc sid)
+        (do (when e (debugger/stop-stepping! (:stepping e)))
+            (swap! sessions dissoc sid)
             (next request))
         (next request)))))
 
@@ -213,5 +225,5 @@
   "The middleware: Break on error for every session cloned through it."
   [next]
   (server/register-ops! "jonquil-break-check" "jonquil-break-eval" "jonquil-break-continue"
-                        "jonquil-breakpoints")
+                        "jonquil-break-step" "jonquil-breakpoints")
   (handler sessions next))

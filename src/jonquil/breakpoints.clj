@@ -27,13 +27,23 @@
 
 (defn breakpoint-form
   "The one-line form for a breakpoint on line n. Everything is qualified, so
-  a namespace that excludes clojure.core names still compiles it."
-  [n]
-  (str "(try (jolt.debug/with-break-handler"
-       " (clojure.core/fn [t fs] (clojure.core/when-let [h (clojure.core/deref jonquil.debugger/breakpoint-hook)] (h t fs)))"
-       " (throw (clojure.core/ex-info \"Breakpoint\" {:jonquil/breakpoint " n "})))"
-       " (catch clojure.lang.ExceptionInfo e"
-       " (clojure.core/when-not (:jonquil/breakpoint (clojure.core/ex-data e)) (throw e))))"))
+  a namespace that excludes clojure.core names still compiles it. opts:
+  :step? marks a step point (it pauses only while stepping, and does
+  nothing at all, not even throw, while nobody steps) and :tab names
+  the tab the code came from, for the gutter's arrow."
+  ([n] (breakpoint-form n {}))
+  ([n {:keys [step? tab]}]
+   (str (when step? "(clojure.core/when (clojure.core/seq (clojure.core/deref jonquil.debugger/stepping-any)) ")
+        "(try (jolt.debug/with-break-handler"
+        " (clojure.core/fn [t fs] (clojure.core/when-let [h (clojure.core/deref jonquil.debugger/breakpoint-hook)] (h t fs)))"
+        " (throw (clojure.core/ex-info \"Breakpoint\" {:jonquil/breakpoint " n
+        (when step? " :jonquil/step true")
+        (when (some? tab) (str " :jonquil/tab " (pr-str tab)))
+        "})))"
+        " (catch clojure.lang.ExceptionInfo e"
+        " (clojure.core/when-not (:jonquil/breakpoint (clojure.core/ex-data e)) (throw e))))"
+        ;; a step point checks stepping-any first: nobody stepping, no throw
+        (when step? ")"))))
 
 (defn breakpoint-throw?
   "True when ex-data is a breakpoint's (breakpoint-form's throw)."
@@ -480,10 +490,18 @@
        (cond-> {:line (:line s)} (not= line (:line s)) (assoc :moved? true))
        {:error NOWHERE}))))
 
+(defn- units
+  "text's stepping units: its top-level forms, a (comment ...) block's
+  forms taken one by one instead of the block."
+  [text]
+  (mapcat (fn [f] (if (commands/comment-form? text f) (rest (:kids f)) [f]))
+          (commands/top-level-forms text)))
+
 (defn- edits
-  "The [offset string] insertions for spot s, a breakpoint on its line."
-  [{:keys [start end kind line]}]
-  (let [bp (breakpoint-form line)]
+  "The [offset string] insertions for spot s, a breakpoint on its line (a
+  step point with :step?), from tab."
+  [tab {:keys [start end kind line step?]}]
+  (let [bp (breakpoint-form line {:step? step? :tab tab})]
     (if (= :statement kind)
       [[start (str bp " ") 0]]
       [[start (str "(do " bp " ") 0] [end ")" 1]])))
@@ -493,22 +511,38 @@
   {:text :lines}, :lines being the lines that got one. With range
   {:start :end}, only that part of text is answered (and only breakpoints
   wholly inside it count): the code a Run Form or Run Selection sends, read
-  in the context of the whole text. opts' :heads as spots takes it."
+  in the context of the whole text. opts' :heads as spots takes it, and
+  :tab goes in each inserted form.
+
+  Stepping: every other line that can pause in a unit holding a
+  breakpoint gets a step point (:steps, their lines), which pauses only
+  while stepping. A unit is a top-level form, or a form directly inside a
+  (comment ...) block. Units without a breakpoint get none."
   ([text lines] (instrument text lines {}))
-  ([text lines {:keys [start end] :or {start 0} :as opts}]
+  ([text lines {:keys [start end tab] :or {start 0} :as opts}]
    (let [end (or end (count text))
          all (spots text (select-keys opts [:heads]))
-         chosen (->> (distinct lines)
-                     (keep #(spot-on all %))
-                     (filter #(and (<= start (:start %)) (<= (:end %) end))))
+         inside? #(and (<= start (:start %)) (<= (:end %) end))
+         dots (->> (distinct lines) (keep #(spot-on all %)) (filter inside?))
+         dotted (set (map :line dots))
+         held (filter (fn [u] (some #(and (<= (:start u) (:start %)) (< (:start %) (:end u))) dots))
+                      (units text))
+         steps (->> all
+                    (filter (fn [sp] (some #(and (<= (:start %) (:start sp)) (< (:start sp) (:end %))) held)))
+                    (remove #(dotted (:line %)))
+                    (map :line) distinct
+                    (keep #(spot-on all %))
+                    (filter inside?)
+                    (map #(assoc % :step? true)))
+         chosen (concat dots steps)
          ;; from the end back, so earlier offsets stay good; at one offset
          ;; an opening goes in first, so the closing ) inserted after it
          ;; ends up in front of it
-         ins (sort-by (fn [[o _ order]] [(- o) order]) (mapcat edits chosen))
+         ins (sort-by (fn [[o _ order]] [(- o) order]) (mapcat #(edits tab %) chosen))
          sb (StringBuilder. ^String (subs text start end))]
      (doseq [[o s] ins]
        (.insert sb (int (- o start)) ^String s))
-     {:text (str sb) :lines (vec (sort (map :line chosen)))})))
+     {:text (str sb) :lines (vec (sort (map :line dots))) :steps (vec (sort (map :line steps)))})))
 
 ;; --- Live at once: which top-level form a toggle sends again -------------------
 
@@ -570,6 +604,15 @@
                (and disk-text
                     (not (str/includes? (str/replace disk-text "\r\n" "\n")
                                         (str/replace (subs text (:start rng) (:end rng)) "\r\n" "\n"))))))))))
+
+(defn arrow-line
+  "The line the gutter's arrow goes on for a pause at line, when the tab
+  still holds the text its breakpoints were sent from (sent); nil when it
+  changed since (the line may be another one now), nothing was sent, or
+  the line is past the end."
+  [{:keys [sent now line]}]
+  (when (and sent (= sent now) line (<= 1 line (count (line-starts now))))
+    line))
 
 ;; --- what a toggle says ------------------------------------------------------------
 

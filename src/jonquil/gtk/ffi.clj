@@ -1004,6 +1004,10 @@
 ;; cairo_new_sub_path (cr): the gutter's breakpoint dots (LM5)
 (ffi/defcfn cairo-arc "cairo_arc" [:pointer :double :double :double :double :double] :void)
 (ffi/defcfn cairo-new-sub-path "cairo_new_sub_path" [:pointer] :void)
+;; cairo.h -- cairo_line_to (cr, x, y) and cairo_close_path (cr): the
+;; gutter's arrow on the paused line (LM5's stepping)
+(ffi/defcfn cairo-line-to "cairo_line_to" [:pointer :double :double] :void)
+(ffi/defcfn cairo-close-path "cairo_close_path" [:pointer] :void)
 (ffi/defcfn cairo-move-to "cairo_move_to" [:pointer :double :double] :void)
 ;; pango/pangocairo.h -- pango_cairo_show_layout (cairo_t*, PangoLayout*);
 ;; pangocairo comes with GTK, as cairo does (the gutter's line counts)

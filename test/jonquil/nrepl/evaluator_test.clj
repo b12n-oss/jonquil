@@ -1035,6 +1035,83 @@
               (is (= "41" (:printed (first (run e "(bpf 20)" false)))))))))
       (finally (ev/stop! e)))))
 
+(defn- step-sync [ev]
+  (let [p (promise)] (ev/step-break! ev (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+
+(deftest stepping-in-the-child-test
+  (let [e (make (temp-project))
+        text "(defn sa [x]\n  (let [y (inc x)]\n    (str y)\n    (* y 2)))\n(defn sb [x]\n  (let [r (sa x)]\n    (+ r 1)))"]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [r (set-breakpoints-sync e true)]
+        (if (and (:error r) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP stepping-in-the-child-test: this child can't break:" (:error r))
+              (is (string? (:error r))))
+          (let [paused (atom (promise))
+                next-pause (fn [] (let [d (deref @paused 20000 nil)] (reset! paused (promise)) d))]
+            (ev/set-break-handlers! e {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+            (run e (:text (bp/instrument text [2 7])) false)
+            (testing "Step pauses at the next line, then the caller's; Continue runs on"
+              (let [done (start-run e "(sb 1)" {})]
+                (is (= "Breakpoint at line 2" (:title (next-pause))))
+                (is (true? (step-sync e)))
+                (is (= "Stepped to line 3" (:title (next-pause))))
+                (is (true? (step-sync e)))
+                (is (= "Stepped to line 4" (:title (next-pause))))
+                (is (true? (step-sync e)))
+                (is (= "Breakpoint at line 7" (:title (next-pause))))
+                (is (true? (ev/continue-break! e)))
+                (is (= "5" (:printed (deref done 20000 :timeout))))))
+            (testing "Stop while stepping ends the run; the next starts with stepping off"
+              (let [done (start-run e "(sb 1)" {})]
+                (is (some? (next-pause)))
+                (is (true? (step-sync e)))
+                (is (= "Stepped to line 3" (:title (next-pause))))
+                (ev/interrupt! e)
+                (is (= :interrupted (:status (deref done 20000 :timeout))))
+                (let [done2 (start-run e "(sb 1)" {})]
+                  (is (= "Breakpoint at line 2" (:title (next-pause))))
+                  (ev/continue-break! e)
+                  (is (= "Breakpoint at line 7" (:title (next-pause))))
+                  (ev/continue-break! e)
+                  (is (= "5" (:printed (deref done2 20000 :timeout))))))))))
+      (finally (ev/stop! e)))))
+
+(deftest a-step-stays-on-its-thread-in-the-child-test
+  ;; futures running only step points while the evaluation's own thread
+  ;; steps (its next line comes 30 ms after the Step): none of them may
+  ;; take its Step
+  (let [e (make (temp-project))
+        text "(defn sf [x m]\n  (when m\n    (Thread/sleep 30))\n  (let [y (inc x)]\n    (* y 2)))"]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [r (set-breakpoints-sync e true)]
+        (if (and (:error r) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP a-step-stays-on-its-thread-in-the-child-test:" (:error r))
+              (is (string? (:error r))))
+          (let [paused (atom (promise))
+                next-pause (fn [] (let [d (deref @paused 20000 nil)] (reset! paused (promise)) d))
+                x-of (fn [d] (some #(when (= "x" (:name %)) (:text %)) (:locals (first (:frames d)))))]
+            (ev/set-break-handlers! e {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+            (run e (:text (bp/instrument text [3])) false)
+            (let [done (start-run e (str "(do (def stop? (atom false))"
+                                         " (dotimes [_ 4] (future (while (not @stop?) (sf 1 false))))"
+                                         " (Thread/sleep 50)"
+                                         " (let [v (sf 2 true)] (reset! stop? true) v))")
+                                  {})
+                  d1 (next-pause)]
+              (is (= ["Breakpoint at line 3" "2"] [(:title d1) (x-of d1)]))
+              (is (true? (step-sync e)))
+              (let [d2 (next-pause)]
+                (is (= ["Stepped to line 4" "2"] [(:title d2) (x-of d2)])
+                    "the evaluation's own thread, not a future running the same lines"))
+              (is (true? (step-sync e)))
+              (let [d3 (next-pause)]
+                (is (= ["Stepped to line 5" "2"] [(:title d3) (x-of d3)])))
+              (is (true? (ev/continue-break! e)))
+              (is (= "6" (:printed (deref done 20000 :timeout))))))))
+      (finally (ev/stop! e)))))
+
 (deftest breakpoints-armed-before-the-child-starts-test
   (let [e (make (temp-project))]
     (try

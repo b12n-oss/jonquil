@@ -509,3 +509,51 @@
                                  {:refused refused? :none none? :asked asked? :set set? :status (status ui)
                                   :heads @(:bp-heads (:changed (active-ed ui)))})))
         (finally (breakpoints-off! ui true))))))
+
+;; --- stepping (LM5) ----------------------------------------------------------------
+
+(defn- arrow-line
+  "The 1-based line of the active tab's gutter arrow, or nil."
+  [ui]
+  (let [ed (active-ed ui)
+        gt (:gutter (:changed ed))]
+    (when-let [m @(:arrow gt)]
+      (let [text (editor/editor-text ed)]
+        (inc (count (filter #{\newline} (subs text 0 (g/mark-offset (:buf ed) m)))))))))
+
+(defn row-step-follows-the-lines
+  "A dot on line 2 of a three-line defn (and one in its caller, so the
+  caller is instrumented too), call the caller: it pauses at line 2. Step
+  twice: the Frames title and the gutter's arrow follow line 3, then the
+  caller's next line. Continue runs to the end and the arrow goes."
+  [ui]
+  (go-row :step-follows-the-lines support/check
+    (if-not (debugger/break-available?)
+      (on-gtk (support/check :step-follows-the-lines true {:available false}))
+      (let [dp (:debugger-pane ui)]
+        (try
+          (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-step-") "steps.clj")
+                _ (spit f "(defn sa [x]\n  (let [y (inc x)]\n    (* y 2)))\n(defn sb [x]\n  (let [r (sa x)]\n    (+ r 1)))\n")
+                m0 (on-gtk (let [m (support/out-end-offset ui)] ((:open-file! ui) (.getPath f)) ((:run!* ui)) m))
+                ran? (await-until 8000 20 #(and (support/idle? ui) (str/includes? (support/since ui m0) "#'user/sb")))
+                _ (on-gtk (caret-to-line! ui 2) (run-palette! ui "toggle a breakpoint"))
+                dot2? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 2; it's live now."))
+                _ (on-gtk (caret-to-line! ui 6) (run-palette! ui "toggle a breakpoint"))
+                dot6? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 6; it's live now."))
+                m (enter! ui "(sb 1)")
+                at2? (await-until 5000 20 #(and (= "Breakpoint at line 2" (dpane/title-text dp)) (= 2 (arrow-line ui))))
+                labels (on-gtk (dpane/restart-labels dp))
+                _ (on-gtk (run-palette! ui "step to the next line"))
+                at3? (await-until 5000 20 #(and (= "Stepped to line 3" (dpane/title-text dp)) (= 3 (arrow-line ui))))
+                _ (on-gtk (dpane/press-restart! dp :step))
+                at6? (await-until 5000 20 #(and (= "Breakpoint at line 6" (dpane/title-text dp)) (= 6 (arrow-line ui))))
+                stepped? (on-gtk (str/includes? (support/since ui m) "; Stepped to line 3."))
+                _ (on-gtk (dpane/press-restart! dp :continue))
+                done? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 5")))
+                no-arrow? (await-until 3000 20 #(nil? (arrow-line ui)))]
+            (on-gtk (support/check :step-follows-the-lines
+                                   (and ran? dot2? dot6? at2? (= ["Continue" "Step"] labels) at3? at6? stepped? done? no-arrow?)
+                                   {:ran ran? :dot2 dot2? :dot6 dot6? :at2 at2? :labels labels :at3 at3? :at6 at6?
+                                    :stepped stepped? :done done? :no-arrow no-arrow?
+                                    :title (dpane/title-text dp) :arrow (arrow-line ui) :status (status ui)})))
+          (finally (breakpoints-off! ui true)))))))

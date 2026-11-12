@@ -5,6 +5,7 @@
   wires a tab's gutter counts. Retrying a failure goes through the window's
   :rerun-failure!, since the evaluation machinery stays in the core."
   (:require [jolt.ffi :as ffi]
+            [jonquil.breakpoints :as bp]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
@@ -199,25 +200,56 @@
 ;; because the evaluators go idle before on-complete, so the next
 ;; evaluation can start before this one's failure is recorded.
 
+(defn- clear-arrow!
+  "Takes the paused line's arrow away, from the tab that showed it."
+  [{:keys [arrow-tab tabs tab-by-id]}]
+  (when-let [id @arrow-tab]
+    (reset! arrow-tab nil)
+    (when-let [gt (some-> (tab-by-id tabs id) :ed :changed :gutter)]
+      (gutter/set-arrow! gt nil))))
+
+(defn- show-arrow!
+  "LM5's stepping: an arrow in the gutter of the tab the paused code came
+  from (:tab), on the paused line (:breakpoint), when the tab still holds
+  the text it ran (jonquil.breakpoints/arrow-line). Answers false when it
+  can't place one."
+  [{:keys [arrow-tab tabs tab-by-id] :as ctx} {n :breakpoint id :tab}]
+  (clear-arrow! ctx)
+  (boolean
+   (when-let [{:keys [ed]} (and n (some? id) (tab-by-id tabs id))]
+     (when-not @(:destroyed? ed)
+       (let [text (editor/editor-text ed)]
+         (when-let [line (bp/arrow-line {:sent (some-> ed :changed :bp-sent deref) :now text :line n})]
+           (when-let [gt (:gutter (:changed ed))]
+             (gutter/set-arrow! gt (nth (bp/line-starts text) (dec line)))
+             (reset! arrow-tab id)
+             true)))))))
+
 (defn- show-paused!
   "A pause in the Frames panel: an error's titled \"Paused: <error>\", a
-  breakpoint's (LM5) \"Breakpoint at line N\" as it came."
-  [{:keys [frames-state dbgp right show-right-panel! cv set-status!]} d]
+  breakpoint's (LM5) \"Breakpoint at line N\" or a step's \"Stepped to
+  line N\" as it came, with Step beside Continue and the gutter's arrow."
+  [{:keys [frames-state dbgp right show-right-panel! cv set-status!] :as ctx} d]
   (let [n (:breakpoint d)
         shown (if n d (assoc d :title (str "Paused: " (:title d))))]
     (reset! frames-state (assoc shown :paused? true))
     (debugger-pane/show! dbgp shown)
-    (debugger-pane/show-restarts! dbgp [{:id :continue :label "Continue"}])
+    (debugger-pane/show-restarts! dbgp (cond-> [{:id :continue :label "Continue"}]
+                                         n (conj {:id :step :label "Step"})))
     (show-right-panel! right :debugger)
     (debugger-pane/focus! dbgp)
     (if n
-      (do (cview/append! cv :system (str "; Paused at the breakpoint on line " n ".\n"))
-          (set-status! (str "; Paused at the breakpoint on line " n ". Continue or Stop.")))
+      (let [where (if (:step? d) (str "Stepped to line " n) (str "Paused at the breakpoint on line " n))
+            arrow? (show-arrow! ctx d)]
+        (cview/append! cv :system (str "; " where ".\n"))
+        (set-status! (str "; " where ". Step, Continue or Stop."
+                          (when-not arrow? " The tab changed since it ran, so the gutter shows no arrow."))))
       (do (cview/append! cv :system (str "; Paused at " (:title d) ".\n"))
           (set-status! (str "; Paused: " (:title d) ". Continue or Stop."))))))
 
 (defn- end-paused!
-  [{:keys [frames-state dbgp]} {:keys [continued?]}]
+  [{:keys [frames-state dbgp] :as ctx} {:keys [continued?]}]
+  (clear-arrow! ctx)
   (when (:paused? @frames-state)
     (let [d {:note (cond (not continued?) "Stopped while paused."
                          (:breakpoint @frames-state) "Continued: the code runs on."
@@ -275,6 +307,19 @@
     (when-not (and e (satisfies? ev/Break e) (ev/continue-break! e))
       (set-status! "; Nothing is paused."))))
 
+(defn- step!
+  "Step (LM5): runs the paused breakpoint on to the next line. At Break on
+  error's pause it says Step works at a breakpoint, and does nothing."
+  [{:keys [ev* set-status! frames-state]}]
+  (let [e @ev*
+        fs @frames-state]
+    (cond
+      (and (:paused? fs) (not (:breakpoint fs)))
+      (set-status! "; Step works at a breakpoint: Continue or Stop this pause.")
+      (and e (satisfies? ev/Breakpoints e))
+      (ev/step-break! e (fn [ok?] (when-not ok? (set-status! "; Nothing is paused at a breakpoint."))))
+      :else (set-status! "; Nothing is paused at a breakpoint."))))
+
 (defn- set-restart-handler!
   [{:keys [dbgp] :as ctx}]
   (debugger-pane/set-restart-handler!
@@ -283,7 +328,8 @@
             :retry (retry! ctx)
             :edit (edit-retry! ctx)
             :define (define-retry! ctx)
-            :continue (continue! ctx)))))
+            :continue (continue! ctx)
+            :step (step! ctx)))))
 
 ;; --- The tab hook (LM4) ---------------------------------------------------------
 
@@ -363,12 +409,15 @@
    :edit-retry-fn (fn [] (edit-retry! ctx))
    :define-retry-fn (fn [] (define-retry! ctx))
    :break-fn (fn [] (toggle-break! ctx))
-   :continue-fn (fn [] (continue! ctx))})
+   :continue-fn (fn [] (continue! ctx))
+   :step-fn (fn [] (step! ctx))
+   ;; F10's :when: a breakpoint's pause is showing (GTK thread)
+   :breakpoint-paused? (fn [] (let [fs @(:frames-state ctx)] (boolean (and (:paused? fs) (:breakpoint fs)))))})
 
 (defn- install
   "The debugger part for one window: builds the Frames pane, wires its
   handlers, registers Break on error on the evaluator now and after a dialect
-  switch, and answers the nine fns and the tab-wired hook.
+  switch, and answers its fns and the tab-wired hook.
 
   frames-state is what the Frames panel shows (jonquil.debugger), GTK thread
   only. Debug mode has no flag here: the toggle reads the runtime's own mode.
@@ -378,7 +427,9 @@
   (let [dbgp (debugger-pane/make-pane)
         ctx (assoc wctx :dbgp dbgp :frames-state (atom nil) :line-counting? (atom false)
                    :current-eval (atom nil) :break-resumed (atom nil)
-                   :paused-breakpoint? (atom false))]
+                   :paused-breakpoint? (atom false)
+                   ;; the tab whose gutter shows the paused line's arrow
+                   :arrow-tab (atom nil))]
     (set-handlers! ctx)
     (watch-break! ctx)
     (set-restart-handler! ctx)

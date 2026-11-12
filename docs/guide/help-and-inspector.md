@@ -655,6 +655,38 @@ keeps the dot: the first evaluation sent to the child arms the breakpoints.
 If that child can't (its Jolt has no `jolt.debug`), every dot goes and the
 status bar says why.
 
+### Stepping
+
+Paused at a breakpoint, **Step** (F10, **Step to the next line** in the
+palette, or the **Step** button beside Continue in the Frames panel) runs on
+to the next line and pauses there. The panel's title reads
+`Stepped to line 3` and the console says `; Stepped to line 3.`. A green
+arrow in the gutter marks the paused line, in the tab the code came from,
+and goes away on Continue, Step or Stop. When the tab was edited since its
+breakpoints were sent, the line may have moved, so there's no arrow and the
+status bar says so. F10 steps only while a breakpoint's pause shows, and
+passes through otherwise; at a Break on error pause Step does nothing and
+says that it works at a breakpoint.
+
+Stepping covers the forms that hold a breakpoint. When a top-level form (or
+a form inside a `(comment ...)` block) holds a dot, a Run or a toggle sends
+it with a step point on every other line that can hold a breakpoint, by the
+same placement rules. A step point pauses only while stepping, which lasts
+from a Step to the next pause. So:
+
+- **Step** goes to the next line the run reaches in that form, or after a
+  return to the caller's next line when the caller holds a breakpoint too.
+  A call into a form with no breakpoint runs through without pausing.
+- **Continue** turns stepping off and runs to the next breakpoint.
+- **Stop** ends the run, as at any pause, and stepping with it.
+
+A form with dots and nobody stepping pauses only at the dots, and its step
+points cost next to nothing: each checks one flag and goes on, without
+throwing. A Step belongs to the thread that was paused: another thread
+reaching a step point meanwhile runs on, so the step lands on the line the
+paused code reaches next. Break on error never turns stepping on. Step Over
+and Step Out (skip or leave a nested call) aren't there yet.
+
 ### Restarts
 
 After an evaluation fails, three restarts take it from there, in every

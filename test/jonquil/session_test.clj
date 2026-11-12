@@ -600,3 +600,143 @@
         (set-breakpoints-sync s false)
         (is (false? (ev/breakpoints-on? s)))
         (finally (debugger/set-debug-mode! false))))))
+
+;; --- stepping (LM5) ------------------------------------------------------------------
+
+(def ^:private step-text
+  ;; a dot on line 2 of sa, and one on line 7 in its caller sb
+  "(defn sa [x]\n  (let [y (inc x)]\n    (str y)\n    (* y 2)))\n(defn sb [x]\n  (let [r (sa x)]\n    (+ r 1)))")
+
+(defn- define-step-fns! [s]
+  (repl-sync s (:text (bp/instrument step-text [2 7]
+                                     (debugger/macro-heads "user" (bp/head-symbols step-text))))))
+
+(defn- step-sync [ev]
+  (let [p (promise)] (ev/step-break! ev (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+
+(deftest stepping-in-process-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          paused (atom (promise))
+          next-pause (fn [] (let [d (deref @paused 5000 nil)] (reset! paused (promise)) d))]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync s true)))
+        (is (= :ok (:status (define-step-fns! s))))
+        (testing "Step from a breakpoint pauses at the next line, then the caller's"
+          (let [done (promise)]
+            (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (= "Breakpoint at line 2" (:title (next-pause))))
+            (is (true? (step-sync s)))
+            (is (= "Stepped to line 3" (:title (next-pause))))
+            (is (true? (step-sync s)))
+            (is (= "Stepped to line 4" (:title (next-pause))))
+            (is (true? (step-sync s)))
+            (is (= "Breakpoint at line 7" (:title (next-pause))) "back in the caller")
+            (is (true? (ev/continue-break! s)))
+            (is (= "5" (:printed (deref done 5000 :timeout))))))
+        (testing "Continue turns stepping off: only the breakpoints pause"
+          (let [done (promise)]
+            (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (= "Breakpoint at line 2" (:title (next-pause))))
+            (is (true? (ev/continue-break! s)))
+            (is (= "Breakpoint at line 7" (:title (next-pause))))
+            (is (true? (ev/continue-break! s)))
+            (is (= "5" (:printed (deref done 5000 :timeout))))))
+        (testing "Stop while stepping ends the run, and the next one starts with stepping off"
+          (let [done (promise)]
+            (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (some? (next-pause)))
+            (is (true? (step-sync s)))
+            (is (= "Stepped to line 3" (:title (next-pause))))
+            (ev/interrupt! s)
+            (is (= :interrupted (:status (deref done 5000 :timeout))))
+            (let [done2 (promise)]
+              (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done2 r))})
+              (is (= "Breakpoint at line 2" (:title (next-pause))) "not a step point")
+              (ev/continue-break! s)
+              (is (= "Breakpoint at line 7" (:title (next-pause))))
+              (ev/continue-break! s)
+              (is (= "5" (:printed (deref done2 5000 :timeout)))))))
+        (testing "a Step whose run ends without pausing leaves stepping off for the next run"
+          (let [done (promise)]
+            (session/submit-repl! s "(sa 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (= "Breakpoint at line 2" (:title (next-pause))))
+            (step-sync s) (next-pause) (step-sync s) (next-pause)
+            (is (true? (step-sync s)) "the last line: the run ends while stepping")
+            (is (= "4" (:printed (deref done 5000 :timeout))))
+            (let [done2 (promise)]
+              (session/submit-repl! s "(sa 1)" {:on-complete (fn [r] (deliver done2 r))})
+              (is (= "Breakpoint at line 2" (:title (next-pause))))
+              (ev/continue-break! s)
+              (is (= "4" (:printed (deref done2 5000 :timeout)))))))
+        (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
+
+(deftest step-at-a-break-on-error-pause-does-nothing-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          paused (promise)
+          done (promise)]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver paused d)) :on-resume (fn [_])})
+        (is (= {:on? true} (toggle-break-sync s)))
+        (session/submit-repl! s "(/ 1 0)" {:on-complete (fn [r] (deliver done r))})
+        (is (= "ArithmeticException: Divide by zero" (:title (deref paused 5000 nil))))
+        (is (false? (step-sync s)) "Step works at a breakpoint, not at an error")
+        (is (not (realized? done)) "the error is still paused")
+        (is (nil? @(:stepping @(:state s))))
+        (is (true? (ev/continue-break! s)))
+        (is (= :error (:status (deref done 5000 :timeout))))
+        (finally (toggle-break-sync s))))))
+
+(deftest another-sessions-end-leaves-a-step-alone-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [a (session/make-session)
+          b (session/make-session)
+          text "(defn s2 [x]\n  (Thread/sleep 300)\n  (let [y (inc x)]\n    (* y 2)))"
+          paused (atom (promise))
+          next-pause (fn [] (let [d (deref @paused 5000 nil)] (reset! paused (promise)) d))]
+      (try
+        (ev/set-break-handlers! a {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync a true)))
+        (repl-sync a (:text (bp/instrument text [2] (debugger/macro-heads "user" (bp/head-symbols text)))))
+        (let [done (promise)]
+          (session/submit-repl! a "(s2 1)" {:on-complete (fn [r] (deliver done r))})
+          (is (= "Breakpoint at line 2" (:title (next-pause))))
+          (is (true? (step-sync a)))
+          ;; while A sleeps on line 2, B runs an evaluation to its end
+          (is (= "3" (:printed (repl-sync b "(+ 1 2)"))))
+          (is (= "Stepped to line 3" (:title (next-pause))) "B's end didn't end A's step")
+          (ev/continue-break! a)
+          (is (= "4" (:printed (deref done 5000 :timeout)))))
+        (is (empty? @debugger/stepping-any))
+        (finally (set-breakpoints-sync a false) (debugger/set-debug-mode! false))))))
+
+(deftest a-step-off-the-end-leaves-no-entry-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          text "(defn s3 [x]\n  (inc x))"
+          paused (promise)
+          done (promise)]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync s true)))
+        (repl-sync s (:text (bp/instrument text [2] (debugger/macro-heads "user" (bp/head-symbols text)))))
+        (session/submit-repl! s "(s3 1)" {:on-complete (fn [r] (deliver done r))})
+        (is (some? (deref paused 5000 nil)))
+        (is (true? (step-sync s)) "the last line: the run ends while stepping")
+        (is (= "2" (:printed (deref done 5000 :timeout))))
+        (is (empty? @debugger/stepping-any) "nothing left to make step points throw")
+        (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
+
+(deftest stopping-a-session-ends-its-step-test
+  (let [s (session/make-session)
+        t (Thread. (fn []))]
+    (reset! (:stepping @(:state s)) t)
+    (swap! debugger/stepping-any conj t)
+    (ev/stop! s)
+    (is (not (contains? @debugger/stepping-any t)) "a closed window leaves no entry")))

@@ -1076,6 +1076,16 @@
                    (on-done r))))
     nil)
   (breakpoints-on? [_] (boolean (:breakpoints-on? @state)))
+  (step-break! [this on-done]
+    ;; the child's own answer: it refuses Break on error's pause, and one
+    ;; already let go; the round trip on a future, as continue-break!'s
+    (if-let [{:keys [conn session]} (when (:paused? @state) (runtime this))]
+      (future
+        (let [r (try (client/request-sync conn {:op "jonquil-break-step" :session session} request-timeout-ms)
+                     (catch Throwable _ nil))]
+          (try (on-done (and (vector? r) (= "true" (some :stepped r)))) (catch Throwable _))))
+      (try (on-done false) (catch Throwable _)))
+    nil)
   (macro-heads! [this ns-name syms on-done]
     (child-op! this {:op "jonquil-breakpoints" :msg {:ns (str ns-name) :heads (pr-str (vec syms))}
                      :unavailable "Breakpoints need Jolt's session middleware in the child."

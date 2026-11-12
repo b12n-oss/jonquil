@@ -142,11 +142,13 @@
                       ["clear line counts" :run/clear-line-counts]
                       ["count how often each line runs" :run/line-counts]
                       ["toggle a breakpoint" :debug/toggle-breakpoint]
-                      ["clear all breakpoints" :debug/clear-breakpoints]]]
+                      ["clear all breakpoints" :debug/clear-breakpoints]
+                      ["step to the next line" :debug/step]
+                      ["go to the next place" :locations/next]]]
         (is (= id (first-id q)) q)
-        (if (#{:debug/toggle-breakpoint :debug/clear-breakpoints} id)
+        (if (#{:debug/toggle-breakpoint :debug/clear-breakpoints :debug/step} id)
           (is (= id (:run (palette/bang-pick es (str "!" q)))) (str "!" q " runs it at the prompt"))
-          (is (= (palette/bang-pick (remove (comp #{:debug/toggle-breakpoint :debug/clear-breakpoints} :id) es)
+          (is (= (palette/bang-pick (remove (comp #{:debug/toggle-breakpoint :debug/clear-breakpoints :debug/step} :id) es)
                                     (str "!" q))
                  (palette/bang-pick es (str "!" q)))
               (str "!" q " answers as it did before breakpoints")))))))
