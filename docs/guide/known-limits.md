@@ -47,7 +47,7 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>The debugger, tracing and live results</strong> (7)</summary>
+<summary><strong>The debugger, tracing and live results</strong> (8)</summary>
 
 - Tracing is for Jolt only, and doesn't record a traced function's call to
   itself.
@@ -62,6 +62,11 @@ Known rough edges, parked for later:
   unwind, and the restarts run the evaluation again.
 - JVM Clojure frames come from the stack trace and keep no locals, and a
   JVM evaluation can't pause before it unwinds.
+- The Processes panel lists only fibers started through
+  `jolt.fibers/spawn` after it first opened. core.async's own fibers
+  (`io-thread`, `go` blocks on its fiber backend, flow processes) don't go
+  through `spawn`, so they're never listed. Jolt has no list of live fibers
+  to ask instead (jolt-lang/jolt#1606).
 
 </details>
 

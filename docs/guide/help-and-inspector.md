@@ -361,10 +361,13 @@ holds off until it ends, and **Kill** ends it outright. **Forget finished**
 drops the done and dead ones; Jonquil keeps the last 50 of those anyway.
 While the panel shows, it refreshes every second.
 
-Jolt keeps no list of live fibers, so the first time the panel opens Jonquil
-starts watching `spawn`, the way Trace wraps a function, and code compiled
-earlier goes through it too. Fibers spawned before that aren't listed, and
-neither are threads (`future`, agents), which aren't fibers. It works in
+Jolt keeps no list of live fibers (jolt-lang/jolt#1606 asks for one), so
+the first time the panel opens Jonquil starts watching `spawn`, the way
+Trace wraps a function, and code compiled earlier goes through it too.
+Fibers spawned before that aren't listed. Neither are the fibers core.async
+starts itself, for `io-thread`, for `go` blocks on its fiber backend and for
+flow processes, because they don't go through `spawn`. Threads (`future`,
+agents) aren't fibers, so they're not listed either. It works in
 process and in a project's Jolt child; other runtimes say it needs Jolt.
 
 ## Counting how often each line runs
