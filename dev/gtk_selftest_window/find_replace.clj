@@ -350,7 +350,7 @@
                       :closed closed? :still-running still-running?})
       (on-gtk (find-bar/close! fb)
               ((:stop!* ui)))
-      (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
+      (await-until 3000 20 #(support/idle? ui)))))
 
 (defn row-window-escape-yields-preedit-while-running
   "With the find bar's own preedit flag set, the Escape clause in
@@ -379,7 +379,7 @@
                                 :still-running still-running?})
                 (find-bar/close! fb)
                 ((:stop!* ui))))
-      (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
+      (await-until 3000 20 #(support/idle? ui)))))
 
 (defn row-window-escape-stops-when-editor-focused
   "Escape must keep its Stop meaning when focus is OUTSIDE the find

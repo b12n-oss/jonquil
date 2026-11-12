@@ -504,3 +504,25 @@
       (is (= :ok (:status r)))
       (is (= "\"hello\"" (:printed r)))
       (is (= [:running :waiting-input :running :idle] @statuses)))))
+
+(deftest settled-waits-for-on-complete-test
+  (testing "the context goes idle before on-complete runs; settled? waits for on-complete too"
+    (let [ctx (sut/make-eval-context)
+          entered (promise)
+          release (promise)
+          done (promise)]
+      (is (sut/settled? ctx) "a fresh context is settled")
+      (sut/eval-async ctx "(+ 1 2)" {:on-complete (fn [r] (deliver entered true) @release (deliver done r))})
+      (is (true? (deref entered 5000 :timeout)) "on-complete started")
+      (is (not (sut/evaluating? ctx)) "idle already, while on-complete is still running")
+      (is (not (sut/settled? ctx)) "but not settled")
+      (deliver release true)
+      (is (= :ok (:status (deref done 5000 :timeout))))
+      (is (loop [n 0] (cond (sut/settled? ctx) true (> n 200) false :else (do (Thread/sleep 10) (recur (inc n)))))
+          "settled once on-complete returned")))
+  (testing "an on-complete that throws still settles"
+    (let [ctx (sut/make-eval-context)
+          done (promise)]
+      (sut/eval-async ctx "(+ 1 2)" {:on-complete (fn [_] (deliver done true) (throw (ex-info "boom" {})))})
+      (deref done 5000 :timeout)
+      (is (loop [n 0] (cond (sut/settled? ctx) true (> n 200) false :else (do (Thread/sleep 10) (recur (inc n)))))))))

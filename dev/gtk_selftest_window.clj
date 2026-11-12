@@ -70,7 +70,6 @@
             [gtk-selftest-window.themes :as themes]
             [gtk-selftest-window.window-keys :as window-keys]
             [jolt.ffi :as ffi]
-            [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
@@ -668,10 +667,12 @@
             ;; starts on the run's base theme
             (when (not= support/BASE-THEME ((:theme-name* ui)))
               ((:set-theme!* ui) support/BASE-THEME)))
-    ;; The window's live evaluator, not support/idle?'s starting :session:
-    ;; the tabs rows switch the window to ClojureDart and back, which leaves
-    ;; a new in-process evaluator, and Stop acts on the live one.
-    (when (ga/ready-for-row? {:idle? #(not (ev/evaluating? ((:evaluator* ui))))
+    ;; support/idle? follows the window's live evaluator (the tabs rows
+    ;; switch the window to ClojureDart and back, which leaves a new
+    ;; in-process evaluator, and Stop acts on the live one), and waits for
+    ;; the last run's on-complete and the console's drain too, so a run's
+    ;; result line never lands inside the next row.
+    (when (ga/ready-for-row? {:idle? #(support/idle? ui)
                               :stop! (:stop!* ui) :deadline-ms 2000}
                              support/check)
       (<! (row ui)))))

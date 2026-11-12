@@ -108,7 +108,14 @@
 ;; not a refactor of it) -----------------------------------------------
 
 (defn- console-text [ui] (g/buffer-text (:buf (:console ui))))
-(defn- idle? [ui] (not (eval/evaluating? (:ctx (:session ui)))))
+(defn- idle?
+  "As gtk-selftest-window.support/idle?: nothing running, every run's
+  on-complete returned, and the console drained."
+  [ui]
+  (let [cv (:console ui)]
+    (and (eval/settled? (:ctx (:session ui)))
+         (empty? @(:queue cv))
+         (not @(:drain-scheduled? cv)))))
 
 (defn- mark-offset [buf mark]
   (let [it (ffi/alloc g/ITER-BYTES)]

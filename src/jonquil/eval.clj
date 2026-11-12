@@ -176,6 +176,10 @@
    ;; next as the REPL does: bound for each run, then shifted by its result.
    :repl-vars (atom {})
    :running-state (atom idle-state)
+   ;; Runs started whose on-complete hasn't returned yet. The context goes
+   ;; idle before on-complete runs (finish-run!), so idle alone doesn't
+   ;; mean a run's result has been handed on; settled? waits for both.
+   :completing (atom 0)
    ;; Guards every running-state transition together with the
    ;; on-status-change notification it implies, so Stop's read of :thread
    ;; and a worker's write of :thread can never miss each other, and a
@@ -188,6 +192,14 @@
 (defn push-stdin-eof! [{:keys [queue]}] (.offer queue ::eof))
 (defn waiting-for-input? [{:keys [waiting-input?]}] @waiting-input?)
 (defn evaluating? [{:keys [running-state]}] (= :running (:status @running-state)))
+
+(defn settled?
+  "True when nothing is running and every run's on-complete has returned.
+  The context goes idle (evaluating? false) just before a run's
+  on-complete, so a caller that needs what on-complete hands on (a
+  console's result line, say) waits for this instead."
+  [{:keys [completing] :as ctx}]
+  (and (not (evaluating? ctx)) (zero? @completing)))
 
 (defn stop-eval!
   "Asks the running evaluation to stop. Never marks the context idle itself:
@@ -465,8 +477,10 @@
     ;; :running is set before the worker exists, so a fast worker's own
     ;; reset to idle can never be overwritten by this thread.
     (reset! running-state {:status :running :token token :done done :stop-requested stop-requested})
+    (swap! (:completing ctx) inc)
     (future
-      (finish-run! ctx run (run-evaluation ctx run code)))
+      (try (finish-run! ctx run (run-evaluation ctx run code))
+           (finally (swap! (:completing ctx) dec))))
     nil))
 
 (defn eval-async
