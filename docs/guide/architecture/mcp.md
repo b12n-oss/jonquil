@@ -20,7 +20,7 @@ one, so the headless entry never opens a window:
   `registry/stop-all!` stops them. An evaluation that passes its deadline is
   interrupted, and a dead one can't wedge its project.
 
-**Window mode.** `jonquil.mcp.window` builds the nineteen tools for
+**Window mode.** `jonquil.mcp.window` builds the twenty tools for
 `jonquil --mcp --window`. It never requires `jonquil.gtk.window`. It receives
 the window's `ui` map (the `:on-ready` map) and touches it only through
 `gui-call`, a thunk handed to the GTK thread with a bounded deref, so the
@@ -32,10 +32,12 @@ with `{:refused msg}`, `{:busy warning}`, `{:problem text}`, `{:none s}` or,
 from the eval worker, `{:done {:result r :output s}}`, and returns a reader
 `(fn [] output-so-far)`. A `notify` only delivers a promise, so a slow or
 abandoned call can't block the worker. The window keeps its one evaluator;
-the tools never stop or swap it.
+the tools never stop or swap it. `jonquil_change_set_propose` saves through
+the ui's `:change-set-propose!*` hook (the change sets part, with the
+client's name from `make-window-tools`' `:client-fn`) and applies nothing.
 
 **Listener and bridge.** `jonquil.mcp.listen` lets a window with
-`:mcp-listen? true` serve those nineteen tools to a socket client. It binds
+`:mcp-listen? true` serve those twenty tools to a socket client. It binds
 127.0.0.1 on an OS-picked port, accepts one connection at a time and runs
 `serve!` over it. It records the port in a per-window registry file
 (`<settings-dir>/mcp/<pid>.edn`), which `stop!` removes and startup

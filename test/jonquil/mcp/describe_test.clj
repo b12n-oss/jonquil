@@ -81,3 +81,9 @@
 
 (deftest nil-client-is-agent
   (is (= "Agent opened tab 1" (:summary (d/describe-call {:tool "jonquil_open" :args {} :result {:text "x" :tab-id 1}})))))
+
+(deftest change-set-propose-entry
+  (let [e (call "jonquil_change_set_propose" {"name" "idea"} {:text "Saved" :error? false})]
+    (is (= :agent (:kind e)))
+    (is (= "Claude Code proposed change set idea" (:summary e))))
+  (is (:error? (call "jonquil_change_set_propose" {"name" "idea"} {:text "Refused: x." :error? true}))))

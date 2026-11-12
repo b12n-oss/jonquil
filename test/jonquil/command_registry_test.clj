@@ -10,7 +10,7 @@
    :describe-key-fn :key-bindings-fn :recent-keys-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
-   :replay-open-fn :replay-forget-fn
+   :replay-open-fn :replay-forget-fn :change-set-make-fn :change-set-list-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :compare-last-run-fn :compare-form-disk-fn :compare-form-head-fn :compare-form-last-run-fn :layout-save-fn :layout-forget-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :panel-focus-fn])
 
@@ -63,7 +63,8 @@
    :panel/locations [:panel-focus-fn :locations] :panel/frames [:panel-focus-fn :debugger]
    :panel/trace [:panel-focus-fn :trace] :panel/plugins [:panel-focus-fn :plugins]
    :panel/messages [:panel-focus-fn :messages] :panel/processes [:panel-focus-fn :processes]
-   :processes/show [:processes-show-fn]})
+   :processes/show [:processes-show-fn]
+   :change-set/make [:change-set-make-fn] :change-set/browse [:change-set-list-fn]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)

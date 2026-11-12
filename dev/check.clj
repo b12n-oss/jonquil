@@ -17,6 +17,7 @@
     jonquil.parts.processes
     jonquil.parts.replay
     jonquil.parts.trace
+    jonquil.parts.change-sets
     jonquil.parts.live-results
     jonquil.parts.time-form
     jonquil.parts.worlds
@@ -34,6 +35,7 @@
     jonquil.mcp
     jonquil.mcp.json
     jonquil.mcp.tools
+    jonquil.change-sets
     jonquil.compare
     jonquil.fibers-rt
     jonquil.hints
@@ -136,6 +138,7 @@
     jonquil.gtk.find-bar
     jonquil.gtk.gutter
     jonquil.gtk.trace-pane
+    jonquil.gtk.change-sets-pane
     jonquil.gtk.processes-pane
     jonquil.gtk.messages-pane
     jonquil.gtk.console-view
@@ -152,6 +155,7 @@
     jonquil.gtk.parts.processes
     jonquil.gtk.parts.replay
     jonquil.gtk.parts.trace
+    jonquil.gtk.parts.change-sets
     jonquil.gtk.parts.live-results
     jonquil.gtk.parts.time-form
     jonquil.gtk.parts.worlds

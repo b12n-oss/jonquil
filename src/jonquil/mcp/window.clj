@@ -1,6 +1,7 @@
 (ns jonquil.mcp.window
-  "The nineteen MCP tools over a live Jonquil window, four of them over its
-  plugins folder (through jonquil.plugin-mcp).
+  "The twenty MCP tools over a live Jonquil window, four of them over its
+  plugins folder (through jonquil.plugin-mcp) and one saving a change set
+  an agent proposes (jonquil.change-sets).
 
   `make-window-tools` returns the same table shape as jonquil.mcp.tools:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`,
@@ -129,7 +130,18 @@
     "inputSchema" {"type" "object"
                    "properties" {"id" (prop "string" plugin-id-doc)
                                  "n" (prop "integer" "The proposal's version number.")}
-                   "required" ["id"]}}])
+                   "required" ["id"]}}
+   {"name" "jonquil_change_set_propose"
+    "description" "Propose a change set: a named list of top-level forms, each with the file it belongs to. It is saved marked as yours and listed under Change Sets in the window, where the user reviews each form as a diff against the file and applies or reverts the set. No tool applies one. A name that is taken is refused."
+    "inputSchema" {"type" "object"
+                   "properties" {"name" (prop "string" "The set's name: letters, digits, dot, dash and underscore.")
+                                 "forms" {"type" "array"
+                                          "description" "The forms, in the order to apply them. Each is one top-level form."
+                                          "items" {"type" "object"
+                                                   "properties" {"path" (prop "string" "The file the form belongs to, absolute or relative to the project.")
+                                                                 "text" (prop "string" "The form's whole text, which replaces the form of the same signature in the file.")}
+                                                   "required" ["path" "text"]}}}
+                   "required" ["name" "forms"]}}])
 
 ;; --- pure helpers ------------------------------------------------------------
 
@@ -446,6 +458,17 @@
                                        ((:plugin-propose!* ui) p)))
       (string? (:id p)) (assoc :plugin-id (:id p)))))
 
+(defn- tool-change-set-propose [{:keys [ui client-fn]} args]
+  (let [name (tools/required-string args "name")]
+    (if-let [propose! (:change-set-propose!* ui)]
+      (let [r (propose! {:name name :forms (get args "forms") :client (client-fn)})]
+        (if-let [why (:error r)]
+          {:text (str "Refused: " (str/replace why #"\.+$" "") ".") :error? true}
+          {:text (str "Saved the change set " (:saved r) " with " (:forms r) (if (= 1 (:forms r)) " form" " forms")
+                      ". The user reviews it under Change Sets in the window and applies or reverts it; no tool applies one.")
+           :error? false}))
+      {:text "Refused: this window keeps no change sets." :error? true})))
+
 (defn- window-handlers
   "Tool name -> (fn [args]) over ctx."
   [ctx]
@@ -468,20 +491,23 @@
      "jonquil_plugins_list" (h tool-plugins-list)
      "jonquil_plugin_read" (h tool-plugin-read)
      "jonquil_plugin_propose" (h tool-plugin-propose)
-     "jonquil_plugin_status" (h tool-plugin-status)}))
+     "jonquil_plugin_status" (h tool-plugin-status)
+     "jonquil_change_set_propose" (h tool-change-set-propose)}))
 
 (defn make-window-tools
   "The tool table over a live window. :ui is the :on-ready ui map, :dir the
   server's default directory (absolute), :gui the enqueue fn (default
   cb/on-gui!; tests pass a synchronous one), :grace-ms the wait after an
-  interrupt and for Stop (default 5000; a test knob, as make-tools has)."
-  [{:keys [ui dir gui grace-ms]}]
+  interrupt and for Stop (default 5000; a test knob, as make-tools has).
+  :client-fn answers the connected client's name, or nil (default)."
+  [{:keys [ui dir gui grace-ms client-fn]}]
   (let [gui (or gui cb/on-gui!)
         grace-ms (or grace-ms default-grace-ms)
         await! (fn [args fire]
                  (await-eval {:ui ui :gui gui :fire fire :grace-ms grace-ms
                               :timeout-ms (tools/timeout-of args)}))
         handlers (window-handlers {:ui ui :dir dir :grace-ms grace-ms :await! await!
+                                   :client-fn (or client-fn (constantly nil))
                                    :turn (fn [f] (gui-call gui f gui-deadline-ms))})]
     {:defs window-tool-defs
      :call (fn [tname args]
@@ -572,7 +598,7 @@
   [{:keys [ui dir read-line write-line gui]}]
   (try
     (let [session* (atom {})]
-      (mcp/serve! {:tools (with-messages (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui) ui session*)
+      (mcp/serve! {:tools (with-messages (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui :client-fn (fn [] (:client @session*))}) ui) ui session*)
                    :on-initialize (fn [ci] (stdio-attached! ui session* ci))
                    :subscribe (:watch-plugin-tools* ui)
                    :read-line read-line

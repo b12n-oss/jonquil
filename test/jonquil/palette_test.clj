@@ -167,3 +167,28 @@
     (is (= :session/open-replay (first-id "replay")))
     (is (= :session/forget-last (first-id "forget last")))
     (is (= :layout/forget (first-id "forget")) "bare forget sorts the layout command first, by doc")))
+
+(deftest change-set-queries-keep-their-neighbours-test
+  (testing "the change set commands share no whole query with the commands they sit beside"
+    (let [es (shipped-entries)
+          first-id (fn [q] (:id (first (palette/filter-entries es q))))]
+      (doseq [[q id] [["run the forms changed since they last ran" :run/changed]
+                      ["save the buffer under a new name" :file/save-as]
+                      ["review the plugin proposals" :plugins/review]
+                      ["reload your code" :debug/locals-mode]
+                      ["compare with git head" :compare/head]
+                      ["this form vs git head" :compare-form/head]
+                      ["make the text larger" :view/zoom-in]
+                      ["save world" :world/save]]]
+        (is (= id (first-id q)) q))
+      (doseq [[q id] [["forms changed since" :run/changed]
+                      ["under a new name" :file/save-as]
+                      ["review the plugin" :plugins/review]
+                      ["reload your code" :debug/locals-mode]
+                      ["compare with git head" :compare/head]]]
+        (is (= id (:run (palette/bang-pick es (str "!" q)))) (str "!" q " runs it at the prompt")))))
+  (testing "their own words reach them"
+    (let [es (shipped-entries)]
+      (is (= :change-set/browse (:run (palette/bang-pick es "!change sets"))))
+      (is (= :change-set/make (:run (palette/bang-pick es "!make a change set"))))
+      (is (= :change-set/make (:run (palette/bang-pick es "!bundle the work you touched")))))))

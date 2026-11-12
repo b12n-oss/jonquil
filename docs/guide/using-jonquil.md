@@ -73,6 +73,43 @@ the forms they sent. An evaluation that fails or is stopped records nothing,
 so its forms stay marked. A file reloaded from disk keeps its record, so
 the forms that differ from what last ran show up marked.
 
+### Change sets
+
+A change set holds the forms you changed for one idea, so you can look at
+them together, send them to the running program in one go, or put them all
+back. **Make a Change Set** (type "bundle the work" in the palette) gathers
+the active tab's changed forms, the ones the gutter marks, and opens the
+Change Sets panel on the right with one section per form: its file, its name
+(`defn f`) and a diff of the text it had at the last Run that ended well
+against the text it has now. A form that is new since then reads "(new)" and
+shows as all added. Type a name and press **Save Set**. The panel needs a
+saved tab that has run once; with nothing changed the status bar says so.
+
+**Change Sets** in the palette lists the project's kept sets, each with its
+form count and, for an agent's, who proposed it. Opening one shows its
+diffs and three buttons:
+
+- **Apply to REPL** sends each form in order, in the namespace of its file,
+  the way Run Selection sends code. Every form is echoed and its result lands
+  in the console. The first form that ends with an error stops the rest, and
+  the console names it. Apply doesn't mark the forms as run.
+- **Revert in Tabs** puts each form's last-run text back in its open tab (it
+  opens the file when no tab shows it) as one undo step per tab. A form is
+  found by its first two elements and its place among forms that share them,
+  as in the one-form compare. One that is gone, is new since the last Run, or
+  already reads as it did is skipped and named in the console.
+- **Delete** removes the set.
+
+Sets are plain EDN files in `change-sets/<folder>-<hash>/` beside the
+settings file, one per set, so they survive a restart and stay out of the
+project's tree. A set that isn't valid EDN, or doesn't have the shape of one,
+is listed as broken, can only be deleted, and is never applied. Saving under
+a name that exists replaces that set.
+
+An agent can propose a set with `jonquil_change_set_propose` (see
+[MCP](mcp.md)). It lands in the same list marked "proposed by" the client, and
+only you can apply or revert it.
+
 ### Timing a form
 
 **Time the form at the caret (about a second)**, in the palette, runs that

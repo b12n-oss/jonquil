@@ -49,6 +49,7 @@ Emacs took first:
 | The Processes panel: the fibers your program spawned, Interrupt and Kill | `list-processes` (`M-x proced` for OS processes); Genera's Peek, which showed every process and let you arrest or kill one |
 | Compare with the file on disk, git HEAD, another tab or the last Run, Take the other version here | `diff-buffer-with-file`, `vc-diff` and `ediff`'s per-hunk copy; Genera's Compare Files |
 | The changed-form marks, Run the forms changed since they last ran | none built in: `diff-hl` marks lines changed since the last commit, not since the last eval |
+| Change sets: the changed forms as a named, reviewable bundle you can apply to the REPL or revert | none built in: `git stash` and branches work on whole files and never touch the running Lisp |
 | Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
 | Break on error, Continue | `debug-on-error` while the error is live: `e` evaluates in a frame, `c` continues |
 | Retry, Edit and retry, Define and retry | none close: the Elisp debugger resumes a live stack, which an unwound one can't |

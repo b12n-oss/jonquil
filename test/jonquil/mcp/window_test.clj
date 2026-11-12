@@ -34,12 +34,13 @@
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 
-(deftest defs-are-the-nineteen
+(deftest defs-are-the-twenty
   (is (= ["jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop"
           "jonquil_open" "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab"
           "jonquil_replace_text" "jonquil_save" "jonquil_console" "jonquil_doc"
           "jonquil_complete" "jonquil_check_brackets" "jonquil_project"
-          "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"]
+          "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
+          "jonquil_change_set_propose"]
          (map #(get % "name") (:defs (tools-for {}))))))
 
 (defn- plugin-ui
@@ -293,7 +294,7 @@
                        :call (fn [args] {:text (str "echo " (get args "text")) :error? false})}])
         f (w/with-plugin-tools (tools-for {}) {:plugin-tools* (fn [] @served)})
         names (fn [] (map #(get % "name") (:defs (f))))]
-    (is (= 20 (count (names))))
+    (is (= 21 (count (names))))
     (is (= "plugin_fmt_echo" (last (names))))
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
     (is (= {:text "Selected tab 1." :error? false :tab-id 1}
@@ -301,8 +302,8 @@
                       {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
     (reset! served [])
-    (is (= 19 (count (names))))
-    (is (= 19 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
+    (is (= 20 (count (names))))
+    (is (= 20 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
 
 (deftest plugin-tools-table-says-list-changed
   ;; a window that can watch its plugin tools declares it
@@ -330,7 +331,7 @@
     (is (= [{:kind :agent :summary "Claude Code switched to tab 1" :client "Claude Code"
              :target {:tab-id 1} :summary-tab 1}]
            @entries))
-    (is (= 19 (count (:defs (f)))) "the defs pass through")))
+    (is (= 20 (count (:defs (f)))) "the defs pass through")))
 
 (deftest with-messages-rethrows
   (let [entries (atom [])
@@ -492,3 +493,26 @@
                                      :mcp-run!* run :evaluator* (fn [] (evaluator {}))))]
       (is (= {:text text :error? false :tab-id 4} (call with-tab "jonquil_run" {})))
       (is (not (contains? (call (tools-for {:mcp-run!* run :evaluator* (fn [] (evaluator {}))}) "jonquil_run" {}) :tab-id))))))
+
+(deftest change-set-propose-tool-test
+  (let [calls (atom [])
+        ui {:change-set-propose!* (fn [m] (swap! calls conj m)
+                                    (if (= "taken" (:name m))
+                                      {:error "a change set called taken exists already; pick another name"}
+                                      {:saved (:name m) :forms (count (:forms m))}))}
+        forms [{"path" "a.clj" "text" "(def a 1)"}]
+        t (tools-for ui :client-fn (fn [] "Claude Code"))]
+    (is (= {:text "Saved the change set idea with 1 form. The user reviews it under Change Sets in the window and applies or reverts it; no tool applies one."
+            :error? false}
+           (call t "jonquil_change_set_propose" {"name" "idea" "forms" forms})))
+    (is (= [{:name "idea" :forms forms :client "Claude Code"}] @calls) "the client's name reaches the hook")
+    (is (= {:text "Refused: a change set called taken exists already; pick another name." :error? true}
+           (call t "jonquil_change_set_propose" {"name" "taken" "forms" forms})))
+    (is (thrown-with-msg? Throwable #"Missing required argument: name" (call t "jonquil_change_set_propose" {"forms" forms})))
+    (is (nil? (:client (first (let [c (atom [])]
+                                (call (tools-for {:change-set-propose!* (fn [m] (swap! c conj m) {:saved "x" :forms 1})})
+                                      "jonquil_change_set_propose" {"name" "x" "forms" forms})
+                                @c))))
+        "no client-fn, no client")
+    (is (:error? (call (tools-for {}) "jonquil_change_set_propose" {"name" "x" "forms" forms}))
+        "a window without the hook refuses")))

@@ -27,6 +27,7 @@
    "jonquil/keymap.edn" (embedded-text "jonquil/keymap.edn")
    "jonquil/palette.clj" (embedded-text "jonquil/palette.clj")
    "jonquil/parts.clj" (embedded-text "jonquil/parts.clj")
+   "jonquil/parts/change_sets.clj" (embedded-text "jonquil/parts/change_sets.clj")
    "jonquil/parts/command_palette.clj" (embedded-text "jonquil/parts/command_palette.clj")
    "jonquil/parts/disk_poll.clj" (embedded-text "jonquil/parts/disk_poll.clj")
    "jonquil/parts/debugger.clj" (embedded-text "jonquil/parts/debugger.clj")
