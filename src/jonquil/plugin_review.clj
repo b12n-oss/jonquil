@@ -72,6 +72,35 @@
     :else (str "Based on " (if based-on (str "v" based-on) "no version") ", live is v" live-n
                ": the diff is against live.")))
 
+(defn- effects-line
+  "review's line naming the effects check reported, each not in
+  live-effects marked (new)."
+  [{:keys [unchecked? plugin]} live-effects]
+  (if unchecked?
+    "Effects: not known until its checks run at Accept."
+    (str "Effects, as its check reported: "
+         (if (empty? (:effects plugin))
+           "none"
+           (str/join ", " (for [e (sort-by str (:effects plugin))]
+                            (str e (when-not (contains? (set live-effects) e) " (new)"))))))))
+
+(defn- check-lines
+  "review's lines from a run check: the MCP tools an agent could call once
+  it's live (each not in live-tools marked (new)), the warnings and the
+  soak timings, each only when there are some."
+  [id {:keys [plugin warnings timings]} live-tools]
+  (cond-> []
+    (seq (:mcp-tools plugin))
+    (conj (str "MCP tools, as its check reported: "
+               (str/join ", " (for [{:keys [name]} (:mcp-tools plugin)]
+                                (str (plugin-check/served-tool-name id name)
+                                     (when-not (contains? (set live-tools) name) " (new)"))))))
+    (seq warnings)
+    (conj (str "Warnings, as its check reported: " (str/join "; " warnings)))
+    (seq timings)
+    (conj (str "Soak timings, as its check reported: "
+               (str/join ", " (for [[k ms] (sort-by (comp str key) timings)] (str k " " ms " ms")))))))
+
 (defn review
   "The review of a pending proposal entry for plugin id (a string), given
   its source (nil when missing from the history), the live version's
@@ -79,8 +108,7 @@
   names (each nil when there's none): {:id :n :lines [...] :diff text}."
   [{:keys [id proposal source live-n live-source live-effects live-tools]}]
   (let [{:keys [n reason based-on check]} proposal
-        {:keys [unchecked? plugin warnings timings]} check
-        live-effects (set live-effects)]
+        unchecked? (:unchecked? check)]
     {:id id :n n
      :diff (if source (diff-text live-source source) "")
      :lines (-> (cond-> []
@@ -88,24 +116,8 @@
                 (conj (str id " v" n ", proposed by an agent: " reason))
                 (cond-> (nil? source) (conj "Its source is missing from its history, so it can't be accepted."))
                 (conj (standing based-on live-n))
-                (conj (if unchecked?
-                        "Effects: not known until its checks run at Accept."
-                        (str "Effects, as its check reported: "
-                             (if (empty? (:effects plugin))
-                               "none"
-                               (str/join ", " (for [e (sort-by str (:effects plugin))]
-                                                (str e (when-not (contains? live-effects e) " (new)"))))))))
-                ;; the tools an agent could call once it's live
-                (cond-> (and (not unchecked?) (seq (:mcp-tools plugin)))
-                  (conj (str "MCP tools, as its check reported: "
-                             (str/join ", " (for [{:keys [name]} (:mcp-tools plugin)]
-                                              (str (plugin-check/served-tool-name id name)
-                                                   (when-not (contains? (set live-tools) name) " (new)")))))))
-                (cond-> (and (not unchecked?) (seq warnings))
-                  (conj (str "Warnings, as its check reported: " (str/join "; " warnings))))
-                (cond-> (and (not unchecked?) (seq timings))
-                  (conj (str "Soak timings, as its check reported: "
-                             (str/join ", " (for [[k ms] (sort-by (comp str key) timings)] (str k " " ms " ms"))))))
+                (conj (effects-line check live-effects))
+                (into (when-not unchecked? (check-lines id check live-tools)))
                 (conj "Pressing Accept runs this code in Jonquil."))}))
 
 (defn summary-text

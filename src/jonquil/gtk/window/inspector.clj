@@ -136,7 +136,7 @@
   runs make-eval-opts' own and then, for an :ok result, hands open-or-queue!
   to on-gui! (the completion runs on the eval worker thread)."
   [{:keys [tab cv ev* status-label] :as ctx}]
-  (let [base-opts (win-run/make-eval-opts (:ed tab) cv ev* status-label false)]
+  (let [base-opts (win-run/make-eval-opts {:ed (:ed tab) :cv cv :ev* ev* :status-label status-label :run? false})]
     (assoc base-opts
            :on-complete
            (fn [result]

@@ -218,7 +218,7 @@
 (defn- form-env
   "Runs f with inspect-form!'s collaborators stubbed, logging into log:
   refuse-foreign! answers refused, the editor snapshot is {:text :caret},
-  make-eval-opts logs [:opts ed cv ev* status-label is-run?] and answers a
+  make-eval-opts logs [:opts ed cv ev* status-label run?] from its ctx and answers a
   base opts map whose :on-complete logs [:base r], and on-gui! logs :gui
   and runs its thunk. The evaluator (evaluating? is busy, inspectable? is
   ok?) keeps the opts eval! got in sent and answers warning."
@@ -236,8 +236,8 @@
         ev* (atom e)]
     (with-redefs [win-run/refuse-foreign! (fn [_] refused)
                   editor/snapshot (fn [_] {:text text :caret caret})
-                  win-run/make-eval-opts (fn [ed cv ev* l run?]
-                                           (swap! log conj [:opts ed cv ev* l run?])
+                  win-run/make-eval-opts (fn [{:keys [ed cv ev* status-label run?]}]
+                                           (swap! log conj [:opts ed cv ev* status-label run?])
                                            {:k 1 :on-complete (fn [r] (swap! log conj [:base r]))})
                   cview/echo-entry! (fn [_ t fresh?] (swap! log conj [:echo t fresh?]))
                   cview/note-run-start! (fn [_] (swap! log conj [:note-start]))
