@@ -25,7 +25,7 @@
         bang* (atom (fn [_text]))
         ;; :failure*, the last failed evaluation, for the restarts
         cv (assoc
-            (cview/make-console-view {:on-submit (win-run/make-on-submit active-tab *cv ev* status-label bang*)
+            (cview/make-console-view {:on-submit (win-run/make-on-submit {:tab-fn active-tab :*cv *cv :ev* ev* :status-label status-label :bang* bang*})
                                       :history-prev (win-run/history-prev-fn ev*)
                                       :history-next (win-run/history-next-fn ev*)
                                       ;; The console reads busy/waiting state
@@ -44,6 +44,19 @@
             :replay-tab* (atom nil))
         _ (reset! *cv cv)]
     (assoc w :bang* bang* :cv cv)))
+
+(defn- follow-scroll!
+  "Connects value-changed on the console view's two adjustments so
+  scrolling the Interactions pane moves or hides the completion popover.
+  Returns nil."
+  [cv repl-completion]
+  (let [follow (callable (fn [_adj _data]
+                           (popover/follow-caret! repl-completion)
+                           nil)
+                         [:pointer :pointer] :void)]
+    (doseq [adj [(g/gtk-scrollable-get-vadjustment (:view cv))
+                 (g/gtk-scrollable-get-hadjustment (:view cv))]]
+      (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT))))
 
 (defn build-completion
   "activate!'s console completion bindings, in activate!'s order: the
@@ -82,11 +95,5 @@
         ;; the console's completion is caret-anchored too: scrolling the
         ;; Interactions pane follows or hides it, as a tab's editor does
         ;; for its popovers (wire-tab!)
-        _ (let [follow (callable (fn [_adj _data]
-                                   (popover/follow-caret! repl-completion)
-                                   nil)
-                                 [:pointer :pointer] :void)]
-            (doseq [adj [(g/gtk-scrollable-get-vadjustment (:view cv))
-                         (g/gtk-scrollable-get-hadjustment (:view cv))]]
-              (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT)))]
+        _ (follow-scroll! cv repl-completion)]
     (assoc w :repl-completion repl-completion :repl-complete-fn repl-complete-fn)))

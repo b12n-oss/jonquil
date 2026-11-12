@@ -58,11 +58,12 @@
 (defn- jump-to-var!
   "Looks sym up and jumps to its definition, or says none was found."
   [{:keys [ev* set-status! active-tab ask-lookup! jump-to! source-ctx status-label]} sym]
-  (ask-lookup! {:ev* ev* :status-label status-label} sym "" 0 (constantly true) "jump"
-               (fn [doc]
-                 (if doc
-                   (jump-to! (source-ctx (active-tab)) sym {:kind :external :doc doc})
-                   (set-status! (str "No definition found for " sym "."))))))
+  (ask-lookup! {:ev* ev* :status-label status-label}
+               {:sym sym :text "" :pos 0 :still? (constantly true) :label "jump"
+                :on-doc (fn [doc]
+                          (if doc
+                            (jump-to! (source-ctx (active-tab)) sym {:kind :external :doc doc})
+                            (set-status! (str "No definition found for " sym "."))))}))
 
 (defn- result-jump!
   [{:keys [set-status!] :as ctx}]
@@ -76,11 +77,12 @@
   "Looks sym up and prints its quick doc in the console as comment lines,
   or says none was found."
   [{:keys [ev* cv set-status! ask-lookup! status-label]} sym]
-  (ask-lookup! {:ev* ev* :status-label status-label} sym "" 0 (constantly true) "quick doc"
-               (fn [doc]
-                 (if doc
-                   (cview/append! cv :system (results/doc-console-text (help/doc-text sym doc)))
-                   (set-status! (str "No documentation found for " sym "."))))))
+  (ask-lookup! {:ev* ev* :status-label status-label}
+               {:sym sym :text "" :pos 0 :still? (constantly true) :label "quick doc"
+                :on-doc (fn [doc]
+                          (if doc
+                            (cview/append! cv :system (results/doc-console-text (help/doc-text sym doc)))
+                            (set-status! (str "No documentation found for " sym "."))))}))
 
 (defn- result-doc!
   [{:keys [set-status!] :as ctx}]

@@ -64,8 +64,9 @@
 (deftest ask-lookup-plain-evaluator-test
   (let [log (atom [])
         e (logging-evaluator log)]
-    (#'win-help/ask-lookup! {:ev* (atom e) :status-label ::l} "map" "(map)" 1 (constantly true) "quick doc"
-                            (fn [d] (swap! log conj [:doc d])))
+    (#'win-help/ask-lookup! {:ev* (atom e) :status-label ::l}
+                            {:sym "map" :text "(map)" :pos 1 :still? (constantly true) :label "quick doc"
+                             :on-doc (fn [d] (swap! log conj [:doc d]))})
     (is (= [[:lookup "map" "(map)" 1] [:doc {:doc "map"}]] @log))))
 
 (deftest ask-lookup-server-evaluator-test
@@ -77,7 +78,8 @@
         ev* (atom e)
         on-doc (fn [d] (swap! log conj [:doc d]))
         ask! (fn [still?]
-               (#'win-help/ask-lookup! {:ev* ev* :status-label ::l} "map" "(map)" 1 still? "quick doc" on-doc))]
+               (#'win-help/ask-lookup! {:ev* ev* :status-label ::l}
+                                       {:sym "map" :text "(map)" :pos 1 :still? still? :label "quick doc" :on-doc on-doc}))]
     (with-redefs [ev/server-help? (constantly true)
                   ev/ask-help! (fn [_ms _f on-later] (reset! later on-later) @answer)
                   jonquil.gtk.callbacks/on-gui! (fn [f] (f))
@@ -186,11 +188,12 @@
                   completion/refine! (fn [_] (throw (ex-info "late" {})))
                   completion/close! (fn [c] (swap! log conj [:close c]))
                   win-status/set-status! (fn [l text] (swap! log conj [l text]))]
-      (#'win-help/wire-completion! ::c cf ::l
-                                   (fn [p] (swap! log conj [:register p]))
-                                   (fn [m] (reset! fns m))
-                                   (fn [f] (reset! moved f))
-                                   (fn [f] (reset! lost f)))
+      (#'win-help/wire-completion! ::c
+                                   {:complete-fn cf :status-label ::l
+                                    :register-popover-fn (fn [p] (swap! log conj [:register p]))
+                                    :set-fns! (fn [m] (reset! fns m))
+                                    :on-moved! (fn [f] (reset! moved f))
+                                    :on-focus-lost! (fn [f] (reset! lost f))})
       (is (= [[:register ::c]] @log))
       (is (identical? cf (:complete! @fns)))
       (is (= [:handled ::c 2 0] ((:handle-key! @fns) 2 0)))

@@ -30,6 +30,19 @@
       (last-session/save-sessions!
        path (last-session/remember (:sessions (last-session/load-sessions path)) (session-snapshot ctx))))))
 
+(defn- write-snapshot!
+  "Saves the session for session-changed! and records snap as the last one
+  written. A failure is said on the console once, until a save works
+  again. ctx is session-changed!'s."
+  [{:keys [session-last session-error cv] :as ctx} snap]
+  (let [err (try (save-session! ctx) (catch :default e (ex-message e)))]
+    (if err
+      (when (not= err @session-error)
+        (reset! session-error err)
+        (cview/append! cv :system (str "; sessions: " err "\n")))
+      (do (reset! session-error nil)
+          (reset! session-last snap)))))
+
 (defn session-changed!
   "Saves the tab list as it changes, not only at quit, so a crash or a
   force quit keeps it. Does nothing until :session-live? is set, which
@@ -41,14 +54,8 @@
   on saves at the next change. A failure is said on the console
   once, until a save works again. ctx without :session-live? (a partial
   map) does nothing."
-  [{:keys [session-live? session-last session-error cv] :as ctx}]
+  [{:keys [session-live? session-last] :as ctx}]
   (when (and session-live? @session-live? (reopen-tabs? @(:settings-path* ctx)))
     (let [snap (session-snapshot ctx)]
       (when (not= snap @session-last)
-        (let [err (try (save-session! ctx) (catch :default e (ex-message e)))]
-          (if err
-            (when (not= err @session-error)
-              (reset! session-error err)
-              (cview/append! cv :system (str "; sessions: " err "\n")))
-            (do (reset! session-error nil)
-                (reset! session-last snap))))))))
+        (write-snapshot! ctx snap)))))

@@ -82,7 +82,7 @@
         *cv (atom nil)
         bang* (atom (fn [t] (swap! log conj [:bang t])))]
     (with-redefs [win-run/do-repl-eval! (fn [& args] (swap! log conj (vec args)))]
-      (let [submit (#'win-run/make-on-submit (fn [] {:id 3 :ed ::ed}) *cv ev* ::l bang*)]
+      (let [submit (#'win-run/make-on-submit {:tab-fn (fn [] {:id 3 :ed ::ed}) :*cv *cv :ev* ev* :status-label ::l :bang* bang*})]
         (reset! *cv ::cv)
         (submit {:action :eval :text "!clear the console"})
         (submit {:action :eval :text "(+ 1 2)"})

@@ -657,7 +657,7 @@
                 :set-status! #(swap! statuses conj %) :status-label :lbl
                 :ev* (atom nil) :active-tab (fn [] nil)
                 :inspect! (fn [_]) :jump-to! (fn [& _]) :source-ctx (fn [_] {})
-                :ask-lookup! (fn [_ sym _ _ _ label on-doc] (swap! asked conj [sym label]) (on-doc @answer))}]
+                :ask-lookup! (fn [_ {:keys [sym label on-doc]}] (swap! asked conj [sym label]) (on-doc @answer))}]
       (with-redefs [cview/result-at (fn [_ _] {:id 1 :epoch "e" :kind :var})
                     cview/result-text-at (fn [_ _] "=> #'clojure.core/inc\n")
                     cview/append! (fn [_ style s] (swap! printed conj [style s]))
