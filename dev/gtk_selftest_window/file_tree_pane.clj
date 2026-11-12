@@ -3,7 +3,8 @@
   on a fresh pane in its own throwaway window over a temp folder tree.
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
-  (:require [clojure.java.io :as io]
+  (:require [selftest-keys]
+            [clojure.java.io :as io]
             [gtk-async :as gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
@@ -36,6 +37,7 @@
                                                                 extra))]
                                    (g/gtk-window-set-default-size win 300 500)
                                    (g/gtk-window-set-child win (:root p))
+                                   (selftest-keys/watch! win)
                                    (g/gtk-window-present win)
                                    {:win win :p p}))]
      (try (f p opened)

@@ -5,7 +5,8 @@
   JVM group (dev/gtk_selftest_clj/source.clj).
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
-  (:require [clojure.core.async :refer [<! timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :refer [<! timeout]]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
@@ -37,6 +38,7 @@
                                          pane (source-pane/make-pane)]
                                      (g/gtk-window-set-default-size win 420 500)
                                      (g/gtk-window-set-child win (:root pane))
+                                     (selftest-keys/watch! win)
                                      (g/gtk-window-present win)
                                      {:win win :pane pane}))]
     (try (f pane)

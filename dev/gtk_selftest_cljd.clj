@@ -9,7 +9,8 @@
   The last row fires the app's own quit action, so finish is a
   close-forced fallback only, and after-close-checks! runs once
   main/start! returns, before SUMMARY."
-  (:require [clojure.core.async :as a :refer [<! go timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :as a :refer [<! go timeout]]
             [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-cljd.rows :as rows]
             [gtk-selftest-window.support :as support]
@@ -68,6 +69,7 @@
 (defn- print-summary! []
   (let [passed (count (filter second @support/results)) total (count @support/results)]
     (reset! finished? true)
+    (selftest-keys/print-warning!)
     (println (str "SUMMARY " passed " of " total " passed"))))
 
 (defn- finish
@@ -100,6 +102,7 @@
      {:file (:file fixture)
       :settings-path (support/fresh-settings-path)
       :on-ready (fn [ui]
+                  (selftest-keys/watch! (:window ui))
                   (g/g-signal-connect-data (:window ui) "destroy"
                                            (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                         [:pointer :pointer] :void)
