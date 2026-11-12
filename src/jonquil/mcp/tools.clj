@@ -123,33 +123,41 @@
         sep (if (or (str/blank? output) (str/ends-with? output "\n")) "" "\n")]
     (str output sep (str/replace (str line) #"\n+$" ""))))
 
+(defn- timed-out-result!
+  "The {:text :error?} for an evaluation that missed its deadline. Interrupts
+  e and waits grace-ms for it to finish; if it is still stuck, evicts it and
+  stops it. output is a fn giving what was collected so far."
+  [e done output {:keys [timeout-ms grace-ms evict!]}]
+  (ev/interrupt! e)
+  (let [stuck? (= ::timeout (deref done grace-ms ::timeout))]
+    (when stuck?
+      (evict!)
+      (try (ev/stop! e) (catch :default _ nil)))
+    {:text (str (output)
+                (if stuck?
+                  (str "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped."
+                       " The runtime was stopped; a fresh one will be started on the next call.")
+                  (str "Timed out after " timeout-ms " ms; interrupted.")))
+     :error? true}))
+
 (defn- run-eval!
-  "Evaluates code on e and blocks for the result: {:text :error?}."
-  [e code opts timeout-ms grace-ms evict!]
+  "Evaluates code on e and blocks for the result: {:text :error?}. limits
+  holds :opts (eval options), :timeout-ms, :grace-ms and :evict! (called when
+  e is stuck past the grace)."
+  [e code {:keys [opts timeout-ms] :as limits}]
   (let [out (atom [])
         done (promise)
         warning (ev/eval! e code
                           (assoc opts
                                  :on-output (fn [_ s] (swap! out conj s))
                                  :on-wait-input (fn [waiting?] (when waiting? (ev/send-eof! e)))
-                                 :on-complete (fn [r] (deliver done r))))]
+                                 :on-complete (fn [r] (deliver done r))))
+        output (fn [] (apply str @out))]
     (if warning
       {:text (str warning) :error? true}
-      (let [output (fn [] (apply str @out))
-            r (deref done timeout-ms ::timeout)]
+      (let [r (deref done timeout-ms ::timeout)]
         (if (= ::timeout r)
-          (do (ev/interrupt! e)
-              (let [r2 (deref done grace-ms ::timeout)
-                    stuck? (= ::timeout r2)]
-                (when stuck?
-                  (evict!)
-                  (try (ev/stop! e) (catch :default _ nil)))
-                {:text (str (output)
-                            (if stuck?
-                              (str "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped."
-                                   " The runtime was stopped; a fresh one will be started on the next call.")
-                              (str "Timed out after " timeout-ms " ms; interrupted.")))
-                 :error? true}))
+          (timed-out-result! e done output limits)
           {:text (result-text (output) r)
            :error? (= :error (:status r))})))))
 
@@ -207,8 +215,8 @@
   cache when it is stuck. step holds :path :e :code :opts :timeout-ms."
   [{:keys [ctx cache grace-ms]} {:keys [path e code opts timeout-ms]}]
   (let [k (dialect/selection-key (selection ctx path))]
-    (run-eval! e code opts timeout-ms grace-ms
-               (fn [] (swap! cache (fn [m] (if (identical? e (get m k)) (dissoc m k) m)))))))
+    (run-eval! e code {:opts opts :timeout-ms timeout-ms :grace-ms grace-ms
+                       :evict! (fn [] (swap! cache (fn [m] (if (identical? e (get m k)) (dissoc m k) m))))})))
 
 (defn- tool-eval [env args]
   (let [code (required-string args "code")

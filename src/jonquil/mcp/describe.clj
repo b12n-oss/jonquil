@@ -47,19 +47,36 @@
 (defn- unknown [tool args]
   {:kind :plugin :what (str "called " tool) :detail (messages/cap-text (pr-str args))})
 
+(defn- row-of
+  "The row map (:kind :what :detail :target :tab?) a tool's describer gives
+  for this call, or the generic one for a tool with no row."
+  [tool args result]
+  (if-let [f (get rows tool)]
+    (f (or args {}) result)
+    (unknown tool args)))
+
+(defn- failure
+  "The reason this call failed: threw, else the first line of the tool's
+  result text."
+  [result threw]
+  (or threw (first (str/split-lines (str (:text result))))))
+
+(defn- summary-text
+  "\"<client> <what>\", plus \", which failed: <why>\" when failed?."
+  [client what failed? why]
+  (str (or client "Agent") " " what
+       (when failed? (str ", which failed: " why))))
+
 (defn describe-call
   "{:tool :args :result :client :threw} -> an entry for jonquil.messages/add.
   result is the tool's {:text :error? & [:tab-id :plugin-id]}, nil when it
   threw (then threw is the message). client nil reads as \"Agent\"."
   [{:keys [tool args result client threw]}]
-  (let [f (get rows tool)
-        {:keys [kind what detail target tab?]} (if f (f (or args {}) result) (unknown tool args))
+  (let [{:keys [kind what detail target tab?]} (row-of tool args result)
         failed? (or (some? threw) (boolean (:error? result)))
-        why (or threw (first (str/split-lines (str (:text result)))))
         tab-id (when tab? (:tab-id result))]
     (cond-> {:kind kind
-             :summary (str (or client "Agent") " " what
-                           (when failed? (str ", which failed: " why)))
+             :summary (summary-text client what failed? (failure result threw))
              :client client}
       failed? (assoc :error? true)
       detail (assoc :detail detail)

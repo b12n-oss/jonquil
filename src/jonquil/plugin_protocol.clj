@@ -20,6 +20,24 @@
       (str "line " line ": " msg)
       (str "loading the file threw: " msg))))
 
+(defn- eval-candidate
+  "Evaluates source with defplugin's collector bound and *ns* restored
+  afterwards: {:definitions [...] :problems [...]}. wanted is the namespace
+  the file must end in. Runs on the load future's thread."
+  [source wanted]
+  (binding [*ns* *ns* p/*definitions* (atom [])]
+    ;; eval-string, not load-string: a Jolt with jolt-lang/jolt #1460
+    ;; binds *ns* around load-string, and ns-now is read after it
+    (let [threw (try (eval/eval-string source) nil (catch Throwable e e))
+          defs @p/*definitions*
+          ns-now (str (ns-name *ns*))]
+      {:definitions defs
+       :problems (cond
+                   threw [(load-problem threw)]
+                   (not= wanted ns-now)
+                   [(str "the file's namespace is " ns-now "; a plugin file's is " wanted)]
+                   :else [])})))
+
 (defn load-candidate
   "Loads source, a plugin file's text, with defplugin's collector bound and
   *ns* restored afterwards: {:definitions [...] :problems [...]}. Never
@@ -31,19 +49,7 @@
   stays loaded."
   [{:keys [source file-id load-ms] :or {load-ms 10000}}]
   (let [wanted (str "jonquil.plugins." file-id)
-        f (future
-            (binding [*ns* *ns* p/*definitions* (atom [])]
-              ;; eval-string, not load-string: a Jolt with jolt-lang/jolt #1460
-              ;; binds *ns* around load-string, and ns-now is read after it
-              (let [threw (try (eval/eval-string source) nil (catch Throwable e e))
-                    defs @p/*definitions*
-                    ns-now (str (ns-name *ns*))]
-                {:definitions defs
-                 :problems (cond
-                             threw [(load-problem threw)]
-                             (not= wanted ns-now)
-                             [(str "the file's namespace is " ns-now "; a plugin file's is " wanted)]
-                             :else [])})))
+        f (future (eval-candidate source wanted))
         v (deref f load-ms ::timeout)]
     (if (= ::timeout v)
       (do (future-cancel f)
@@ -84,6 +90,25 @@
       (str ":sel " (pr-str sel) " isn't two offsets inside the edited text")
       :else nil)))
 
+(defn- edits-problem
+  "The sentence for the first way edits (a vector of [start end string])
+  is malformed for text of length len, or nil."
+  [edits len]
+  (cond
+    (not (and (vector? edits)
+              (every? #(and (vector? %) (= 3 (count %)) (string? (nth % 2))) edits)))
+    ":edits isn't a vector of [start end string]"
+    ;; apply-op! refuses such an op silently (GTK C
+    ;; strings would truncate the insert), so the refusal is named here,
+    ;; on the loud path the author already gets.
+    (some (fn [[_ _ r]] (str/includes? r "\u0000")) edits)
+    "an edit's text holds a NUL byte, which Jonquil's editor can't keep"
+    (not (every? (fn [[a b]] (and (offset? a len) (offset? b len) (<= a b))) edits))
+    (str "an edit is outside the text (0.." len ")")
+    (not (every? (fn [[[_ e1] [s2]]] (<= e1 s2)) (partition 2 1 edits)))
+    "its edits overlap or aren't in ascending order"
+    :else nil))
+
 (defn edit-result-problem
   "nil when result is nil (the command doesn't apply here) or a well-formed
   jonquil.edit op for snapshot's text: {:edits [[start end string] ...]
@@ -95,19 +120,8 @@
     (cond
       (nil? result) nil
       (not (map? result)) (str "returned " (pr-str result) ", not an edit op map")
-      (not (and (vector? edits)
-                (every? #(and (vector? %) (= 3 (count %)) (string? (nth % 2))) edits)))
-      ":edits isn't a vector of [start end string]"
-      ;; apply-op! refuses such an op silently (GTK C
-      ;; strings would truncate the insert), so the refusal is named here,
-      ;; on the loud path the author already gets.
-      (some (fn [[_ _ r]] (str/includes? r "\u0000")) edits)
-      "an edit's text holds a NUL byte, which Jonquil's editor can't keep"
-      (not (every? (fn [[a b]] (and (offset? a len) (offset? b len) (<= a b))) edits))
-      (str "an edit is outside the text (0.." len ")")
-      (not (every? (fn [[[_ e1] [s2]]] (<= e1 s2)) (partition 2 1 edits)))
-      "its edits overlap or aren't in ascending order"
-      :else (caret-problem result len))))
+      :else (or (edits-problem edits len)
+                (caret-problem result len)))))
 
 (defn- throw-message [e]
   (or (some-> e .getCause ex-message) (ex-message e) (str e)))
