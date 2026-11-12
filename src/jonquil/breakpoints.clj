@@ -33,7 +33,7 @@
   the tab the code came from, for the gutter's arrow."
   ([n] (breakpoint-form n {}))
   ([n {:keys [step? tab]}]
-   (str (when step? "(clojure.core/when (clojure.core/deref jonquil.debugger/stepping-any) ")
+   (str (when step? "(clojure.core/when (clojure.core/seq (clojure.core/deref jonquil.debugger/stepping-any)) ")
         "(try (jolt.debug/with-break-handler"
         " (clojure.core/fn [t fs] (clojure.core/when-let [h (clojure.core/deref jonquil.debugger/breakpoint-hook)] (h t fs)))"
         " (throw (clojure.core/ex-info \"Breakpoint\" {:jonquil/breakpoint " n

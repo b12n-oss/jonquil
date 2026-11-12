@@ -102,6 +102,15 @@
         starts-in (fn [l] (let [s (nth (bp/line-starts text) (dec l) nil)] (and s (<= start s) (< s end))))]
     (bp/dropped-lines text (filter starts-in ls) (heads ed text))))
 
+(defn record-sent!
+  "Keeps text as what ed's breakpoints were last sent from, for the
+  stepping arrow (jonquil.breakpoints/arrow-line). Only a whole-tab Run and
+  a toggle's re-send record it: a Run Form of an edited buffer while an
+  older pause shows would make that pause's lines look current."
+  [ed text]
+  (some-> (get-in ed [:changed :bp-sent]) (reset! text))
+  nil)
+
 (defn sent-text
   "What a Run sends from ed: text's range ({:start :end}, the whole text
   when nil) with ed's breakpoints in, when evaluator e has them armed and
@@ -112,6 +121,5 @@
   (let [{:keys [start end] :or {start 0 end (count text)}} range
         ls (when (and (supported? e) (ev/breakpoints-on? e)) (seq (lines ed text)))]
     (if ls
-      (do (some-> (get-in ed [:changed :bp-sent]) (reset! text))
-          (:text (bp/instrument text ls (merge {:start start :end end :tab tab-id} (heads ed text)))))
+      (:text (bp/instrument text ls (merge {:start start :end end :tab tab-id} (heads ed text))))
       (subs text start end))))

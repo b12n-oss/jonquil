@@ -694,7 +694,7 @@
                    "        acc))))")
           {out :text steps :steps} (instrument-h t [3])]
       (try
-        (reset! debugger/stepping-any false)
+        (reset! debugger/stepping-any #{})
         (reset! debugger/breakpoint-hook hook)
         (is (seq steps))
         (is (= 4950 ((eval (read-string out)) 100)))
@@ -744,7 +744,7 @@
       (reset! (:paused brk) {:data {:breakpoint 3} :continued (atom true) :thread (Thread/currentThread)})
       (is (false? (debugger/step! brk stepping)))
       (is (nil? @stepping))
-      (is (false? @debugger/stepping-any)))))
+      (is (empty? @debugger/stepping-any)))))
 
 (deftest arrow-line-only-on-the-text-that-ran-test
   (is (= 3 (bp/arrow-line {:sent "a\nb\nc" :now "a\nb\nc" :line 3})))
@@ -752,3 +752,15 @@
       "edited since it ran: line 3 may be another line now")
   (is (nil? (bp/arrow-line {:sent nil :now "a" :line 1})) "nothing sent from this tab")
   (is (nil? (bp/arrow-line {:sent "a" :now "a" :line 4})) "past the end"))
+
+(deftest stopping-one-step-leaves-anothers-test
+  (let [a (Thread. (fn [])) b (Thread. (fn []))
+        sa (atom a) sb (atom b)]
+    (reset! debugger/stepping-any #{a b})
+    (debugger/stop-stepping! sb)
+    (is (= #{a} @debugger/stepping-any) "B's end takes only B's entry")
+    (debugger/stop-stepping! (atom nil))
+    (is (= #{a} @debugger/stepping-any) "a session not stepping takes nothing")
+    (debugger/stop-stepping! sa)
+    (is (empty? @debugger/stepping-any))
+    (is (nil? @sa))))

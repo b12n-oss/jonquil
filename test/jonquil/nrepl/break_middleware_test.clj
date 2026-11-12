@@ -282,3 +282,12 @@
           (is (= 4 (deref fut 5000 :blocked)) "Continue: line 4's step point doesn't pause")
           (is (nil? @(:stepping entry))))
         (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))
+
+(deftest closing-a-session-ends-its-step-test
+  (let [{:keys [h entry]} (setup)
+        t (Thread. (fn []))]
+    (reset! (:stepping entry) t)
+    (swap! debugger/stepping-any conj t)
+    (h {"op" "close" "session" "s1" :reply (fn [_])})
+    (is (nil? @(:stepping entry)))
+    (is (not (contains? @debugger/stepping-any t)))))

@@ -542,9 +542,11 @@
   (let [d (ex-data t)] (when (map? d) (:jonquil/breakpoint d))))
 
 (defonce stepping-any
-  ;; True while any session is stepping: a step point checks it before it
-  ;; throws, so with nobody stepping it costs a deref and nothing else
-  (atom false))
+  ;; The threads stepping now, in any session: a step point checks that
+  ;; this is non-empty before it throws, so with nobody stepping it costs a
+  ;; deref and nothing else. A session adds its stepped thread and removes
+  ;; only its own (stop-stepping!), so one ending never ends another's step.
+  (atom #{}))
 
 (defn stepping-here?
   "True when stepping (an atom holding the thread a Step let go, or nil)
@@ -554,11 +556,12 @@
   (identical? @stepping (Thread/currentThread)))
 
 (defn stop-stepping!
-  "Ends stepping (the atom) and clears stepping-any. Called at any pause,
-  Continue, Stop and an evaluation's end."
+  "Ends stepping (the atom) and takes its thread, and only its own, out of
+  stepping-any. Called at any pause, Continue, Stop, an evaluation's end
+  and a session's close."
   [stepping]
-  (reset! stepping nil)
-  (reset! stepping-any false)
+  (let [[old _] (reset-vals! stepping nil)]
+    (when old (swap! stepping-any disj old)))
   nil)
 
 (defn- step-point?
@@ -634,8 +637,9 @@
     (boolean
      (when (and p (:breakpoint (:data p)) (compare-and-set! (:continued p) false true))
        ;; on before the thread runs again, so its next line sees it
+       (stop-stepping! stepping)
        (reset! stepping (:thread p))
-       (reset! stepping-any true)
+       (swap! stepping-any conj (:thread p))
        (.put queue :continue)
        true))))
 

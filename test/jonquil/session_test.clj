@@ -690,3 +690,53 @@
         (is (true? (ev/continue-break! s)))
         (is (= :error (:status (deref done 5000 :timeout))))
         (finally (toggle-break-sync s))))))
+
+(deftest another-sessions-end-leaves-a-step-alone-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [a (session/make-session)
+          b (session/make-session)
+          text "(defn s2 [x]\n  (Thread/sleep 300)\n  (let [y (inc x)]\n    (* y 2)))"
+          paused (atom (promise))
+          next-pause (fn [] (let [d (deref @paused 5000 nil)] (reset! paused (promise)) d))]
+      (try
+        (ev/set-break-handlers! a {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync a true)))
+        (repl-sync a (:text (bp/instrument text [2] (debugger/macro-heads "user" (bp/head-symbols text)))))
+        (let [done (promise)]
+          (session/submit-repl! a "(s2 1)" {:on-complete (fn [r] (deliver done r))})
+          (is (= "Breakpoint at line 2" (:title (next-pause))))
+          (is (true? (step-sync a)))
+          ;; while A sleeps on line 2, B runs an evaluation to its end
+          (is (= "3" (:printed (repl-sync b "(+ 1 2)"))))
+          (is (= "Stepped to line 3" (:title (next-pause))) "B's end didn't end A's step")
+          (ev/continue-break! a)
+          (is (= "4" (:printed (deref done 5000 :timeout)))))
+        (is (empty? @debugger/stepping-any))
+        (finally (set-breakpoints-sync a false) (debugger/set-debug-mode! false))))))
+
+(deftest a-step-off-the-end-leaves-no-entry-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          text "(defn s3 [x]\n  (inc x))"
+          paused (promise)
+          done (promise)]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync s true)))
+        (repl-sync s (:text (bp/instrument text [2] (debugger/macro-heads "user" (bp/head-symbols text)))))
+        (session/submit-repl! s "(s3 1)" {:on-complete (fn [r] (deliver done r))})
+        (is (some? (deref paused 5000 nil)))
+        (is (true? (step-sync s)) "the last line: the run ends while stepping")
+        (is (= "2" (:printed (deref done 5000 :timeout))))
+        (is (empty? @debugger/stepping-any) "nothing left to make step points throw")
+        (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
+
+(deftest stopping-a-session-ends-its-step-test
+  (let [s (session/make-session)
+        t (Thread. (fn []))]
+    (reset! (:stepping @(:state s)) t)
+    (swap! debugger/stepping-any conj t)
+    (ev/stop! s)
+    (is (not (contains? @debugger/stepping-any t)) "a closed window leaves no entry")))

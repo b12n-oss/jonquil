@@ -313,6 +313,7 @@
           (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                 ;; LM5: the tab's breakpoints go in the text sent
                 _ (say-dropped! cv ed @ev* text nil)
+                _ (gbp/record-sent! ed text)
                 warning (ev/eval! @ev* (gbp/sent-text ed @ev* text nil (:id tab)) (opts))]
             (say-busy! cv notify warning)))))))
 
@@ -687,6 +688,7 @@
       (before-run-stopped ctx :form tab forms) :refused
       :else
       (do (cview/echo-entry! cv forms true)
+          (gbp/record-sent! ed text)
           (do-repl-eval! ctx ed (joined (fn [r] (gbp/sent-text ed @ev* text r (:id tab))))
                          {:ns-source text :owner (:id tab) :hook-code forms
                           :hook-source :form :hook-tab (:id tab) :then then

@@ -206,7 +206,8 @@
               (debugger/break-stop! (:break e)))
             (next request))
         "close"
-        (do (swap! sessions dissoc sid)
+        (do (when e (debugger/stop-stepping! (:stepping e)))
+            (swap! sessions dissoc sid)
             (next request))
         (next request)))))
 

@@ -106,7 +106,10 @@
   ;; did before the Evaluator protocol existed: nothing to end.
   ;; a paused break (Break on error) is let go, so closing the window or
   ;; switching runtimes never leaves its worker blocked
-  (stop! [_] (debugger/continue! (:break @state)) nil)
+  (stop! [_]
+    (debugger/stop-stepping! (:stepping @state))
+    (debugger/continue! (:break @state))
+    nil)
   (eval! [this code opts]
     (cond
       (:quiet opts) (quiet-eval! this code (dissoc opts :run?))
