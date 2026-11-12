@@ -1,7 +1,8 @@
 (ns gtk-selftest-window.gutter
   "The Definitions editor's left gutter (jonquil.gtk.gutter): its bars
   follow the lines of the ranges they mark, through scrolling."
-  (:require [clojure.core.async :refer [<! timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :refer [<! timeout]]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -30,6 +31,7 @@
                                             gt (gutter/attach! ed)]
                                         (g/gtk-window-set-default-size win 300 160)
                                         (g/gtk-window-set-child win (:scroll ed))
+                                        (selftest-keys/watch! win)
                                         (g/gtk-window-present win)
                                         (editor/set-text! ed text)
                                         {:win win :ed ed :gt gt}))]
@@ -70,6 +72,7 @@
                                             gt (gutter/attach! ed)]
                                         (g/gtk-window-set-default-size win 300 200)
                                         (g/gtk-window-set-child win (:scroll ed))
+                                        (selftest-keys/watch! win)
                                         (g/gtk-window-present win)
                                         (editor/set-text! ed text)
                                         {:win win :ed ed :gt gt}))]

@@ -11,7 +11,8 @@
 
   Mirrors gtk-selftest-cljd's driver; the last row fires the app's quit
   action."
-  (:require [clojure.core.async :as a :refer [<! go timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :as a :refer [<! go timeout]]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :as ga :refer [await-until go-row on-gtk]]
@@ -133,6 +134,7 @@
 (defn- print-summary! []
   (let [passed (count (filter second @support/results)) total (count @support/results)]
     (reset! finished? true)
+    (selftest-keys/print-warning!)
     (println (str "SUMMARY " passed " of " total " passed"))))
 
 (defn- finish
@@ -167,6 +169,7 @@
       :on-ready (fn [ui]
                   (reset! at-show* {:tabs (mapv (fn [t] @(:path t)) ((:tabs* ui)))
                                     :names (mapv :name (pane/visible-rows (:file-tree ui)))})
+                  (selftest-keys/watch! (:window ui))
                   (g/g-signal-connect-data (:window ui) "destroy"
                                            (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                         [:pointer :pointer] :void)

@@ -90,6 +90,53 @@
     (loop [i 0]
       (if (and (< i limit) (= (nth a (- la 1 i)) (nth b (- lb 1 i)))) (recur (inc i)) i))))
 
+(defn- edit-window
+  "{:p :q :old-len :new-len :delta :old-tail :new-tail}: the prefix and
+  suffix lengths the edit left alone (p, q) and where the changed middle
+  sits in the old and new text."
+  [old-text new-text bounds]
+  (let [old-len (count old-text)
+        new-len (count new-text)
+        p (min (common-prefix old-text new-text) (:prefix bounds 0))
+        q (common-suffix old-text new-text
+                         (min (:suffix bounds 0) (- (min old-len new-len) p)))]
+    {:p p :q q :old-len old-len :new-len new-len
+     :delta (- new-len old-len)
+     :old-tail (- old-len q)
+     :new-tail (- new-len q)}))
+
+(defn- crossing-span
+  "[a b] in new-text offsets for the old span s..e that straddles the edit."
+  [{:keys [p old-tail new-tail delta]} s e]
+  [(cond (< s p) s (>= s old-tail) (+ s delta) :else p)
+   (cond (> e old-tail) (+ e delta) (> e p) new-tail :else e)])
+
+(defn- sort-old-span
+  "reduce step: files the old span before the edit and after it under :kept
+  (shifted when after), and one that crosses it under :crossing."
+  [{:keys [p old-tail delta] :as window} acc [k s e :as span]]
+  (cond (<= e p) (update acc :kept conj! span)
+        (>= s old-tail) (update acc :kept conj! [k (+ s delta) (+ e delta)])
+        :else (update acc :crossing conj! (crossing-span window s e))))
+
+(defn- sort-old-plan
+  "{:kept #{span} :crossing [[a b]]} for old-plan around the edit window."
+  [old-plan window]
+  (let [{:keys [kept crossing]}
+        (reduce (partial sort-old-span window)
+                {:kept (transient #{}) :crossing (transient [])}
+                old-plan)]
+    {:kept (persistent! kept) :crossing (persistent! crossing)}))
+
+(defn- changed-spans
+  "[a b] pairs for the spans that differ between old and new plan: the
+  symmetric difference of new-plan and kept, plus the crossing spans."
+  [new-plan {:keys [kept crossing]}]
+  (let [new-set (set new-plan)
+        changed (concat (remove kept new-plan)
+                        (remove new-set kept))]
+    (concat (map (fn [[_ s e]] [s e]) changed) crossing)))
+
 (defn plan-diff
   "The smallest region to re-tag after an edit. Returns {:range [a b] :apply
   spans} in new-text offsets, or nil when nothing needs re-tagging. :apply is
@@ -105,30 +152,12 @@
   makes the common prefix one char longer than the real edit start, and GTK
   gives inherited tags to the char at the real start. So bounds is
   {:prefix m :suffix n}: no edit since old-text touched the first m chars or
-  the last n chars. nil means unknown and re-tags the whole text. One pass over each plan plus hash sets, so linear in span count."
-  [old-text old-plan new-text new-plan bounds]
-  (let [old-len (count old-text)
-        new-len (count new-text)
-        p (min (common-prefix old-text new-text) (:prefix bounds 0))
-        q (common-suffix old-text new-text
-                         (min (:suffix bounds 0) (- (min old-len new-len) p)))
-        delta (- new-len old-len)
-        old-tail (- old-len q)
-        new-tail (- new-len q)
-        {:keys [kept crossing]}
-        (reduce (fn [acc [k s e :as span]]
-                  (cond (<= e p) (update acc :kept conj! span)
-                        (>= s old-tail) (update acc :kept conj! [k (+ s delta) (+ e delta)])
-                        :else (update acc :crossing conj!
-                                      [(cond (< s p) s (>= s old-tail) (+ s delta) :else p)
-                                       (cond (> e old-tail) (+ e delta) (> e p) new-tail :else e)])))
-                {:kept (transient #{}) :crossing (transient [])}
-                old-plan)
-        kept (persistent! kept)
-        new-set (set new-plan)
-        changed (concat (remove kept new-plan)
-                        (remove new-set kept))
-        spans (concat (map (fn [[_ s e]] [s e]) changed) (persistent! crossing))]
+  the last n chars. nil means unknown and re-tags the whole text. One pass over each plan plus hash sets, so linear in span count.
+
+  Takes one map: {:old-text :old-plan :new-text :new-plan :bounds}."
+  [{:keys [old-text old-plan new-text new-plan bounds]}]
+  (let [{:keys [p q old-len new-len new-tail] :as window} (edit-window old-text new-text bounds)
+        spans (changed-spans new-plan (sort-old-plan old-plan window))]
     (when-not (and (empty? spans) (>= (+ p q) old-len) (>= (+ p q) new-len))
       (let [a (reduce min p (map first spans))
             b (reduce max new-tail (map second spans))]

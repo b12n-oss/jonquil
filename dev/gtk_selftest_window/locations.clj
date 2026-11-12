@@ -2,7 +2,8 @@
   "The locations list: the panel on its own in a transient window, then
   the real window's commands that fill it and F8 / Shift+F8 stepping
   through it."
-  (:require [clojure.java.io :as io]
+  (:require [selftest-keys]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -31,6 +32,7 @@
     (let [{:keys [win pane]} (on-gtk (let [win (g/gtk-window-new)
                                            pane (lpane/make-pane)]
                                        (g/gtk-window-set-child win (:root pane))
+                                       (selftest-keys/watch! win)
                                        (g/gtk-window-present win)
                                        {:win win :pane pane}))
           lst (assoc (loc/definitions fixture "area") :index 1)]
@@ -59,6 +61,7 @@
     (let [{:keys [win pane]} (on-gtk (let [win (g/gtk-window-new)
                                            pane (lpane/make-pane)]
                                        (g/gtk-window-set-child win (:root pane))
+                                       (selftest-keys/watch! win)
                                        (g/gtk-window-present win)
                                        {:win win :pane pane}))
           calls (atom [])]

@@ -38,7 +38,8 @@
   it's done, so its three checks are always part of the same summary the
   exit code is computed from, never a separate late FAIL that would need
   its own tally line."
-  (:require [clojure.core.async :as a :refer [<! go timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :as a :refer [<! go timeout]]
             [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-nrepl.rows :as rows]
             [gtk-selftest-window.support :as support]
@@ -116,6 +117,7 @@
   []
   (let [passed (count (filter second @support/results)) total (count @support/results)]
     (reset! finished? true)
+    (selftest-keys/print-warning!)
     (println (str "SUMMARY " passed " of " total " passed"))))
 
 (defn- finish
@@ -159,6 +161,7 @@
        {:file (:file fixture)
         :settings-path (support/fresh-settings-path)
         :on-ready (fn [ui]
+                    (selftest-keys/watch! (:window ui))
                     (g/g-signal-connect-data (:window ui) "destroy"
                                              (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                           [:pointer :pointer] :void)

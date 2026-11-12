@@ -13,7 +13,8 @@
   state (the SAME pane persists across rows, exactly as it does in the
   real app -- run-row only resets the editor and the console's input,
   never the inspector panel), so their order matters."
-  (:require [clojure.string :as str]
+  (:require [selftest-keys]
+            [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.gtk.callbacks :as callbacks]
@@ -59,6 +60,7 @@
         (on-gtk (let [win (g/gtk-window-new)
                       pane (inspector-pane/make-pane opts)]
                   (g/gtk-window-set-child win (:root pane))
+                  (selftest-keys/watch! win)
                   (g/gtk-window-present win)
                   {:win win :pane pane}))]
     (try

@@ -151,6 +151,22 @@
            :caret (shift-offset edits sel-end)
            :sel [(shift-offset edits sel-start) (shift-offset edits sel-end)]})))))
 
+(defn- comment-edits
+  "Edits for toggle-comment over lines ([line-start text] pairs): strip the
+  comment marker when every non-blank line has one, else add \"; \" to each
+  non-blank line."
+  [lines]
+  (let [non-blank (remove (fn [[_ t]] (str/blank? t)) lines)
+        all-commented? (and (seq non-blank)
+                            (every? (fn [[_ t]] (boolean (re-find #"^[ ]*;+" t))) non-blank))]
+    (if all-commented?
+      (keep (fn [[ls t]]
+              (when-let [m (re-find #"^([ ]*)(;+[ ]?)" t)]
+                (let [lead (count (nth m 1)) chars (count (nth m 2))]
+                  [(+ ls lead) (+ ls lead chars) ""])))
+            lines)
+      (keep (fn [[ls t]] (when-not (str/blank? t) [ls ls "; "])) lines))))
+
 (defn toggle-comment
   "Upstream ui.clj toggle-comment! (41c56b8): comments every non-blank line
   the selection spans (or the caret's line) with a leading \"; \", or, when
@@ -165,16 +181,7 @@
                       (let [[s e] (line-span text starts idx)]
                         [(nth starts idx) (subs text s e)]))
                     (range start-line (inc end-line)))
-        non-blank (remove (fn [[_ t]] (str/blank? t)) lines)
-        all-commented? (and (seq non-blank)
-                            (every? (fn [[_ t]] (boolean (re-find #"^[ ]*;+" t))) non-blank))
-        edits (if all-commented?
-                (keep (fn [[ls t]]
-                        (when-let [m (re-find #"^([ ]*)(;+[ ]?)" t)]
-                          (let [lead (count (nth m 1)) chars (count (nth m 2))]
-                            [(+ ls lead) (+ ls lead chars) ""])))
-                      lines)
-                (keep (fn [[ls t]] (when-not (str/blank? t) [ls ls "; "])) lines))]
+        edits (comment-edits lines)]
     (when (seq edits)
       (let [edits (vec edits)]
         {:edits edits

@@ -19,7 +19,8 @@
   popovers-quickdoc, completion, rename-menus, dialects, mcp). This file keeps
   only row-fns (the ordered list every row runs in -- the last row really
   closes the window, so order matters), the driver, and -main."
-  (:require [clojure.core.async :as a :refer [<! go timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :as a :refer [<! go timeout]]
             [gtk-selftest-window.probe-part]
             [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-window.probe :as probe-rows]
@@ -694,6 +695,7 @@
   []
   (let [passed (count (filter second @support/results)) total (count @support/results)]
     (reset! finished? true)
+    (selftest-keys/print-warning!)
     (println (str "SUMMARY " passed " of " total " passed"))))
 
 (defn- finish
@@ -737,6 +739,7 @@
     (main/start!
      {:settings-path (support/fresh-settings-path)
       :on-ready (fn [ui]
+                  (selftest-keys/watch! (:window ui))
                   (g/g-signal-connect-data (:window ui) "destroy"
                                            (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                         [:pointer :pointer] :void)

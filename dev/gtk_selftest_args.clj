@@ -10,7 +10,8 @@
 
   Mirrors gtk-selftest-tree's driver; the last row fires the app's quit
   action."
-  (:require [clojure.core.async :as a :refer [<! go timeout]]
+  (:require [selftest-keys]
+            [clojure.core.async :as a :refer [<! go timeout]]
             [clojure.java.io :as io]
             [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -113,6 +114,7 @@
 (defn- print-summary! []
   (let [passed (count (filter second @support/results)) total (count @support/results)]
     (reset! finished? true)
+    (selftest-keys/print-warning!)
     (println (str "SUMMARY " passed " of " total " passed"))))
 
 (defn- finish
@@ -143,6 +145,7 @@
       :argv (main/gtk-argv [(:sub dir) (:a dir) (:b dir)] (:dir dir))
       :settings-path (reset! settings-path* (support/fresh-settings-path))
       :on-ready (fn [ui]
+                  (selftest-keys/watch! (:window ui))
                   (g/g-signal-connect-data (:window ui) "destroy"
                                            (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                         [:pointer :pointer] :void)

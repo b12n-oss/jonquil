@@ -888,7 +888,8 @@
   (future
     (try
       (let [plan (paint/paint-plan profile text)
-            diff (paint/plan-diff (:text painted) (:plan painted) text plan bounds)
+            diff (paint/plan-diff {:old-text (:text painted) :old-plan (:plan painted)
+                                   :new-text text :new-plan plan :bounds bounds})
             spans (nearest-first caret (:apply diff))]
         (on-gui!
          (fn []

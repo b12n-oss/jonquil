@@ -37,6 +37,28 @@
     (when on-wait-input (on-wait-input false))
     item))
 
+(defn- refill-stdin!
+  "Takes the next stdin item into :current-rdr. True when there is more to
+   read; false at EOF, after marking :closed. stdin is {:queue :current-rdr
+   :closed :on-wait-input}."
+  [{:keys [queue current-rdr closed on-wait-input]}]
+  (let [item (await-stdin-item queue on-wait-input)]
+    (if (or (identical? item ::eof) (nil? item) @closed)
+      (do (reset! closed true) false)
+      (do (reset! current-rdr (StringReader. (str item))) true))))
+
+(defn- read-stdin-chars
+  "Reads up to len chars into cbuf at off, refilling from the queue as the
+   current reader runs dry. -1 once closed or at EOF."
+  [{:keys [current-rdr closed] :as stdin} cbuf off len]
+  (if @closed
+    -1
+    (loop []
+      (let [n (.read ^StringReader @current-rdr cbuf off len)]
+        (cond (not (neg? n)) n
+              (refill-stdin! stdin) (recur)
+              :else -1)))))
+
 (defn create-stdin-reader
   "Upstream's queue-fed Reader, unchanged."
   [queue current-rdr-atom closed-atom on-wait-input]
@@ -50,17 +72,9 @@
              n (.read ^Reader this buf 0 1)]
          (if (neg? n) -1 (int (aget ^chars buf 0)))))
       ([cbuf off len]
-       (if @closed-atom
-         -1
-         (loop []
-           (let [n (.read ^StringReader @current-rdr-atom cbuf off len)]
-             (if (neg? n)
-               (let [item (await-stdin-item queue on-wait-input)]
-                 (if (or (identical? item ::eof) (nil? item) @closed-atom)
-                   (do (reset! closed-atom true) -1)
-                   (do (reset! current-rdr-atom (StringReader. (str item)))
-                       (recur))))
-               n))))))))
+       (read-stdin-chars {:queue queue :current-rdr current-rdr-atom :closed closed-atom
+                          :on-wait-input on-wait-input}
+                         cbuf off len)))))
 
 (defn find-root-cause [^Throwable t]
   (loop [cause t]
@@ -433,6 +447,28 @@
     (catch :default e (report-callback-exception! "on-complete" e)))
   result)
 
+(defn- start-run!
+  "Registers a new run on ctx and starts its worker future. Answers nil.
+   Called with ctx's lock held, and no run in progress."
+  [{:keys [running-state] :as ctx} code opts]
+  (let [{:keys [on-output]} opts
+        ns-sym (or (:ns-name opts) 'user)
+        token (jolt.host/make-interrupt)
+        done (promise)
+        stop-requested (atom false)
+        emit (fn [kind] (fn [chunk] (when on-output (on-output kind chunk))))
+        run {:token token :done done :stop-requested stop-requested
+             :ns-sym ns-sym :opts opts
+             :out-w (create-writer (emit :out))
+             :err-w (create-writer (emit :err))}]
+    (reset-run-input! ctx)
+    ;; :running is set before the worker exists, so a fast worker's own
+    ;; reset to idle can never be overwritten by this thread.
+    (reset! running-state {:status :running :token token :done done :stop-requested stop-requested})
+    (future
+      (finish-run! ctx run (run-evaluation ctx run code)))
+    nil))
+
 (defn eval-async
   "Evaluates code on a worker. Options:
      :on-output (fn [kind s])  kind is :out or :err
@@ -479,24 +515,8 @@
   {:arglists '([{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
                 code
                 {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle wrap-eval source-path] :as opts}])}
-  [{:keys [lock running-state] :as ctx} code opts]
-  (let [{:keys [on-output]} opts
-        ns-sym (or (:ns-name opts) 'user)]
-    (locking lock
-      (if (evaluating? ctx)
-        "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n"
-        (let [token (jolt.host/make-interrupt)
-              done (promise)
-              stop-requested (atom false)
-              emit (fn [kind] (fn [chunk] (when on-output (on-output kind chunk))))
-              run {:token token :done done :stop-requested stop-requested
-                   :ns-sym ns-sym :opts opts
-                   :out-w (create-writer (emit :out))
-                   :err-w (create-writer (emit :err))}]
-          (reset-run-input! ctx)
-          ;; :running is set before the worker exists, so a fast worker's own
-          ;; reset to idle can never be overwritten by this thread.
-          (reset! running-state {:status :running :token token :done done :stop-requested stop-requested})
-          (future
-            (finish-run! ctx run (run-evaluation ctx run code)))
-          nil)))))
+  [{:keys [lock] :as ctx} code opts]
+  (locking lock
+    (if (evaluating? ctx)
+      "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n"
+      (start-run! ctx code opts))))
