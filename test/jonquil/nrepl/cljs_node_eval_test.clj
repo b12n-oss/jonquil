@@ -531,7 +531,7 @@
   (count (filter #(str/includes? % "cljs.repl/apropos") (fake/received-forms srv))))
 
 (defn- offered [e prefix]
-  (set (map :symbol (ev/complete e prefix alias-buf 0 nil))))
+  (set (map :symbol (ev/complete e {:prefix prefix :text alias-buf :pos 0 :extra-context nil}))))
 
 (deftest completion-offers-analyzer-names-after-a-run-test
   (with-node {:apropos-val "(clojure.string/upper-case cljs.user/twice)"} {}
@@ -594,7 +594,7 @@
   (with-node {:apropos-val "(cljs.core/make-hierarchy cljs.core/map-indexed)"} {}
     (fn [_srv {:keys [ev]}]
       (run ev "(def a 1)" {:run? true})
-      (let [cands (ev/complete ev "ma" alias-buf 0 nil)]
+      (let [cands (ev/complete ev {:prefix "ma" :text alias-buf :pos 0 :extra-context nil})]
         (is (contains? (set (map :symbol cands)) "map-indexed") (pr-str cands))
         (is (= "map" (:symbol (first cands))) (pr-str (take 3 cands)))))))
 

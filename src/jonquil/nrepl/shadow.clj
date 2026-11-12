@@ -261,8 +261,8 @@
   ;; advertises complete, bounded by ev/*help-timeout-ms* (the window asks
   ;; through ev/ask-help!, off the GTK thread, with a 3 s limit). Any throw,
   ;; a timeout or no connection falls back to offline.
-  (complete [_ prefix text pos extra-context]
-    (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (complete [_ {:keys [prefix text] :as req}]
+    (let [offline (try (cljd/candidates (:profile selection) req)
                        (catch Throwable _ []))]
       (try
         (let [{:keys [conn session ops session-ns]} @state]
@@ -301,8 +301,8 @@
     "Jonquil connects to the shadow-cljs nREPL server on the first Run.")
 
   ev/ServerHelp
-  (offline-candidates [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (offline-candidates [_ req]
+    (try (cljd/candidates (:profile selection) req)
          (catch Throwable _ [])))
 
   ev/FullDoc

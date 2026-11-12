@@ -595,7 +595,7 @@
   popover. Returns the opts map."
   [ev* status-label close-popovers-fn]
   {:ns-fn (fn [] (ev/prompt-ns @ev*))
-   :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
+   :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* {:prefix prefix :text text :pos pos :extra-context extra}))
    :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
    :server-ev (fn [] (let [e @ev*] (when (ev/server-help? e) e)))
    :close-others! close-popovers-fn

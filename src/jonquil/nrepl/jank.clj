@@ -292,8 +292,8 @@
   ;; Offline candidates, plus jank's own when the connection is live and
   ;; nothing is running, bounded by :help-timeout-ms since this runs on the
   ;; GTK thread. A timeout or a throw falls back to offline alone.
-  (complete [this prefix text pos extra-context]
-    (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (complete [this {:keys [prefix text] :as req}]
+    (let [offline (try (cljd/candidates (:profile selection) req)
                        (catch Throwable _ []))]
       (try
         (if-let [{:keys [conn session prompt-ns]} (help-state this)]
@@ -312,8 +312,8 @@
   (limitations [_] jank/limitations)
 
   ev/ServerHelp
-  (offline-candidates [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+  (offline-candidates [_ req]
+    (try (cljd/candidates (:profile selection) req)
          (catch Throwable _ [])))
 
   ev/FullDoc

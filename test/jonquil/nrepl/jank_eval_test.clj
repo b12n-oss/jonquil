@@ -271,7 +271,7 @@
       (run e core-text {:run? true})
       (run e "(+ 1 2)" {:run? false})
       (ev/lookup e "map" "(map)" 1)
-      (ev/complete e "ma" "(ma" 3 {})
+      (ev/complete e {:prefix "ma" :text "(ma" :pos 3 :extra-context {}})
       (deref (let [p (promise)] (ev/full-doc e "map" "(map)" #(deliver p %)) p) 5000 nil)
       (is (not (some #{"lookup"} (fake/ops-seen srv)))))))
 
@@ -320,13 +320,13 @@
   (with-jank [j {:completions {"gr" [["greet" "demo.core" "function"]]}} {} srv]
     (let [e (:ev j)]
       (run e "(+ 1 2)" {:run? false})
-      (is (contains? (candidate-names (ev/complete e "gr" "(gr" 3 {})) "greet"))
+      (is (contains? (candidate-names (ev/complete e {:prefix "gr" :text "(gr" :pos 3 :extra-context {}})) "greet"))
       (is (some #{"completions"} (fake/ops-seen srv))))))
 
 (deftest complete-offline-when-idle-not-connected-test
   (with-jank [j {:completions {"gr" [["greet" "demo.core" "function"]]}} {} srv]
     (let [e (:ev j)
-          cands (ev/complete e "gr" "(defn greet [])\n(gr" 19 {})]
+          cands (ev/complete e {:prefix "gr" :text "(defn greet [])\n(gr" :pos 19 :extra-context {}})]
       (is (sequential? cands))
       (is (not (contains? (candidate-names cands) "demo.core/greet")))
       (is (empty? (fake/requests srv)) "not connected: nothing sent"))))
@@ -340,7 +340,7 @@
       (ev/eval! e "(spin)" {:run? false :on-output (fn [_ _]) :on-complete #(deliver done %)})
       (wait-until! #(some (fn [m] (= "(spin)" (get m "code"))) (fake/requests srv)))
       (let [before (count (fake/requests srv))
-            cands (ev/complete e "gr" "(gr" 3 {})
+            cands (ev/complete e {:prefix "gr" :text "(gr" :pos 3 :extra-context {}})
             doc (ev/lookup e "greet" "(greet)" 1)]
         (is (not (contains? (candidate-names cands) "greet")))
         (is (= jank/busy-doc (:doc doc)))

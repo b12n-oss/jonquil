@@ -41,7 +41,7 @@
               (support/place-cursor! (:buf ed) 3)
               ((:complete!* ui))
               (let [st (completion/state c)
-                    expected (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3))
+                    expected (mapv :symbol (docs/candidates ns-sym {:prefix "ma" :text "(ma" :pos 3}))
                     rows (mapv :symbol (:candidates st))
                     preview (g/label-text (:doc-label c))]
                 (support/check :completion-opens
@@ -190,14 +190,14 @@
                 (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "p" -1 1)
                 (let [text-p (editor/editor-text ed)
                       st-p (completion/state c)
-                      expected-p (mapv :symbol (docs/candidates ns-sym "map" "(map" 4))
+                      expected-p (mapv :symbol (docs/candidates ns-sym {:prefix "map" :text "(map" :pos 4}))
                       rows-p (mapv :symbol (:candidates st-p))
                       bs-swallowed (completion/handle-key! c KEY-BACKSPACE 0)
                       bs-handled (editor/handle-key! ed KEY-BACKSPACE 0)]
                   (support/backspace-interactive! (:buf ed) (g/cursor-offset (:buf ed)))
                   (let [text-bs (editor/editor-text ed)
                         st-bs (completion/state c)
-                        expected-bs (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3))
+                        expected-bs (mapv :symbol (docs/candidates ns-sym {:prefix "ma" :text "(ma" :pos 3}))
                         rows-bs (mapv :symbol (:candidates st-bs))
                         left-swallowed (completion/handle-key! c KEY-LEFT 0)
                         left-handled (editor/handle-key! ed KEY-LEFT 0)]
@@ -428,7 +428,7 @@
               (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
               ((:repl-complete!* ui))
               (let [st (completion/state c)
-                    expected (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3 history))
+                    expected (mapv :symbol (docs/candidates ns-sym {:prefix "ma" :text "(ma" :pos 3 :extra-context history}))
                     rows (mapv :symbol (:candidates st))
                     preview (g/label-text (:doc-label c))]
                 (support/check :repl-completion-opens
@@ -645,14 +645,14 @@
                 (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "p" -1 1)
                 (let [input-p (cview/input-text cv)
                       st-p (completion/state c)
-                      expected-p (mapv :symbol (docs/candidates ns-sym "map" "(map" 4 history))
+                      expected-p (mapv :symbol (docs/candidates ns-sym {:prefix "map" :text "(map" :pos 4 :extra-context history}))
                       rows-p (mapv :symbol (:candidates st-p))
                       bs-swallowed (completion/handle-key! c KEY-BACKSPACE 0)
                       bs-handled (cview/handle-key! cv KEY-BACKSPACE 0)]
                   (support/backspace-interactive! (:buf cv) (g/cursor-offset (:buf cv)))
                   (let [input-bs (cview/input-text cv)
                         st-bs (completion/state c)
-                        expected-bs (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3 history))
+                        expected-bs (mapv :symbol (docs/candidates ns-sym {:prefix "ma" :text "(ma" :pos 3 :extra-context history}))
                         rows-bs (mapv :symbol (:candidates st-bs))
                         left-swallowed (completion/handle-key! c KEY-LEFT 0)
                         left-handled (cview/handle-key! cv KEY-LEFT 0)]

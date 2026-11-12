@@ -68,9 +68,9 @@
 
 (defn candidates
   "syntax/get-autocomplete-candidates with ns-sym's namespace as *ns* (or
-  `user` when it is gone). [] when the lookup throws."
-  ([ns-sym prefix text pos] (candidates ns-sym prefix text pos nil))
-  ([ns-sym prefix text pos extra-context]
-   (try (binding [*ns* (resolve-ns ns-sym)]
-          (syntax/get-autocomplete-candidates prefix text pos extra-context))
-        (catch Exception _ []))))
+  `user` when it is gone). req is {:prefix :text :pos :extra-context}.
+  [] when the lookup throws."
+  [ns-sym {:keys [prefix text pos extra-context]}]
+  (try (binding [*ns* (resolve-ns ns-sym)]
+         (syntax/get-autocomplete-candidates prefix text pos extra-context))
+       (catch Exception _ [])))

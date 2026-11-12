@@ -249,7 +249,7 @@
 (defn- completion-names
   "The first max-completions completion names for prefix on evaluator e."
   [e prefix]
-  (->> (ev/complete e prefix prefix (count prefix) nil)
+  (->> (ev/complete e {:prefix prefix :text prefix :pos (count prefix) :extra-context nil})
        (map #(if (map? %) (or (:name %) (:text %) (:symbol %)) %))
        (remove nil?)
        (map str)

@@ -117,7 +117,7 @@
   ;; what a person sees in a core.jank window.
   (with-jank [e (make)]
     (is (= :ok (:status (:result (run-core! e)))))
-    (let [cands (ev/complete e "tw" core-text 3 {})]
+    (let [cands (ev/complete e {:prefix "tw" :text core-text :pos 3 :extra-context {}})]
       (is (some #(= "twice" (:symbol %)) cands) (pr-str cands)))))
 
 (deftest completions-from-jank-live
@@ -132,8 +132,8 @@
     ;; builds, so the probe refers one in from another namespace, as the
     ;; Run's :refer does for twice.
     (is (= :ok (:status (:result (run e "(do (intern 'demo.util 'zqprobevar 1) (refer 'demo.util :only '[zqprobevar]))" {:run? false})))))
-    (if (some #(= "zqprobevar" (:symbol %)) (ev/complete e "zqprobe" "(zqprobe" 8 {}))
-      (let [cands (ev/complete e "tw" "(tw" 3 {})]
+    (if (some #(= "zqprobevar" (:symbol %)) (ev/complete e {:prefix "zqprobe" :text "(zqprobe" :pos 8 :extra-context {}}))
+      (let [cands (ev/complete e {:prefix "tw" :text "(tw" :pos 3 :extra-context {}})]
         (is (some #(= "twice" (:symbol %)) cands) (pr-str cands)))
       (println "test:jank: skipped completions-from-jank-live: this jank's completions op omits vars referred from other namespaces"))))
 

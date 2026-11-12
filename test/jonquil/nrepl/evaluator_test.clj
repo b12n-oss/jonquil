@@ -97,7 +97,7 @@
         (is (= {:status :error :error-text "Error: Divide by zero"}
                (dissoc (first (run e "(/ 1 0)" false)) :ns :ref))))
       (testing "help: the server's names merged with offline ones"
-        (is (some #{"greet"} (map :symbol (ev/complete e "gre" "(gre" 4 nil))))
+        (is (some #{"greet"} (map :symbol (ev/complete e {:prefix "gre" :text "(gre" :pos 4 :extra-context nil}))))
         (is (= "Says hi." (:doc (ev/lookup e "greet" "(greet 1)" 1))))
         (is (nil? (:file (ev/lookup e "greet" "(greet 1)" 1))) "the Run's text isn't on disk, so no file")
         (is (= :found (:status (ev/lookup e "if" "(if x y)" 1))) "a special form falls back to the offline doc"))

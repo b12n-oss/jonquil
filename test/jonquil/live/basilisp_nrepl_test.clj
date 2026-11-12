@@ -99,7 +99,7 @@
           (testing "a buffer namespace the server hasn't loaded: info finds nothing there, so the prompt's answers"
             (is (str/includes? (str (:doc (ev/lookup e "map" "(ns not.loaded)\n(map" 18))) "lazy sequence")))
           (testing "completion through complete, prefix only"
-            (let [names (map :symbol (ev/complete e "map" "(map" 4 nil))]
+            (let [names (map :symbol (ev/complete e {:prefix "map" :text "(map" :pos 4 :extra-context nil}))]
               (is (some #{"mapv"} names))
               (is (every? #(str/starts-with? % "map") names))))
           (testing "the limitations"

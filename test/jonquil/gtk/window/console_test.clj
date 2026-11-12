@@ -16,7 +16,7 @@
   #_{:clj-kondo/ignore [:missing-protocol-method]}
   (reify ev/Evaluator
     (waiting-for-input? [_] [:waiting k])
-    (complete [_ p t pos x] [:complete k p t pos x])
+    (complete [_ {:keys [prefix text pos extra-context]}] [:complete k prefix text pos extra-context])
     (lookup [_ s t p] [:lookup k s t p])))
 
 (deftest build-makes-the-console-test

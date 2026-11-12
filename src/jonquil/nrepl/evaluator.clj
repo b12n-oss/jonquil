@@ -850,8 +850,8 @@
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [_ mode] (swap! state assoc :mode mode) nil)
-  (complete [this prefix text pos extra-context]
-    (let [offline (docs/candidates 'user prefix text pos extra-context)]
+  (complete [this {:keys [prefix] :as req}]
+    (let [offline (docs/candidates 'user req)]
       (try
         (let [{:keys [child conn session]} (runtime this)
               r (when (and (child/alive? child) (client/open? conn))
@@ -895,8 +895,8 @@
           (not (contains? (:ops rt) "interrupt"))
           (conj "Stop restarts the runtime: this server has no interrupt op.")))))
   ev/ServerHelp
-  (offline-candidates [_ prefix text pos extra-context]
-    (try (docs/candidates 'user prefix text pos extra-context)
+  (offline-candidates [_ req]
+    (try (docs/candidates 'user req)
          (catch Throwable _ [])))
 
   ev/QuietEval
@@ -935,11 +935,11 @@
     (child-op! this {:op "jonquil-debug-mode" :msg {} :unavailable "The debugger needs Jolt."
                      :reply toggle-reply}
                on-done))
-  (eval-in-frame! [this i code error-id on-result]
+  (eval-in-frame! [this {:keys [frame-i code error-id]} on-result]
     ;; the evaluator's usual bound: a longer form keeps running in the
     ;; child, and this says it didn't answer
     (child-op! this {:op "jonquil-frame-eval"
-                     :msg (cond-> {:frame i :code code} error-id (assoc :error-id error-id))
+                     :msg (cond-> {:frame frame-i :code code} error-id (assoc :error-id error-id))
                      :not-running {:error "No error yet."} :unavailable "The debugger needs Jolt."
                      :reply frame-eval-reply}
                on-result))

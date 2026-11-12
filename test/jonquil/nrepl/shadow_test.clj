@@ -210,14 +210,14 @@
   (with-project {}
     (fn [_ _ e]
       (testing "offline until connected: never connects on its own"
-        (is (not-any? #(= "mapv" (:symbol %)) (ev/complete e "mapv" "" 0 "")))
+        (is (not-any? #(= "mapv" (:symbol %)) (ev/complete e {:prefix "mapv" :text "" :pos 0 :extra-context ""})))
         (is (= :no-docs (:status (ev/lookup e "map" "" 0))))
         (let [got (promise)]
           (ev/full-doc e "map" "" (fn [r] (deliver got r)))
           (is (= {:status :not-attached} (deref got 2000 :timeout)))))
       (run e "(+ 1 2)" {:run? false})
       (testing "the server's candidates merge into the offline ones"
-        (is (some #(= "mapv" (:symbol %)) (ev/complete e "map" "" 0 ""))))
+        (is (some #(= "mapv" (:symbol %)) (ev/complete e {:prefix "map" :text "" :pos 0 :extra-context ""}))))
       (testing "lookup reads eldoc"
         (is (= {:status :found :symbol "map" :ns "cljs.core" :name "map" :arglists "([f] [f coll])"
                 :doc fake/map-doc}
@@ -240,7 +240,7 @@
       (is (connection/connected? e))
       (testing "completion and docs stay offline when the server lacks the ops"
         (let [before (count (fake/ops-seen srv))]
-          (is (vector? (ev/complete e "map" "" 0 "")))
+          (is (vector? (ev/complete e {:prefix "map" :text "" :pos 0 :extra-context ""})))
           (is (= :no-docs (:status (ev/lookup e "map" "" 0))))
           (let [got (promise)]
             (ev/full-doc e "map" "" (fn [r] (deliver got r)))

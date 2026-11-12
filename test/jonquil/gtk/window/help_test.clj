@@ -267,7 +267,7 @@
   (let [ev* (atom #_{:clj-kondo/ignore [:missing-protocol-method]}
              (reify ev/Evaluator
                (prompt-ns [_] 'user.x)
-               (complete [_ p t pos x] [:complete p t pos x])
+               (complete [_ {:keys [prefix text pos extra-context]}] [:complete prefix text pos extra-context])
                (lookup [_ s t p] [:lookup s t p])))
         r (atom ::r1)
         tc (atom ::tc1)
