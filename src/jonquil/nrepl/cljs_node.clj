@@ -341,6 +341,33 @@
     :else
     (route-reply! ev r)))
 
+(defn- exchange-sink
+  "exchange!'s sink: collects each reply into replies, hands output to
+  on-output when given, and delivers p :done once done? holds (:closed on
+  the child's close)."
+  [{:keys [p replies done? on-output]}]
+  (fn [r]
+    (if (= :closed (:tag r))
+      (deliver p :closed)
+      (do (swap! replies conj r)
+          (when on-output
+            (when-let [[k t] (cljs-node/output-of r)]
+              (connection/say! on-output k t)))
+          (when (done? r) (deliver p :done))))))
+
+(defn- end-exchange
+  "The state once an exchange ended with outcome: its sink cleared (if it
+  is still the current one) and its cancel key, and, on a timeout or a
+  cancel whose sentinel ret has not arrived, :drain set to the sentinel so
+  the late ret is dropped."
+  [s {:keys [sentinel cancel-key outcome]}]
+  (let [arrived? (contains? (:done-forms s) sentinel)]
+    (cond-> (if (= sentinel (:sink-form s)) (assoc s :sink nil :sink-form nil) s)
+      cancel-key (assoc cancel-key nil)
+      sentinel (update :done-forms disj sentinel)
+      (and sentinel (#{:timeout :cancelled} outcome) (not arrived?))
+      (assoc :drain sentinel))))
+
 (defn- exchange!
   "Sends text and collects the replies until (done? reply) or :closed or
   timeout-ms. [outcome replies], outcome :done, :closed, :timeout or
@@ -355,27 +382,13 @@
   [{:keys [state]} text done? {:keys [on-output timeout-ms sentinel cancel-key]}]
   (let [p (promise)
         replies (atom [])
-        sink (fn [r]
-               (if (= :closed (:tag r))
-                 (deliver p :closed)
-                 (do (swap! replies conj r)
-                     (when on-output
-                       (when-let [[k t] (cljs-node/output-of r)]
-                         (connection/say! on-output k t)))
-                     (when (done? r) (deliver p :done)))))]
+        sink (exchange-sink {:p p :replies replies :done? done? :on-output on-output})]
     (swap! state (fn [s] (cond-> (assoc s :sink sink :sink-form sentinel)
                            cancel-key (assoc cancel-key (fn [] (deliver p :cancelled))))))
     (let [outcome (try (prepl/send! (:conn @state) text)
                        (if timeout-ms (deref p timeout-ms :timeout) (deref p))
                        (catch Throwable _ :closed))]
-      (swap! state
-             (fn [s]
-               (let [arrived? (contains? (:done-forms s) sentinel)]
-                 (cond-> (if (= sentinel (:sink-form s)) (assoc s :sink nil :sink-form nil) s)
-                   cancel-key (assoc cancel-key nil)
-                   sentinel (update :done-forms disj sentinel)
-                   (and sentinel (#{:timeout :cancelled} outcome) (not arrived?))
-                   (assoc :drain sentinel)))))
+      (swap! state end-exchange {:sentinel sentinel :cancel-key cancel-key :outcome outcome})
       [outcome @replies])))
 
 (defn- next-sentinel! [{:keys [state]}]
@@ -726,6 +739,26 @@
             replies)
       ""))
 
+(defn- doc-lookup
+  "meta-lookup's exchange, once it holds :helping: (cljs.repl/doc sym)
+  within timeout-ms."
+  [{:keys [state] :as ev} sym timeout-ms]
+  (let [sentinel-form (next-sentinel! ev)
+        form (doc-form sym)
+        ;; The program's own output during the lookup (a timer firing)
+        ;; goes to the console, as it would between evaluations.
+        [outcome replies] (exchange! ev (str form "\n" sentinel-form)
+                                     (fn [r] (and (ret? r) (= sentinel-form (:form r))))
+                                     {:sentinel sentinel-form
+                                      :cancel-key :help-cancel
+                                      :on-output (:last-output @state)
+                                      :timeout-ms timeout-ms})]
+    (if (= :done outcome)
+      (let [t (doc-text replies form)]
+        (cljd/no-docs sym (if (str/blank? t) (str "No docs for " sym) t)))
+      ;; cancelled = an evaluation arrived: that's busy, not slow
+      (cljd/no-docs sym (if (= :cancelled outcome) busy-doc timeout-doc)))))
+
 (defn- meta-lookup
   "Docs for sym from (cljs.repl/doc sym), bounded by timeout-ms; only when
   the child is live and nothing is running."
@@ -739,21 +772,7 @@
       (do (swap! state assoc :helping false) (cljd/no-docs sym (str "No docs for " sym)))
       :else
       (try
-        (let [sentinel-form (next-sentinel! ev)
-              form (doc-form sym)
-              ;; The program's own output during the lookup (a timer firing)
-              ;; goes to the console, as it would between evaluations.
-              [outcome replies] (exchange! ev (str form "\n" sentinel-form)
-                                           (fn [r] (and (ret? r) (= sentinel-form (:form r))))
-                                           {:sentinel sentinel-form
-                                            :cancel-key :help-cancel
-                                            :on-output (:last-output @state)
-                                            :timeout-ms (or timeout-ms (ev/help-timeout (:help-timeout-ms timings)))})]
-          (if (= :done outcome)
-            (let [t (doc-text replies form)]
-              (cljd/no-docs sym (if (str/blank? t) (str "No docs for " sym) t)))
-            ;; cancelled = an evaluation arrived: that's busy, not slow
-            (cljd/no-docs sym (if (= :cancelled outcome) busy-doc timeout-doc))))
+        (doc-lookup ev sym (or timeout-ms (ev/help-timeout (:help-timeout-ms timings))))
         (finally (swap! state assoc :helping false))))))
 
 (defn- send-stdin-line!
