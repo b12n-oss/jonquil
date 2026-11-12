@@ -142,6 +142,18 @@
     (catch Throwable e
       {:error (str "recording it threw: " (or (ex-message e) (str e)))})))
 
+(defn- proposal-entry
+  "history.edn's entry for a proposal recorded as version n at at: check
+  kept on a :pending one, problems (and check-log, when it's a string) on
+  a :rejected-by-checks one."
+  [{:keys [n at reason status based-on check problems check-log]}]
+  (let [e {:n n :at at :source :agent :reason reason :status status :based-on based-on}]
+    (case status
+      :pending (assoc e :check check)
+      :rejected-by-checks (cond-> (assoc e :problems problems)
+                            (string? check-log) (assoc :check-log check-log))
+      e)))
+
 (defn record-proposal!
   "Records an agent's proposal of text for id as its next version, with
   status :pending (keeping check, what its check reported) or
@@ -150,7 +162,7 @@
   it was made against: {:n n}, {:n n :superseded m} when a pending one
   replaced pending version m (in the same history.edn write), or {:error
   sentence}. Never throws."
-  [{:keys [plugins-dir id text reason status based-on check problems check-log now]}]
+  [{:keys [plugins-dir id text status now] :as opts}]
   (try
     (let [dir (history-dir plugins-dir id)
           {:keys [entries error]} (read-entries dir)]
@@ -162,10 +174,7 @@
         (let [n (next-n entries (file-ns dir))
               at ((or now #(str (java.time.Instant/now))))
               old (when (= :pending status) (:n (pending entries)))
-              e (cond-> {:n n :at at :source :agent :reason reason :status status :based-on based-on}
-                  (= :pending status) (assoc :check check)
-                  (= :rejected-by-checks status) (assoc :problems problems)
-                  (and (= :rejected-by-checks status) (string? check-log)) (assoc :check-log check-log))]
+              e (proposal-entry (assoc opts :n n :at at))]
           (if-let [why (append! dir n text entries (cond-> [e] old (conj {:n old :at at :status :superseded})))]
             {:error why}
             (cond-> {:n n} old (assoc :superseded old))))))

@@ -337,6 +337,48 @@
       (editor-cell-findings ctx)
       (window-cell-findings ctx))))
 
+(defn- lost-cell?
+  "Whether a cell's findings fs say a built-in always takes it first."
+  [fs]
+  (some #(= :unreachable (first %)) fs))
+
+(defn- cell-results
+  "[cell findings] for each key cell, with the :sometimes findings dropped
+  on a cell a built-in always takes first."
+  [cells scope request]
+  (for [[_ kv st :as cell] cells
+        :let [fs (cell-findings scope request kv st)]]
+    [cell (if (lost-cell? fs) (remove #(= :sometimes (first %)) fs) fs)]))
+
+(defn- distinct-findings
+  "One [key kind binding cell] per distinct [kind binding] over
+  per-cell, at the first cell it occurs on. :unreachable becomes :partly
+  unless every cell is lost."
+  [per-cell]
+  (let [all-lost? (and (seq per-cell) (every? (comp lost-cell? second) per-cell))]
+    (reduce (fn [acc [cell fs]]
+              (reduce (fn [acc [kind tb]]
+                        (let [kind (if (and (= :unreachable kind) (not all-lost?)) :partly kind)
+                              k [kind (:command tb) (:plugin/source tb)]]
+                          (if (some #(= k (first %)) acc) acc (conj acc [k kind tb cell]))))
+                      acc fs))
+            [] per-cell)))
+
+(defn- finding-message
+  "binding i's sentence for one distinct finding, on the chord named
+  chord."
+  [i chord [_ kind tb _]]
+  (let [at (str "binding " i " (" chord ") ")]
+    (case kind
+      :unreachable (str at "can never fire: the window's " (pr-str (:command tb))
+                        " takes it first; bind it in :window scope")
+      :partly (str at "doesn't fire on that chord: the window's " (pr-str (:command tb))
+                   " takes it first; the binding's other chords work")
+      :dead (str at "never fires: " (who tb) " takes that chord first, and "
+                 (name (:plugin/source tb)) " loads first")
+      :sometimes (str at "takes that chord only when " (who tb) " doesn't")
+      :takes (str at "takes that chord from " (who tb)))))
+
 (defn- binding-rules
   "Typing keys and unreachable as problems, the rest as warnings, for
   binding i b in scope (its command's), over every key cell b matches: a
@@ -352,30 +394,8 @@
   (let [cells (matching-cells b)
         label (fn [[k _ st]] (chord-label k st os))
         typing (first (filter (fn [[_ kv st]] (and (typing-key? kv) (not (command-chord? st)))) cells))
-        per-cell (when-not typing
-                   (for [[_ kv st :as cell] cells
-                         :let [fs (cell-findings scope request kv st)
-                               lost? (some #(= :unreachable (first %)) fs)]]
-                     [cell (if lost? (remove #(= :sometimes (first %)) fs) fs)]))
-        all-lost? (and (seq per-cell) (every? (fn [[_ fs]] (some #(= :unreachable (first %)) fs)) per-cell))
-        findings (reduce (fn [acc [cell fs]]
-                           (reduce (fn [acc [kind tb]]
-                                     (let [kind (if (and (= :unreachable kind) (not all-lost?)) :partly kind)
-                                           k [kind (:command tb) (:plugin/source tb)]]
-                                       (if (some #(= k (first %)) acc) acc (conj acc [k kind tb cell]))))
-                                   acc fs))
-                         [] per-cell)
-        msg (fn [[_ kind tb cell]]
-              (let [at (str "binding " i " (" (label cell) ") ")]
-                (case kind
-                  :unreachable (str at "can never fire: the window's " (pr-str (:command tb))
-                                    " takes it first; bind it in :window scope")
-                  :partly (str at "doesn't fire on that chord: the window's " (pr-str (:command tb))
-                               " takes it first; the binding's other chords work")
-                  :dead (str at "never fires: " (who tb) " takes that chord first, and "
-                             (name (:plugin/source tb)) " loads first")
-                  :sometimes (str at "takes that chord only when " (who tb) " doesn't")
-                  :takes (str at "takes that chord from " (who tb)))))]
+        findings (when-not typing (distinct-findings (cell-results cells scope request)))
+        msg #(finding-message i (label (nth % 3)) %)]
     {:problems (cond-> []
                  typing (conj (str "binding " i " (" (label typing) ") would take a key you type; "
                                    "hold Cmd/Ctrl"))
