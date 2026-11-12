@@ -34,6 +34,8 @@
     jonquil.fibers-rt-test
     jonquil.hints-test
     jonquil.layouts-test
+    jonquil.docs-panel-test
+    jonquil.docs-part-test
     jonquil.line-counts-test
     jonquil.messages-test
     jonquil.registry-test

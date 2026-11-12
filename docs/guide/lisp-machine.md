@@ -41,6 +41,7 @@ Emacs took first:
 | Save the layout, Use layout: name | `window-configuration-to-register` and `jump-to-register`; Genera's Select key brought up a whole activity |
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
 | Switch to a recent panel, Cmd/Ctrl+Alt+1 to 8 for each panel | none built in: `C-x o` cycles windows; Genera's Select key, where Select L brings up the Lisp Listener, is where this comes from |
+| The docs panel: a symbol's doc or a guide page beside the code, with Back, Forward and bookmarks | `describe-function` and the `*Help*` buffer, with `l` and `r` to go back and forward; Genera's Document Examiner, whose reading list and cross-references this follows |
 | The Messages panel: agent actions, files changed on disk, connections, with an unread count | the `*Messages*` buffer, which keeps the echo area's lines; Genera's notifications and Converse are where this comes from |
 | Time the form at the caret | `benchmark-run` |
 | Count how often each line runs, beside the code | `profiler-start`'s call tree and `elp`, which sample or time functions; Genera's metering and `gcov`-style line counts are closer |
