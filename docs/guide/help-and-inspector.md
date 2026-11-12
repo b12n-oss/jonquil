@@ -242,6 +242,17 @@ loaded. Only a Run of the whole tab that ended without an error counts; Run
 Form and Run Selection don't move it. Before the first such Run the status
 bar says there's nothing to compare with yet.
 
+**This form vs the file on disk**, **vs git HEAD** and **vs the last Run**
+do the same for just the top-level form around the caret, so the other
+forms' edits stay out of the list. The form is found in the other version
+by its first two elements, such as `defn f` (three for a `defmethod`, whose
+dispatch value tells its methods apart, and just `comment` for a comment
+block), and by its place among forms that share them, so a second
+`(comment ...)` block matches the second one there. The list's title names
+the form, with its place when it isn't the first, Take works the same way,
+and a version with no such form says so on the status bar. Typing "this
+form" in the palette finds the three.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System

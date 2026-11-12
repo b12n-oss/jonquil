@@ -1,6 +1,6 @@
 (ns jonquil.compare-test
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.compare :as c]))
 
 (def other "a\nb\nc\nd\ne\n")
@@ -56,3 +56,58 @@
 (deftest insertion-past-the-end-test
   (is (= {:line 2 :here [] :there ["c"]} (c/hunk-at (c/hunks "a\nb\nc\n" "a\nb") 1 "a\nb"))
       "the caret on the last line reaches a difference just past it"))
+
+;; --- one form (LM3 single forms) -------------------------------------------
+
+(def ^:private buf "(ns a)\n\n(defn f [x]\n  (inc x))\n\n(def y 1)\n\n(defn g [] 2)\n")
+(def ^:private head-text "(ns a)\n\n(def y 0)\n\n(defn f [x]\n  (dec x))\n\n(defn h [] 3)\n")
+
+(deftest form-key-test
+  (is (= {:sig ["defn" "f"] :nth 0 :name "defn f"}
+         (select-keys (c/form-key buf 12) [:sig :nth :name])))
+  (is (= ["def" "y"] (:sig (c/form-key buf (str/index-of buf "1)")))) "anywhere inside the form")
+  (is (nil? (c/form-key buf 7)) "between forms: none")
+  (testing "the second of two same-headed forms is told apart by its place"
+    (let [t "(comment 1)\n(comment 2)\n"]
+      (is (= {:sig ["comment"] :nth 0} (select-keys (c/form-key t 3) [:sig :nth])))
+      (is (= {:sig ["comment"] :nth 1} (select-keys (c/form-key t 14) [:sig :nth])))
+      (is (= 1 (:nth (c/form-key "(foo [a])\n(foo [a])\n" 12)))))))
+
+(deftest form-key-edges-test
+  (testing "defmethod forms are told apart by their dispatch value"
+    (let [t "(defmethod area :circle [s] 1)\n(defmethod area :square [s] 2)\n"]
+      (is (= ["defmethod" "area" ":square"] (:sig (c/form-key t 40))))
+      (let [disk "(defmethod area :square [s] 3)\n"
+            {:keys [text]} (c/splice-form t disk (c/form-key t 40) "disk")]
+        (is (= "(defmethod area :circle [s] 1)\n(defmethod area :square [s] 3)\n" text)
+            "the buffer's :square is matched with disk's :square, not by place"))))
+  (testing "a comment block is keyed by its place, not its first form's text"
+    (let [k (c/form-key "(comment\n  (f 1))\n" 3)]
+      (is (= ["comment"] (:sig k)))
+      (is (= {:text "(comment\n  (f 2))\n"}
+             (c/splice-form "(comment\n  (f 1))\n" "(comment\n  (f 2))\n" k "HEAD"))
+          "editing its first form doesn't lose it")))
+  (testing "an empty list is keyed by its text"
+    (is (= ["()"] (:sig (c/form-key "()\n(def a 1)\n" 0)))))
+  (testing "the caret right after a form's closing bracket is in it, as Run Form takes it"
+    (is (= ["def" "a"] (:sig (c/form-key "(def a 1)" 9)))))
+  (testing "a second form with the same signature says which one"
+    (is (= "comment (2nd)" (:name (c/form-key "(comment 1)\n(comment 2)\n" 14))))
+    (is (= {:error "HEAD has no (comment ...), the 2nd."}
+           (c/splice-form "(comment 1)\n(comment 2)\n" "(comment 1)\n" (c/form-key "(comment 1)\n(comment 2)\n" 14) "HEAD")))))
+
+(deftest splice-form-test
+  (testing "the buffer with only its form swapped for the other's"
+    (let [{:keys [text]} (c/splice-form buf head-text (c/form-key buf 12) "HEAD")]
+      (is (= "(ns a)\n\n(defn f [x]\n  (dec x))\n\n(def y 1)\n\n(defn g [] 2)\n" text))
+      (is (= [{:line 3 :here ["  (inc x))"] :there ["  (dec x))"]}]
+             (map #(select-keys % [:line :here :there]) (c/hunks text buf)))
+          "so only that form's lines differ")))
+  (testing "a form the other version doesn't have"
+    (is (= {:error "HEAD has no (defn g ...)."}
+           (c/splice-form buf head-text (c/form-key buf (str/index-of buf "(defn g")) "HEAD"))))
+  (testing "a form gone from the buffer since the compare"
+    (is (= {:error "The last Run has no (defn f ...)."}
+           (c/splice-form buf "(ns a)\n" (c/form-key buf 12) "the last Run")))
+    (is (= {:error "This tab has no (defn f ...) any more."}
+           (c/splice-form "(ns a)\n" head-text {:sig ["defn" "f"] :nth 0 :name "defn f"} "HEAD")))))

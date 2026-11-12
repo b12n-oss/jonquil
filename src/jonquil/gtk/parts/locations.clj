@@ -253,24 +253,41 @@
 ;; LM3: the tab against another version of its file, another tab or its
 ;; last Run, its differences in the Locations list. compare-state is {:tab-id
 ;; :label :other}, plus :other-tab-id when the other version is a tab or
-;; :last-run? when it is the last Run, for
-;; Take, which works out the difference at the caret afresh.
+;; :last-run? when it is the last Run, and :form-key when only one form is
+;; compared, for Take, which works out the difference at the caret afresh.
+(defn- scoped-other
+  "{:text t} to compare buffer with: other itself, or for a one-form compare
+  (extra's :form-key) buffer with that form taken from other; {:error msg}
+  when either side has no such form."
+  [buffer other label extra]
+  (if-let [k (:form-key extra)]
+    (compare/splice-form buffer other k label)
+    {:text other}))
+
 (defn- compare-list!
   "Lists the differences between tab's text and other in the Locations panel,
   or says there are none. extra is what compare-state keeps beside the
   label (nil for the disk or HEAD)."
   [{:keys [compare-state state locp right hide-right-panel! set-status!] :as ctx} {:keys [tab label other extra]}]
-  (let [l (compare/location-list label other (editor/editor-text (:ed tab)))]
-    (if (seq (:entries l))
+  (let [buffer (editor/editor-text (:ed tab))
+        {scoped :text err :error} (scoped-other buffer other label extra)
+        form-name (some-> extra :form-key :name)
+        l (when scoped
+            (cond-> (compare/location-list label scoped buffer)
+              form-name (assoc :title (str "Differences in " form-name " from " label))))]
+    (cond
+      err (set-status! (str "; " err))
+      (seq (:entries l))
       (do (reset! compare-state (merge {:tab-id (:id tab) :label label :other other} extra))
           (make-locations! ctx l))
+      :else
       (do (reset! compare-state nil)
           ;; a list of differences that are gone goes too
-          (when (some-> @state :list :title (str/starts-with? "Differences from "))
+          (when (some-> @state :list :title (str/starts-with? "Differences "))
             (clear-locations! ctx)
             (locations-pane/show! locp {:title "" :entries [] :index nil})
             (hide-right-panel! right :locations))
-          (set-status! (str "; No differences from " label "."))))))
+          (set-status! (str "; No differences" (when form-name (str " in " form-name)) " from " label "."))))))
 
 (defn- read-disk
   [path]
@@ -290,16 +307,36 @@
       {:error (str "git: " (or (not-empty (first (str/split-lines (str (:err r)))))
                                (str "exited " (:exit r))))})))
 
+(defn- caret-form-key
+  "The compare/form-key of the active tab's form at the caret, or nil."
+  [{:keys [active-tab]}]
+  (let [snap (editor/snapshot (:ed (active-tab)))]
+    (compare/form-key (:text snap) (:caret snap))))
+
+(defn- form-scope
+  "{:extra {:form-key k}} for a one-form compare (form? true), {:extra nil}
+  for the whole tab, or {:error msg} when the caret is on no form."
+  [ctx form?]
+  (if-not form?
+    {:extra nil}
+    (if-let [k (caret-form-key ctx)]
+      {:extra {:form-key k}}
+      {:error "Put the caret in a top-level form to compare just that form."})))
+
 (defn- compare-with!
-  [{:keys [active-tab set-status!] :as ctx} label read-other]
+  "Compare the active tab (or, form? true, the form at its caret) with the
+  version read-other reads from its file."
+  [{:keys [active-tab set-status!] :as ctx} label read-other form?]
   (let [t (active-tab)
-        path @(:path t)]
-    (if-not path
-      (set-status! "; Compare needs a saved file.")
-      (let [{:keys [text error]} (read-other path)]
-        (if error
-          (set-status! (str "; " error))
-          (compare-list! ctx {:tab t :label label :other text}))))))
+        path @(:path t)
+        {:keys [extra] scope-err :error} (form-scope ctx form?)]
+    (cond
+      scope-err (set-status! (str "; " scope-err))
+      (not path) (set-status! "; Compare needs a saved file.")
+      :else (let [{:keys [text error]} (read-other path)]
+              (if error
+                (set-status! (str "; " error))
+                (compare-list! ctx {:tab t :label label :other text :extra extra}))))))
 
 (defn- compare-tab!
   "Compare with tab: the active tab against the open tab other-id, as it
@@ -319,13 +356,16 @@
 (defn- last-run-text [t] (some-> t :ed :changed :last-run deref))
 
 (defn- compare-last-run!
-  "Compare with the last Run: the active tab against the text its last
-  whole Run sent, when that Run ended well."
-  [{:keys [active-tab set-status!] :as ctx}]
-  (let [t (active-tab)]
-    (if-let [text (last-run-text t)]
-      (compare-list! ctx {:tab t :label last-run-label :other text :extra {:last-run? true}})
-      (set-status! "; This tab hasn't had a whole Run that ended well yet."))))
+  "Compare with the last Run: the active tab (or, form? true, the form at its
+  caret) against the text its last whole Run sent, when that Run ended well."
+  [{:keys [active-tab set-status!] :as ctx} form?]
+  (let [t (active-tab)
+        {:keys [extra] scope-err :error} (form-scope ctx form?)]
+    (cond
+      scope-err (set-status! (str "; " scope-err))
+      (nil? (last-run-text t)) (set-status! "; This tab hasn't had a whole Run that ended well yet.")
+      :else (compare-list! ctx {:tab t :label last-run-label :other (last-run-text t)
+                                :extra (assoc extra :last-run? true)}))))
 
 (defn- take-hunk!
   "Takes other's lines for the difference at the caret of t, as one undo
@@ -333,8 +373,12 @@
   [{:keys [state set-status!] :as ctx} {:keys [tab label other extra]}]
   (let [ed (:ed tab)
         buffer (editor/editor-text ed)
-        line (first (g/cursor-line-col (:buf ed)))]
-    (if-let [h (compare/hunk-at (compare/hunks other buffer) line buffer)]
+        line (first (g/cursor-line-col (:buf ed)))
+        {scoped :text err :error} (scoped-other buffer other label extra)
+        h (when scoped (compare/hunk-at (compare/hunks scoped buffer) line buffer))]
+    (cond
+      err (set-status! (str "; " err))
+      h
       (let [[s e r] (compare/take-edit buffer h)]
         ;; one undo step, exactly the other version's lines
         (editor/apply-op-plain! ed {:edits [[s e r]] :caret s})
@@ -342,7 +386,7 @@
         (when (seq (:entries (:list @state)))
           (set-status! (str "; Took " (if (= "disk" label) "the disk's" (str label "'s"))
                             " version of line " (inc (:line h)) "."))))
-      (set-status! "; No difference at the caret: F8 steps to the next one."))))
+      :else (set-status! "; No difference at the caret: F8 steps to the next one."))))
 
 (defn- compare-take!
   [{:keys [compare-state active-tab tabs tab-by-id set-status!] :as ctx}]
@@ -358,7 +402,7 @@
     (if (not= tab-id (:id t))
       (set-status! "; Compare this tab first: with the file on disk, git HEAD, another tab or the last Run.")
       (take-hunk! ctx {:tab t :label label :other other
-                       :extra (select-keys st [:other-tab-id :last-run?])}))))
+                       :extra (select-keys st [:other-tab-id :last-run? :form-key])}))))
 
 (defn- set-handlers!
   [{:keys [state locp right hide-right-panel! set-status!] :as ctx}]
@@ -407,15 +451,18 @@
 
 (defn- compare-fns
   [ctx]
-  {:compare-disk-fn (fn [] (compare-with! ctx "disk" read-disk))
-   :compare-head-fn (fn [] (compare-with! ctx "HEAD" read-head))
+  {:compare-disk-fn (fn [] (compare-with! ctx "disk" read-disk false))
+   :compare-head-fn (fn [] (compare-with! ctx "HEAD" read-head false))
    :compare-take-fn (fn [] (compare-take! ctx))
    :compare-tab-fn (fn [id] (compare-tab! ctx id))
-   :compare-last-run-fn (fn [] (compare-last-run! ctx))})
+   :compare-last-run-fn (fn [] (compare-last-run! ctx false))
+   :compare-form-disk-fn (fn [] (compare-with! ctx "disk" read-disk true))
+   :compare-form-head-fn (fn [] (compare-with! ctx "HEAD" read-head true))
+   :compare-form-last-run-fn (fn [] (compare-last-run! ctx true))})
 
 (defn- install
   "The Locations part for one window: builds the pane, wires its handlers and
-  answers the ten list and compare fns and the tab-removed hook.
+  answers the thirteen list and compare fns and the tab-removed hook.
 
   state is the locations list, or nil. A buffer list is {:tab-id :list
   :marks}, its marks in that tab's buffer. A project list (:scope
