@@ -9,10 +9,11 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 <details>
-<summary><strong>45 entries</strong></summary>
+<summary><strong>46 entries</strong></summary>
 
 - Breakpoints (Jolt, in process and in the Jolt child): Toggle Breakpoint (F9, or the palette) puts a red dot in the gutter, and code that reaches that line pauses there, in the Frames panel with the frame's locals, its field and Continue, the way Break on error pauses on a throw. A line that can't pause moves the dot to the next one that can. Toggling sends the top-level form again when it only defines code (a `defn`, a `defmethod`, a `def` of a `fn`), so a call from the console, another namespace or a test pauses at once; any other form takes the breakpoint at its next Run. Run, Run Form and Run Selection send the breakpoints too, and Clear all breakpoints takes a tab's dots away. Toggling turns debug mode on.
 - This form vs the file on disk, vs git HEAD and vs the last Run: the compare commands for just the top-level form around the caret, its differences in the Locations list and Take working on it alone. The form is matched in the other version by its first two elements, such as `defn f` (a `defmethod` by its dispatch value too), and its place among forms that share them.
+- A file and line in console output (`src/app/core.clj:12:3`, a stack frame's `(core.clj:12)`) opens there with a click or with Open This File and Line from the console's menu or the palette. A bare file name opens the project file it names, and when several share it, the stack frame's namespace picks one.
 - Find Usages in Project tells same-named symbols apart: it works out which var the symbol at the caret names from the file's `ns` form, its own definitions and the local bindings, and lists only that var's places at first. The **Other vars** and **Unresolved** check boxes, each with its count, bring back another var's or a local's places and the ones a file can't decide (`:refer :all`, `:use`, a name a macro defines).
 - Quick Doc for This Var: on a var result in the console, the right-click menu and the palette print that var's doc into the console as comment lines, below the result.
 - `jolt metrics`, `jolt metrics:edn`, `jolt metrics:json` and `jolt metrics:html` report code metrics with jolt-metrics (report only, never a gate), configured in `.jolt-metrics.edn`. The HTML report is one self-contained page, written to `target/metrics.html` by default. Since jolt-metrics v0.4.0 the queue ranks a function by how much of the code depends on it, and the report adds unusual commits and files.

@@ -105,6 +105,7 @@
    :inspect! (fn [start]
                (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
    :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to!
+   :open-file-line! win-help/open-file-line!
    :source-ctx source-ctx
    :place-caret-and-scroll! win-help/place-caret-and-scroll! :file-name win-files/file-name
    :open-in-tab! win-help/open-in-tab! :show-source! win-help/show-source!
@@ -148,13 +149,13 @@
 (defn build-console-menu
   "activate!'s console context menu, in activate!'s order: the menu,
   whose items call the same fns their keys do (Complete, Clear Last and
-  the live-results part's five result fns), and the fn that fires one of
+  the live-results part's six result fns), and the fn that fires one of
   its items by name. w holds what they read: :cv :repl-complete-fn
   :clear-last-fn :part-contribution :status-label. Returns w with
   :repl-activate-menu-action-fn added."
   [{:keys [cv repl-complete-fn clear-last-fn part-contribution status-label] :as w}]
   (let [;; The console's context menu is built here, after the parts, because
-      ;; the live-results part answers the five result fns its items call;
+      ;; the live-results part answers the six result fns its items call;
       ;; built earlier those keys were nil.
         console-menu-group
         (win-keys/install-context-menu! (:view cv)
@@ -162,7 +163,8 @@
                                                                  (merge {:complete! repl-complete-fn :clear-last-fn clear-last-fn}
                                                                         (select-keys (:fns part-contribution)
                                                                                      [:result-inspect-fn :result-copy-fn
-                                                                                      :result-define-fn :result-jump-fn :result-doc-fn])))
+                                                                                      :result-define-fn :result-jump-fn :result-doc-fn
+                                                                                      :result-open-location-fn])))
                                         (fn [msg] (win-status/set-status! status-label msg)))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))]

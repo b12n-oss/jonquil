@@ -191,6 +191,45 @@
                                   :status (status ui)})))
         (finally (on-gtk (cview/clear-input! cv) (to-prompt!)))))))
 
+(defn row-result-open-file-line
+  "A file and line printed in the console opens there: Open This File and
+  Line, with the caret in a printed /tmp/.../fileline.clj:3, shows that
+  file in the source panel at line 3 (it's outside the project, so the
+  panel rather than a tab); on plain output it says there's no file:line."
+  [ui]
+  (go-row :result-open-file-line support/check
+    (let [cv (:console ui)
+          sp (:source-pane ui)
+          fire! (:repl-activate-menu-action!* ui)
+          dir (doto (java.io.File. (System/getProperty "java.io.tmpdir") (str "jonquil-fileline-" (System/nanoTime))) (.mkdirs))
+          f (java.io.File. dir "fileline.clj")
+          _ (spit f "(ns fileline)\n\n(defn here [] 3)\n")
+          ref (str (.getCanonicalPath f) ":3")
+          to-prompt! (fn [] (console-caret! ui (g/gtk-text-buffer-get-char-count (:buf cv))))]
+      (try
+        (let [m (enter! ui (str "(println \"at " ref "\")"))
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) ref)))
+              _ (on-gtk (console-caret! ui (+ 5 (str/last-index-of (console-text ui) ref)))
+                        (fire! "result-open-location"))
+              shown? (await-until 5000 20 #(pos? (g/gtk-widget-get-visible (:root sp))))
+              v (on-gtk {:header (g/label-text (:header sp))
+                         :line (inc (first (g/cursor-line-col (:buf (:editor sp)))))})
+              ;; back to the prompt: the caret sat in the read-only output
+              _ (on-gtk (to-prompt!))
+              m2 (enter! ui "(println \"plain words\")")
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m2) "plain words")))
+              _ (on-gtk (console-caret! ui (+ 2 (str/last-index-of (console-text ui) "plain words")))
+                        (fire! "result-open-location"))
+              none? (await-until 3000 20 #(= "; No file:line here." (status ui)))]
+          (on-gtk (support/check :result-open-file-line
+                                 (and shown? (str/includes? (:header v) "fileline.clj") (= 3 (:line v)) none?)
+                                 (assoc v :shown shown? :none none? :status (status ui)))
+                  ((:source-close!* ui))))
+        (finally
+          (on-gtk (cview/clear-input! cv) (to-prompt!))
+          (.delete f)
+          (.delete dir))))))
+
 (defn- widget-xy
   "The console view's widget coordinates of offset's character."
   [ui offset]

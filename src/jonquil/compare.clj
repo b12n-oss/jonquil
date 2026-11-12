@@ -145,10 +145,11 @@
   (str n (if (<= 11 (mod n 100) 13) "th" (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
 
 (defn form-key
-  "{:sig :nth :name} for the top-level form of text around caret: its
+  "{:sig :nth :of :name} for the top-level form of text around caret: its
   signature, how many earlier forms share it (so a second (comment ...) is
-  told apart from the first) and a name for messages, \"defn f\". nil
-  when the caret is between forms."
+  told apart from the first), how many share it in all (so a place that
+  shifted since is caught) and a name for messages, \"defn f\". nil when
+  the caret is between forms."
   [text caret]
   (let [forms (commands/top-level-forms text)]
     ;; as Run Form takes it: the form the caret is in, else the one it's
@@ -156,9 +157,11 @@
     (when-let [f (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
                      (first (filter (fn [{:keys [end]}] (= end caret)) forms)))]
       (let [sig (form-sig text f)
+            same (filterv #(= sig (form-sig text %)) forms)
             n (count (filter #(= sig (form-sig text %)) (take-while #(not= f %) forms)))]
         {:sig sig
          :nth n
+         :of (count same)
          :name (str (str/join " " sig) (when (pos? n) (str " (" (ordinal (inc n)) ")")))}))))
 
 (defn- find-form
@@ -177,6 +180,11 @@
         shown (str "(" (str/join " " (:sig key)) " ...)"
                    (when (pos? (:nth key)) (str ", the " (ordinal (inc (:nth key))))))]
     (cond
+      ;; a same-signature form added or removed since the key was made
+      ;; moves every later one's place: refuse rather than take the wrong one
+      (and (:of key) (not= (:of key) (count (filter #(= (:sig key) (form-sig buffer %))
+                                                    (commands/top-level-forms buffer)))))
+      {:error (str "This tab's (" (str/join " " (:sig key)) " ...) forms changed since the compare: compare again.")}
       (nil? here) {:error (str "This tab has no " shown " any more.")}
       (nil? there) {:error (str (if (= "disk" label) "The file on disk" (str/capitalize (subs label 0 1)))
                                 (when-not (= "disk" label) (subs label 1))
