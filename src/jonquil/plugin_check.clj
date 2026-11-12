@@ -92,7 +92,10 @@
     (and (some? run) (nil? edit) pure?)
     (conj (str label ": a pure plugin's commands are :edit commands; declare the :effects its :run uses"))))
 
-(defn- command-problems [i c plugin-name pure? seen]
+(defn- command-problems
+  "One :commands row's problems. ctx holds :plugin-name, :pure? and :seen
+  (the ids of the rows before it)."
+  [i c {:keys [plugin-name pure? seen]}]
   (if-not (map? c)
     [(str "command " i " isn't a map")]
     (let [label (str "command " i " (" (pr-str (:id c)) ")")]
@@ -100,6 +103,18 @@
           (into (command-identity-problems label c {:plugin-name plugin-name :seen seen}))
           (into (command-body-problems label c))
           (into (command-kind-problems label c pure?))))))
+
+(defn- rows-problems
+  "The problems of every row of a vector, in order. key-fn gives a map row's
+  identity (its id or name), and row-problems is called (i row seen) with the
+  identities of the map rows before it."
+  [rows key-fn row-problems]
+  (loop [i 0 seen #{} out []]
+    (if (< i (count rows))
+      (let [r (nth rows i)]
+        (recur (inc i) (if (map? r) (conj seen (key-fn r)) seen)
+               (into out (row-problems i r seen))))
+      out)))
 
 (defn- commands-problems
   "The file name is the plugin's id (a wrong :id is its own problem), so
@@ -111,12 +126,9 @@
     (cond
       (nil? cs) []
       (not (vector? cs)) [":commands isn't a vector"]
-      :else (loop [i 0 seen #{} out []]
-              (if (< i (count cs))
-                (let [c (nth cs i)]
-                  (recur (inc i) (if (map? c) (conj seen (:id c)) seen)
-                         (into out (command-problems i c plugin-name pure? seen))))
-                out)))))
+      :else (rows-problems cs :id
+                           (fn [i c seen]
+                             (command-problems i c {:plugin-name plugin-name :pure? pure? :seen seen}))))))
 
 (defn- hooks-problems [d]
   (let [h (:hooks d)]
@@ -157,32 +169,43 @@
   [file-id name]
   (str "plugin_" file-id "_" name))
 
+(defn- arg-map-problems
+  "The findings inside one argument's map a, labelled al."
+  [al a]
+  (cond-> []
+    (not (contains? MCP-ARG-TYPES (:type a)))
+    (conj (str al "'s :type " (pr-str (:type a)) " isn't one of " (pr-str (vec (sort MCP-ARG-TYPES)))))
+    (seq (remove arg-keys (keys a))) (conj (str al " has unknown keys " (pr-str (vec (remove arg-keys (keys a))))))
+    (blank-string? (:doc a)) (conj (str al "'s :doc isn't a sentence"))
+    (and (contains? a :required?) (not (boolean? (:required? a))))
+    (conj (str al "'s :required? isn't true or false"))))
+
 (defn- arg-problems [label k a]
-  (if-not (and (string? k) (re-matches arg-name-pattern k))
+  (cond
+    (not (and (string? k) (re-matches arg-name-pattern k)))
     [(str label ": argument " (pr-str k) " isn't a string of letters, digits, _, . or -, 1 to 64 long")]
-    (let [al (str label ": argument " k)]
-      (if-not (map? a)
-        [(str al " isn't a map of :type :doc :required?")]
-        (cond-> []
-          (not (contains? MCP-ARG-TYPES (:type a)))
-          (conj (str al "'s :type " (pr-str (:type a)) " isn't one of " (pr-str (vec (sort MCP-ARG-TYPES)))))
-          (seq (remove arg-keys (keys a))) (conj (str al " has unknown keys " (pr-str (vec (remove arg-keys (keys a))))))
-          (blank-string? (:doc a)) (conj (str al "'s :doc isn't a sentence"))
-          (and (contains? a :required?) (not (boolean? (:required? a))))
-          (conj (str al "'s :required? isn't true or false")))))))
+    (not (map? a))
+    [(str label ": argument " k " isn't a map of :type :doc :required?")]
+    :else (arg-map-problems (str label ": argument " k) a)))
+
+(defn- tool-name-problems
+  "The findings on a tool row's :name: its shape, a repeat in seen, and the
+  length of the name it is served under."
+  [label name file-id seen]
+  (let [good-name? (and (string? name) (re-matches tool-name-pattern name))
+        served (when (and good-name? (string? file-id)) (served-tool-name file-id name))]
+    (cond-> []
+      (not good-name?) (conj (str label ": :name isn't lower-case letters, digits and _, starting with a letter"))
+      (contains? seen name) (conj (str label ": its name is used twice"))
+      (and served (> (count served) MCP-NAME-MAX))
+      (conj (str label ": its served name " served " is longer than " MCP-NAME-MAX " characters")))))
 
 (defn- tool-problems [i t file-id seen]
   (if-not (map? t)
     [(str "mcp tool " i " isn't a map")]
     (let [{:keys [name doc args run]} t
-          label (str "mcp tool " i " (" (pr-str name) ")")
-          good-name? (and (string? name) (re-matches tool-name-pattern name))
-          served (when (and good-name? (string? file-id)) (served-tool-name file-id name))]
-      (cond-> []
-        (not good-name?) (conj (str label ": :name isn't lower-case letters, digits and _, starting with a letter"))
-        (contains? seen name) (conj (str label ": its name is used twice"))
-        (and served (> (count served) MCP-NAME-MAX))
-        (conj (str label ": its served name " served " is longer than " MCP-NAME-MAX " characters"))
+          label (str "mcp tool " i " (" (pr-str name) ")")]
+      (cond-> (tool-name-problems label name file-id seen)
         (seq (remove tool-keys (keys t))) (conj (str label ": has unknown keys " (pr-str (vec (remove tool-keys (keys t))))))
         (blank-string? doc) (conj (str label ": :doc isn't a sentence"))
         (and (some? args) (not (map? args)))
@@ -198,12 +221,8 @@
     (cond
       (not (contains? d :mcp-tools)) []
       (not (vector? ts)) [":mcp-tools isn't a vector"]
-      :else (loop [i 0 seen #{} out []]
-              (if (< i (count ts))
-                (let [t (nth ts i)]
-                  (recur (inc i) (if (map? t) (conj seen (:name t)) seen)
-                         (into out (tool-problems i t file-id seen))))
-                out)))))
+      :else (rows-problems ts :name
+                           (fn [i t seen] (tool-problems i t file-id seen))))))
 
 (def ^:private M km/MODIFIER-MASKS)
 

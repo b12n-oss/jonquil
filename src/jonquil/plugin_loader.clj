@@ -210,6 +210,28 @@
               [r ls]))
           [reg lines] files))
 
+(defn- changed-ids
+  "The ids of plugins whose entry differs (by identity) between registries
+  before and after, counting ones added or removed."
+  [before after]
+  (set (filter #(not (identical? (get-in before [:plugins %]) (get-in after [:plugins %])))
+               (into (set (keys (:plugins before))) (keys (:plugins after))))))
+
+(defn- reload-files
+  "{:registry :lines} after sending each of files through reload-one, from
+  reg, or with only nil from reg minus the plugins whose files are gone
+  (skipped ids are noted)."
+  [{:keys [os registry disabled only skipped files texts]}]
+  (let [start (if only
+                {:registry registry :lines []}
+                (drop-gone {:registry registry
+                            :lines (mapv #(str "plugins/" % ": not a plugin id, skipped") skipped)}
+                           (set (map (comp keyword first) files))))]
+    (reduce (fn [{reg :registry lines :lines} file]
+              (let [[reg' more] (reload-one reg file {:os os :disabled disabled :texts texts})]
+                {:registry reg' :lines (into lines more)}))
+            start files)))
+
 (defn reload
   "The next registry from reg and the plugin files in dir: {:registry reg'
   :lines [str ...]}. Each file in id order (or only the one at path only)
@@ -222,22 +244,13 @@
         disabled (set disabled)
         files (selected-files {:dir dir :files all-files :only only :text text})
         texts (when (and text (seq files)) {(first (first files)) text})
-        start (if only
-                {:registry registry :lines []}
-                (drop-gone {:registry registry
-                            :lines (mapv #(str "plugins/" % ": not a plugin id, skipped") skipped)}
-                           (set (map (comp keyword first) files))))
-        {reg :registry lines :lines} (reduce (fn [{reg :registry lines :lines} file]
-                                               (let [[reg' more] (reload-one reg file {:os os :disabled disabled :texts texts})]
-                                                 {:registry reg' :lines (into lines more)}))
-                                             start files)
-        changed-in (fn [r] (set (filter #(not (identical? (get-in registry [:plugins %]) (get-in r [:plugins %])))
-                                        (into (set (keys (:plugins registry))) (keys (:plugins r))))))
-        [reg lines] (if (and only (seq files) (seq (changed-in reg)))
+        {reg :registry lines :lines} (reload-files {:os os :registry registry :disabled disabled :only only
+                                                    :skipped skipped :files files :texts texts})
+        [reg lines] (if (and only (seq files) (seq (changed-ids registry reg)))
                       (revive-later [reg lines] {:saved (first (first files)) :files all-files
                                                  :os os :disabled disabled})
                       [reg lines])
-        [reg more removed] (recheck-later reg (changed-in reg) os)
+        [reg more removed] (recheck-later reg (changed-ids registry reg) os)
         ;; a plugin loaded this pass and then removed isn't reported loaded
         lines (remove (fn [l] (some #(str/starts-with? l (str "plugin " (name %) " loaded (")) removed)) lines)]
     {:registry reg :lines (into (vec lines) more)}))

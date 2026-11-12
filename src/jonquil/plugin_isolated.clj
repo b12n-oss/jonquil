@@ -67,6 +67,21 @@
   (and (map? t) (string? (:name t)) (string? (:doc t))
        (or (nil? (:args t)) (and (map? (:args t)) (every? string? (keys (:args t)))))))
 
+(defn- mcp-tools-summary?
+  "Whether p's :mcp-tools, when it has the key, is a vector of tool rows."
+  [p]
+  (or (not (contains? p :mcp-tools))
+      (and (vector? (:mcp-tools p)) (every? tool-summary? (:mcp-tools p)))))
+
+(defn- summary-fields?
+  "Whether the id, doc, effects, commands, bindings and hooks of p have their
+  shapes."
+  [p]
+  (and (keyword? (:id p)) (or (nil? (:doc p)) (string? (:doc p))) (set? (:effects p))
+       (vector? (:commands p)) (every? map? (:commands p))
+       (vector? (:bindings p)) (every? map? (:bindings p))
+       (vector? (:hooks p)) (every? keyword? (:hooks p))))
+
 (defn- summary?
   "checker/summary's shape, every key present, and :mcp-tools when the
   plugin has them (a fixed key set would refuse every
@@ -74,11 +89,16 @@
   [p]
   (and (map? p)
        (= #{:id :doc :effects :commands :bindings :hooks} (disj (set (keys p)) :mcp-tools))
-       (or (not (contains? p :mcp-tools)) (and (vector? (:mcp-tools p)) (every? tool-summary? (:mcp-tools p))))
-       (keyword? (:id p)) (or (nil? (:doc p)) (string? (:doc p))) (set? (:effects p))
-       (vector? (:commands p)) (every? map? (:commands p))
-       (vector? (:bindings p)) (every? map? (:bindings p))
-       (vector? (:hooks p)) (every? keyword? (:hooks p))))
+       (mcp-tools-summary? p)
+       (summary-fields? p)))
+
+(defn- optional-shapes?
+  "Whether v's :problems, :warnings and :timings, when present, have their
+  shapes."
+  [v]
+  (and (or (not (contains? v :problems)) (strings? (:problems v)))
+       (or (not (contains? v :warnings)) (strings? (:warnings v)))
+       (or (not (contains? v :timings)) (map? (:timings v)))))
 
 (defn- result?
   "A whole result: a pass carries no problems and a full
@@ -86,9 +106,7 @@
   :timings have their shapes when present."
   [v]
   (and (map? v) (boolean? (:ok? v))
-       (or (not (contains? v :problems)) (strings? (:problems v)))
-       (or (not (contains? v :warnings)) (strings? (:warnings v)))
-       (or (not (contains? v :timings)) (map? (:timings v)))
+       (optional-shapes? v)
        (if (:ok? v)
          (and (empty? (:problems v)) (summary? (:plugin v)))
          (nil? (:plugin v)))))
@@ -190,6 +208,34 @@
     (cond-> (scrub-env (into {} (System/getenv)))
       path (assoc "PATH" path))))
 
+(defn- spawn-checker!
+  "Starts the jolt child in dir, its output to log: the process, or
+  {:spawn-error sentence}."
+  [{:keys [dir root program log]}]
+  (try (p/process {:dir dir :env (env-for-child) :out (io/file log) :err :out}
+                  program "-Sdeps"
+                  (str "{:deps {" checker-files/lib " {:local/root " (pr-str root) "}}}")
+                  "-e" "(require 'jonquil.plugin-checker) (jonquil.plugin-checker/-main)")
+       (catch Throwable t {:spawn-error (str "couldn't start jolt: " (ex-message t))})))
+
+(defn- await-checker!
+  "Waits for the spawned child up to deadline-ms, stopping it at the deadline,
+  and parses its log. Keeps the log (cut to the tail that was read, all a
+  post-mortem shows anyway) and sets keep? when the child misbehaved. proc*
+  holds the child while it runs."
+  [spawned proc* keep? {:keys [dir log deadline-ms]}]
+  (reset! proc* spawned)
+  (leftovers/write-pid! dir (.pid ^java.lang.Process (:proc spawned)))
+  (let [r (deref spawned deadline-ms ::overrun)
+        timed-out? (= ::overrun r)
+        exit (if timed-out? (stop! spawned) (:exit r))
+        _ (reset! proc* nil)
+        out (read-output log)
+        result (parse-result {:out out :exit exit :timed-out? timed-out? :deadline-ms deadline-ms})]
+    (if (or timed-out? (not (reported? out exit)))
+      (do (reset! keep? true) (spit log out) (assoc result :log log))
+      result)))
+
 (defn- check-in!
   "check!'s run once dir exists: writes the request and candidate, runs the
   child, and keeps dir or deletes it."
@@ -200,32 +246,33 @@
     (try
       (spit (io/file dir "request.edn") (request-text {:request request :file-id file-id}))
       (spit (io/file dir "candidate.clj") source)
-      (let [spawned (try (p/process {:dir dir :env (env-for-child) :out (io/file log) :err :out}
-                                    program "-Sdeps"
-                                    (str "{:deps {" checker-files/lib " {:local/root " (pr-str root) "}}}")
-                                    "-e" "(require 'jonquil.plugin-checker) (jonquil.plugin-checker/-main)")
-                         (catch Throwable t {:spawn-error (str "couldn't start jolt: " (ex-message t))}))]
+      (let [spawned (spawn-checker! {:dir dir :root root :program program :log log})]
         (if-let [e (:spawn-error spawned)]
           (failed e)
-          (do
-            (reset! proc spawned)
-            (leftovers/write-pid! dir (.pid ^java.lang.Process (:proc spawned)))
-            (let [r (deref spawned deadline-ms ::overrun)
-                  timed-out? (= ::overrun r)
-                  exit (if timed-out? (stop! spawned) (:exit r))
-                  _ (reset! proc nil)
-                  out (read-output log)
-                  result (parse-result {:out out :exit exit :timed-out? timed-out? :deadline-ms deadline-ms})]
-              (if (or timed-out? (not (reported? out exit)))
-                ;; The kept log is cut to the tail that was
-                ;; read, all a post-mortem shows anyway
-                (do (reset! keep? true) (spit log out) (assoc result :log log))
-                result)))))
+          (await-checker! spawned proc keep? {:dir dir :log log :deadline-ms deadline-ms})))
       (catch Throwable t
         (failed (str "the isolated check couldn't run: " (ex-message t))))
       (finally
         (when-let [pr @proc] (try (stop! pr) (catch Throwable _ nil)))
         (when-not @keep? (delete-tree! dir))))))
+
+(defn- checker-root!
+  "The folder holding the checker's files, or {:error sentence}."
+  [cache-base]
+  (try (checker-files/ensure-root!
+        (or cache-base (checker-files/cache-base (System/getenv) (System/getProperty "user.home"))))
+       (catch Throwable t {:error (str "the checker's files couldn't be written: " (ex-message t))})))
+
+(defn- make-check-dir!
+  "A fresh owner-only folder under temp-base (java.io.tmpdir unless given),
+  as its canonical path, or {:error sentence}."
+  [temp-base]
+  (try (.getCanonicalPath
+        (.toFile (java.nio.file.Files/createTempDirectory
+                  (.toPath (io/file (or temp-base (System/getProperty "java.io.tmpdir"))))
+                  "jonquil-plugin-check-"
+                  (make-array java.nio.file.attribute.FileAttribute 0))))
+       (catch Throwable t {:error (str "the check's folder couldn't be made: " (ex-message t))})))
 
 (defn check!
   "Runs the isolated check of source (file-id's plugin) against request in
@@ -241,18 +288,11 @@
   [{:keys [source file-id request program cache-base temp-base deadline-ms]}]
   (if-let [program (or program (jolt-program))]
     (let [deadline-ms (or deadline-ms CHECK-DEADLINE-MS)
-          root (try (checker-files/ensure-root!
-                     (or cache-base (checker-files/cache-base (System/getenv) (System/getProperty "user.home"))))
-                    (catch Throwable t {:error (str "the checker's files couldn't be written: " (ex-message t))}))]
+          root (checker-root! cache-base)]
       (if-let [e (:error root)]
         (failed e)
         (let [_ (leftovers/prune!)
-              dir (try (.getCanonicalPath
-                        (.toFile (java.nio.file.Files/createTempDirectory
-                                  (.toPath (io/file (or temp-base (System/getProperty "java.io.tmpdir"))))
-                                  "jonquil-plugin-check-"
-                                  (make-array java.nio.file.attribute.FileAttribute 0))))
-                       (catch Throwable t {:error (str "the check's folder couldn't be made: " (ex-message t))}))]
+              dir (make-check-dir! temp-base)]
           (if-let [e (:error dir)]
             (failed e)
             (check-in! {:dir dir :root root :source source :file-id file-id :request request

@@ -162,33 +162,43 @@
 (def ^:private NO-EFFECTS
   ":before-run hooks can't use effects, since the Run waits for them")
 
+(defn- hook-verdict
+  "What hook f says about event e: [:next event'], [:abort sentence] or
+  [:bad-abort]. The answer's shape is checked here, inside the caller's try:
+  an odd map (a sorted one with string keys) throws on contains?."
+  [f ctx e]
+  (let [e' (f ctx e)]
+    (cond
+      (not (and (map? e') (contains? e' :abort))) [:next (if (map? e') e' e)]
+      (and (string? (:abort e')) (not (str/blank? (:abort e')))) [:abort (:abort e')]
+      :else [:bad-abort])))
+
+(defn- before-answer
+  "hook-verdict for one hook, with a throw reported and read as :next e."
+  [{:keys [plugin f]} {:keys [ctx report!]} e]
+  (try (hook-verdict f ctx e)
+       (catch Throwable ex
+         (report! (str "plugin " (name plugin) ": :before-run hook: "
+                       (or (ex-message ex) (str ex))))
+         [:next e])))
+
 (defn run-before-chain
   "Threads event through hooks, each called with ctx, until one answers
   {:abort sentence}: {:plugin id :abort sentence}, or nil when none did.
   Each hook's plugin id goes into the current atom before it's called. A
   throw, or an :abort that isn't a non-blank string, is reported and the
   chain goes on with the event as it was."
-  [{:keys [hooks ctx event report! current]}]
-  (reduce (fn [e {:keys [plugin f]}]
+  [{:keys [hooks report! current] :as opts}]
+  (reduce (fn [e {:keys [plugin] :as hook}]
             (reset! current plugin)
-            ;; the answer's shape is checked inside the try too: an odd map
-            ;; (a sorted one with string keys) throws on contains?
-            (let [answer (try (let [e' (f ctx e)]
-                                (cond
-                                  (not (and (map? e') (contains? e' :abort))) [:next (if (map? e') e' e)]
-                                  (and (string? (:abort e')) (not (str/blank? (:abort e')))) [:abort (:abort e')]
-                                  :else [:bad-abort]))
-                              (catch Throwable ex
-                                (report! (str "plugin " (name plugin) ": :before-run hook: "
-                                              (or (ex-message ex) (str ex))))
-                                [:next e]))]
+            (let [answer (before-answer hook opts e)]
               (case (first answer)
                 :next (second answer)
                 :abort (reduced {:plugin plugin :abort (second answer)})
                 :bad-abort (do (report! (str "plugin " (name plugin)
                                              ": :before-run's :abort must be a sentence, so the Run went ahead"))
                                e))))
-          event hooks))
+          (:event opts) hooks))
 
 ;; true while a :before-run chain is running, overrun or not
 (defonce ^:private before-busy (atom false))

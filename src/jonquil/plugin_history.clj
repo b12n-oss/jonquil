@@ -36,6 +36,26 @@
   [{:keys [n at source reason]}]
   {:n n :at at :source source :reason reason :status :accepted})
 
+(defn- copy-mode!
+  "Gives the file at from the POSIX permissions of the file at to, when that
+  file exists."
+  [from to]
+  (when (.exists (io/file to))
+    (java.nio.file.Files/setPosixFilePermissions
+     (.toPath (io/file from))
+     (java.nio.file.Files/getPosixFilePermissions
+      (.toPath (io/file to)) (make-array java.nio.file.LinkOption 0)))))
+
+(defn- move-into-place!
+  "Atomically moves the file at from over the one at to."
+  [from to]
+  (java.nio.file.Files/move
+   (.toPath (java.io.File. ^String from))
+   (.toPath (java.io.File. ^String to))
+   (into-array java.nio.file.CopyOption
+               [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                java.nio.file.StandardCopyOption/ATOMIC_MOVE])))
+
 (defn write-atomic!
   "Writes text to path through a temp file and an atomic move, making its
   folder: nil, or the sentence saying why it couldn't. A symlinked path
@@ -50,17 +70,8 @@
         (io/make-parents target)
         (save-path/create-temp! @tmp target)
         (spit @tmp text)
-        (when (.exists (io/file target))
-          (java.nio.file.Files/setPosixFilePermissions
-           (.toPath (io/file @tmp))
-           (java.nio.file.Files/getPosixFilePermissions
-            (.toPath (io/file target)) (make-array java.nio.file.LinkOption 0))))
-        (java.nio.file.Files/move
-         (.toPath (java.io.File. ^String @tmp))
-         (.toPath (java.io.File. ^String target))
-         (into-array java.nio.file.CopyOption
-                     [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                      java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+        (copy-mode! @tmp target)
+        (move-into-place! @tmp target)
         nil)
       (catch Throwable e
         (when @tmp (try (io/delete-file @tmp true) (catch Throwable _ nil)))
@@ -112,8 +123,8 @@
 (defn- append!
   "Writes text (when given) as dir's <n>.clj, then history.edn with more
   appended to entries, printed without namespaced maps: nil, or the
-  sentence saying why it couldn't."
-  [dir n text entries more]
+  sentence saying why it couldn't. step holds :n :text :entries :more."
+  [dir {:keys [n text entries more]}]
   (or (when text (write-atomic! (str dir "/" n ".clj") text))
       (write-atomic! (str dir "/history.edn")
                      (binding [*print-namespace-maps* false] (pr-str (into entries more))))))
@@ -136,7 +147,7 @@
             {:same (:n latest)}
             (let [n (next-n entries (file-ns dir))
                   at ((or now #(str (java.time.Instant/now))))]
-              (if-let [why (append! dir n text entries [(entry {:n n :at at :source source :reason reason})])]
+              (if-let [why (append! dir {:n n :text text :entries entries :more [(entry {:n n :at at :source source :reason reason})]})]
                 {:error why}
                 {:n n}))))))
     (catch Throwable e
@@ -175,7 +186,8 @@
               at ((or now #(str (java.time.Instant/now))))
               old (when (= :pending status) (:n (pending entries)))
               e (proposal-entry (assoc opts :n n :at at))]
-          (if-let [why (append! dir n text entries (cond-> [e] old (conj {:n old :at at :status :superseded})))]
+          (if-let [why (append! dir {:n n :text text :entries entries
+                                     :more (cond-> [e] old (conj {:n old :at at :status :superseded}))})]
             {:error why}
             (cond-> {:n n} old (assoc :superseded old))))))
     (catch Throwable e
@@ -189,8 +201,9 @@
     (let [dir (history-dir plugins-dir id)
           {:keys [entries error]} (read-entries dir)]
       (or error
-          (append! dir n nil entries [(cond-> {:n n :at ((or now #(str (java.time.Instant/now)))) :status status}
-                                        note (assoc :note note))])))
+          (append! dir {:n n :entries entries
+                        :more [(cond-> {:n n :at ((or now #(str (java.time.Instant/now)))) :status status}
+                                 note (assoc :note note))]})))
     (catch Throwable e
       (str "recording it threw: " (or (ex-message e) (str e))))))
 

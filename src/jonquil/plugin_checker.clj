@@ -12,6 +12,11 @@
 (def MARK-START "__JONQUIL_CHECK__")
 (def MARK-END "__END_CHECK__")
 
+(defn- tool-summary
+  "A tool row's :name :doc :args, or the row itself when it isn't a map."
+  [row]
+  (if (map? row) (select-keys row [:name :doc :args]) row))
+
 (defn summary
   "A plugin definition as plain data, nothing that can't print and read
   back: its id, doc and effects, each command's id, doc and scope, its
@@ -25,7 +30,7 @@
              :bindings (vec (:bindings definition))
              :hooks (vec (sort (keys (:hooks definition))))}
       (contains? definition :mcp-tools)
-      (assoc :mcp-tools (mapv #(if (map? %) (select-keys % [:name :doc :args]) %) (:mcp-tools definition))))))
+      (assoc :mcp-tools (mapv tool-summary (:mcp-tools definition))))))
 
 (defn check-dir
   "The check of dir's candidate.clj against dir's request.edn ({:request
