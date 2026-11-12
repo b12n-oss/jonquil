@@ -12,6 +12,15 @@
   ;; status box's own child spacing (6) plus a little.
   8)
 
+(defn- make-hint-label
+  "The LM6 key hints label: dim, ellipsized at 44 characters so the status
+  bar doesn't jump."
+  []
+  (doto (g/gtk-label-new "")
+    (g/gtk-widget-add-css-class "dim-label")
+    (g/gtk-label-set-ellipsize g/PANGO-ELLIPSIZE-END)
+    (g/gtk-label-set-max-width-chars 44)))
+
 (defn build
   "activate!'s status bar labels, in activate!'s order: the status text,
   Ln/Col, the key hints label with hints-on?, the Parinfer label, the
@@ -24,11 +33,7 @@
   (let [status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
         ;; LM6: what keys do at the caret, dim, hidden while there's nothing
-        hint-label (doto (g/gtk-label-new "")
-                     (g/gtk-widget-add-css-class "dim-label")
-                     ;; never wider than this, so the status bar doesn't jump
-                     (g/gtk-label-set-ellipsize g/PANGO-ELLIPSIZE-END)
-                     (g/gtk-label-set-max-width-chars 44))
+        hint-label (make-hint-label)
         hints-on? (atom true)
         parinfer-label (g/gtk-label-new "")
         ;; How many agent proposals are pending, hidden at zero
@@ -49,6 +54,65 @@
            :hints-on? hints-on? :parinfer-label parinfer-label :pending-label pending-label
            :dialect-label dialect-label :unread-label unread-label :hints-toggle-fn hints-toggle-fn)))
 
+(defn- make-parinfer-label-updater
+  "The fn that sets the Parinfer label from the active tab's effective
+  mode and shows it, or hides it when the mode has nothing to say.
+  active-parinfer-override reads the active tab's own mode, if any."
+  [parinfer-label parinfer-mode* active-parinfer-override]
+  (fn []
+    (let [ov (active-parinfer-override)]
+      (if-let [t (commands/parinfer-status-text
+                  (commands/parinfer-effective ov @parinfer-mode*)
+                  (some? ov)
+                  @parinfer-mode*)]
+        (do (g/gtk-label-set-text parinfer-label t)
+            (g/gtk-widget-set-visible parinfer-label 1))
+        (g/gtk-widget-set-visible parinfer-label 0)))))
+
+(defn- make-parinfer-status-fn
+  "The hook's one status line: a skipped long form names itself, and the
+  next adjusted edit clears it back to Ready. m holds :parinfer-mode*
+  :parinfer-skip-shown* :evaluating-fn and :status-label."
+  [{:keys [parinfer-mode* parinfer-skip-shown* evaluating-fn status-label]}]
+  (fn [msg]
+    (if msg
+      (do (reset! parinfer-skip-shown* true)
+          (when-not (evaluating-fn)
+            (win-status/set-status! status-label
+                                    (str (or (commands/parinfer-label-text @parinfer-mode*)
+                                             "Parinfer")
+                                         " (" msg ")"))))
+      (when (and (compare-and-set! parinfer-skip-shown* true false)
+                 (not (evaluating-fn)))
+        (win-status/set-status! status-label "Ready")))))
+
+(defn- make-parinfer-fn
+  "The Parinfer command's fn of a choice: steps the mode, saves it to
+  settings.edn, updates the label and says so on the status line. m holds
+  :parinfer-mode* :parinfer-skip-shown* :settings-path* :cv
+  :update-parinfer-label! :active-parinfer-override :evaluating-fn and
+  :status-label."
+  [{:keys [parinfer-mode* parinfer-skip-shown* settings-path* cv update-parinfer-label!
+           active-parinfer-override evaluating-fn status-label]}]
+  (fn [choice]
+    (let [k (commands/parinfer-step @parinfer-mode* choice)]
+      (reset! parinfer-mode* k)
+      ;; A cleared skip note mustn't later stomp a newer
+      ;; status.
+      (reset! parinfer-skip-shown* false)
+      (update-parinfer-label!)
+      (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
+        (cview/append! cv :system (str "; settings: " err "\n")))
+      ;; same restraint as the theme: a live Running…
+      ;; status isn't overwritten. A pinned active tab
+      ;; names its project's choice, since the command
+      ;; changed only the global.
+      (when-not (evaluating-fn)
+        (win-status/set-status! status-label
+                                (str "Parinfer: " (commands/parinfer-mode-word k)
+                                     (commands/parinfer-pinned-note
+                                      k (active-parinfer-override))))))))
+
 (defn build-parinfer
   "activate!'s Parinfer bindings, in activate!'s order: the window's one
   mode (from settings.edn, else :off), the label that follows the active
@@ -66,47 +130,14 @@
         active-parinfer-override (fn []
                                    (when-let [t (active-tab)]
                                      (:parinfer (some-> (:project t) deref))))
-        update-parinfer-label! (fn []
-                                 (let [ov (active-parinfer-override)]
-                                   (if-let [t (commands/parinfer-status-text
-                                               (commands/parinfer-effective ov @parinfer-mode*)
-                                               (some? ov)
-                                               @parinfer-mode*)]
-                                     (do (g/gtk-label-set-text parinfer-label t)
-                                         (g/gtk-widget-set-visible parinfer-label 1))
-                                     (g/gtk-widget-set-visible parinfer-label 0))))
-        ;; The hook's one status line: a skipped long form names itself,
-        ;; and the next adjusted edit clears it back to Ready.
+        update-parinfer-label! (make-parinfer-label-updater parinfer-label parinfer-mode* active-parinfer-override)
         parinfer-skip-shown* (atom false)
-        parinfer-status-fn (fn [msg]
-                             (if msg
-                               (do (reset! parinfer-skip-shown* true)
-                                   (when-not (evaluating-fn)
-                                     (win-status/set-status! status-label
-                                                             (str (or (commands/parinfer-label-text @parinfer-mode*)
-                                                                      "Parinfer")
-                                                                  " (" msg ")"))))
-                               (when (and (compare-and-set! parinfer-skip-shown* true false)
-                                          (not (evaluating-fn)))
-                                 (win-status/set-status! status-label "Ready"))))
-        parinfer-fn (fn [choice]
-                      (let [k (commands/parinfer-step @parinfer-mode* choice)]
-                        (reset! parinfer-mode* k)
-                        ;; A cleared skip note mustn't later stomp a newer
-                        ;; status.
-                        (reset! parinfer-skip-shown* false)
-                        (update-parinfer-label!)
-                        (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
-                          (cview/append! cv :system (str "; settings: " err "\n")))
-                        ;; same restraint as the theme: a live Running…
-                        ;; status isn't overwritten. A pinned active tab
-                        ;; names its project's choice, since the command
-                        ;; changed only the global.
-                        (when-not (evaluating-fn)
-                          (win-status/set-status! status-label
-                                                  (str "Parinfer: " (commands/parinfer-mode-word k)
-                                                       (commands/parinfer-pinned-note
-                                                        k (active-parinfer-override)))))))]
+        m {:parinfer-mode* parinfer-mode* :parinfer-skip-shown* parinfer-skip-shown*
+           :evaluating-fn evaluating-fn :status-label status-label}
+        parinfer-status-fn (make-parinfer-status-fn m)
+        parinfer-fn (make-parinfer-fn (assoc m :settings-path* settings-path* :cv cv
+                                             :update-parinfer-label! update-parinfer-label!
+                                             :active-parinfer-override active-parinfer-override))]
     (assoc w :parinfer-mode* parinfer-mode* :update-parinfer-label! update-parinfer-label!
            :parinfer-status-fn parinfer-status-fn :parinfer-fn parinfer-fn)))
 

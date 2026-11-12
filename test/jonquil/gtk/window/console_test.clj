@@ -24,7 +24,9 @@
         at (fn [] ::tab) busy (fn [] ::busy)
         in {:active-tab at :ev* ev* :status-label ::sl :evaluating-fn busy :x 1}
         w (with-redefs [cview/make-console-view (fn [o] (reset! opts o) {:view ::view :scroll ::scroll})
-                        win-run/make-on-submit (fn [a cv* e sl bang*] (reset! submit [a cv* e sl bang*]) ::on-submit)
+                        win-run/make-on-submit (fn [{a :tab-fn cv* :*cv e :ev* sl :status-label bang* :bang*}]
+                                                 (reset! submit [a cv* e sl bang*])
+                                                 ::on-submit)
                         win-run/history-prev-fn (fn [e] [:prev e])
                         win-run/history-next-fn (fn [e] [:next e])]
             (win-console/build in))

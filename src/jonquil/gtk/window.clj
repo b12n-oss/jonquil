@@ -109,34 +109,58 @@
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
 
+(defn- build-frame
+  "The window map's first stages: app and opts through the startup, status
+  bar, quit, console and theme builders and the right-hand panels."
+  [app opts]
+  (-> (assoc opts :app app :current-report current-report :current-open-paths current-open-paths)
+      win-startup/build
+      win-status-bar/build
+      win-quit/build
+      win-console/build
+      win-theme/build
+      win-right-slot/build-panels))
+
+(defn- build-workspace
+  "The middle stages: the tab fns, then help, completion, run, tabs, the
+  inspector and the right-hand slot."
+  [w]
+  (-> (assoc w :open-file! win-tabs/open-file! :select-tab! win-tabs/select-tab! :tab-by-id win-tabs/tab-by-id)
+      win-help/build
+      win-console/build-completion
+      win-run/build
+      win-tabs/build
+      win-inspector/build
+      win-right-slot/build
+      win-right-slot/publish))
+
+(defn- build-bindings
+  "The last stages: the key fns, the tree and layout, the parts, the console
+  menu and the keys."
+  [w]
+  (-> w
+      win-help/build-source-keys
+      win-status-bar/build-parinfer
+      win-context/build-key-fns
+      ;; win-tree-ops/build makes the tree's pane, and win-layout/build the
+      ;; Files toggle, the tree's outer paned, the editor and console
+      ;; paned, the toolbar and its buttons, the column and the key
+      ;; controller.
+      win-tree-ops/build
+      win-layout/build
+      win-context/build-parts
+      win-context/build-console-menu
+      win-context/build-keys))
+
+(defn- build-window
+  "The window map for app: opts run through each build stage in turn."
+  [app opts]
+  (-> (build-frame app opts)
+      build-workspace
+      build-bindings))
+
 (defn- activate! [app {:keys [on-ready] :as opts}]
-  (let [w (-> (assoc opts :app app :current-report current-report :current-open-paths current-open-paths)
-              win-startup/build
-              win-status-bar/build
-              win-quit/build
-              win-console/build
-              win-theme/build
-              win-right-slot/build-panels
-              (assoc :open-file! win-tabs/open-file! :select-tab! win-tabs/select-tab! :tab-by-id win-tabs/tab-by-id)
-              win-help/build
-              win-console/build-completion
-              win-run/build
-              win-tabs/build
-              win-inspector/build
-              win-right-slot/build
-              win-right-slot/publish
-              win-help/build-source-keys
-              win-status-bar/build-parinfer
-              win-context/build-key-fns
-              ;; win-tree-ops/build makes the tree's pane, and win-layout/build the
-              ;; Files toggle, the tree's outer paned, the editor and console
-              ;; paned, the toolbar and its buttons, the column and the key
-              ;; controller.
-              win-tree-ops/build
-              win-layout/build
-              win-context/build-parts
-              win-context/build-console-menu
-              win-context/build-keys)]
+  (let [w (build-window app opts)]
     (win-layout/place! w)
     (win-theme/connect! w)
     (win-layout/connect! w)

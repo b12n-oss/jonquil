@@ -402,8 +402,8 @@
                   editor/set-rename-fn! (keep-fn :rename-fn)
                   editor/set-run-form-fn! (keep-fn :run-form-fn)
                   editor/set-flash-cancel-fn! (fn [_ f] (l [:flash-cancel f]))
-                  win-help/wire-completion! (fn [c complete-fn label register-fn & _]
-                                              (swap! caps assoc :completion [complete-fn label register-fn])
+                  win-help/wire-completion! (fn [c {:keys [complete-fn status-label register-popover-fn]}]
+                                              (swap! caps assoc :completion [complete-fn status-label register-popover-fn])
                                               (l [:completion c]))]
       (f))))
 

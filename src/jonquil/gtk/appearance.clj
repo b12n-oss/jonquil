@@ -10,6 +10,14 @@
 (ffi/defcfn sel-register-name "sel_registerName" [:string] :pointer)
 (ffi/defcfn msg-send "objc_msgSend" [:pointer :pointer] :pointer)
 
+(defn- send-non-null
+  "Sends the selector named `sel` to `obj` and returns the result, or nil when
+  `obj` or the result is null."
+  [obj sel]
+  (when-not (ffi/null? obj)
+    (let [ret (msg-send obj (sel-register-name sel))]
+      (when-not (ffi/null? ret) ret))))
+
 (defn system-dark?
   "True when macOS is showing the Dark appearance, false when Light, nil when
   it can't tell (not macOS, or any step returned null or threw). Reads
@@ -20,13 +28,11 @@
   []
   (when (= "Mac OS X" (System/getProperty "os.name"))
     (try
-      (let [app (msg-send (objc-get-class "NSApplication") (sel-register-name "sharedApplication"))]
-        (when-not (ffi/null? app)
-          (let [appearance (msg-send app (sel-register-name "effectiveAppearance"))]
-            (when-not (ffi/null? appearance)
-              (let [nm (msg-send appearance (sel-register-name "name"))]
-                (when-not (ffi/null? nm)
-                  (let [cstr (msg-send nm (sel-register-name "UTF8String"))]
-                    (when-not (ffi/null? cstr)
-                      (str/includes? (ffi/ptr->string cstr) "Dark")))))))))
+      (let [app (msg-send (objc-get-class "NSApplication") (sel-register-name "sharedApplication"))
+            cstr (some-> app
+                         (send-non-null "effectiveAppearance")
+                         (send-non-null "name")
+                         (send-non-null "UTF8String"))]
+        (when cstr
+          (str/includes? (ffi/ptr->string cstr) "Dark")))
       (catch Throwable _ nil))))

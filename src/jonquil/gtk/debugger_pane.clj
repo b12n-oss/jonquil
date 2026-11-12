@@ -163,17 +163,22 @@
   (doseq [w [title restart-box scroll field close-btn footer]] (g/gtk-box-append root w))
   (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
 
-(defn- connect-list-field-close!
-  "Connects the list's row-activated, the field's activate and the Close
-  button's clicked to their handlers."
-  [{lb :list :keys [field close-btn] :as pane}]
+(defn- connect-row-activated!
+  "Connects the list's row-activated signal to activate!."
+  [{lb :list :as pane}]
   (g/g-signal-connect-data lb "row-activated"
                            (callable (fn [_box row _data]
                                        (try (activate! pane (g/gtk-list-box-row-get-index row))
                                             (catch :default e (report! pane (str "; " (ex-message e)))))
                                        nil)
                                      [:pointer :pointer :pointer] :void)
-                           ffi/null ffi/null g/CONNECT-DEFAULT)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- connect-list-field-close!
+  "Connects the list's row-activated, the field's activate and the Close
+  button's clicked to their handlers."
+  [{:keys [field close-btn] :as pane}]
+  (connect-row-activated! pane)
   (g/g-signal-connect-data field "activate"
                            (callable (fn [_entry _data]
                                        (try (evaluate-field! pane)

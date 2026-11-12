@@ -86,37 +86,44 @@
 (defn set-reason! [pane s] (g/gtk-editable-set-text (:reason pane) s) nil)
 (defn footer-text [pane] (g/label-text (:footer pane)))
 
+(defn- lay-out!
+  "Sets up the list, the labels and the reason field, and packs the widgets
+  into the root, the buttons into bar first."
+  [{:keys [root title scroll empty reason footer revert-btn back-btn close-btn] lb :list} bar]
+  (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
+  (g/gtk-scrolled-window-set-child scroll lb)
+  (g/gtk-widget-set-vexpand scroll 1)
+  (doseq [l [title empty footer]]
+    (g/gtk-label-set-xalign l 0.0)
+    (g/gtk-label-set-wrap l 1))
+  (g/gtk-widget-set-visible empty 0)
+  (g/gtk-entry-set-placeholder-text reason "Reason for Revert (optional)")
+  (doseq [b [revert-btn back-btn close-btn]] (g/gtk-box-append bar b))
+  (doseq [w [title scroll empty reason bar footer]] (g/gtk-box-append root w))
+  (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
+
+(defn- connect-buttons!
+  "Connects each button's clicked signal to its handler."
+  [{:keys [revert-btn back-btn close-btn] :as pane}]
+  (doseq [[b k] [[revert-btn :on-revert] [back-btn :on-back] [close-btn :on-close]]]
+    (g/g-signal-connect-data b "clicked" (callable (handler-click pane k) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)))
+
 (defn make-pane
   "Builds the panel: {:root :title :list :scroll :empty :reason :revert-btn
   :back-btn :close-btn :footer :rows (atom []) :handlers (atom {})}. :root
   starts visible; the window hides it."
   []
-  (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
-        title (g/gtk-label-new "History")
-        lb (g/gtk-list-box-new)
-        scroll (g/gtk-scrolled-window-new)
-        empty (g/gtk-label-new "")
-        reason (g/gtk-entry-new)
-        bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        revert-btn (g/gtk-button-new-with-label "Revert")
-        back-btn (g/gtk-button-new-with-label "Back")
-        close-btn (g/gtk-button-new-with-label "Close")
-        footer (g/gtk-label-new "")
-        pane {:root root :title title :list lb :scroll scroll :empty empty :reason reason
-              :revert-btn revert-btn :back-btn back-btn :close-btn close-btn :footer footer
+  (let [bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
+        pane {:root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
+              :title (g/gtk-label-new "History")
+              :list (g/gtk-list-box-new) :scroll (g/gtk-scrolled-window-new)
+              :empty (g/gtk-label-new "") :reason (g/gtk-entry-new)
+              :revert-btn (g/gtk-button-new-with-label "Revert")
+              :back-btn (g/gtk-button-new-with-label "Back")
+              :close-btn (g/gtk-button-new-with-label "Close")
+              :footer (g/gtk-label-new "")
               :rows (atom []) :handlers (atom {})}]
-    (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
-    (g/gtk-scrolled-window-set-child scroll lb)
-    (g/gtk-widget-set-vexpand scroll 1)
-    (doseq [l [title empty footer]]
-      (g/gtk-label-set-xalign l 0.0)
-      (g/gtk-label-set-wrap l 1))
-    (g/gtk-widget-set-visible empty 0)
-    (g/gtk-entry-set-placeholder-text reason "Reason for Revert (optional)")
-    (doseq [b [revert-btn back-btn close-btn]] (g/gtk-box-append bar b))
-    (doseq [w [title scroll empty reason bar footer]] (g/gtk-box-append root w))
-    (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
-    (doseq [[b k] [[revert-btn :on-revert] [back-btn :on-back] [close-btn :on-close]]]
-      (g/g-signal-connect-data b "clicked" (callable (handler-click pane k) [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT))
+    (lay-out! pane bar)
+    (connect-buttons! pane)
     pane))

@@ -80,39 +80,48 @@
 
 (defn footer-text [pane] (g/label-text (:footer pane)))
 
+(defn- lay-out!
+  "Sets up the list and the labels and packs the widgets into the root, the
+  buttons into bar first. The title label is passed in: the pane keeps none."
+  [{:keys [root scroll empty footer enable-btn disable-btn open-btn history-btn review-btn close-btn] lb :list}
+   title bar]
+  (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
+  (g/gtk-scrolled-window-set-child scroll lb)
+  (g/gtk-widget-set-vexpand scroll 1)
+  (doseq [l [title empty footer]]
+    (g/gtk-label-set-xalign l 0.0)
+    (g/gtk-label-set-wrap l 1))
+  (g/gtk-widget-set-visible empty 0)
+  (doseq [b [enable-btn disable-btn open-btn history-btn review-btn close-btn]] (g/gtk-box-append bar b))
+  (doseq [w [title scroll empty bar footer]] (g/gtk-box-append root w))
+  (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1))
+
+(defn- connect-buttons!
+  "Connects each button's clicked signal to its handler."
+  [{:keys [enable-btn disable-btn open-btn history-btn review-btn close-btn] :as pane}]
+  (doseq [[b k] [[enable-btn :on-enable] [disable-btn :on-disable] [open-btn :on-open]
+                 [history-btn :on-history] [review-btn :on-review] [close-btn :on-close]]]
+    (g/g-signal-connect-data b "clicked" (callable (handler-click pane k) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)))
+
 (defn make-pane
   "Builds the panel: {:root :list :scroll :empty :enable-btn :disable-btn
   :open-btn :history-btn :review-btn :close-btn :footer :rows (atom []) :handlers (atom
   {})}. :root starts visible; the window hides it."
   []
-  (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
-        title (g/gtk-label-new "Plugins")
-        lb (g/gtk-list-box-new)
-        scroll (g/gtk-scrolled-window-new)
-        empty (g/gtk-label-new "")
+  (let [title (g/gtk-label-new "Plugins")
         bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        enable-btn (g/gtk-button-new-with-label "Enable")
-        disable-btn (g/gtk-button-new-with-label "Disable")
-        open-btn (g/gtk-button-new-with-label "Open")
-        history-btn (g/gtk-button-new-with-label "History")
-        review-btn (g/gtk-button-new-with-label "Review Proposals")
-        close-btn (g/gtk-button-new-with-label "Close")
-        footer (g/gtk-label-new "")
-        pane {:root root :list lb :scroll scroll :empty empty :enable-btn enable-btn
-              :disable-btn disable-btn :open-btn open-btn :history-btn history-btn :review-btn review-btn
-              :close-btn close-btn :footer footer :rows (atom []) :handlers (atom {})}]
-    (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
-    (g/gtk-scrolled-window-set-child scroll lb)
-    (g/gtk-widget-set-vexpand scroll 1)
-    (doseq [l [title empty footer]]
-      (g/gtk-label-set-xalign l 0.0)
-      (g/gtk-label-set-wrap l 1))
-    (g/gtk-widget-set-visible empty 0)
-    (doseq [b [enable-btn disable-btn open-btn history-btn review-btn close-btn]] (g/gtk-box-append bar b))
-    (doseq [w [title scroll empty bar footer]] (g/gtk-box-append root w))
-    (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
-    (doseq [[b k] [[enable-btn :on-enable] [disable-btn :on-disable] [open-btn :on-open]
-                   [history-btn :on-history] [review-btn :on-review] [close-btn :on-close]]]
-      (g/g-signal-connect-data b "clicked" (callable (handler-click pane k) [:pointer :pointer] :void)
-                               ffi/null ffi/null g/CONNECT-DEFAULT))
+        pane {:root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
+              :list (g/gtk-list-box-new) :scroll (g/gtk-scrolled-window-new)
+              :empty (g/gtk-label-new "")
+              :enable-btn (g/gtk-button-new-with-label "Enable")
+              :disable-btn (g/gtk-button-new-with-label "Disable")
+              :open-btn (g/gtk-button-new-with-label "Open")
+              :history-btn (g/gtk-button-new-with-label "History")
+              :review-btn (g/gtk-button-new-with-label "Review Proposals")
+              :close-btn (g/gtk-button-new-with-label "Close")
+              :footer (g/gtk-label-new "")
+              :rows (atom []) :handlers (atom {})}]
+    (lay-out! pane title bar)
+    (connect-buttons! pane)
     pane))

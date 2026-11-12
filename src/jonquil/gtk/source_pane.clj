@@ -317,6 +317,32 @@
   (g/g-signal-connect-data close-btn "clicked" (callable (handler-click pane :on-close) [:pointer :pointer] :void)
                            ffi/null ffi/null g/CONNECT-DEFAULT))
 
+(defn- new-scroll-state
+  "The scroll-settle bookkeeping for a pane over ed and footer:
+  {:scroll-deadline :scroll-armed? :scroll-cancelled? :scroll-settle-cb
+  :on-user-scroll!}."
+  [ed footer]
+  ;; scroll-deadline/armed?/cancelled? are made before the pane map so
+  ;; scroll-settle-cb and on-user-scroll! can close over the SAME atoms
+  ;; and ed before pane itself exists -- one callable for the pane's
+  ;; whole lifetime (jonquil.gtk.inspector-pane/note-clear-cb's own
+  ;; pattern), never one per place-caret! call.
+  (let [scroll-deadline (atom 0)
+        scroll-armed? (atom false)
+        scroll-cancelled? (atom false)]
+    {:scroll-deadline scroll-deadline
+     :scroll-armed? scroll-armed?
+     :scroll-cancelled? scroll-cancelled?
+     :scroll-settle-cb (scroll-settle-callback {:ed ed :footer footer :scroll-deadline scroll-deadline
+                                                :scroll-armed? scroll-armed? :scroll-cancelled? scroll-cancelled?})
+     ;; The real "scroll" signal's own 4-arg shape (controller, dx, dy,
+     ;; data); dx/dy are never read, since ANY scroll at all means the
+     ;; person is driving the view themselves. Plain fn, not yet
+     ;; wrapped in callable, so it can also be called directly (no FFI
+     ;; marshaling) by a self-test row, and wrapped once, in
+     ;; connect-scroll-cancels!, for the real GTK connection.
+     :on-user-scroll! (user-scroll-fn footer scroll-cancelled?)}))
+
 (defn make-pane
   "Builds the panel. Returns {:root :header :editor :footer :open-btn
   :close-btn :state (atom {:loc nil :history []}) :handlers (atom {})}
@@ -343,41 +369,17 @@
   as dev/gtk_selftest_window/source_pane.clj's with-source-pane does
   between rows)."
   []
-  (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
-        header (g/gtk-label-new "")
-        ed (editor/make-editor)
-        bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        open-btn (g/gtk-button-new-with-label "Open in window")
-        close-btn (g/gtk-button-new-with-label "Close")
+  (let [ed (editor/make-editor)
         footer (g/gtk-label-new hint-text)
-        ;; scroll-deadline/armed?/cancelled? are hoisted out of the pane
-        ;; map literal (rather than built as atoms inline there) so
-        ;; scroll-settle-cb and on-user-scroll!, below, can close over the
-        ;; SAME atoms and ed before pane itself exists -- one callable for
-        ;; the pane's whole lifetime (jonquil.gtk.inspector-pane/note-
-        ;; clear-cb's own pattern), never one per place-caret! call.
-        scroll-deadline (atom 0)
-        scroll-armed? (atom false)
-        scroll-cancelled? (atom false)
-        scroll-settle-cb
-        (scroll-settle-callback {:ed ed :footer footer :scroll-deadline scroll-deadline
-                                 :scroll-armed? scroll-armed? :scroll-cancelled? scroll-cancelled?})
-        ;; The real "scroll" signal's own 4-arg shape (controller, dx, dy,
-        ;; data); dx/dy are never read, since ANY scroll at all means the
-        ;; person is driving the view themselves. Plain fn, not yet
-        ;; wrapped in callable, so it can also be called directly (no FFI
-        ;; marshaling) by a self-test row, and wrapped once, in
-        ;; connect-scroll-cancels!, for the real GTK connection.
-        on-user-scroll! (user-scroll-fn footer scroll-cancelled?)
-        pane {:root root :header header :editor ed :footer footer
-              :open-btn open-btn :close-btn close-btn
-              :state (atom {:loc nil :history []})
-              :handlers (atom {})
-              :scroll-deadline scroll-deadline
-              :scroll-armed? scroll-armed?
-              :scroll-cancelled? scroll-cancelled?
-              :scroll-settle-cb scroll-settle-cb
-              :on-user-scroll! on-user-scroll!}
+        bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
+        pane (merge {:root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
+                     :header (g/gtk-label-new "")
+                     :editor ed :footer footer
+                     :open-btn (g/gtk-button-new-with-label "Open in window")
+                     :close-btn (g/gtk-button-new-with-label "Close")
+                     :state (atom {:loc nil :history []})
+                     :handlers (atom {})}
+                    (new-scroll-state ed footer))
         scroll-ctl (g/gtk-event-controller-scroll-new g/EVENT-CONTROLLER-SCROLL-BOTH-AXES)]
     (lay-out! pane bar)
     (connect-scroll-cancels! pane scroll-ctl)

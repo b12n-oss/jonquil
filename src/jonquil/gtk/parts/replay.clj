@@ -98,6 +98,26 @@
   (when (compare-and-set! replay-save-pending? false true)
     (g/g-timeout-add REPLAY-SAVE-MS replay-save-cb ffi/null)))
 
+(defn- adopt-record!
+  "Loads root's record into the window as its replay state (moving :current to
+  :previous, saved at once, for the first window of the process on root),
+  puts the root's prompt history into the evaluator and offers :previous on
+  the console when it isn't empty."
+  [{:keys [cv ev* sel* settings-path* replay*] :as ctx} root]
+  (let [path (replay/record-path @settings-path* root)
+        {:keys [record warning]} (replay/load-record path)
+        first? (not (contains? @opened-roots root))
+        moved (if first? (replay/open-slot record) record)
+        state {:root root :path path :record moved :dirty? false}]
+    (swap! opened-roots conj root)
+    (when warning (cview/append! cv :system (str "; " warning "\n")))
+    (reset! replay* state)
+    (when (not= moved record) (save-replay! ctx state))
+    (let [v (:history moved)]
+      (reset! (ev/history @ev*) {:items v :index (count v) :draft ""}))
+    (when-let [line (offer-line (:previous moved) (System/currentTimeMillis) @sel*)]
+      (cview/append! cv :system (str line "\n")))))
+
 (defn- open-root!
   "The tree's root has opened (at startup, or an Open Folder re-root):
   writes the old root's pending changes, loads the new root's record, and, for
@@ -106,25 +126,13 @@
   evaluator and the console offers :previous when it isn't empty. Does
   nothing with :remember-session? off for root, or when the record is
   already this root's. GTK thread. Never throws; a failure is said on the console."
-  [{:keys [cv ev* sel* settings-path* tree-pane replay*] :as ctx}]
+  [{:keys [cv settings-path* tree-pane replay*] :as ctx}]
   (let [root (:root @(:state tree-pane))]
     (when (and (remember-session? @settings-path* root)
                (not (and @replay* (= root (:root @replay*)))))
       (try
         (flush-replay! ctx)
-        (let [path (replay/record-path @settings-path* root)
-              {:keys [record warning]} (replay/load-record path)
-              first? (not (contains? @opened-roots root))
-              moved (if first? (replay/open-slot record) record)
-              state {:root root :path path :record moved :dirty? false}]
-          (swap! opened-roots conj root)
-          (when warning (cview/append! cv :system (str "; " warning "\n")))
-          (reset! replay* state)
-          (when (not= moved record) (save-replay! ctx state))
-          (let [v (:history moved)]
-            (reset! (ev/history @ev*) {:items v :index (count v) :draft ""}))
-          (when-let [line (offer-line (:previous moved) (System/currentTimeMillis) @sel*)]
-            (cview/append! cv :system (str line "\n"))))
+        (adopt-record! ctx root)
         (catch :default e
           (cview/append! cv :system (str "; last session: " (ex-message e) "\n")))))))
 
@@ -174,23 +182,33 @@
         (schedule-replay-save! ctx))
     (append-to-root! ctx (:root rt) nil {:forget? true :run-text run-text})))
 
+(defn- ok-entries
+  "The replay entries of an :ok result's record, nil for any other result."
+  [{:keys [profile]} record result]
+  (when (= :ok (:status result))
+    (replay/entries (assoc (select-keys record [:source :code :path :ns])
+                           :at (System/currentTimeMillis)
+                           :dialect (:name profile)))))
+
+(defn- forgets-previous?
+  "True for an :ok Run of the replay tab rt, which forgets the :previous of
+  the root the tab was opened for."
+  [{:keys [source tab-id]} rt result]
+  (and (= :ok (:status result)) (= :run source) (some? tab-id) (= tab-id (:id rt))))
+
 (defn- record-eval!
   "The recorder's work for one finished evaluation, on the GTK thread. An :ok
   Run of the replay tab forgets the :previous of the root the tab was opened
   for, but first carries into :current the other forms of that :previous that
   are still behind #_ in the Run's text (the record's :code), ahead of what
   the Run recorded."
-  [{:keys [cv sel* settings-path* replay*] :as ctx} {:keys [source tab-id root] :as record} result]
+  [{:keys [cv sel* settings-path* replay*] :as ctx} {:keys [root] :as record} result]
   (when (remember-session? @settings-path* root)
-    (let [ok? (= :ok (:status result))
-          es (when ok?
-               (replay/entries (assoc (select-keys record [:source :code :path :ns])
-                                      :at (System/currentTimeMillis)
-                                      :dialect (:name (:profile @sel*)))))
+    (let [es (ok-entries @sel* record result)
           rt @(:replay-tab* cv)
           ;; an :ok Run of the replay tab forgets its own root's :previous,
           ;; which may not be the root the entries are filed under
-          forget? (and ok? (= :run source) (some? tab-id) (= tab-id (:id rt)))
+          forget? (forgets-previous? record rt result)
           forget-here? (and forget? (= root (:root rt)))
           run-text (:code record)
           st @replay*]
@@ -199,6 +217,15 @@
         (append-to-root! ctx root es {:forget? forget-here? :run-text run-text}))
       (when (and forget? (not forget-here?))
         (forget-tab-root! ctx {:rt rt :st st :run-text run-text})))))
+
+(defn- run-record!
+  "Runs record-eval! on the GTK thread. A throw is said once, like a failed
+  save, and never reaches the evaluation."
+  [ctx record result]
+  (try (record-eval! ctx record result)
+       (catch :default e
+         (try (note-replay-result! ctx (or (ex-message e) (str e)))
+              (catch :default _ nil)))))
 
 (defn- make-recorder
   "The fn (record result) hooked-opts calls when an evaluation that carries a
@@ -212,11 +239,7 @@
   A throw is said once, like a failed save, and never reaches the evaluation."
   [ctx]
   (fn [record result]
-    (on-gui! (fn []
-               (try (record-eval! ctx record result)
-                    (catch :default e
-                      (try (note-replay-result! ctx (or (ex-message e) (str e)))
-                           (catch :default _ nil))))))))
+    (on-gui! (fn [] (run-record! ctx record result)))))
 
 (defn- replay-open!
   "Open last session's replay: an Untitled tab holding the script of :previous,
