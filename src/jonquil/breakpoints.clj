@@ -529,6 +529,8 @@
        (cond-> {:line (:line s)} (not= line (:line s)) (assoc :moved? true))
        {:error NOWHERE}))))
 
+(declare defining-forms)
+
 (defn- units
   "text's stepping units: its top-level forms, a (comment ...) block's
   forms taken one by one instead of the block."
@@ -556,16 +558,20 @@
   Stepping: every other line that can pause in a unit holding a
   breakpoint gets a step point (:steps, their lines), which pauses only
   while stepping. A unit is a top-level form, or a form directly inside a
-  (comment ...) block. Units without a breakpoint get none."
+  (comment ...) block. Units without a breakpoint get none, unless opts'
+  :step-all? is set (an instrumented tab): then every top-level form that
+  only defines code (defines-code?, never one inside a comment block) is
+  filled too, dot or not."
   ([text lines] (instrument text lines {}))
-  ([text lines {:keys [start end tab] :or {start 0} :as opts}]
+  ([text lines {:keys [start end tab step-all?] :or {start 0} :as opts}]
    (let [end (or end (count text))
          all (spots text (select-keys opts [:heads]))
          inside? #(and (<= start (:start %)) (<= (:end %) end))
          dots (->> (distinct lines) (keep #(spot-on all %)) (filter inside?))
          dotted (set (map :line dots))
-         held (filter (fn [u] (some #(and (<= (:start u) (:start %)) (< (:start %) (:end u))) dots))
-                      (units text))
+         held (concat (filter (fn [u] (some #(and (<= (:start u) (:start %)) (< (:start %) (:end u))) dots))
+                              (units text))
+                      (when step-all? (defining-forms text)))
          steps (->> all
                     (filter (fn [sp] (some #(and (<= (:start %) (:start sp)) (< (:start sp) (:end %))) held)))
                     (remove #(dotted (:line %)))
@@ -622,6 +628,49 @@
                             (commands/top-level-forms text)))]
     (when (and form (not (commands/comment-form? text form)) (defines-code? text form))
       {:start (:start form) :end (:end form)})))
+
+(defn- defining-forms
+  "text's top-level forms that only define code (defines-code?), outside
+  any (comment ...) block, in text order."
+  [text]
+  (filter #(and (not (commands/comment-form? text %)) (defines-code? text %))
+          (commands/top-level-forms text)))
+
+(defn step-all-ranges
+  "The {:start :end} of each top-level form Instrument this tab sends
+  again: every one that only defines code, outside comment blocks."
+  [text]
+  (mapv #(select-keys % [:start :end]) (defining-forms text)))
+
+(defn- forms-n [n] (str n (if (= 1 n) " form" " forms")))
+
+(defn- skipped-sentence
+  "What an instrument command says about k forms with edits that haven't
+  run, which it left unsent; nil for none."
+  [k]
+  (when (pos? k)
+    (if (= 1 k)
+      " 1 form has edits that haven't run, so it wasn't sent: Run it to include it."
+      (str " " (forms-n k) " have edits that haven't run, so they weren't sent: Run them to include them."))))
+
+(defn instrument-message
+  "The status line after Instrument this tab (on? true) or Stop
+  instrumenting (on? false): n forms sent, skipped forms left out for
+  edits that haven't run, sent the re-send's outcome (:ok, or :failed,
+  :busy, :refused; nil when nothing was sent)."
+  [{:keys [on? n skipped sent]}]
+  (let [skipped (or skipped 0)]
+    (cond
+      (and on? (zero? n) (zero? skipped)) "; This tab defines no functions to instrument."
+      (and (pos? n) (not= :ok sent))
+      (if on?
+        "; This tab is instrumented for stepping; its forms get step points when you next run them."
+        "; This tab isn't instrumented now; its forms lose their step points when you next run them.")
+      on? (str "; Instrumented " (forms-n n) " for stepping"
+               (when (pos? n) (str ", so Step Into goes into " (if (= 1 n) "it" "them") " now"))
+               "." (skipped-sentence skipped))
+      :else (str "; Stopped instrumenting this tab; sent " (forms-n n) " again without step points."
+                 (skipped-sentence skipped)))))
 
 (defn edited?
   "True when the form at rng ({:start :end}) of text has edits that

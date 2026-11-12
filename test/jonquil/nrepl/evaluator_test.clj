@@ -1150,6 +1150,34 @@
                 (is (= "5" (:printed (deref done 20000 :timeout)))))))))
       (finally (ev/stop! e)))))
 
+(deftest step-all-in-the-child-test
+  (let [e (make (temp-project))
+        text "(defn a [x]\n  (when (neg? x)\n    (str \"never\"))\n  (let [y (inc x)]\n    (* y 2)))\n(defn b [x]\n  (let [r (a x)]\n    (+ r 1)))"]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [r (set-breakpoints-sync e true)]
+        (if (and (:error r) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP step-all-in-the-child-test:" (:error r))
+              (is (string? (:error r))))
+          (let [paused (atom (promise))
+                next-pause (fn [] (let [d (deref @paused 20000 nil)] (reset! paused (promise)) d))
+                step-from-7 (fn []
+                              (let [done (start-run e "(b 1)" {})]
+                                (is (= "Breakpoint at line 7" (:title (next-pause))))
+                                (is (true? (step-sync e :step)))
+                                (let [t (:title (next-pause))]
+                                  (ev/continue-break! e)
+                                  (is (= "5" (:printed (deref done 20000 :timeout))))
+                                  t)))]
+            (ev/set-break-handlers! e {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+            (testing "a dot in b only: a runs through"
+              (run e (:text (bp/instrument text [7])) false)
+              (is (= "Stepped to line 8" (step-from-7))))
+            (testing "an instrumented tab: Step Into goes into a"
+              (run e (:text (bp/instrument text [7] {:step-all? true})) false)
+              (is (= "Stepped to line 2" (step-from-7)))))))
+      (finally (ev/stop! e)))))
+
 (deftest breakpoints-armed-before-the-child-starts-test
   (let [e (make (temp-project))]
     (try
