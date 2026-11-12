@@ -1134,6 +1134,7 @@
   "A QuietEval evaluator answering every eval with printed, recording the
   code and opts it got."
   [printed seen]
+  #_{:clj-kondo/ignore [:missing-protocol-method]}
   (reify
     ev/Evaluator
     (eval! [_ code opts]
