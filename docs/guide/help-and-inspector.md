@@ -548,6 +548,97 @@ server calls around each evaluation (Jolt main from merge commit `440ea77a`,
 jolt-lang/jolt#1474, not yet in a release). Turning it on says so when one of them is missing, and the other
 runtimes say so too.
 
+### Breakpoints
+
+**Toggle Breakpoint** (F9, or the palette) puts a red dot in the gutter on
+the caret's line, and pressing it there again takes the dot away. When code
+reaches that line it pauses there, with nothing wrong: the Frames panel
+opens titled `Breakpoint at line 3`, the console says
+`; Paused at the breakpoint on line 3.`, and everything Break on error offers
+works the same way. The field evaluates with the frame's locals, a local
+opens in the inspector, **Continue** (the panel's button, or **Continue from
+the break** in the palette) runs on, and Stop ends the evaluation. Break on
+error doesn't need to be on.
+
+A breakpoint goes before the code that starts on its line, so it needs
+something there that runs:
+
+- a body form of `defn`, `fn`, `let`, `loop`, `when`, `do`, `doseq`,
+  `try` and the like: the breakpoint runs as a statement of its own before
+  it;
+- any other expression whose value is used, such as a call's argument, a
+  `let` init or an `if` branch: it is wrapped as `(do <breakpoint> expr)`,
+  which keeps its value.
+
+A line with nothing that can pause (a parameter vector, a binding name, a
+`catch` clause, a `case` test, quoted code, a tagged literal, the `ns` form,
+a blank or comment line, anything inside a macro's arguments) moves the dot
+to the next line that can hold one, and the status bar says
+`Breakpoint moved to line N`. The dot is a text mark, so it moves with the
+line when you edit above it.
+
+Before it places a breakpoint, Toggle Breakpoint asks the runtime what each
+form's head names in the buffer's namespace. Code inside a macro call is
+left alone, since the macro may read it as data (`s/def`, `go-loop`, a
+`defmacro` earlier in the same file), except for the core forms Jonquil
+knows the shape of (`let`, `when`, `cond`, `try` and the like). A head that
+names nothing loaded stays a call, unless the buffer's namespace isn't loaded
+yet (before its first Run), since a name it refers could be a macro: then
+every head Jonquil doesn't know counts as one, and the status bar says so, as
+it does when the runtime can't answer at all. The answer is taken when you
+toggle and again after each Run that ends well, and Runs in between reuse it:
+until the next answer, a head typed since and every head after a change to
+the `ns` form count as macros.
+When a Run leaves a dot out because its line is now inside a macro (a name
+typed since, or one the Run turned out to define), the console says so, and
+after the Run the status bar names the dots that won't pause.
+
+**It works at once.** Toggling sends the top-level form holding the line
+again, the way Run Form does (the console shows it), with every breakpoint
+it now holds, or without any once the last is gone. So after toggling a
+breakpoint in a `defn`, an evaluation that calls that function pauses there,
+whether you typed it at the console or it runs code in another namespace.
+Only a form that just defines code is sent this way: `defn`, `defmacro`,
+`defmethod`, `extend-type`, `extend-protocol`, and a `def` or `defonce` whose
+value is literally `(fn ...)`, `#(...)` or `(reify ...)`. Toggling never runs
+anything else, so on a form like `(def db (connect!))`, a top-level call, a
+`deftype`, `defrecord`, `defprotocol` or `defmulti` (sending those again makes
+a new class or dispatch table) or a form inside a `(comment ...)` block the
+status bar says `it takes effect when you next run this form.` A form with
+edits that haven't run isn't sent either, so the toggle never runs your
+unfinished edit: after a Run that's what the changed-form mark shows, and in
+a tab that never ran it's unsaved edits, or a form that differs from the
+file on disk. The status bar then says
+`this form has edits that haven't run, so Run Form to apply both.` If
+sending the form again fails, the status bar says so and the dot stays.
+
+Run, Run Form and Run Selection send the code with the breakpoints in their
+text. Each inserted form is one line, so line numbers in errors and frames
+stay right. `require :reload` or `load-file` of the file loads it as saved,
+without breakpoints; toggling a breakpoint again puts them back. **Clear all
+breakpoints** takes every dot in the tab away and sends the forms that held
+them again without. A tab's breakpoints aren't saved across sessions.
+
+Toggling turns Jolt's debug mode on when it's off, since a paused frame's
+locals need it, and the status bar says so. One pause at a time: while one
+is paused, another thread that reaches a breakpoint runs on, and so does an
+error with Break on error on. Breakpoints work for Jolt, in process and in a
+project's Jolt child, on a Jolt with `jolt.debug`; other dialects, and a
+child whose Jolt lacks it, say why. A breakpoint pauses only during an
+evaluation you started (a Run or a console entry):
+
+- In process, only on that evaluation's own thread. A future, a quiet
+  evaluation (completion, a plugin's) and the window's own thread run on,
+  since pausing the window's thread would freeze it.
+- In the Jolt child, on any of its threads while it runs, since that is how
+  the pause reaches the window. A thread still paused when the evaluation
+  ends is let go, because the window can't reach it after that.
+
+Toggling before the Jolt child is running (or right after a switch to it)
+keeps the dot: the first evaluation sent to the child arms the breakpoints.
+If that child can't (its Jolt has no `jolt.debug`), every dot goes and the
+status bar says why.
+
 ### Restarts
 
 After an evaluation fails, three restarts take it from there, in every

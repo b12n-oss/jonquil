@@ -90,7 +90,7 @@
              :hide-right-panel! :inspect! :jump-to! :make-eval-opts :mcp-eval! :new-tab! :on-saved :open-file! :open-file-line!
              :open-in-tab! :paned :panel-focus-fn :pending-label :place-caret-and-scroll! :plugin-console
              :plugin-history-pane :plugin-history-shown :plugin-list-pane :plugin-reviews-changed :plugin-step! :run-example!
-             :plugins-on* :recent-tabs :refresh-labels! :refuse-foreign! :register-status-log! :rerun-failure!
+             :plugins-on* :recent-tabs :refresh-labels! :refuse-foreign! :register-status-log! :rerun-failure! :run-ranges!
              :review-pane :right :sel* :select-tab! :set-status! :settings-path* :show-alert! :show-right-panel!
              :show-source! :showing-panel :source-ctx :status-label :tab-by-id :tab-ctx* :tabs :tree-pane
              :tree-paned :unread-label :win}

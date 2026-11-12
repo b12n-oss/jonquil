@@ -4,7 +4,8 @@
   public tables. A spec command names its context fn as :call data
   ([ctx-key & args]), never a :run fn, so a spec namespace needs nothing
   from the registry (which requires this namespace)."
-  (:require [jonquil.parts.change-sets :as change-sets]
+  (:require [jonquil.parts.breakpoints :as breakpoints]
+            [jonquil.parts.change-sets :as change-sets]
             [jonquil.parts.command-palette :as command-palette]
             [jonquil.parts.debugger :as debugger]
             [jonquil.parts.extra :as extra]
@@ -27,7 +28,7 @@
   :panels [{:id kw :label s}] :bindings {:window [binding ...] :editor [binding ...]}};
   :panels and :bindings are optional, a binding has keymap.edn's shape. The
   real parts, then any registered in jonquil.parts.extra."
-  (into [messages/spec disk-poll/spec layouts/spec worlds/spec time-form/spec processes/spec trace/spec live-results/spec locations/spec debugger/spec command-palette/spec file-tree/spec plugins/spec change-sets/spec docs/spec replay/spec] @extra/specs*))
+  (into [messages/spec disk-poll/spec layouts/spec worlds/spec time-form/spec processes/spec trace/spec live-results/spec locations/spec debugger/spec breakpoints/spec command-palette/spec file-tree/spec plugins/spec change-sets/spec docs/spec replay/spec] @extra/specs*))
 
 (defn- claim
   "owners with id's owner added, or throws when id is already owned."

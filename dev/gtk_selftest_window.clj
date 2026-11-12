@@ -486,6 +486,10 @@
    debugger-rows/row-break-pauses
    debugger-rows/row-break-stop
    debugger-rows/row-break-stop-blocked
+   debugger-rows/row-breakpoint-live-at-once
+   debugger-rows/row-breakpoint-placement
+   debugger-rows/row-breakpoint-waits-for-unrun-edits
+   debugger-rows/row-breakpoint-asks-again-after-a-run
    restarts-rows/row-restart-retry
    restarts-rows/row-restart-edit
    restarts-rows/row-restart-define

@@ -34,6 +34,12 @@
     ;; Compare with the last Run (changed/last-run-after)
     (assoc ed0 :changed {:ran (atom nil) :last-run (atom nil) :refresh (atom (fn [])) :gutter gt
                          :counts-refresh (atom (fn [_source _code]))
+                         ;; LM5: what the runtime last said the buffer's
+                         ;; heads name (jonquil.breakpoints' :heads)
+                         :bp-heads (atom nil)
+                         ;; LM5: what a Run that ended well calls, to ask
+                         ;; again (installed when the tab is wired)
+                         :bp-refresh (atom (fn []))
                          :counting? (atom (constantly false))})))
 
 (defn- lay-out-tab!

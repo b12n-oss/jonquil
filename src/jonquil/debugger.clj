@@ -400,31 +400,52 @@
 (defn- serve-pause
   "Runs a published pause: (on-pause d), then serves the paused thread until
   continue!, and whatever way that ends clears the pause, drains the queue
-  and calls (on-resume {:continued? b}). The callbacks' own throws are dropped."
+  and calls (on-resume {:continued? b}). A pause already continued when it
+  gets here calls neither callback. The callbacks' own throws are dropped."
   [{:keys [brk callbacks t frames d]}]
   (let [{:keys [queue paused]} brk
         {:keys [on-pause on-resume]} callbacks
-        continued? (volatile! false)]
+        continued? (volatile! false)
+        ;; a pause let go before it was served (its evaluation ended) is
+        ;; never shown, so its end isn't either
+        shown? (not (some-> @paused :continued deref))]
     (try
-      (try (when on-pause (on-pause d)) (catch Throwable _ nil))
+      (when shown?
+        (try (when on-pause (on-pause d)) (catch Throwable _ nil)))
       (serve! queue t frames)
       (vreset! continued? true)
       (finally
         (reset! paused nil)
         (drain! queue)
-        (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil))))))
+        (when shown?
+          (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil)))))))
+
+(defn- claim-pause!
+  "Takes brk's pause: true when nothing was paused. One pause at a time, an
+  error's or a breakpoint's (LM5). The claim's :continued is already true,
+  so a Continue before the pause is published finds nothing to continue."
+  [{:keys [paused]}]
+  (compare-and-set! paused nil {:claim true :continued (atom true)}))
+
+(defn- publish-pause!
+  "Publishes the claimed pause of thread on t with frames and data d."
+  [{:keys [queue paused]} t frames d]
+  (drain! queue)
+  (reset! paused {:error t :frames frames :data d :continued (atom false)
+                  :thread (Thread/currentThread)}))
 
 (defn- pause-on-error
   "The break handler's body, on the throwing thread: publishes the pause for
-  error t and serves it. A Stop's InterruptedException is never paused on."
+  error t and serves it. A Stop's InterruptedException is never paused on,
+  and while another pause holds (a breakpoint on another thread) the error
+  goes on unpaused."
   [{:keys [brk callbacks t frames]}]
   ;; a Stop is never an error to pause on: a body blocked in a
   ;; sleep, a deref or a .take throws InterruptedException
-  (when-not (interrupted? t)
-    (let [{:keys [queue paused]} brk
-          d (frames-data t {:frames-fn (fn [_] frames) :resolve-file (:resolve-file callbacks)})]
-      (drain! queue)
-      (reset! paused {:error t :frames frames :data d :continued (atom false)})
+  (when (and (not (interrupted? t)) (claim-pause! brk))
+    (let [d (try (frames-data t {:frames-fn (fn [_] frames) :resolve-file (:resolve-file callbacks)})
+                 (catch Throwable e (reset! (:paused brk) nil) (throw e)))]
+      (publish-pause! brk t frames d)
       (serve-pause {:brk brk :callbacks callbacks :t t :frames frames :d d}))))
 
 (defn break-wrapper
@@ -468,17 +489,32 @@
   (when @paused (.put queue ::stop))
   nil)
 
+(defn- own-pause?
+  "True when pause p was published by this thread, or by none that is
+  still alive (an older pause, or a thread gone)."
+  [p]
+  (let [^Thread t (:thread p)]
+    (or (nil? t) (identical? t (Thread/currentThread)) (not (.isAlive t)))))
+
 (defn end-stale-pause!
-  "The evaluation has ended: a pause still published there lost its own
-  cleanup (a Stop's interrupt landing inside the handler's finally), so this
-  ends it as a Stop would: cleared, requests answered, (on-resume
-  {:continued? false})."
-  [{:keys [queue paused]} {:keys [on-resume]}]
-  (when @paused
-    (reset! paused nil)
-    (drain! queue)
-    (try (when on-resume (on-resume {:continued? false})) (catch Throwable _ nil)))
-  nil)
+  "The evaluation has ended, on its own thread: a pause it published that is
+  still there lost its own cleanup (a Stop's interrupt landing inside the
+  handler's finally), so this ends it as a Stop would: cleared, requests
+  answered, (on-resume {:continued? false}). A pause another live thread
+  holds (a breakpoint in a future) is left alone, or with opts
+  {:other-thread :wake} continued, for a client that can't reach it once
+  the evaluation is over. A claim not yet published is left alone."
+  ([brk callbacks] (end-stale-pause! brk callbacks {:other-thread :leave}))
+  ([{:keys [queue paused] :as brk} {:keys [on-resume]} {:keys [other-thread]}]
+   (when-let [p @paused]
+     (cond
+       (:claim p) nil
+       (own-pause? p)
+       (do (reset! paused nil)
+           (drain! queue)
+           (try (when on-resume (on-resume {:continued? false})) (catch Throwable _ nil)))
+       (= :wake other-thread) (continue! brk)))
+   nil))
 
 (defn paused-local
   "The value of local-name in the paused error's frame i: ::missing when
@@ -489,3 +525,98 @@
     (if (and p (= error-id (:error-id (:data p))))
       (local-value (:error p) i local-name {:frames-fn (fn [_] (:frames p))})
       ::not-paused)))
+
+;; --- breakpoints (LM5): a pause where the person chose, nothing wrong -------
+
+(defonce breakpoint-hook
+  ;; What jonquil.breakpoints/breakpoint-form calls with the throwable and
+  ;; frames when its throw reaches its own break handler: nil (the form
+  ;; does nothing) or a fn of [t frames]. An atom, not a dynamic var, so a
+  ;; call on any thread (a future, a test runner) reaches it.
+  (atom nil))
+
+(defn breakpoint-line
+  "The line a breakpoint throw names (its ex-data's :jonquil/breakpoint),
+  or nil for any other throwable."
+  [t]
+  (let [d (ex-data t)] (when (map? d) (:jonquil/breakpoint d))))
+
+(defn breakpoint-data
+  "frames-data for breakpoint throw t: titled \"Breakpoint at line N\",
+  with :breakpoint N."
+  [t frames resolve-file]
+  (let [n (breakpoint-line t)]
+    (assoc (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})
+           :title (str "Breakpoint at line " n) :breakpoint n)))
+
+(defn pause-at-breakpoint
+  "The breakpoint hook's body, on the thread that reached the breakpoint:
+  pauses there through brk as Break on error does, unless something is
+  paused already (that thread then runs on). frames' first entry is
+  jolt.debug/with-break-handler's own thunk, which has no locals, so it
+  is dropped. (can-pause?), when given, is asked again once the pause is
+  published: false means the evaluation that allowed it ended while it was
+  being claimed, and its end may have missed the claim, so the pause is
+  let go at once rather than wait for a Continue nobody can send. Answers
+  true when it paused."
+  [{:keys [brk callbacks t frames can-pause?]}]
+  (let [{:keys [paused]} brk
+        frames (vec (rest frames))]
+    (when (claim-pause! brk)
+      (let [d (try (breakpoint-data t frames (:resolve-file callbacks))
+                   (catch Throwable e (reset! paused nil) (throw e)))]
+        (publish-pause! brk t frames d)
+        (when (and can-pause? (not (can-pause?))) (continue! brk))
+        (serve-pause {:brk brk :callbacks callbacks :t t :frames frames :d d})
+        true))))
+
+(defn breakpoint-handler
+  "A breakpoint hook pausing through brk with the callbacks (callbacks-fn)
+  answers at pause time. (can-pause?) false lets a breakpoint run on, as
+  does a throwable that isn't a breakpoint's."
+  [brk callbacks-fn can-pause?]
+  (fn [t frames]
+    (when (and (breakpoint-line t) (can-pause?))
+      (pause-at-breakpoint {:brk brk :callbacks (callbacks-fn) :t t :frames frames
+                            :can-pause? can-pause?}))))
+
+(defn arm-breakpoints!
+  "Installs hook as breakpoint-hook, after turning debug mode on when it's
+  off (a breakpoint's frame needs its locals). {:on? true :debug-turned-on?
+  b}, or {:error s} on a Jolt without jolt.debug, where nothing is
+  installed. Loads jolt.debug, which the inserted form names."
+  [hook]
+  (if-not (and (available?) (break-available?))
+    {:error NO-API}
+    (try
+      (let [was (locking instrument-lock/lock ((requiring-resolve 'jolt.profile/instrument-mode)))
+            r (when (not= :debug was) (set-debug-mode! true))]
+        (or (when (:error r) r)
+            (do (reset! breakpoint-hook hook)
+                {:on? true :debug-turned-on? (not= :debug was)})))
+      (catch Throwable e (jolt-error e)))))
+
+(defn disarm-breakpoints!
+  "Empties breakpoint-hook when it still holds hook. {:on? false}."
+  [hook]
+  (compare-and-set! breakpoint-hook hook nil)
+  {:on? false})
+
+(defn macro-heads
+  "What each symbol text in syms names in namespace ns-name, for
+  jonquil.breakpoints' opts: {:heads {sym info} :ns-found? b}. info is
+  {:var \"ns/name\" :macro true} for a macro, {:var \"ns/name\"} for any
+  other var, nil for nothing (a local, a special form, interop, a class,
+  or a symbol that throws when resolved). A namespace not loaded yet (the
+  buffer before its first Run) is resolved in user, with :ns-found? false:
+  what its :refer brings in can't be known then."
+  [ns-name syms]
+  (let [found (some-> ns-name str symbol find-ns)
+        n (or found (the-ns 'user))]
+    {:heads (into {} (map (fn [s]
+                            [s (try (let [v (ns-resolve n (symbol s))]
+                                      (when (var? v)
+                                        (cond-> {:var (str (symbol v))} (:macro (meta v)) (assoc :macro true))))
+                                    (catch Throwable _ nil))]))
+                  syms)
+     :ns-found? (some? found)}))

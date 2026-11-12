@@ -110,6 +110,10 @@
    :source-ctx source-ctx
    :place-caret-and-scroll! win-help/place-caret-and-scroll! :file-name win-files/file-name
    :open-in-tab! win-help/open-in-tab! :show-source! win-help/show-source!
+   ;; LM5's Live at once: a toggle sends its form again
+   :run-ranges! (fn [t ranges then]
+                  (win-run/do-run-ranges! {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label}
+                                          ranges then))
    :rerun-failure! (fn [f t]
                      (win-run/rerun-failure! {:failure f :tab t :cv cv :ev* ev* :sel* sel*
                                               :status-label status-label}))})

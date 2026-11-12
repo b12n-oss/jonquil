@@ -16,6 +16,7 @@
     jonquil.parts.locations
     jonquil.parts.plugins
     jonquil.parts.processes
+    jonquil.parts.breakpoints
     jonquil.parts.replay
     jonquil.parts.trace
     jonquil.parts.change-sets
@@ -85,6 +86,7 @@
     jonquil.runtime-registry
     jonquil.commands
     jonquil.changed
+    jonquil.breakpoints
     jonquil.trace-rt
     jonquil.world-rt
     jonquil.world
@@ -140,6 +142,7 @@
     jonquil.gtk.completion
     jonquil.gtk.find-bar
     jonquil.gtk.gutter
+    jonquil.gtk.breakpoints
     jonquil.gtk.trace-pane
     jonquil.gtk.change-sets-pane
     jonquil.gtk.processes-pane
@@ -158,6 +161,7 @@
     jonquil.gtk.parts.locations
     jonquil.gtk.parts.plugins
     jonquil.gtk.parts.processes
+    jonquil.gtk.parts.breakpoints
     jonquil.gtk.parts.replay
     jonquil.gtk.parts.trace
     jonquil.gtk.parts.change-sets

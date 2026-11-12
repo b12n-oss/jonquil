@@ -215,6 +215,25 @@
   (continue-break! [ev]
     "Lets the paused error unwind: true when one was paused."))
 
+(defprotocol Breakpoints
+  "Breakpoints (LM5, jonquil.breakpoints): the runtime side, for the two
+  Jolt runtimes. The window sends breakpoint-instrumented code; this arms
+  the runtime's hook (jonquil.debugger/breakpoint-hook) so a call that
+  reaches a breakpoint pauses through the Break handlers. Callers check
+  (satisfies? Breakpoints ev) first."
+  (set-breakpoints! [ev on? on-done]
+    "Arms (on? true) or disarms the hook, off the caller's thread; arming
+    turns debug mode on when it's off. on-done gets {:on? b}, with
+    :debug-turned-on? true when it did, or {:error s}, and then the hook
+    stays as it was.")
+  (breakpoints-on? [ev]
+    "True while the runtime's hook is armed, as the last
+    set-breakpoints! answered: only then does a Run send breakpoint code.")
+  (macro-heads! [ev ns-name syms on-done]
+    "What each symbol text in syms names in namespace ns-name, off the
+    caller's thread: on-done gets {:heads m :ns-found? b}
+    (jonquil.debugger/macro-heads) or {:error s}."))
+
 (defprotocol Trace
   "Tracing functions where the code runs (jonquil.trace-rt): the two Jolt
   runtimes. Callers check (satisfies? Trace ev) first."

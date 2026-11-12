@@ -5,6 +5,7 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.breakpoints :as bp]
             [jonquil.console :as console]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
@@ -925,6 +926,18 @@
   (is (false? (nrepl/breakable? {:break-on? true} {:no-break true})) "auto-require's")
   (is (false? (nrepl/breakable? {:break-on? false} {}))))
 
+(deftest breakpoints-armed-test
+  (is (true? (nrepl/breakpoints-armed? {:breakpoints-on? true} {})))
+  (is (false? (nrepl/breakpoints-armed? {:breakpoints-on? true} {:quiet "token:"})) "a quiet eval")
+  (is (false? (nrepl/breakpoints-armed? {:breakpoints-on? true} {:no-break true})) "auto-require's")
+  (is (false? (nrepl/breakpoints-armed? {} {}))))
+
+(deftest breakpoints-reply-test
+  (is (= {:on? true :debug-turned-on? true} (nrepl/breakpoints-reply [{:on "true" :debug-turned-on "true"}])))
+  (is (= {:on? false :debug-turned-on? false} (nrepl/breakpoints-reply [{:on "false"}])))
+  (is (= {:error "nope"} (nrepl/breakpoints-reply [{:error "nope"}])))
+  (is (:error (nrepl/breakpoints-reply [{:status ["done"]}]))))
+
 (defn- toggle-break-sync [e]
   (let [p (promise)] (ev/toggle-break! e (fn [r] (deliver p r))) (deref p 20000 :timeout)))
 
@@ -987,6 +1000,59 @@
             (testing "off: no pause"
               (is (= :error (:status (first (run e "(bi 3)" false)))))
               (is (not (realized? @paused)))))))
+      (finally (ev/stop! e)))))
+
+;; --- breakpoints in the child (LM5) ----------------------------------------------
+
+(defn- set-breakpoints-sync [e on?]
+  (let [p (promise)] (ev/set-breakpoints! e on? (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+
+(deftest breakpoints-in-the-child-test
+  (let [e (make (temp-project))]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [r (set-breakpoints-sync e true)]
+        (if (and (:error r) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP breakpoints-in-the-child-test: this child can't break:" (:error r))
+              (is (string? (:error r))))
+          (let [paused (promise)
+                resumed (atom [])]
+            (is (true? (:on? r)) (pr-str r))
+            (ev/set-break-handlers! e {:on-pause (fn [d] (deliver paused d))
+                                       :on-resume (fn [how] (swap! resumed conj how))})
+            (run e (:text (bp/instrument "(defn bpf [x]\n  (let [y (* x 2)]\n    (+ y 1)))" [3])) false)
+            (testing "a call from the prompt pauses at the breakpoint, with Break on error off"
+              (let [done (start-run e "(bpf 20)" {})
+                    d (deref paused 20000 nil)]
+                (is (= "Breakpoint at line 3" (:title d)))
+                (is (some #{{:name "y" :text "40"}} (:locals (first (:frames d)))) (pr-str d))
+                (is (= {:out "" :text "41"} (break-eval-sync e 0 "(inc y)")))
+                (is (true? (ev/continue-break! e)))
+                (is (= "41" (:printed (deref done 20000 :timeout))))
+                (is (= [{:continued? true}] @resumed))))
+            (is (= {:on? false :debug-turned-on? false} (set-breakpoints-sync e false)))
+            (testing "disarmed: the same code runs through"
+              (is (= "41" (:printed (first (run e "(bpf 20)" false)))))))))
+      (finally (ev/stop! e)))))
+
+(deftest breakpoints-armed-before-the-child-starts-test
+  (let [e (make (temp-project))]
+    (try
+      (is (= {:on? true :pending? true} (set-breakpoints-sync e true)) "no child yet: pending")
+      (let [paused (promise)
+            failed (atom nil)]
+        (ev/set-break-handlers! e {:on-pause (fn [d] (deliver paused d)) :on-resume (fn [_])})
+        (swap! (:state e) update :breakpoints-pending (fn [f] (fn [r] (reset! failed r) (f r))))
+        (let [r (first (run e (:text (bp/instrument "(defn bpg [x]\n  (let [y (* x 2)]\n    (+ y 1)))" [3])) false))]
+          (if (some-> @failed :error)
+            (do (println "SKIP breakpoints-armed-before-the-child-starts-test:" (:error @failed))
+                (is (false? (ev/breakpoints-on? e)) "a child that can't arm turns them off"))
+            (do (is (= :ok (:status r)) (pr-str r))
+                (is (nil? (:breakpoints-pending @(:state e))) "the first eval's reply confirmed them")
+                (let [done (start-run e "(bpg 20)" {})]
+                  (is (= "Breakpoint at line 3" (:title (deref paused 20000 nil))))
+                  (is (true? (ev/continue-break! e)))
+                  (is (= "41" (:printed (deref done 20000 :timeout)))))))))
       (finally (ev/stop! e)))))
 
 ;; --- trace in the child (LM4) ----------------------------------------------------
@@ -1161,3 +1227,25 @@
                         5000)
             "the console shows the failed stop"))
       (finally (ev/stop! e)))))
+
+(deftest breakpoints-wait-for-a-child-test
+  (let [e (nrepl/make-nrepl {:dialect :jolt :project-dir (str (temp-project))})
+        answers (atom [])
+        first-answer (promise)]
+    (ev/set-breakpoints! e true (fn [r] (swap! answers conj r) (deliver first-answer r)))
+    (is (= {:on? true :pending? true} (deref first-answer 3000 :timeout))
+        "no child yet: pending, armed by the first evaluation")
+    (is (true? (ev/breakpoints-on? e)) "so the first Run sends breakpoint code and arms them")
+    (testing "that evaluation's reply confirms them"
+      (nrepl/breakpoints-watch! e {:jonquil-breakpoints-armed "true"})
+      (is (true? (ev/breakpoints-on? e)))
+      (is (= 1 (count @answers))))
+    (testing "or says why it couldn't, once"
+      (let [second-answer (promise)]
+        (ev/set-breakpoints! e true (fn [r] (swap! answers conj r) (deliver second-answer r)))
+        (is (= {:on? true :pending? true} (deref second-answer 3000 :timeout))))
+      (nrepl/breakpoints-watch! e {:jonquil-breakpoints-error "no jolt.debug"})
+      (is (false? (ev/breakpoints-on? e)))
+      (is (= {:error "no jolt.debug" :pending-failed? true} (last @answers)))
+      (nrepl/breakpoints-watch! e {:jonquil-breakpoints-error "no jolt.debug"})
+      (is (= 1 (count (filter :pending-failed? @answers)))))))

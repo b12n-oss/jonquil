@@ -1,6 +1,7 @@
 (ns jonquil.session-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.breakpoints :as bp]
             [jonquil.debugger :as debugger]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
@@ -539,3 +540,63 @@
     (deref p 2000 nil)
     (Thread/sleep 200)
     (is (= 1 @calls) "called once; the throw is swallowed and nothing else is sent")))
+
+;; --- breakpoints (LM5) ------------------------------------------------------------
+
+(defn- set-breakpoints-sync [s on?]
+  (let [p (promise)] (ev/set-breakpoints! s on? (fn [r] (deliver p r))) (deref p 3000 :timeout)))
+
+(def ^:private bp-fn-text
+  "(defn bp-sess [x]\n  (let [y (* x 2)]\n    (+ y 1)))")
+
+(defn- define-bp-fn! [s]
+  (let [{t :text} (bp/instrument bp-fn-text [3]
+                                 (debugger/macro-heads "user" (bp/head-symbols bp-fn-text)))]
+    (repl-sync s t)))
+
+(deftest breakpoints-pause-only-the-worker-of-a-persons-eval-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          paused (atom (promise))]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync s true)))
+        (is (= :ok (:status (define-bp-fn! s))))
+        (testing "a person's evaluation pauses at the breakpoint"
+          (let [done (promise)]
+            (session/submit-repl! s "(bp-sess 20)" {:on-complete (fn [r] (deliver done r))})
+            (is (= "Breakpoint at line 3" (:title (deref @paused 5000 nil))))
+            (is (true? (ev/continue-break! s)))
+            (is (= "41" (:printed (deref done 5000 :timeout))))))
+        (testing "a quiet evaluation runs through"
+          (reset! paused (promise))
+          (is (= "41" (:printed (run session/submit-repl! s "(bp-sess 20)" {:quiet "T"}))))
+          (is (not (realized? @paused))))
+        (testing "another thread runs through, even during a person's evaluation"
+          (reset! paused (promise))
+          (is (= "41" (:printed (repl-sync s "@(future (bp-sess 20))"))))
+          (is (not (realized? @paused))))
+        (testing "a thread outside any evaluation runs through"
+          (is (= 41 (deref (future ((resolve 'user/bp-sess) 20)) 5000 :blocked)))
+          (is (not (realized? @paused))))
+        (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
+
+(deftest breakpoints-on-and-macro-heads-test
+  (let [s (session/make-session)
+        p (promise)]
+    (ev/macro-heads! s "user" ["when" "nope"] (fn [r] (deliver p r)))
+    (is (= {:heads {"when" {:var "clojure.core/when" :macro true} "nope" nil} :ns-found? true}
+           (deref p 3000 :timeout)))
+    (let [p2 (promise)]
+      (ev/macro-heads! s "no.such.buffer-ns" ["when" "go-loop"] (fn [r] (deliver p2 r)))
+      (is (false? (:ns-found? (deref p2 3000 :timeout))) "a namespace not loaded yet is said so"))
+    (is (false? (ev/breakpoints-on? s)) "off until armed")
+    (if-not (debugger/break-available?)
+      (is (:error (set-breakpoints-sync s true)))
+      (try
+        (is (:on? (set-breakpoints-sync s true)))
+        (is (true? (ev/breakpoints-on? s)))
+        (set-breakpoints-sync s false)
+        (is (false? (ev/breakpoints-on? s)))
+        (finally (debugger/set-debug-mode! false))))))

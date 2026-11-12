@@ -10,6 +10,7 @@
   Run Changed fns, in its order."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jonquil.breakpoints :as bp]
             [jonquil.changed :as changed]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
@@ -20,6 +21,7 @@
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.breakpoints :as gbp]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
@@ -117,6 +119,14 @@
                                                  :idle "Ready")))
    :on-complete (fn [result] (complete-eval! ctx result))})
 
+(defn- say-dropped!
+  "LM5: names on the console the tab's breakpoints in range ({:start :end},
+  nil for all of text) that the Run leaves out, being inside a macro by
+  the runtime's last answer, so none is dropped without a word."
+  [cv ed e text range]
+  (when-let [msg (bp/dropped-message (gbp/dropped ed e text range))]
+    (cview/append! cv :system (str msg "\n"))))
+
 (defn refuse-foreign!
   "The refusal message (truthy), after printing it, when
   tab belongs to another project or dialect than the window
@@ -164,6 +174,10 @@
   ;; LM3: the text Compare with the last Run compares against
   (when-let [lr (:last-run changed)]
     (swap! lr changed/last-run-after hook-code hook-source (:status result)))
+  ;; LM5: the breakpoints' macro answer, asked again once the Run has
+  ;; loaded what it defines
+  (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
+    (try (some-> (:bp-refresh changed) deref (apply [])) (catch :default _ nil)))
   ;; LM4: the lines that ran, whether it ended well or not
   (when (and changed (#{:run :form :selection} hook-source))
     (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil))))
@@ -297,7 +311,9 @@
               (win-status/set-status! status-label "Ready")
               (when notify (notify {:problem problem})))
           (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-                warning (ev/eval! @ev* text (opts))]
+                ;; LM5: the tab's breakpoints go in the text sent
+                _ (say-dropped! cv ed @ev* text nil)
+                warning (ev/eval! @ev* (gbp/sent-text ed @ev* text nil) (opts))]
             (say-busy! cv notify warning)))))))
 
 (defn do-run!
@@ -383,11 +399,15 @@
   :cv, :ev* and :status-label)."
   [{:keys [cv ev* status-label]} ed text extra-opts]
   (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-        warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts {:ed ed :cv cv :ev* ev* :status-label status-label :run? false}) :run? false
+        ;; :then (LM5's re-send) hears the result after the usual completion
+        then (:then extra-opts)
+        base (cond-> (make-eval-opts {:ed ed :cv cv :ev* ev* :status-label status-label :run? false})
+               then (update :on-complete (fn [f] (fn [r] (try (f r) (finally (then r)))))))
+        warning (ev/eval! @ev* text (hooked-opts (merge (assoc base :run? false
                                                                :hook-code text :failure* (:failure* cv)
                                                                :changed (:changed ed) :recorder (:recorder* cv)
                                                                :replay-root (:replay-root* cv))
-                                                        extra-opts)))]
+                                                        (dissoc extra-opts :then))))]
     (when warning (cview/append! cv :system warning))))
 
 (defn- tab-record
@@ -397,6 +417,16 @@
   [tab ev* {:keys [source code buffer-text]}]
   {:source source :code code :path @(:path tab)
    :ns (or (clj/buffer-ns buffer-text) (str (ev/prompt-ns @ev*)))})
+
+(defn- selection-range
+  "Where text, Run Selection's code from snap, lies in snap's text: the
+  selection, else the caret's line."
+  [{:keys [text caret sel-start sel-end]} code]
+  (if (and sel-start sel-end (< sel-start sel-end))
+    {:start sel-start :end sel-end}
+    (let [nl (when (pos? caret) (str/last-index-of text "\n" (dec caret)))
+          start (if nl (inc nl) 0)]
+      {:start start :end (+ start (count code))})))
 
 (defn- do-run-selection!
   "Cmd/Ctrl+E: commands/run-selection-text on the editor's snapshot
@@ -420,10 +450,13 @@
                     ;; asked only when the Run would start
                     (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab text)))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-        (do-repl-eval! ctx ed text {:ns-source (:text snap) :owner (:id tab)
-                                    :hook-source :selection :hook-tab (:id tab)
-                                    :record (tab-record tab ev* {:source :selection :code text
-                                                                 :buffer-text (:text snap)})})))))
+        ;; LM5: sent with the breakpoints in its range; echoed and recorded as typed
+        (say-dropped! cv ed @ev* (:text snap) (selection-range snap text))
+        (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) (selection-range snap text))
+                       {:ns-source (:text snap) :owner (:id tab) :hook-code text
+                        :hook-source :selection :hook-tab (:id tab)
+                        :record (tab-record tab ev* {:source :selection :code text
+                                                     :buffer-text (:text snap)})})))))
 
 (defn do-run-example!
   "Run in Interactions on a ClojureDocs example's code: evaluated in user at
@@ -627,11 +660,38 @@
                     (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :form tab text)))
         ((:flash! flash-fns) start end (:caret snap))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-        (do-repl-eval! ctx ed text {:ns-source (:text snap) :owner (:id tab)
-                                    :hook-source :form :hook-tab (:id tab)
-                                    :record (tab-record tab ev* {:source :form :code text
-                                                                 :buffer-text (:text snap)})}))
+        ;; LM5: sent with the breakpoints in the form
+        (say-dropped! cv ed @ev* (:text snap) {:start start :end end})
+        (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) {:start start :end end})
+                       {:ns-source (:text snap) :owner (:id tab) :hook-code text
+                        :hook-source :form :hook-tab (:id tab)
+                        :record (tab-record tab ev* {:source :form :code text
+                                                     :buffer-text (:text snap)})}))
       (win-status/set-status! status-label "No form at the caret."))))
+
+(defn do-run-ranges!
+  "LM5's Live at once: sends tab's top-level forms at ranges ([{:start
+  :end}], in buffer order) again the way Run Form sends a form, joined by
+  newlines and echoed at the prompt as one entry, each with the tab's
+  breakpoints in it. (then result) hears how it ended, on the eval worker.
+  Answers :started, :busy (an evaluation is running, nothing is sent) or
+  :refused (another project's tab, or a plugin stopped it)."
+  [{:keys [tab cv ev*] :as ctx} ranges then]
+  (let [ed (:ed tab)
+        text (editor/editor-text ed)
+        joined (fn [f] (str/join "\n" (map f ranges)))
+        forms (joined (fn [{:keys [start end]}] (subs text start end)))]
+    (cond
+      (refuse-foreign! ctx) :refused
+      (ev/evaluating? @ev*) :busy
+      (before-run-stopped ctx :form tab forms) :refused
+      :else
+      (do (cview/echo-entry! cv forms true)
+          (do-repl-eval! ctx ed (joined (fn [r] (gbp/sent-text ed @ev* text r)))
+                         {:ns-source text :owner (:id tab) :hook-code forms
+                          :hook-source :form :hook-tab (:id tab) :then then
+                          :record (tab-record tab ev* {:source :form :code forms :buffer-text text})})
+          :started))))
 
 (defn- send-changed!
   "do-run-changed!'s send of forms, the changed forms of the tab's text,

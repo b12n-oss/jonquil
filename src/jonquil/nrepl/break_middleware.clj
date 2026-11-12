@@ -18,8 +18,14 @@
   at a time per session, so the arming set when an eval arrives is the one
   that runs (and it ends with that eval). The pause and its end go to the client on the eval's
   own reply, as \"jonquil-paused\" (frames-data, printed) and
-  \"jonquil-resumed\" (\"continued\" or \"stopped\"), with no status."
-  (:require [clojure.java.io :as io]
+  \"jonquil-resumed\" (\"continued\" or \"stopped\"), with no status.
+
+  Breakpoints (LM5) pause through the same messages. The jonquil-breakpoints
+  op arms or disarms jonquil.debugger/breakpoint-hook with the session's own
+  hook, and an eval sent with \"jonquil-breakpoints\" \"1\" arms it too (a
+  restarted child) and lets a breakpoint pause while that eval runs."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [jolt.nrepl :as server]
             [jonquil.debugger :as debugger]))
 
@@ -33,12 +39,6 @@
   "True when this Jolt's nREPL evaluate takes a wrapper around each eval."
   []
   (some? (hook-var)))
-
-(defn entry
-  "One session's break state: the break, whether its current eval may
-  pause, and that eval's reply."
-  []
-  {:break (debugger/make-break) :armed? (atom false) :reply (atom nil)})
 
 (defn resource-url
   "A frame's classpath name as the URL this child loads it from, so the
@@ -60,6 +60,17 @@
                 (send! e {"jonquil-resumed" (if continued? "continued" "stopped")}))
    :resolve-file resource-url})
 
+(defn entry
+  "One session's break state: the break, whether its current eval may
+  pause on an error (:armed?) or at a breakpoint (:bp-ok?), that eval's
+  reply, and the session's breakpoint hook (LM5). A breakpoint pauses only
+  while an eval the client marked runs, since the pause can only reach the
+  client on that eval's reply."
+  []
+  (let [e {:break (debugger/make-break) :armed? (atom false) :reply (atom nil) :bp-ok? (atom false)}]
+    (assoc e :hook (debugger/breakpoint-handler (:break e) (fn [] (break-callbacks e))
+                                                (fn [] @(:bp-ok? e))))))
+
 (defn- run-armed
   "Runs ev under session e's break, then drops the arming."
   [e ev]
@@ -71,16 +82,21 @@
       ;; left published (its cleanup skipped) ends here too; the
       ;; client drops its own when the eval finishes.
       (reset! (:armed? e) false)
-      (debugger/end-stale-pause! (:break e) {}))))
+      (debugger/end-stale-pause! (:break e) {} {:other-thread :wake}))))
 
 (defn session-wrapper
   "Session e's jolt.nrepl/*eval-wrapper*: runs the evaluation's thunk under
   the session's break when the eval was armed, else just runs it."
   [e]
   (fn [ev]
-    (if @(:armed? e)
-      (run-armed e ev)
-      (ev))))
+    (try
+      (if @(:armed? e)
+        (run-armed e ev)
+        (ev))
+      (finally
+        ;; a breakpoint reached after this eval can't reach the client
+        (reset! (:bp-ok? e) false)
+        (debugger/end-stale-pause! (:break e) {} {:other-thread :wake})))))
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))
 
@@ -101,6 +117,19 @@
   [e next request]
   (when e
     (reset! (:armed? e) (= "1" (str (get request "jonquil-break"))))
+    (let [bp? (= "1" (str (get request "jonquil-breakpoints")))]
+      ;; a restarted child, or one that never heard the op: arm before
+      ;; the code compiles, so it keeps its locals, and say how it went
+      ;; on the eval's own reply (the client's pending breakpoints)
+      (when bp?
+        (let [r (if (identical? (:hook e) @debugger/breakpoint-hook)
+                  {:on? true}
+                  (debugger/arm-breakpoints! (:hook e)))]
+          (try ((:reply request) (if-let [err (:error r)]
+                                   {"jonquil-breakpoints-error" err}
+                                   {"jonquil-breakpoints-armed" "true"}))
+               (catch Throwable _ nil))))
+      (reset! (:bp-ok? e) bp?))
     (reset! (:reply e) (:reply request)))
   (next request))
 
@@ -123,6 +152,26 @@
                                                       {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))))
     (server/respond request {"status" ["done"] "error" "Not paused any more."})))
 
+(defn- heads-reply
+  "jonquil.debugger/macro-heads for the symbols in heads (an EDN vector),
+  in namespace ns."
+  [ns heads]
+  (try {"status" ["done"]
+        "heads" (pr-str (debugger/macro-heads ns (edn/read-string (str heads))))}
+       (catch Throwable t {"status" ["done"] "error" (or (ex-message t) (str (class t)))})))
+
+(defn- breakpoints-reply
+  "Arms or disarms session entry e's breakpoint hook (on, \"true\" or
+  \"false\")."
+  [e on]
+  (let [r (cond (nil? e) {:error "No such session."}
+                (= "true" (str on)) (debugger/arm-breakpoints! (:hook e))
+                :else (debugger/disarm-breakpoints! (:hook e)))]
+    (if-let [err (:error r)]
+      {"status" ["done"] "error" err}
+      {"status" ["done"] "on" (str (boolean (:on? r)))
+       "debug-turned-on" (str (boolean (:debug-turned-on? r)))})))
+
 (defn handler
   "The middleware's request handler over sessions (an atom, session id ->
   entry), handing everything but its own ops on to next."
@@ -134,6 +183,10 @@
         "clone" (clone-request! sessions next request)
         ("eval" "load-file") (arm-and-pass! e next request)
         "jonquil-break-check" (server/respond request (break-check-reply))
+        "jonquil-breakpoints"
+        (server/respond request (if-let [heads (get request "heads")]
+                                  (heads-reply (get request "ns") heads)
+                                  (breakpoints-reply e (get request "on"))))
         "jonquil-break-eval" (break-eval! e request)
         "jonquil-break-continue"
         (server/respond request {"status" ["done"]
@@ -159,5 +212,6 @@
 (defn break
   "The middleware: Break on error for every session cloned through it."
   [next]
-  (server/register-ops! "jonquil-break-check" "jonquil-break-eval" "jonquil-break-continue")
+  (server/register-ops! "jonquil-break-check" "jonquil-break-eval" "jonquil-break-continue"
+                        "jonquil-breakpoints")
   (handler sessions next))

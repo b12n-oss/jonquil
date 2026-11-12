@@ -371,6 +371,28 @@
   [state opts]
   (boolean (and (:break-on? state) (not (:quiet opts)) (not (:no-break opts)))))
 
+(defn breakpoints-armed?
+  "True when an eval sent with opts arms the child's breakpoints (LM5):
+  the window has some, and the eval is the person's own."
+  [state opts]
+  (boolean (and (:breakpoints-on? state) (not (:quiet opts)) (not (:no-break opts)))))
+
+(defn breakpoints-watch!
+  "For each reply to the main eval: the child saying whether the eval
+  armed the breakpoints. Armed confirms pending ones; an error turns them
+  off and, the first time, hands {:error s :pending-failed? true} to the
+  set-breakpoints! answer that left them pending. Never throws."
+  [ev m]
+  (try
+    (cond
+      (:jonquil-breakpoints-armed m) (swap! (:state ev) dissoc :breakpoints-pending)
+      (:jonquil-breakpoints-error m)
+      (let [[old _] (swap-vals! (:state ev) (fn [s] (-> s (assoc :breakpoints-on? false)
+                                                        (dissoc :breakpoints-pending))))]
+        (when-let [f (:breakpoints-pending old)]
+          (f {:error (:jonquil-breakpoints-error m) :pending-failed? true}))))
+    (catch Throwable _ nil)))
+
 (defn paused-message
   "The child's jonquil-paused message as frames-data's map, or nil."
   [m]
@@ -440,13 +462,15 @@
         acc (atom [])
         done (promise)
         msg (cond-> (main-msg ev code session opts)
-              (breakable? @(:state ev) opts) (assoc :jonquil-break "1"))
+              (breakable? @(:state ev) opts) (assoc :jonquil-break "1")
+              (breakpoints-armed? @(:state ev) opts) (assoc :jonquil-breakpoints "1"))
         _ (tell-break! ev :on-eval-start opts)
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)
                               (stdin-watch! ev m)
                               (break-watch! ev m)
+                              (breakpoints-watch! ev m)
                               (feed-output! on-output m)
                               (when (client/done? m) (deliver done @acc))))]
     (swap! (:state ev) assoc-in [:running :id] id)
@@ -726,6 +750,16 @@
     (if-let [t (some :text responses)]
       {:out (or (some :frame-out responses) "") :text t}
       {:error "The Jolt child answered without a value."})))
+
+(defn breakpoints-reply
+  "The child's jonquil-breakpoints responses as {:on? b :debug-turned-on?
+  b} or {:error s}."
+  [responses]
+  (if-let [err (some :error responses)]
+    {:error err}
+    (if-let [on (some :on responses)]
+      {:on? (= "true" on) :debug-turned-on? (= "true" (some :debug-turned-on responses))}
+      {:error "The Jolt child didn't say whether its breakpoints are on."})))
 
 (defn toggle-reply
   "The child's jonquil-debug-mode responses as {:on? b} or {:error s},
@@ -1011,7 +1045,47 @@
       (do (future (try (client/request-sync conn {:op "jonquil-break-continue" :session session} request-timeout-ms)
                        (catch Throwable _ nil)))
           true)
-      false)))
+      false))
+  ev/Breakpoints
+  (set-breakpoints! [this on? on-done]
+    ;; on only once the child said so: every eval the person sends then
+    ;; arms them again (a restarted child starts without them), and a
+    ;; child that can't (no jolt.debug) never gets breakpoint code
+    ;; with no child yet (or a dead one) they are pending: the first eval
+    ;; arms them and its reply says how it went (breakpoints-watch!),
+    ;; calling on-done again only when that failed
+    (cond
+      (not on?)
+      (do (swap! state (fn [s] (-> s (assoc :breakpoints-on? false) (dissoc :breakpoints-pending))))
+          (if (live? this)
+            (child-op! this {:op "jonquil-breakpoints" :msg {:on "false"}
+                             :unavailable "Breakpoints need Jolt's session middleware in the child."
+                             :reply breakpoints-reply}
+                       on-done)
+            (future (try (on-done {:on? false}) (catch Throwable _)))))
+      (not (live? this))
+      (do (swap! state assoc :breakpoints-on? true
+                 :breakpoints-pending (fn [r] (try (on-done r) (catch Throwable _))))
+          (future (try (on-done {:on? true :pending? true}) (catch Throwable _))))
+      :else
+      (child-op! this {:op "jonquil-breakpoints" :msg {:on "true"}
+                       :unavailable "Breakpoints need Jolt's session middleware in the child."
+                       :reply breakpoints-reply}
+                 (fn [r]
+                   (when-not (:error r) (swap! state assoc :breakpoints-on? true))
+                   (on-done r))))
+    nil)
+  (breakpoints-on? [_] (boolean (:breakpoints-on? @state)))
+  (macro-heads! [this ns-name syms on-done]
+    (child-op! this {:op "jonquil-breakpoints" :msg {:ns (str ns-name) :heads (pr-str (vec syms))}
+                     :unavailable "Breakpoints need Jolt's session middleware in the child."
+                     :reply (fn [r] (if-let [err (some :error r)]
+                                      {:error err}
+                                      (if-let [h (some :heads r)]
+                                        (edn/read-string h)
+                                        {:error "The Jolt child didn't say which names are macros."})))}
+               on-done)
+    nil))
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result

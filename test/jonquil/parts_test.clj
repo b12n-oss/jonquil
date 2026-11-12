@@ -85,7 +85,7 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :debugger :breakpoints :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
            :panel/processes :processes/show
            :change-set/make :change-set/browse
@@ -98,6 +98,7 @@
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
            :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
            :palette/open :help/describe-key :help/key-bindings :help/recent-keys
+           :debug/toggle-breakpoint :debug/clear-breakpoints
            :pages/show :pages/bookmark :pages/bookmarks :pages/guide}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
@@ -778,6 +779,12 @@
            (update-vals (:commands spec) :call)))
     (is (= [{:id :debugger :label "Frames"}] (:panels spec)))
     (is (= "Frames" (:debugger palette/PANEL-LABELS)))))
+
+(deftest breakpoints-part-owns-its-commands-and-key
+  (let [spec (some #(when (= :breakpoints (:id %)) %) parts/specs)]
+    (is (= {:debug/toggle-breakpoint [:toggle-breakpoint-fn] :debug/clear-breakpoints [:clear-breakpoints-fn]}
+           (update-vals (:commands spec) :call)))
+    (is (= [{:key "F9" :exact #{} :command :debug/toggle-breakpoint}] (get-in spec [:bindings :window])))))
 
 (defn- debugger-wctx [ev* failure* statuses rerun]
   {:ev* ev* :cv {:failure* failure*} :sel* (atom nil)
