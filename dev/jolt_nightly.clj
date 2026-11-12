@@ -17,8 +17,7 @@
 (ns jolt-nightly
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
-            [clojure.string :as str])
-  (:import (java.security MessageDigest)))
+            [clojure.string :as str]))
 
 (def ^:private base-url
   "https://github.com/jolt-lang/jolt/releases/download/vnightly/")
@@ -49,12 +48,19 @@
     (when-not (zero? (:exit r))
       (fail! "download failed (curl exit " (:exit r) "): " url))))
 
-(defn- sha256 [file]
-  (let [md (MessageDigest/getInstance "SHA-256")]
-    (.update md (fs/read-all-bytes file))
-    (apply str (map #(format "%02x" (bit-and % 0xff)) (.digest md)))))
-
 (defn- first-word [s] (first (str/split (str/trim s) (re-pattern "\\s+"))))
+
+(defn- sha256
+  "file's SHA-256, hex, from the system's own tool: java.security's
+  MessageDigest needs jolt-lang/crypto in Jolt (since v0.8.1), which
+  Jonquil doesn't depend on, and every platform with a nightly has one of
+  these."
+  [file]
+  (let [cmd (if (fs/which "sha256sum") ["sha256sum"] ["shasum" "-a" "256"])
+        r (apply p/shell {:out :string :continue true} (conj cmd (str file)))]
+    (when-not (zero? (:exit r))
+      (fail! "couldn't hash " file " with " (str/join " " cmd)))
+    (first-word (:out r))))
 
 (defn- fetch!
   "Makes sure dir holds the current nightly's jolt; returns its path."
