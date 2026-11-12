@@ -65,6 +65,15 @@
     (g/with-iters* buf offset offset
       (fn [a _] (g/gtk-text-view-scroll-to-iter (:view ed) a 0.0 0 0.0 0.0)))))
 
+(defn- guarded-status
+  "f as a thunk whose throw sets the status to \"; label: ...\" instead
+  of escaping onto the GTK thread."
+  [status-label label f]
+  (fn []
+    (try (f)
+         (catch :default ex
+           (win-status/set-status! status-label (str "; " label ": " (ex-message ex)))))))
+
 (defn ask-lookup!
   "ev/lookup for sym, for quick doc and jump. A plain evaluator is asked
   directly and (on-doc doc) runs at once. A server evaluator
@@ -85,17 +94,13 @@
                     (on-doc doc)))]
     (if-not (ev/server-help? e)
       (on-doc (ev/lookup e sym text pos))
-      (let [[k doc] (ev/ask-help! ev/help-grace-ms (fn [] (ev/lookup e sym text pos))
-                                  (fn [doc]
-                                    (on-gui!
-                                     (fn []
-                                       (try
-                                         (when (= looking (g/label-text status-label))
-                                           (win-status/set-status! status-label "Ready"))
-                                         (when (and (identical? e @ev*) (still?))
-                                           (answer! doc))
-                                         (catch :default ex
-                                           (win-status/set-status! status-label (str "; " label ": " (ex-message ex)))))))))]
+      (let [late! (fn [doc]
+                    (when (= looking (g/label-text status-label))
+                      (win-status/set-status! status-label "Ready"))
+                    (when (and (identical? e @ev*) (still?))
+                      (answer! doc)))
+            [k doc] (ev/ask-help! ev/help-grace-ms (fn [] (ev/lookup e sym text pos))
+                                  (fn [doc] (on-gui! (guarded-status status-label label #(late! doc)))))]
         (if (= k :now)
           (answer! doc)
           (win-status/set-status! status-label looking))))))
@@ -110,6 +115,35 @@
   not read its buffer then."
   [ed]
   (not @(:destroyed? ed)))
+
+(defn- land-full-doc!
+  "do-quick-doc!'s full-doc result for symbol (target id) on the GTK
+  thread: shown, when it is :ok and its tab is still active with the caret
+  on id; else the status says why, or goes back to Ready."
+  [{:keys [ed status-label full-doc-pop close-popovers-fn win active? example-ctx]} id symbol result]
+  (cond
+    ;; Another tab became active while the server answered; a popover
+    ;; popped up on a hidden page maps anyway and is lost on the next
+    ;; switch, so show nothing.
+    (not (active?))
+    (win-status/set-status! status-label "Ready")
+
+    ;; The caret moved to another symbol while the server answered: drop
+    ;; the text, but don't leave "Loading full docs..." behind.
+    (not= id (select-keys (help/target (editor/snapshot ed)) [:symbol :start]))
+    (win-status/set-status! status-label "Ready")
+
+    (= :ok (:status result))
+    (do (close-popovers-fn full-doc-pop)
+        (help-popover/show-full-doc!
+         full-doc-pop (:text result)
+         (int (* 0.6 (g/gtk-widget-get-height win)))
+         {:on-run (fn [code] (win-run/do-run-example! example-ctx code))
+          :on-copy (fn [code] (win-run/do-copy-example! example-ctx code))})
+        (win-status/set-status! status-label "Ready"))
+
+    :else
+    (win-status/set-status! status-label (help/full-doc-status symbol result))))
 
 (defn do-quick-doc!
   "Ctrl+Q/Shift+F1, the ui's own :quick-doc!*: help/target on ed's
@@ -147,7 +181,7 @@
   status. Every other press, and every evaluator without FullDoc (cljd,
   in-process), takes the ordinary re-show path below unchanged, which
   also records the freshly shown target in last-shown."
-  [{:keys [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win active? example-ctx]}]
+  [{:keys [ed ev* status-label help-pop last-shown close-popovers-fn active?] :as ctx}]
   (try
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start] :as target} (help/target snap)]
@@ -156,36 +190,8 @@
             (do (win-status/set-status! status-label (str "Loading full docs for " symbol "..."))
                 (ev/full-doc @ev* symbol (:text snap)
                              (fn [result]
-                               (on-gui!
-                                (fn []
-                                  (try
-                                    (cond
-                                      ;; Another tab became active
-                                      ;; while the server answered; a popover popped
-                                      ;; up on a hidden page maps anyway and is lost
-                                      ;; on the next switch, so show nothing.
-                                      (not (active?))
-                                      (win-status/set-status! status-label "Ready")
-
-                                      ;; The caret moved to another symbol while the
-                                      ;; server answered: drop the text, but don't
-                                      ;; leave "Loading full docs..." behind.
-                                      (not= id (select-keys (help/target (editor/snapshot ed)) [:symbol :start]))
-                                      (win-status/set-status! status-label "Ready")
-
-                                      (= :ok (:status result))
-                                      (do (close-popovers-fn full-doc-pop)
-                                          (help-popover/show-full-doc!
-                                           full-doc-pop (:text result)
-                                           (int (* 0.6 (g/gtk-widget-get-height win)))
-                                           {:on-run (fn [code] (win-run/do-run-example! example-ctx code))
-                                            :on-copy (fn [code] (win-run/do-copy-example! example-ctx code))})
-                                          (win-status/set-status! status-label "Ready"))
-
-                                      :else
-                                      (win-status/set-status! status-label (help/full-doc-status symbol result)))
-                                    (catch :default e
-                                      (win-status/set-status! status-label (str "; full doc: " (ex-message e))))))))))
+                               (on-gui! (guarded-status status-label "full doc"
+                                                        #(land-full-doc! ctx id symbol result))))))
             (ask-lookup! {:ev* ev* :status-label status-label} symbol (:text snap) start
                          (fn [] (and (active?) (live-editor? ed) (same-target? id (editor/snapshot ed))))
                          "quick doc"

@@ -39,6 +39,44 @@
 
 ;; --- Run / Stop ------------------------------------------------------------
 
+(defn- unclosed-bracket-hint!
+  "After a Run that hit EOF while reading, names the unclosed bracket in
+  ed's text. editor/editor-text calls GTK text-buffer functions, a real
+  GTK-thread requirement, and on-complete runs on the eval worker thread,
+  so the read (and the append! that depends on it) goes through on-gui!."
+  [ed cv]
+  (on-gui! (fn []
+             ;; The Run's tab may have closed while it ran;
+             ;; its buffer is gone then.
+             (when-let [msg (when-not @(:destroyed? ed)
+                              (console/unclosed-bracket-message (editor/editor-text ed)))]
+               (cview/append! cv :system (str msg "\n"))))))
+
+(defn- complete-eval!
+  "make-eval-opts' :on-complete, on the eval worker thread."
+  [{:keys [ed cv ev* status-label run?]} result]
+  ;; docs/symbol-doc memoises on [ns sym text], so a name looked up before
+  ;; this evaluation defined (or removed) it would keep serving that stale
+  ;; answer forever. Clearing here covers every completed evaluation, Run
+  ;; and REPL entry alike. A plain atom reset, safe to call from this
+  ;; worker thread with no on-gui! (unlike everything else here).
+  (docs/clear-doc-cache!)
+  (when-let [f (some-> (:after-eval* cv) deref)]
+    (try (f) (catch :default _ nil)))
+  (win-status/set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
+  (cview/reset-busy-hint! cv)
+  (on-gui! (fn [] (cview/note-run-end! cv)))
+  (win-runtime/refresh-prompt! cv ev*)
+  (let [[kind text] (console/result-line result)]
+    ;; LM1: a result that kept a handle to its value
+    (if-let [ref (:ref result)]
+      (cview/append-result! cv kind text ref)
+      (cview/append! cv kind text)))
+  (when (and run?
+             (= :error (:status result))
+             (str/includes? (console/error-text result) "EOF while reading"))
+    (unclosed-bracket-hint! ed cv)))
+
 (defn make-eval-opts
   "The opts run-definitions!/submit-repl! share (the lock-caller rule:
   every one of these runs on the eval worker thread and must only
@@ -55,7 +93,8 @@
   stuck on \"Running…\"; the same goes for reset-busy-hint!, which
   must re-arm for the next run whether or not the append below throws.
 
-  is-run? is true for run-definitions! and false for submit-repl!:
+  ctx holds :ed, :cv, :ev*, :status-label and :run?, true for
+  run-definitions! and false for submit-repl!:
   the EOF-unclosed-bracket hint reads the DEFINITIONS editor's own text,
   which is only relevant to a Run's own EOF -- a REPL entry's EOF (e.g. an
   unbalanced string argument to a nested load-string, since a genuinely
@@ -66,7 +105,7 @@
   :on-complete also refreshes the console's prompt from ev*, since the
   evaluation may have moved the session's namespace; every evaluator
   updates its prompt-ns before it calls on-complete."
-  [ed cv ev* status-label is-run?]
+  [{:keys [cv status-label] :as ctx}]
   {:on-output (fn [kind s] (cview/append! cv kind s))
    :on-wait-input (fn [waiting?]
                     (win-status/set-status! status-label (if waiting? "Waiting for input" "Running…")))
@@ -76,40 +115,7 @@
                                                  :running "Running…"
                                                  :waiting-input "Waiting for input"
                                                  :idle "Ready")))
-   :on-complete (fn [result]
-                  ;; docs/symbol-doc memoises on [ns sym text], so a name
-                  ;; looked up before this evaluation defined (or removed)
-                  ;; it would keep serving that stale answer forever.
-                  ;; Clearing here covers every completed evaluation, Run
-                  ;; and REPL entry alike. A plain atom reset, safe to
-                  ;; call from this worker thread with no on-gui! (unlike
-                  ;; everything else here).
-                  (docs/clear-doc-cache!)
-                  (when-let [f (some-> (:after-eval* cv) deref)]
-                    (try (f) (catch :default _ nil)))
-                  (win-status/set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
-                  (cview/reset-busy-hint! cv)
-                  (on-gui! (fn [] (cview/note-run-end! cv)))
-                  (win-runtime/refresh-prompt! cv ev*)
-                  (let [[kind text] (console/result-line result)]
-                    ;; LM1: a result that kept a handle to its value
-                    (if-let [ref (:ref result)]
-                      (cview/append-result! cv kind text ref)
-                      (cview/append! cv kind text)))
-                  (when (and is-run?
-                             (= :error (:status result))
-                             (str/includes? (console/error-text result) "EOF while reading"))
-                    ;; editor/editor-text calls GTK text-buffer functions, which
-                    ;; is a real GTK-thread requirement, not just this project's
-                    ;; own lock -- on-complete runs on the eval worker thread, so
-                    ;; the read (and the append! that depends on it) is handed to
-                    ;; on-gui! rather than called here directly.
-                    (on-gui! (fn []
-                               ;; The Run's tab may have closed while it ran;
-                               ;; its buffer is gone then.
-                               (when-let [msg (when-not @(:destroyed? ed)
-                                                (console/unclosed-bracket-message (editor/editor-text ed)))]
-                                 (cview/append! cv :system (str msg "\n")))))))})
+   :on-complete (fn [result] (complete-eval! ctx result))})
 
 (defn refuse-foreign!
   "The refusal message (truthy), after printing it, when
@@ -146,14 +152,18 @@
 
 (defn- note-ran!
   "LM3 and LM4 after a Run, Run Form or Run Selection: an :ok result marks
-  code as ran (jonquil.changed) and refreshes the marks, and either way the
-  gutter's line counts refresh. Never throws."
+  code as ran (jonquil.changed) and refreshes the marks, an :ok whole Run
+  becomes the tab's last-run text, and either way the gutter's line counts
+  refresh. Never throws."
   [{:keys [changed hook-source hook-code]} result]
   ;; LM3: what ran :ok is no longer changed (jonquil.changed)
   (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
     (try (swap! (:ran changed) changed/record hook-code (if (= :run hook-source) :run :form))
          ((deref (:refresh changed)))
          (catch :default _ nil)))
+  ;; LM3: the text Compare with the last Run compares against
+  (when-let [lr (:last-run changed)]
+    (swap! lr changed/last-run-after hook-code hook-source (:status result)))
   ;; LM4: the lines that ran, whether it ended well or not
   (when (and changed (#{:run :form :selection} hook-source))
     (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil))))
@@ -247,7 +257,7 @@
   hook keys and, for a Run that isn't MCP's, its replay record."
   [{:keys [tab cv ev* status-label]} notify out]
   (let [{ed :ed path-atom :path id :id} tab
-        base (cond-> (assoc (make-eval-opts ed cv ev* status-label true)
+        base (cond-> (assoc (make-eval-opts {:ed ed :cv cv :ev* ev* :status-label status-label :run? true})
                             :run? true :path @path-atom :owner id)
                ;; LM7: the replay tab's Run adds to the session, and
                ;; what it defines is the REPL's, as if typed there
@@ -369,22 +379,22 @@
   busy warning run-definitions! can. extra-opts is merged in last: Run
   Selection and Run Form pass {:ns-source buffer-text}, which the attach
   evaluator uses to switch the session into the buffer's namespace first;
-  the in-process and nREPL evaluators ignore it."
-  ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
-  ([ed cv ev* status-label text extra-opts]
-   (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-         warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false
-                                                                :hook-code text :failure* (:failure* cv)
-                                                                :changed (:changed ed) :recorder (:recorder* cv)
-                                                                :replay-root (:replay-root* cv))
-                                                         extra-opts)))]
-     (when warning (cview/append! cv :system warning)))))
+  the in-process and nREPL evaluators ignore it. ctx is the window's (its
+  :cv, :ev* and :status-label)."
+  [{:keys [cv ev* status-label]} ed text extra-opts]
+  (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+        warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts {:ed ed :cv cv :ev* ev* :status-label status-label :run? false}) :run? false
+                                                               :hook-code text :failure* (:failure* cv)
+                                                               :changed (:changed ed) :recorder (:recorder* cv)
+                                                               :replay-root (:replay-root* cv))
+                                                        extra-opts)))]
+    (when warning (cview/append! cv :system warning))))
 
 (defn- tab-record
   "The :record map (LM7) for code that Run Selection or Run Form sends from
   tab: its saved path, and the namespace the buffer's ns form names, else
   the prompt's."
-  [tab ev* source code buffer-text]
+  [tab ev* {:keys [source code buffer-text]}]
   {:source source :code code :path @(:path tab)
    :ns (or (clj/buffer-ns buffer-text) (str (ev/prompt-ns @ev*)))})
 
@@ -402,7 +412,7 @@
   last-entry mark from that running program: a later Shift+L needs to
   keep clearing the WHOLE run, not stop short at wherever this mid-run
   echo landed."
-  [{:keys [tab cv ev* status-label] :as ctx}]
+  [{:keys [tab cv ev*] :as ctx}]
   (let [ed (:ed tab)
         snap (editor/snapshot ed)]
     (when-let [text (commands/run-selection-text snap)]
@@ -410,9 +420,10 @@
                     ;; asked only when the Run would start
                     (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab text)))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
-                                                    :hook-source :selection :hook-tab (:id tab)
-                                                    :record (tab-record tab ev* :selection text (:text snap))})))))
+        (do-repl-eval! ctx ed text {:ns-source (:text snap) :owner (:id tab)
+                                    :hook-source :selection :hook-tab (:id tab)
+                                    :record (tab-record tab ev* {:source :selection :code text
+                                                                 :buffer-text (:text snap)})})))))
 
 (defn do-run-example!
   "Run in Interactions on a ClojureDocs example's code: evaluated in user at
@@ -423,7 +434,7 @@
   do-run-selection!. Plugins see a :selection Run on all three hooks;
   :failure-kind :example is the window's own marker so Retry runs it here
   again. No :changed, since the code isn't the tab's."
-  [{:keys [tab cv ev* status-label] :as ctx} code]
+  [{:keys [tab cv ev*] :as ctx} code]
   (let [idle? (not (ev/evaluating? @ev*))]
     (when-not (or (refuse-foreign! ctx)
                   ;; asked only when the Run would start, as Run Selection does
@@ -431,7 +442,7 @@
       (when (and idle? (not= "user" (str (ev/prompt-ns @ev*))))
         (cview/append! cv :system "; in user\n"))
       (cview/echo-entry! cv code idle?)
-      (do-repl-eval! (:ed tab) cv ev* status-label code
+      (do-repl-eval! ctx (:ed tab) code
                      {:ns-source "(ns user)" :owner (:id tab)
                       :hook-source :selection :failure-kind :example :hook-tab (:id tab)
                       :changed nil
@@ -439,14 +450,15 @@
 
 (defn- re-eval-failure!
   "Sends failure f's code through the REPL again, in tab t, as it first went."
-  [{:keys [cv ev* status-label]} f t]
+  [{:keys [cv ev*] :as ctx} f t]
   (let [code (:code f)
         buffer? (#{:selection :form} (:kind f))]
     (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
-    (do-repl-eval! (:ed t) cv ev* status-label code
+    (do-repl-eval! ctx (:ed t) code
                    (cond-> {:hook-source (:kind f) :hook-tab (:id t)
                             :record (if buffer?
-                                      (tab-record t ev* (:kind f) code (editor/editor-text (:ed t)))
+                                      (tab-record t ev* {:source (:kind f) :code code
+                                                         :buffer-text (editor/editor-text (:ed t))})
                                       {:source (:kind f) :code code :path nil
                                        :ns (str (ev/prompt-ns @ev*))})}
                      ;; as Run Selection and Run Form send them
@@ -497,7 +509,7 @@
   [{:keys [tab cv ev* status-label]} text extra-opts notify]
   (let [ed (:ed tab)
         out (atom [])
-        opts (hooked-opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false
+        opts (hooked-opts (merge (notifying-opts (assoc (make-eval-opts {:ed ed :cv cv :ev* ev* :status-label status-label :run? false}) :run? false
                                                         :hook-code text :failure* (:failure* cv)
                                                         :changed (:changed ed))
                                                  out notify)
@@ -607,17 +619,35 @@
                     (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :form tab text)))
         ((:flash! flash-fns) start end (:caret snap))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
-                                                    :hook-source :form :hook-tab (:id tab)
-                                                    :record (tab-record tab ev* :form text (:text snap))}))
+        (do-repl-eval! ctx ed text {:ns-source (:text snap) :owner (:id tab)
+                                    :hook-source :form :hook-tab (:id tab)
+                                    :record (tab-record tab ev* {:source :form :code text
+                                                                 :buffer-text (:text snap)})}))
       (win-status/set-status! status-label "No form at the caret."))))
+
+(defn- send-changed!
+  "do-run-changed!'s send of forms, the changed forms of the tab's text,
+  joined by newlines."
+  [{:keys [tab cv ev*] :as ctx} text forms]
+  (let [code (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) forms))]
+    (when-not (or (refuse-foreign! ctx)
+                  (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))
+      ;; echoed as an entry, as Run Form's is, so Clear Last Output
+      ;; finds it and its Running line
+      (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
+      (cview/append! cv :system (str "; Running " (count forms) " changed form"
+                                     (when (> (count forms) 1) "s") "\n"))
+      (do-repl-eval! ctx (:ed tab) code {:ns-source text :owner (:id tab)
+                                         :hook-source :selection :hook-tab (:id tab)
+                                         :record (tab-record tab ev* {:source :form :code code
+                                                                      :buffer-text text})}))))
 
 (defn- do-run-changed!
   "Run the forms changed since they last ran (LM3): the tab's changed
   top-level forms, in buffer order and joined by newlines, sent once the
   way Run Selection sends code. Says so instead when the tab never ran or
   nothing changed."
-  [{:keys [tab cv ev* status-label] :as ctx}]
+  [{:keys [tab status-label] :as ctx}]
   (let [ed (:ed tab)
         ran (some-> (:changed ed) :ran deref)]
     (if (nil? ran)
@@ -626,17 +656,7 @@
             forms (changed/changed text ran)]
         (if (empty? forms)
           (win-status/set-status! status-label "; Nothing has changed since the last run.")
-          (let [code (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) forms))]
-            (when-not (or (refuse-foreign! ctx)
-                          (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))
-              ;; echoed as an entry, as Run Form's is, so Clear Last Output
-              ;; finds it and its Running line
-              (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
-              (cview/append! cv :system (str "; Running " (count forms) " changed form"
-                                             (when (> (count forms) 1) "s") "\n"))
-              (do-repl-eval! ed cv ev* status-label code {:ns-source text :owner (:id tab)
-                                                          :hook-source :selection :hook-tab (:id tab)
-                                                          :record (tab-record tab ev* :form code text)}))))))))
+          (send-changed! ctx text forms))))))
 
 (defn make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console
@@ -651,7 +671,7 @@
       :eval (if (pal-data/bang? text)
               (@bang* text)
               (let [tab (tab-fn)]
-                (do-repl-eval! (:ed tab) @*cv ev* status-label text
+                (do-repl-eval! {:cv @*cv :ev* ev* :status-label status-label} (:ed tab) text
                                {:hook-source :repl :hook-tab (:id tab)
                                 ;; the namespace it runs in, read before it can move
                                 :record {:source :repl :code text :path nil :ns (str (ev/prompt-ns @ev*))}})))

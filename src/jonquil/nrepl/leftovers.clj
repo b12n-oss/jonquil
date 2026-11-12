@@ -64,6 +64,25 @@
     (doseq [c (.listFiles f)] (delete-tree! c)))
   (.delete f))
 
+(defn- stale?
+  "Whether f, an entry of the leftovers' base folder, is one prune! deletes
+  at now-ms: a leftover folder untouched for prune-age-ms whose pid file
+  names a dead process (pidless-age-ms with no pid file), or a log
+  untouched for prune-age-ms. Never a symlink, never a live process's."
+  [^java.io.File f now-ms]
+  (let [n (.getName f)
+        older? (fn [t age] (> (- now-ms t) age))]
+    (and (not (symlink? f))
+         (cond
+           (re-matches folder-name n)
+           (and (.isDirectory f)
+                (case (pid-state f)
+                  :live false
+                  :dead (older? (newest-mtime f) prune-age-ms)
+                  :none (older? (newest-mtime f) pidless-age-ms)))
+           (re-matches log-name n)
+           (and (.isFile f) (older? (.lastModified f) prune-age-ms))))))
+
 (defn prune!
   "Deletes base's leftovers (see the ns doc) untouched for prune-age-ms
   (pidless-age-ms for a folder with no pid file), skipping a folder whose
@@ -72,24 +91,10 @@
   ([] (prune! (System/getProperty "java.io.tmpdir") (System/currentTimeMillis)))
   ([base now-ms]
    (try
-     (let [older? (fn [t age] (> (- now-ms t) age))
-           old? (fn [t] (older? t prune-age-ms))
-           stale? (fn [^java.io.File f]
-                    (let [n (.getName f)]
-                      (and (not (symlink? f))
-                           (cond
-                             (re-matches folder-name n)
-                             (and (.isDirectory f)
-                                  (case (pid-state f)
-                                    :live false
-                                    :dead (old? (newest-mtime f))
-                                    :none (older? (newest-mtime f) pidless-age-ms)))
-                             (re-matches log-name n)
-                             (and (.isFile f) (old? (.lastModified f)))))))]
-       (reduce (fn [k ^java.io.File f]
-                 (if (stale? f)
-                   (do (delete-tree! f) (if (.exists f) k (inc k)))
-                   k))
-               0
-               (or (.listFiles (io/file base)) [])))
+     (reduce (fn [k ^java.io.File f]
+               (if (stale? f now-ms)
+                 (do (delete-tree! f) (if (.exists f) k (inc k)))
+                 k))
+             0
+             (or (.listFiles (io/file base)) []))
      (catch Throwable _ 0))))

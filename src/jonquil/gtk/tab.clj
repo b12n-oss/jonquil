@@ -34,7 +34,9 @@
         ;; every run path carries. :counts-refresh and :counting?, installed
         ;; by wire-tab! too, are LM4's: fetch the line counts after a run (a
         ;; fn of the run's source and code), and whether the window counts
-        ed (assoc ed0 :changed {:ran (atom nil) :refresh (atom (fn [])) :gutter gt
+        ;; :last-run is the buffer as its last :ok whole Run sent it, for
+        ;; Compare with the last Run (changed/last-run-after)
+        ed (assoc ed0 :changed {:ran (atom nil) :last-run (atom nil) :refresh (atom (fn [])) :gutter gt
                                 :counts-refresh (atom (fn [_source _code]))
                                 :counting? (atom (constantly false))})
         fb (find-bar/make-find-bar ed)

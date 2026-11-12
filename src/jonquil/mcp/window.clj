@@ -206,6 +206,22 @@
 
 (defn- now-ms [] (System/currentTimeMillis))
 
+(defn- timed-out
+  "await-eval past its deadline: stops the evaluation through a gui turn,
+  then waits up to grace-ms more for p's notify. The timeout result."
+  [{:keys [ui gui timeout-ms grace-ms]} p reader]
+  (gui-call gui
+            ;; as tool-stop: never interrupt an idle evaluator (an attach
+            ;; evaluator would detach)
+            (fn [] (when (ev/evaluating? ((:evaluator* ui))) ((:stop!* ui))))
+            gui-deadline-ms)
+  (let [r2 (deref p grace-ms ::pending)]
+    (if (= ::pending r2)
+      {:text (str (reader) "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped.")
+       :error? true}
+      {:text (str (or (:output (:done r2)) (reader)) "Timed out after " timeout-ms " ms; interrupted.")
+       :error? true})))
+
 (defn- await-eval
   "Fires a hook in one gui turn ((fire notify) returns the output reader) and
   waits for its notify: the result, or the early waiting-for-input result,
@@ -232,17 +248,7 @@
           (notify->result @p)
 
           (>= (now-ms) deadline)
-          (do (gui-call gui
-                        ;; as tool-stop: never interrupt an idle evaluator (an
-                        ;; attach evaluator would detach)
-                        (fn [] (when (ev/evaluating? ((:evaluator* ui))) ((:stop!* ui))))
-                        gui-deadline-ms)
-              (let [r2 (deref p grace-ms ::pending)]
-                (if (= ::pending r2)
-                  {:text (str (reader) "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped.")
-                   :error? true}
-                  {:text (str (or (:output (:done r2)) (reader)) "Timed out after " timeout-ms " ms; interrupted.")
-                   :error? true})))
+          (timed-out {:ui ui :gui gui :timeout-ms timeout-ms :grace-ms grace-ms} p reader)
 
           :else (recur))))))
 
@@ -520,6 +526,17 @@
          (binding [*out* *err*]
            (println "jonquil: couldn't log an MCP call:" (or (ex-message e) (str e)))))))
 
+(defn- logged-call
+  "(f)'s result, logged through log! as base plus :result; a throw is
+  logged as base plus :threw and re-thrown as itself."
+  [log! base f]
+  (let [r (try (f)
+               (catch Throwable e
+                 (log-call! log! (assoc base :threw (or (ex-message e) (str e))))
+                 (throw e)))]
+    (log-call! log! (assoc base :result r))
+    r))
+
 (defn with-messages
   "tables-fn (with-plugin-tools' fn answering a table per message) with
   every :call logged to the window's Messages through (:log!* ui), named
@@ -536,13 +553,8 @@
                              (log-call! log! {:tool tname :args args :client (:client @session*)
                                               :threw (str "Unknown tool: " tname)}))
                :call (fn [tname args]
-                       (let [base {:tool tname :args args :client (:client @session*)}
-                             r (try (call tname args)
-                                    (catch Throwable e
-                                      (log-call! log! (assoc base :threw (or (ex-message e) (str e))))
-                                      (throw e)))]
-                         (log-call! log! (assoc base :result r))
-                         r)))))
+                       (logged-call log! {:tool tname :args args :client (:client @session*)}
+                                    #(call tname args))))))
     tables-fn))
 
 (defn serve-window!

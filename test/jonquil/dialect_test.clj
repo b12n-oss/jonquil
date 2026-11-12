@@ -97,6 +97,35 @@
     (is (str/includes? (first (:warnings r)) ":parinfer")))
   (is (not (contains? (dialect/parse-config "{:dialect :jolt}" nil) :parinfer))))
 
+(deftest parse-config-remember-session-test
+  (is (false? (:remember-session? (dialect/parse-config "{:remember-session? false}" nil)))
+      "a project can keep its session off disk")
+  (is (true? (:remember-session? (dialect/parse-config "{:remember-session? true}" nil)))
+      "a project can record when the global setting is off")
+  (let [r (dialect/parse-config "{:remember-session? :no}" nil)]
+    (is (not (contains? r :remember-session?)))
+    (is (= [".jonquil.edn :remember-session? should be true or false, not :no, so it is ignored"]
+           (:warnings r))))
+  (is (not (contains? (dialect/parse-config "{:dialect :jolt}" nil) :remember-session?))))
+
+(deftest project-remember-session-test
+  (let [root (temp-dir)
+        src (do (write! root "src/demo/core.clj" "(ns demo.core)") (str (io/file root "src")))]
+    (testing "no project config: nil, so the global setting decides"
+      (is (nil? (dialect/project-remember-session nil)))
+      (write! root "deps.edn" "{}")
+      (is (nil? (dialect/project-remember-session root))))
+    (write! root ".jonquil.edn" "{:remember-session? false}")
+    (is (false? (dialect/project-remember-session root)))
+    (testing "a tree rooted below the project reads the project's config"
+      (is (false? (dialect/project-remember-session src))))
+    (testing "a nearer project without the key: nil"
+      (write! root "src/deps.edn" "{}")
+      (is (nil? (dialect/project-remember-session src))))
+    (testing "an unusable value is ignored"
+      (write! root ".jonquil.edn" "{:remember-session? 1}")
+      (is (nil? (dialect/project-remember-session root))))))
+
 (deftest parse-config-format-style-test
   (is (= :paren-stable (:format-style (dialect/parse-config "{:format-style :paren-stable}" nil))))
   (is (= :plain (:format-style (dialect/parse-config "{:format-style :plain}" nil)))

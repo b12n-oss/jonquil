@@ -93,6 +93,31 @@
       (when-let [next-item (first (get before point))]
         (recur next-item)))))
 
+(defn- enqueue
+  "running's map m with item queued at point: a fresh empty queue when no
+  chain runs there (the caller starts one with item), item appended while
+  the queue is under QUEUE-BOUND, else m unchanged."
+  [m point item]
+  (cond (not (contains? m point)) (assoc m point [])
+        (< (count (get m point)) QUEUE-BOUND) (update m point conj item)
+        :else m))
+
+(defn- start-drain!
+  "A future draining point's queue from item; the point is freed when the
+  chain itself fails or no future could start."
+  [point item]
+  (try
+    (future
+      (try (drain! point item)
+           (catch Throwable _
+             ;; run-chain reports each hook's throw; this only frees
+             ;; the point if the chain itself failed
+             (swap! running dissoc point))))
+    (catch Throwable e
+      ;; nothing started, so the point is free again
+      (swap! running dissoc point)
+      (throw e))))
+
 (defn run-hooks!
   "Starts point's hooks on a future with event, each hook's ctx acting on
   tab, and answers the future. While point's chain is still running the
@@ -102,29 +127,13 @@
   [{:keys [point tab event]}]
   (when (seq (hooks @plugin-registry/live point))
     (let [report! (or (:report! @plugin-registry/effects) (fn [_]))
-          [before after] (swap-vals! running
-                                     (fn [m]
-                                       (cond (not (contains? m point)) (assoc m point [])
-                                             (< (count (get m point)) QUEUE-BOUND) (update m point conj [tab event])
-                                             :else m)))]
-      (cond
-        (contains? before point)
+          [before after] (swap-vals! running #(enqueue % point [tab event]))]
+      (if (contains? before point)
         (do (when (= before after)
               (report! (str "the " point " hooks are still busy with " QUEUE-BOUND
                             " earlier events, so this one was skipped")))
             nil)
-        :else
-        (try
-          (future
-            (try (drain! point [tab event])
-                 (catch Throwable _
-                   ;; run-chain reports each hook's throw; this only frees
-                   ;; the point if the chain itself failed
-                   (swap! running dissoc point))))
-          (catch Throwable e
-            ;; nothing started, so the point is free again
-            (swap! running dissoc point)
-            (throw e)))))))
+        (start-drain! point [tab event])))))
 
 (defn after-eval!
   "Fires the hooks an eval from source that ended with result calls for:
@@ -184,6 +193,45 @@
 ;; true while a :before-run chain is running, overrun or not
 (defonce ^:private before-busy (atom false))
 
+(defn- start-before-chain
+  "run-before-chain on a future, with opts as its own; before-busy goes
+  false again when it ends, or here when no future could start."
+  [opts]
+  (try
+    (future
+      (try (run-before-chain opts)
+           (finally (reset! before-busy false))))
+    (catch Throwable e
+      ;; nothing started, so the hooks are free again
+      (reset! before-busy false)
+      (throw e))))
+
+(defn- await-before-chain
+  "f's result within BEFORE-RUN-MS, ::timeout past it, or nil when the
+  chain failed outright: that is reported, never thrown onto the GTK
+  thread."
+  [f report!]
+  (try (deref f BEFORE-RUN-MS ::timeout)
+       (catch Throwable e
+         (let [c (or (ex-cause e) e)]
+           (report! (str "the :before-run hooks failed: " (or (ex-message c) (str c))
+                         ", so the Run went ahead")))
+         nil)))
+
+(defn- before-verdict
+  "before-run!'s answer from the chain's result r: the stop line, or nil
+  (a timeout is reported, naming the plugin that was running)."
+  [r report! current]
+  (cond
+    (= ::timeout r)
+    (do (report! (str "the :before-run hooks took longer than " BEFORE-RUN-MS " ms"
+                      ;; under load the worker may not have reached a hook yet
+                      (when-let [id @current] (str " (plugin " (name id) " was running)"))
+                      ", so the Run went ahead"))
+        nil)
+    (:abort r) (str "plugin " (name (:plugin r)) " stopped this Run: " (:abort r))
+    :else nil))
+
 (defn before-run!
   "Asks the :before-run hooks about a Run of kind about to send text from
   path, on tab. nil to let it go ahead, or the line saying which plugin
@@ -200,30 +248,7 @@
           (do (report! "the :before-run hooks are still running from an earlier Run, so this Run went ahead without them")
               nil)
           (let [current (atom nil)
-                ctx {::p/effects #{} ::p/impl {} ::p/tab tab ::p/refused NO-EFFECTS}
-                f (try
-                    (future
-                      (try (run-before-chain {:hooks hs :ctx ctx :report! report! :current current
-                                              :event {:kind kind :text text :path path}})
-                           (finally (reset! before-busy false))))
-                    (catch Throwable e
-                      ;; nothing started, so the hooks are free again
-                      (reset! before-busy false)
-                      (throw e)))
-                ;; a chain that failed outright is reported, never thrown
-                ;; onto the GTK thread
-                r (try (deref f BEFORE-RUN-MS ::timeout)
-                       (catch Throwable e
-                         (let [c (or (ex-cause e) e)]
-                           (report! (str "the :before-run hooks failed: " (or (ex-message c) (str c))
-                                         ", so the Run went ahead")))
-                         nil))]
-            (cond
-              (= ::timeout r)
-              (do (report! (str "the :before-run hooks took longer than " BEFORE-RUN-MS " ms"
-                                ;; under load the worker may not have reached a hook yet
-                                (when-let [id @current] (str " (plugin " (name id) " was running)"))
-                                ", so the Run went ahead"))
-                  nil)
-              (:abort r) (str "plugin " (name (:plugin r)) " stopped this Run: " (:abort r))
-              :else nil)))))))
+                f (start-before-chain {:hooks hs :report! report! :current current
+                                       :ctx {::p/effects #{} ::p/impl {} ::p/tab tab ::p/refused NO-EFFECTS}
+                                       :event {:kind kind :text text :path path}})]
+            (before-verdict (await-before-chain f report!) report! current)))))))

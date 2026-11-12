@@ -86,7 +86,7 @@
            :result/inspect :result/copy :result/define :result/jump :result/doc
            :panel/locations :locations/uses :locations/definitions :locations/matches
            :locations/usages-in-project :locations/next :locations/previous
-           :compare/disk :compare/head :compare/take
+           :compare/disk :compare/head :compare/take :compare/last-run
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
            :debug/break-on-error :debug/continue :restart/retry :restart/edit :restart/define
            :palette/open :help/describe-key :help/key-bindings :help/recent-keys}
@@ -264,7 +264,7 @@
   schedule and append-to-root! logged. Returns [ret log]."
   [ctx remember? record result]
   (let [log (atom [])]
-    (with-redefs-fn {#'replay-part/remember-session? (fn [_] remember?)
+    (with-redefs-fn {#'replay-part/remember-session? (fn [_ _] remember?)
                      #'replay-part/schedule-replay-save! (fn [_] (swap! log conj [:schedule]) nil)
                      #'replay-part/append-to-root! (fn [_ root es opts]
                                                      (swap! log conj [:append root (mapv :text es) opts])
@@ -283,6 +283,15 @@
     (is (nil? ret))
     (is (= [] log))
     (is (= st @(:replay* ctx)))))
+
+(deftest record-eval-asks-about-the-records-root
+  (testing "the evaluation's own root decides, not the window's (a window
+           re-rooted mid-evaluation still files under the old project's say)"
+    (let [seen (atom [])
+          ctx (record-env {:root "/r/b" :path "p" :record (replay/empty-record) :dirty? false} nil [])]
+      (with-redefs-fn {#'replay-part/remember-session? (fn [path root] (swap! seen conj [path root]) false)}
+        (fn [] (@#'replay-part/record-eval! ctx {:source :repl :root "/r/a" :code "(x)"} {:status :ok})))
+      (is (= [["settings.edn" "/r/a"]] @seen)))))
 
 (deftest record-eval-files-in-the-window
   (let [ctx (record-env {:root "/r/a" :path "p" :record (replay/empty-record) :dirty? false} nil ["(a)" "(b)"])
@@ -708,7 +717,7 @@
             :locations/usages-in-project [:locations-project-usages-fn]
             :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
             :compare/disk [:compare-disk-fn] :compare/head [:compare-head-fn]
-            :compare/take [:compare-take-fn]}
+            :compare/take [:compare-take-fn] :compare/last-run [:compare-last-run-fn]}
            (update-vals (:commands spec) :call)))
     (is (= [{:id :locations :label "Locations"}] (:panels spec)))
     (is (= "Locations" (:locations palette/PANEL-LABELS)))))

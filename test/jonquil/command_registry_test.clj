@@ -11,7 +11,7 @@
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
    :replay-open-fn :replay-forget-fn
-   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :layout-save-fn :layout-forget-fn
+   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :compare-last-run-fn :layout-save-fn :layout-forget-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :panel-focus-fn])
 
 (defn- recording-ctx
@@ -48,6 +48,7 @@
    :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn] :help/key-hints [:hints-toggle-fn]
    :run/line-counts [:line-counts-fn] :run/clear-line-counts [:clear-line-counts-fn]
    :compare/disk [:compare-disk-fn] :compare/head [:compare-head-fn] :compare/take [:compare-take-fn]
+   :compare/last-run [:compare-last-run-fn]
    :layout/save [:layout-save-fn] :layout/forget [:layout-forget-fn]
    :debug/break-on-error [:break-fn] :debug/continue [:continue-fn]
    :run/changed [:run-changed-fn]
