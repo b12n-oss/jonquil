@@ -120,6 +120,17 @@
       (is (= [:world/save] (map :id (palette/filter-entries es "save world")))
           "Restore World's doc holds no save, so it doesn't match at all"))))
 
+(deftest compare-queries-pick-the-whole-tab-test
+  (testing "the form-scoped compare commands share no query with the whole-tab ones"
+    (let [es (shipped-entries)
+          first-id (fn [q] (:id (first (palette/filter-entries es q))))]
+      (doseq [[q id] [["compare with the file on disk" :compare/disk]
+                      ["compare with git head" :compare/head]
+                      ["compare with the last run" :compare/last-run]]]
+        (is (= id (first-id q)) q)
+        (is (= id (:run (palette/bang-pick es (str "!" q)))) (str "!" q " runs it at the prompt")))
+      (is (= :compare-form/head (:run (palette/bang-pick es "!this form vs git head")))))))
+
 (deftest bang-pick-test
   (let [es [{:id :a/clear :doc "Clear line counts: zero Jolt's counters and hide them."}
             {:id :a/count :doc "Count how often each line runs (Jolt)."}

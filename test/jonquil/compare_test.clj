@@ -69,9 +69,32 @@
   (is (nil? (c/form-key buf 7)) "between forms: none")
   (testing "the second of two same-headed forms is told apart by its place"
     (let [t "(comment 1)\n(comment 2)\n"]
-      (is (= {:sig ["comment" "1"] :nth 0} (select-keys (c/form-key t 3) [:sig :nth]))
-          "its second element is part of the signature")
+      (is (= {:sig ["comment"] :nth 0} (select-keys (c/form-key t 3) [:sig :nth])))
+      (is (= {:sig ["comment"] :nth 1} (select-keys (c/form-key t 14) [:sig :nth])))
       (is (= 1 (:nth (c/form-key "(foo [a])\n(foo [a])\n" 12)))))))
+
+(deftest form-key-edges-test
+  (testing "defmethod forms are told apart by their dispatch value"
+    (let [t "(defmethod area :circle [s] 1)\n(defmethod area :square [s] 2)\n"]
+      (is (= ["defmethod" "area" ":square"] (:sig (c/form-key t 40))))
+      (let [disk "(defmethod area :square [s] 3)\n"
+            {:keys [text]} (c/splice-form t disk (c/form-key t 40) "disk")]
+        (is (= "(defmethod area :circle [s] 1)\n(defmethod area :square [s] 3)\n" text)
+            "the buffer's :square is matched with disk's :square, not by place"))))
+  (testing "a comment block is keyed by its place, not its first form's text"
+    (let [k (c/form-key "(comment\n  (f 1))\n" 3)]
+      (is (= ["comment"] (:sig k)))
+      (is (= {:text "(comment\n  (f 2))\n"}
+             (c/splice-form "(comment\n  (f 1))\n" "(comment\n  (f 2))\n" k "HEAD"))
+          "editing its first form doesn't lose it")))
+  (testing "an empty list is keyed by its text"
+    (is (= ["()"] (:sig (c/form-key "()\n(def a 1)\n" 0)))))
+  (testing "the caret right after a form's closing bracket is in it, as Run Form takes it"
+    (is (= ["def" "a"] (:sig (c/form-key "(def a 1)" 9)))))
+  (testing "a second form with the same signature says which one"
+    (is (= "comment (2nd)" (:name (c/form-key "(comment 1)\n(comment 2)\n" 14))))
+    (is (= {:error "HEAD has no (comment ...), the 2nd."}
+           (c/splice-form "(comment 1)\n(comment 2)\n" "(comment 1)\n" (c/form-key "(comment 1)\n(comment 2)\n" 14) "HEAD")))))
 
 (deftest splice-form-test
   (testing "the buffer with only its form swapped for the other's"
@@ -84,5 +107,7 @@
     (is (= {:error "HEAD has no (defn g ...)."}
            (c/splice-form buf head-text (c/form-key buf (str/index-of buf "(defn g")) "HEAD"))))
   (testing "a form gone from the buffer since the compare"
+    (is (= {:error "The last Run has no (defn f ...)."}
+           (c/splice-form buf "(ns a)\n" (c/form-key buf 12) "the last Run")))
     (is (= {:error "This tab has no (defn f ...) any more."}
            (c/splice-form "(ns a)\n" head-text {:sig ["defn" "f"] :nth 0 :name "defn f"} "HEAD")))))

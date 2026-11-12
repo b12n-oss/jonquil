@@ -434,7 +434,7 @@
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
 (defn row-compare-this-form-and-take
-  "This form: compare with the file on disk, with the caret in defn f, lists
+  "This form vs the file on disk, with the caret in defn f, lists
   only f's difference, titled for it, though (def b ...) differs too; Take
   puts f's disk line back and leaves b's edit alone."
   [ui]
@@ -446,7 +446,7 @@
           edited "(ns c)\n(defn f [x]\n  (dec x))\n(def b 20)\n"
           _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count (editor/editor-text ed)) edited]] :caret 0})
                     (support/place-cursor! (:buf ed) 10)
-                    (run-palette! ui "this form: compare with the file on disk"))
+                    (run-palette! ui "this form vs the file on disk"))
           listed? (await-until 3000 20 #(= 1 (count (lpane/row-texts (:locations-pane ui)))))
           title (on-gtk (lpane/title-text (:locations-pane ui)))
           _ (on-gtk (support/place-cursor! (:buf ed) 22)

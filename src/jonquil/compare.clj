@@ -125,12 +125,24 @@
 ;; --- one form ------------------------------------------------------------------
 
 (defn- form-sig
-  "A top-level form's signature in text: its first two elements' text for
-  a bracketed form ((defn f ...) is [\"defn\" \"f\"]), else its own text."
+  "A top-level form's signature in text: for a bracketed form its first
+  two elements' text ((defn f ...) is [\"defn\" \"f\"]), three for a
+  defmethod (its dispatch value tells the methods apart), just the head for
+  a (comment ...) block (its first form is code being edited); for an
+  atom, or an empty list, its own text."
   [^String text {:keys [start end open kids]}]
-  (if open
-    (mapv (fn [{s :start e :end}] (subs text s e)) (take 2 kids))
-    [(subs text start end)]))
+  (let [elems (fn [n] (mapv (fn [{s :start e :end}] (subs text s e)) (take n kids)))
+        head (first (elems 1))]
+    (cond
+      (or (not open) (empty? kids)) [(subs text start end)]
+      (= "comment" head) ["comment"]
+      (= "defmethod" head) (elems 3)
+      :else (elems 2))))
+
+(defn- ordinal
+  "1st, 2nd, 3rd, 4th, ..., 11th, 12th, 13th, 21st."
+  [n]
+  (str n (if (<= 11 (mod n 100) 13) "th" (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
 
 (defn form-key
   "{:sig :nth :name} for the top-level form of text around caret: its
@@ -139,11 +151,15 @@
   when the caret is between forms."
   [text caret]
   (let [forms (commands/top-level-forms text)]
-    (when-let [f (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))]
-      (let [sig (form-sig text f)]
+    ;; as Run Form takes it: the form the caret is in, else the one it's
+    ;; right after
+    (when-let [f (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
+                     (first (filter (fn [{:keys [end]}] (= end caret)) forms)))]
+      (let [sig (form-sig text f)
+            n (count (filter #(= sig (form-sig text %)) (take-while #(not= f %) forms)))]
         {:sig sig
-         :nth (count (filter #(= sig (form-sig text %)) (take-while #(not= f %) forms)))
-         :name (str/join " " sig)}))))
+         :nth n
+         :name (str (str/join " " sig) (when (pos? n) (str " (" (ordinal (inc n)) ")")))}))))
 
 (defn- find-form
   "The top-level form of text with key's signature, at its :nth place, or nil."
@@ -158,10 +174,13 @@
   [buffer other key label]
   (let [here (find-form buffer key)
         there (find-form other key)
-        shown (str "(" (:name key) " ...)")]
+        shown (str "(" (str/join " " (:sig key)) " ...)"
+                   (when (pos? (:nth key)) (str ", the " (ordinal (inc (:nth key))))))]
     (cond
       (nil? here) {:error (str "This tab has no " shown " any more.")}
-      (nil? there) {:error (str (if (= "disk" label) "The file on disk" label) " has no " shown ".")}
+      (nil? there) {:error (str (if (= "disk" label) "The file on disk" (str/capitalize (subs label 0 1)))
+                                (when-not (= "disk" label) (subs label 1))
+                                " has no " shown ".")}
       :else {:text (str (subs buffer 0 (:start here))
                         (subs other (:start there) (:end there))
                         (subs buffer (:end here)))})))
