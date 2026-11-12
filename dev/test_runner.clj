@@ -142,6 +142,7 @@
     jonquil.gtk.window.ui-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
+    jonquil.gtk.change-sets-part-test
     jonquil.gtk.processes-pane-test
     jonquil.gtk.messages-pane-test
     jonquil.inspect.view-test

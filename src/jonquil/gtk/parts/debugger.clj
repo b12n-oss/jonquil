@@ -235,7 +235,9 @@
     (reset! frames-state (assoc shown :paused? true))
     (debugger-pane/show! dbgp shown)
     (debugger-pane/show-restarts! dbgp (cond-> [{:id :continue :label "Continue"}]
-                                         n (conj {:id :step :label "Step"})))
+                                         n (into [{:id :step :label "Step Into"}
+                                                  {:id :step-over :label "Step Over"}
+                                                  {:id :step-out :label "Step Out"}])))
     (show-right-panel! right :debugger)
     (debugger-pane/focus! dbgp)
     (if n
@@ -308,16 +310,18 @@
       (set-status! "; Nothing is paused."))))
 
 (defn- step!
-  "Step (LM5): runs the paused breakpoint on to the next line. At Break on
-  error's pause it says Step works at a breakpoint, and does nothing."
-  [{:keys [ev* set-status! frames-state]}]
+  "Step (LM5) in mode :step (Step Into), :over (Step Over) or :out (Step
+  Out): runs the paused breakpoint on to the next line that mode stops at.
+  At Break on error's pause it says Step works at a breakpoint, and does
+  nothing."
+  [{:keys [ev* set-status! frames-state]} mode]
   (let [e @ev*
         fs @frames-state]
     (cond
       (and (:paused? fs) (not (:breakpoint fs)))
       (set-status! "; Step works at a breakpoint: Continue or Stop this pause.")
       (and e (satisfies? ev/Breakpoints e))
-      (ev/step-break! e (fn [ok?] (when-not ok? (set-status! "; Nothing is paused at a breakpoint."))))
+      (ev/step-break! e mode (fn [ok?] (when-not ok? (set-status! "; Nothing is paused at a breakpoint."))))
       :else (set-status! "; Nothing is paused at a breakpoint."))))
 
 (defn- set-restart-handler!
@@ -329,7 +333,9 @@
             :edit (edit-retry! ctx)
             :define (define-retry! ctx)
             :continue (continue! ctx)
-            :step (step! ctx)))))
+            :step (step! ctx :step)
+            :step-over (step! ctx :over)
+            :step-out (step! ctx :out)))))
 
 ;; --- The tab hook (LM4) ---------------------------------------------------------
 
@@ -410,8 +416,10 @@
    :define-retry-fn (fn [] (define-retry! ctx))
    :break-fn (fn [] (toggle-break! ctx))
    :continue-fn (fn [] (continue! ctx))
-   :step-fn (fn [] (step! ctx))
-   ;; F10's :when: a breakpoint's pause is showing (GTK thread)
+   :step-fn (fn [] (step! ctx :step))
+   :step-over-fn (fn [] (step! ctx :over))
+   :step-out-fn (fn [] (step! ctx :out))
+   ;; the step keys' :when (F7, F10, Shift+F7): a breakpoint's pause is showing (GTK thread)
    :breakpoint-paused? (fn [] (let [fs @(:frames-state ctx)] (boolean (and (:paused? fs) (:breakpoint fs)))))})
 
 (defn- install

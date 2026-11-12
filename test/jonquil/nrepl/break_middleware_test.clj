@@ -286,7 +286,7 @@
 (deftest closing-a-session-ends-its-step-test
   (let [{:keys [h entry]} (setup)
         t (Thread. (fn []))]
-    (reset! (:stepping entry) t)
+    (reset! (:stepping entry) {:thread t :mode :step :depth 1})
     (swap! debugger/stepping-any conj t)
     (h {"op" "close" "session" "s1" :reply (fn [_])})
     (is (nil? @(:stepping entry)))

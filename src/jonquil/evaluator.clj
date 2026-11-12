@@ -233,9 +233,11 @@
     "What each symbol text in syms names in namespace ns-name, off the
     caller's thread: on-done gets {:heads m :ns-found? b}
     (jonquil.debugger/macro-heads) or {:error s}.")
-  (step-break! [ev on-done]
+  (step-break! [ev mode on-done]
     "Step (stepping): lets the paused breakpoint run on with stepping on
-    for its thread, so the next step point or breakpoint it reaches pauses.
+    for its thread in mode :step (Step Into), :over (Step Over) or :out
+    (Step Out), so the next step point that mode allows, or any
+    breakpoint, pauses it (jonquil.debugger/pause-here?).
     on-done gets true when a breakpoint's pause was waiting, false for
     none, or for Break on error's pause, which Step leaves alone. Continue,
     Stop and the evaluation's end turn stepping off."))

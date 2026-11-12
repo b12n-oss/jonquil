@@ -549,11 +549,12 @@
   (atom #{}))
 
 (defn stepping-here?
-  "True when stepping (an atom holding the thread a Step let go, or nil)
-  belongs to this thread: a step point pauses only the thread that was
-  stepping."
+  "stepping's entry ({:thread :mode :depth}, what a Step left in the
+  atom) when it belongs to this thread, else nil: a step point pauses only
+  the thread that was stepping."
   [stepping]
-  (identical? @stepping (Thread/currentThread)))
+  (let [s @stepping]
+    (when (and s (identical? (:thread s) (Thread/currentThread))) s)))
 
 (defn stop-stepping!
   "Ends stepping (the atom) and takes its thread, and only its own, out of
@@ -561,8 +562,15 @@
   and a session's close."
   [stepping]
   (let [[old _] (reset-vals! stepping nil)]
-    (when old (swap! stepping-any disj old)))
+    (when old (swap! stepping-any disj (:thread old))))
   nil)
+
+(defn frame-depth
+  "How deep a pause is in the code: its frames that are the code's own
+  (user-frames), the breakpoint form's thunk already dropped. Step Over
+  and Step Out compare it."
+  [frames]
+  (count (user-frames frames)))
 
 (defn- step-point?
   "True when breakpoint throw t is a step point's (it pauses only while
@@ -571,10 +579,21 @@
   (boolean (:jonquil/step (ex-data t))))
 
 (defn pause-here?
-  "Whether a breakpoint pauses: a user breakpoint always, a step point
-  (:step?) only while stepping (:stepping?)."
-  [{:keys [step? stepping?]}]
-  (boolean (or (not step?) stepping?)))
+  "Whether a breakpoint pauses: a user breakpoint always; a step point
+  (:step?) only while this thread is stepping (:stepping, its entry
+  {:mode :depth}, nil when not), by its mode against the depth here
+  (:depth): Step (:step) anywhere, Step Over (:over) in the same function
+  or a caller (depth at most the Step's), Step Out (:out) only in a caller
+  (depth below it)."
+  [{:keys [step? stepping depth]}]
+  (boolean
+   (cond
+     (not step?) true
+     (nil? stepping) false
+     :else (case (:mode stepping)
+             :over (<= depth (:depth stepping))
+             :out (< depth (:depth stepping))
+             true))))
 
 (defn breakpoint-data
   "frames-data for breakpoint throw t: titled \"Breakpoint at line N\", or
@@ -611,6 +630,16 @@
         (serve-pause {:brk brk :callbacks callbacks :t t :frames frames :d d})
         true))))
 
+(defn- pauses-here?
+  "pause-here? for breakpoint throw t with the live frames, the thunk
+  frame dropped as at a pause: the depth is counted only for a step point
+  this thread is stepping through."
+  [t frames stepping]
+  (let [step? (step-point? t)
+        entry (when step? (stepping-here? stepping))]
+    (pause-here? {:step? step? :stepping entry
+                  :depth (when entry (frame-depth (rest frames)))})))
+
 (defn breakpoint-handler
   "A breakpoint hook pausing through brk with the callbacks (callbacks-fn)
   answers at pause time. (can-pause?) false lets a breakpoint run on, as
@@ -621,27 +650,35 @@
   ([brk callbacks-fn can-pause? stepping]
    (fn [t frames]
      (when (and (breakpoint-line t)
-                (pause-here? {:step? (step-point? t) :stepping? (stepping-here? stepping)})
+                (pauses-here? t frames stepping)
                 (can-pause?))
        (pause-at-breakpoint {:brk brk :callbacks (callbacks-fn) :t t :frames frames
                              :can-pause? can-pause? :stepping stepping})))))
 
+(defn- start-stepping!
+  "Puts pause p's thread in stepping with mode and the pause's depth, and
+  in stepping-any."
+  [stepping p mode]
+  (stop-stepping! stepping)
+  (reset! stepping {:thread (:thread p) :mode mode :depth (frame-depth (:frames p))})
+  (swap! stepping-any conj (:thread p)))
+
 (defn step!
   "Step: lets brk's paused breakpoint (or step) run on with stepping on for
-  the thread it paused, so the next step point or breakpoint that thread
-  reaches pauses. True when such a pause was waiting; false, with nothing
-  changed, for none, one already let go, or a pause that isn't a
-  breakpoint's (Break on error's: Step works at a breakpoint)."
-  [{:keys [^LinkedBlockingQueue queue paused]} stepping]
-  (let [p @paused]
-    (boolean
-     (when (and p (:breakpoint (:data p)) (compare-and-set! (:continued p) false true))
-       ;; on before the thread runs again, so its next line sees it
-       (stop-stepping! stepping)
-       (reset! stepping (:thread p))
-       (swap! stepping-any conj (:thread p))
-       (.put queue :continue)
-       true))))
+  the thread it paused, in mode :step (Step Into, the default), :over or
+  :out (see pause-here?), so the next step point it allows, or any
+  breakpoint, pauses that thread. True when such a pause was waiting;
+  false, with nothing changed, for none, one already let go, or a pause
+  that isn't a breakpoint's (Break on error's: Step works at a breakpoint)."
+  ([brk stepping] (step! brk stepping :step))
+  ([{:keys [^LinkedBlockingQueue queue paused]} stepping mode]
+   (let [p @paused]
+     (boolean
+      (when (and p (:breakpoint (:data p)) (compare-and-set! (:continued p) false true))
+        ;; on before the thread runs again, so its next line sees it
+        (start-stepping! stepping p mode)
+        (.put queue :continue)
+        true)))))
 
 (defn arm-breakpoints!
   "Installs hook as breakpoint-hook, after turning debug mode on when it's

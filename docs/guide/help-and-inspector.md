@@ -657,15 +657,24 @@ status bar says why.
 
 ### Stepping
 
-Paused at a breakpoint, **Step** (F10, **Step to the next line** in the
-palette, or the **Step** button beside Continue in the Frames panel) runs on
-to the next line and pauses there. The panel's title reads
-`Stepped to line 3` and the console says `; Stepped to line 3.`. A green
+Paused at a breakpoint, three steps run on and pause again. Each has a key,
+a palette entry and a button beside Continue in the Frames panel:
+
+| Step | Key | Palette | Pauses at |
+|---|---|---|---|
+| **Step Into** | F7 | Step to the next line | the next line reached, inside a call too |
+| **Step Over** | F10 | Step over the next line | the next line in this function or a caller, running a call on this line through |
+| **Step Out** | Shift+F7 | Step out of this function | the caller's next line, once this function has returned |
+
+The keys follow VS Code's F10 and F11 with F7 in F11's place, since macOS
+keeps F11 for Show Desktop. The panel's title reads
+`Stepped to line 3` for all three, and the console says
+`; Stepped to line 3.`. A green
 arrow in the gutter marks the paused line, in the tab the code came from,
 and goes away on Continue, Step or Stop. When the tab was edited since its
 breakpoints were sent, the line may have moved, so there's no arrow and the
-status bar says so. F10 steps only while a breakpoint's pause shows, and
-passes through otherwise; at a Break on error pause Step does nothing and
+status bar says so. The keys step only while a breakpoint's pause shows,
+and pass through otherwise; at a Break on error pause Step does nothing and
 says that it works at a breakpoint.
 
 Stepping covers the forms that hold a breakpoint. When a top-level form (or
@@ -674,9 +683,22 @@ it with a step point on every other line that can hold a breakpoint, by the
 same placement rules. A step point pauses only while stepping, which lasts
 from a Step to the next pause. So:
 
-- **Step** goes to the next line the run reaches in that form, or after a
-  return to the caller's next line when the caller holds a breakpoint too.
-  A call into a form with no breakpoint runs through without pausing.
+- **Step Into** goes to the next line the run reaches in that form, or
+  after a return to the caller's next line when the caller holds a
+  breakpoint too. A call into a form with no breakpoint runs through
+  without pausing.
+- **Step Over** and **Step Out** compare how deep the code is: Over pauses
+  at the same depth or above, so a call on the line runs through, and Out
+  pauses only above, once the function returned. Out from the outermost
+  instrumented function runs to the next dot or the end, as Continue. A dot
+  pauses whichever step is running. Step Over at the end of a function
+  that a library loop calls (`mapv`, `reduce`, `run!`) pauses in that
+  function's next call, since the loop itself has no frame to return to.
+  Chrome's debugger does the same. Use Continue, or Step Out to leave the
+  loop's function. An inline
+  `fn` or `#()`, and a `for`, `lazy-seq`, `delay` or `with-redefs` body
+  inside a defn, run as calls of their own, so Step Over steps over them,
+  as JVM debuggers do.
 - **Continue** turns stepping off and runs to the next breakpoint.
 - **Stop** ends the run, as at any pause, and stepping with it.
 
@@ -684,8 +706,7 @@ A form with dots and nobody stepping pauses only at the dots, and its step
 points cost next to nothing: each checks one flag and goes on, without
 throwing. A Step belongs to the thread that was paused: another thread
 reaching a step point meanwhile runs on, so the step lands on the line the
-paused code reaches next. Break on error never turns stepping on. Step Over
-and Step Out (skip or leave a nested call) aren't there yet.
+paused code reaches next. Break on error never turns stepping on.
 
 ### Restarts
 

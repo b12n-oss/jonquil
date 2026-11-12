@@ -619,10 +619,25 @@
     (is (= {:jonquil/breakpoint 4} (data (read-string (bp/breakpoint-form 4)))) "the old shape without opts")))
 
 (deftest pause-decision-test
-  (is (true? (debugger/pause-here? {:step? false :stepping? false})) "a user breakpoint always")
-  (is (true? (debugger/pause-here? {:step? false :stepping? true})))
-  (is (false? (debugger/pause-here? {:step? true :stepping? false})) "a step point only while stepping")
-  (is (true? (debugger/pause-here? {:step? true :stepping? true}))))
+  (is (true? (debugger/pause-here? {:step? false :stepping nil})) "a user breakpoint always")
+  (is (true? (debugger/pause-here? {:step? false :stepping {:mode :step :depth 2} :depth 5})))
+  (is (false? (debugger/pause-here? {:step? true :stepping nil})) "a step point only while stepping")
+  (is (true? (debugger/pause-here? {:step? true :stepping {:mode :step :depth 2} :depth 1}))))
+
+(deftest pause-decision-by-mode-and-depth-test
+  (let [fr3 (mapv (fn [n] {:fn (symbol "user" (str "k" n "-not-a-var")) :line n :locals {}}) [1 2 3])
+        frames-at {4 (into [{:fn 'user/deeper :line 9 :locals {}}] fr3) 3 fr3 2 (vec (rest fr3))}
+        at (fn [mode depth] (debugger/pause-here? {:step? true :stepping {:mode mode :depth 3 :frames fr3}
+                                                   :depth depth :frames (frames-at depth)}))]
+    (testing "Step (into) pauses at any depth"
+      (is (= [true true true] (mapv #(at :step %) [4 3 2]))))
+    (testing "Step Over: this function or a caller, never a deeper call"
+      (is (= [false true true] (mapv #(at :over %) [4 3 2]))))
+    (testing "Step Out: only a caller, once this function returned"
+      (is (= [false false true] (mapv #(at :out %) [4 3 2]))))
+    (testing "a dot pauses in every mode, at any depth"
+      (doseq [mode [:step :over :out] depth [4 3 2]]
+        (is (true? (debugger/pause-here? {:step? false :stepping {:mode mode :depth 3} :depth depth})))))))
 
 (deftest nothing-new-pauses-with-stepping-off-test
   (if-not (debugger/break-available?)
@@ -725,12 +740,12 @@
         (is (= v (apply (eval (read-string out)) args)) (str "with step points, stepping off:\n" out))))))
 
 (deftest step-only-pauses-the-stepping-thread-test
-  (is (true? (debugger/pause-here? {:step? false :stepping? false})))
   (let [me (Thread/currentThread)
         other (Thread. (fn []))]
-    (is (true? (debugger/stepping-here? (atom me))))
-    (is (false? (debugger/stepping-here? (atom other))) "a Step belongs to the thread that was paused")
-    (is (false? (debugger/stepping-here? (atom nil))))))
+    (is (= {:thread me :mode :over :depth 2} (debugger/stepping-here? (atom {:thread me :mode :over :depth 2}))))
+    (is (nil? (debugger/stepping-here? (atom {:thread other :mode :step :depth 1})))
+        "a Step belongs to the thread that was paused")
+    (is (nil? (debugger/stepping-here? (atom nil))))))
 
 (deftest step-refuses-a-pause-that-isnt-a-breakpoint-test
   (let [brk (debugger/make-break)
@@ -755,7 +770,7 @@
 
 (deftest stopping-one-step-leaves-anothers-test
   (let [a (Thread. (fn [])) b (Thread. (fn []))
-        sa (atom a) sb (atom b)]
+        sa (atom {:thread a :mode :step :depth 1}) sb (atom {:thread b :mode :step :depth 1})]
     (reset! debugger/stepping-any #{a b})
     (debugger/stop-stepping! sb)
     (is (= #{a} @debugger/stepping-any) "B's end takes only B's entry")
@@ -764,3 +779,4 @@
     (debugger/stop-stepping! sa)
     (is (empty? @debugger/stepping-any))
     (is (nil? @sa))))
+

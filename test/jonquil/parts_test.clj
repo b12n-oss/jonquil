@@ -96,7 +96,7 @@
            :compare/disk :compare/head :compare/take :compare/last-run
            :compare-form/disk :compare-form/head :compare-form/last-run
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
-           :debug/break-on-error :debug/continue :debug/step :restart/retry :restart/edit :restart/define
+           :debug/break-on-error :debug/continue :debug/step :debug/step-over :debug/step-out :restart/retry :restart/edit :restart/define
            :palette/open :help/describe-key :help/key-bindings :help/recent-keys
            :debug/toggle-breakpoint :debug/clear-breakpoints
            :pages/show :pages/bookmark :pages/bookmarks :pages/guide}
@@ -774,6 +774,7 @@
             :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn]
             :run/line-counts [:line-counts-fn] :run/clear-line-counts [:clear-line-counts-fn]
             :debug/break-on-error [:break-fn] :debug/continue [:continue-fn] :debug/step [:step-fn]
+            :debug/step-over [:step-over-fn] :debug/step-out [:step-out-fn]
             :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn]
             :restart/define [:define-retry-fn]}
            (update-vals (:commands spec) :call)))

@@ -215,33 +215,40 @@
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)))
 
+(defn- say-error!
+  "A set-breakpoints! answer handler: says r's error, with prefix, when it
+  has one."
+  [{:keys [set-status!]} prefix]
+  (fn [r] (when-let [err (:error r)] (set-status! (str prefix err)))))
+
+(defn- runtime-switched!
+  "A dialect switch from evaluator old to new: the old runtime's hook goes
+  with it, and the new one is armed the same way, pending while its child
+  isn't running yet, when a tab has breakpoints."
+  [wctx old new]
+  (when (gbp/supported? old) (ev/set-breakpoints! old false (fn [_])))
+  (when (gbp/supported? new)
+    (on-gui! (fn [] (when (any-dots? wctx)
+                      (arm-with! wctx new (say-error! wctx "; Breakpoints are off: ")))))))
+
+(defn- tab-removed!
+  "The tab hook for a tab about to close, while it and its buffer are still
+  there: its dots go, and with none left anywhere the runtime is disarmed."
+  [wctx t]
+  (when (and (pos? (gbp/clear! (:ed t))) (not (any-dots? wctx)))
+    (arm! wctx (say-error! wctx "; Breakpoints: "))))
+
 (defn- install
   "The breakpoints part for one window: the two command fns, the tab hooks,
   and a watch that arms a new evaluator (a dialect switch) while a tab has
   breakpoints."
-  [{:keys [ev* set-status!] :as wctx}]
+  [{:keys [ev*] :as wctx}]
   (add-watch ev* ::breakpoints
-             (fn [_ _ old new]
-               (when-not (identical? old new)
-                 ;; the old runtime's hook goes with it
-                 (when (gbp/supported? old) (ev/set-breakpoints! old false (fn [_])))
-                 ;; the new one is armed the same way, pending while its
-                 ;; child isn't running yet
-                 (when (gbp/supported? new)
-                   (on-gui! (fn [] (when (any-dots? wctx)
-                                     (arm-with! wctx new
-                                                (fn [r] (when-let [err (:error r)]
-                                                          (set-status! (str "; Breakpoints are off: " err))))))))))))
+             (fn [_ _ old new] (when-not (identical? old new) (runtime-switched! wctx old new))))
   {:fns {:toggle-breakpoint-fn (fn [] (toggle! wctx))
          :clear-breakpoints-fn (fn [] (clear-all! wctx))}
    :hooks {:on-tab-wired (fn [_ t] (tab-wired! wctx t))
-           ;; called while the tab and its buffer are still there: its
-           ;; dots go, and with none left anywhere the runtime is disarmed
-           :on-tab-removed (fn [_ t]
-                             (when (pos? (gbp/clear! (:ed t)))
-                               (when-not (any-dots? wctx)
-                                 (arm! wctx (fn [r] (when-let [err (:error r)]
-                                                      (set-status! (str "; Breakpoints: " err))))))))}})
+           :on-tab-removed (fn [_ t] (tab-removed! wctx t))}})
 
 (def part
   "The breakpoints part's install fn, (part wctx) -> contribution."

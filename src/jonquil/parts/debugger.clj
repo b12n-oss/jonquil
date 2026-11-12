@@ -26,12 +26,21 @@
                      :call [:continue-fn]}
     :debug/step {:doc "Step to the next line: run the paused breakpoint on to the next line it reaches (Jolt)."
                  :scope :window :call [:step-fn]}
+    :debug/step-over {:doc "Step over the next line: run any call on it through, pausing in this function or a caller (Jolt)."
+                      :scope :window :call [:step-over-fn]}
+    :debug/step-out {:doc "Step out of this function: run on until it returns, pausing in its caller (Jolt)."
+                     :scope :window :call [:step-out-fn]}
     :restart/retry {:doc "Retry the last failed evaluation." :scope :window :call [:retry-fn]}
     :restart/edit {:doc "Edit the last failed evaluation at the prompt." :scope :window
                    :call [:edit-retry-fn]}
     :restart/define {:doc "Define the name the last error couldn't resolve, then retry." :scope :window
                      :call [:define-retry-fn]}}
    :panels [{:id :debugger :label "Frames"}]
-   ;; F10: free in keymap.edn, and macOS reserves no F10 shortcut; only
-   ;; while a breakpoint's pause shows, else it passes through
-   :bindings {:window [{:key "F10" :exact #{} :when [:breakpoint-paused] :command :debug/step}]}})
+   ;; VS Code's F10 Step Over, F11 Step Into, Shift+F11 Step Out, with F7
+   ;; for F11: macOS's Show Desktop takes F11 (keycode 103), while F7
+   ;; (keycode 98) and F10 (109) have no system shortcut and nothing in
+   ;; keymap.edn; Shift+F10 is the context menu. Only while a breakpoint's
+   ;; pause shows, else the key passes through
+   :bindings {:window [{:key "F10" :exact #{} :when [:breakpoint-paused] :command :debug/step-over}
+                       {:key "F7" :exact #{} :when [:breakpoint-paused] :command :debug/step}
+                       {:key "F7" :exact #{:shift} :when [:breakpoint-paused] :command :debug/step-out}]}})
