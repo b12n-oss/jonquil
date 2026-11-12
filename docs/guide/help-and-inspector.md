@@ -38,6 +38,44 @@ symbol at the caret. Escape or moving the caret closes it.
 
 ![The quick documentation popup over a call to a core function](../images/quick-doc.png)
 
+### The docs panel
+
+The popovers close as soon as you type, so they can't stay beside the code.
+**Show Doc in Panel**, in the palette or on Cmd/Ctrl+Alt+9, puts the doc of
+the symbol at the caret in a panel on the right, where it stays while you
+keep working. It asks the way full doc does: a dialect with a full doc
+answers with that (JVM Clojure's includes ClojureDocs examples, each with
+Run in Interactions and Copy to Definitions), and Jolt and ClojureDart show
+the quick doc text. (Cmd/Ctrl+Alt+D would be easier to remember, but macOS
+takes Cmd+Option+D to hide the Dock.) With no symbol at the caret the
+command just brings the panel back and focuses it.
+
+- **Following a symbol.** Click a symbol in the page and its doc becomes the
+  next page. A symbol with no docs says so on the panel's footer and leaves
+  the page as it was, and a drag that selects text isn't a click. Guide
+  pages work the same way.
+- **History.** Back and Forward, or `[` and `]` while the panel has focus,
+  move through the last 50 pages. Opening a doc after going back drops the
+  pages that were ahead, as a browser does. Back and Forward show a page as
+  it read when you first opened it, so Show Doc in Panel on the same symbol
+  asks again when you want a fresh one.
+- **Bookmarks.** The Bookmark button, or **Bookmark This Page** in the
+  palette, saves the page you're reading, and pressing it on a bookmarked
+  page removes the bookmark. They live in the settings file under
+  `:doc-bookmarks`, so every window and the next start have them. **Doc
+  Bookmarks…** lists them in the palette and picking one opens it. A symbol
+  is kept under the qualified name full doc gave (`clojure.core/map`), or as
+  you typed it when the dialect has no full doc, and is looked up again from
+  the tab you're in.
+- **Guide pages.** **Open a Guide Page…** lists the pages of `docs/guide`
+  beside the Jonquil source tree that is running. A page shows as plain
+  text: headings underlined, links as their words, code indented. The
+  installed app is one compiled file with no source tree, so there the
+  command says the guide isn't installed.
+
+**Switch to panel: Doc Pages** brings the panel back once you've had it
+open.
+
 ### Jump to definition
 
 F12 or Ctrl+B jumps to the symbol's definition: the nearest local binding,
@@ -94,7 +132,7 @@ was there. The palette lists **Switch to panel: name** for each panel you've
 had open in this window, the one you saw last first, leaving out the one on
 screen. Cmd/Ctrl+Alt+1 to 8 each go to one panel: 1 the Inspector, 2
 Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages and 8
-Processes. Both focus the panel
+Processes (Cmd/Ctrl+Alt+9 shows a doc in [the docs panel](#the-docs-panel)). Both focus the panel
 when it's showing. Otherwise Frames, Trace and Plugins open the way their own
 commands do, asking for the last error, the recorded calls or the plugin
 list as they are now. The Inspector, Source and Locations come back with

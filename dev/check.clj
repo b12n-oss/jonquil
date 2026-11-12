@@ -9,6 +9,7 @@
     jonquil.parts.command-palette
     jonquil.parts.debugger
     jonquil.parts.disk-poll
+    jonquil.parts.docs
     jonquil.parts.file-tree
     jonquil.parts.messages
     jonquil.parts.layouts
@@ -38,6 +39,7 @@
     jonquil.fibers-rt
     jonquil.hints
     jonquil.layouts
+    jonquil.docs-panel
     jonquil.instrument-lock
     jonquil.line-counts
     jonquil.messages
@@ -137,6 +139,7 @@
     jonquil.gtk.gutter
     jonquil.gtk.trace-pane
     jonquil.gtk.processes-pane
+    jonquil.gtk.docs-pane
     jonquil.gtk.messages-pane
     jonquil.gtk.console-view
     jonquil.gtk.tab
@@ -144,6 +147,7 @@
     jonquil.gtk.parts.command-palette
     jonquil.gtk.parts.debugger
     jonquil.gtk.parts.disk-poll
+    jonquil.gtk.parts.docs
     jonquil.gtk.parts.file-tree
     jonquil.gtk.parts.messages
     jonquil.gtk.parts.layouts

@@ -105,6 +105,7 @@
    :inspect! (fn [start]
                (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
    :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to!
+   :run-example! win-run/do-run-example!
    :source-ctx source-ctx
    :place-caret-and-scroll! win-help/place-caret-and-scroll! :file-name win-files/file-name
    :open-in-tab! win-help/open-in-tab! :show-source! win-help/show-source!

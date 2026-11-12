@@ -305,3 +305,24 @@
     (let [s (settings/load-settings path)]
       (is (= {"Good" {:tree? false}} (:layouts s)) "only string names with valid layouts are kept")
       (is (re-find #":layouts" (:warning s))))))
+
+(deftest doc-bookmarks-test
+  (let [path (str (temp-dir) "/settings.edn")
+        bs [{:kind :symbol :id "clojure.core/map"} {:kind :guide :id "keys"}]]
+    (is (not (contains? (settings/load-settings path) :doc-bookmarks)) "no file, none")
+    (is (nil? (settings/save-settings! path {:doc-bookmarks bs})))
+    (is (= bs (:doc-bookmarks (settings/load-settings path))))
+    (is (= {:doc-bookmarks bs} (select-keys (settings/load-settings path) [:doc-bookmarks]))
+        "saving them keeps the file's other keys")
+    (spit path (pr-str {:doc-bookmarks [{:kind :symbol :id "map"} {:kind :url :id "x"} "map" {:kind :guide}
+                                        {:kind :symbol :id "map"}]}))
+    (let [s (settings/load-settings path)]
+      (is (= [{:kind :symbol :id "map"}] (:doc-bookmarks s))
+          "only valid pages are kept, once each")
+      (is (re-find #":doc-bookmarks" (:warning s))))
+    (spit path (pr-str {:doc-bookmarks :nope}))
+    (let [s (settings/load-settings path)]
+      (is (not (contains? s :doc-bookmarks)))
+      (is (re-find #":doc-bookmarks" (:warning s))))
+    (spit path (pr-str {:theme :light :doc-bookmarks []}))
+    (is (not (contains? (settings/load-settings path) :doc-bookmarks)) "an empty list reads as none")))

@@ -68,6 +68,9 @@
   {:key "6" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/plugins}
   {:key "7" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/messages}
   {:key "8" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/processes}
+  ;; Show Doc in Panel. Cmd+Alt+D would be the mnemonic, but macOS takes it
+  ;; to hide the Dock before the app sees it.
+  {:key "9" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :doc-panel/show}
   {:key "1" :mods #{:cmd} :command :tab/select :args {:n 1}}
   {:key "2" :mods #{:cmd} :command :tab/select :args {:n 2}}
   {:key "3" :mods #{:cmd} :command :tab/select :args {:n 3}}

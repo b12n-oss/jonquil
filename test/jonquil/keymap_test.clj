@@ -206,8 +206,8 @@
                 @got))]
     (is (= [[:panel/inspector nil] [:panel/source nil] [:panel/locations nil]
             [:panel/frames nil] [:panel/trace nil] [:panel/plugins nil] [:panel/messages nil]
-            [:panel/processes nil]]
-           (for [d "12345678"] (run (int d) (bit-or ctrl alt) nil)))
+            [:panel/processes nil] [:doc-panel/show nil]]
+           (for [d "123456789"] (run (int d) (bit-or ctrl alt) nil)))
         "Linux: Ctrl+Alt and the plain digit")
     (is (= [:panel/trace nil] (run 0x100221e (bit-or meta-m alt) "5"))
         "macOS: Option+5's infinity, through the physical key")
@@ -215,6 +215,8 @@
         "macOS: Option+7's pilcrow, through the physical key")
     (is (= [:panel/processes nil] (run 0x1002022 (bit-or meta-m alt) "8"))
         "macOS: Option+8's bullet, through the physical key")
+    (is (= [:doc-panel/show nil] (run 0xaa (bit-or meta-m alt) "9"))
+        "macOS: Option+9's ordinal indicator, through the physical key")
     (is (= [:tab/select {:n 1}] (run 0x31 ctrl nil)) "Ctrl+1 is still tab 1")
     (is (not= :panel/inspector (first (run 0x31 (bit-or ctrl alt shift) nil))) "Shift held: not a panel key")))
 

@@ -9,8 +9,9 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 <details>
-<summary><strong>44 entries</strong></summary>
+<summary><strong>45 entries</strong></summary>
 
+- The docs panel: **Show Doc in Panel** (Cmd/Ctrl+Alt+9, or the palette) keeps the doc of the symbol at the caret in the right-hand slot instead of a popover that closes as you type. A dialect with full doc shows it with its ClojureDocs examples and their Run and Copy buttons, and Jolt and ClojureDart show the quick doc text. A click on a symbol in the page opens its doc, Back, Forward and `[` `]` move through the last 50 pages, **Bookmark This Page** saves into `:doc-bookmarks` in the settings file and **Doc Bookmarks…** reopens one, and **Open a Guide Page…** shows a page of `docs/guide` as plain text when Jonquil runs from a source checkout (the compiled app says the guide isn't installed). Switch to panel lists it as Doc Pages.
 - This form vs the file on disk, vs git HEAD and vs the last Run: the compare commands for just the top-level form around the caret, its differences in the Locations list and Take working on it alone. The form is matched in the other version by its first two elements, such as `defn f` (a `defmethod` by its dispatch value too), and its place among forms that share them.
 - Find Usages in Project tells same-named symbols apart: it works out which var the symbol at the caret names from the file's `ns` form, its own definitions and the local bindings, and lists only that var's places at first. The **Other vars** and **Unresolved** check boxes, each with its count, bring back another var's or a local's places and the ones a file can't decide (`:refer :all`, `:use`, a name a macro defines).
 - Quick Doc for This Var: on a var result in the console, the right-click menu and the palette print that var's doc into the console as comment lines, below the result.
