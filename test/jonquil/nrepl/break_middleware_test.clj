@@ -264,3 +264,21 @@
           [r] (ask h {"op" "jonquil-breakpoints" "session" "s1" "on" "true"})]
       (is (string? (get r "error")) "arming says why, so the window sends no breakpoint code")
       (is (nil? @debugger/breakpoint-hook)))))
+
+(deftest step-op-and-its-end-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [{:keys [h entry]} (setup)
+          sent (atom [])]
+      (try
+        (h {"op" "eval" "session" "s1" "jonquil-breakpoints" "1" :reply (fn [m] (swap! sent conj m))})
+        (let [f (eval (read-string (:text (bp/instrument "(fn [x]\n  (let [y (inc x)]\n    (str y)\n    (* y 2)))" [2]))))
+              titles (fn [] (keep #(some-> (get % "jonquil-paused") edn/read-string :title) @sent))
+              fut (eval-under entry (fn [_] (f 1)))]
+          (is (wait-for #(= ["Breakpoint at line 2"] (titles))))
+          (is (= "true" (get (first (ask h {"op" "jonquil-break-step" "session" "s1"})) "stepped")))
+          (is (wait-for #(= ["Breakpoint at line 2" "Stepped to line 3"] (titles))))
+          (is (= "true" (get (first (ask h {"op" "jonquil-break-continue" "session" "s1"})) "continued")))
+          (is (= 4 (deref fut 5000 :blocked)) "Continue: line 4's step point doesn't pause")
+          (is (false? @(:stepping entry))))
+        (finally (reset! debugger/breakpoint-hook nil) (debugger/set-debug-mode! false))))))

@@ -24,9 +24,13 @@
                            :scope :window :call [:break-fn]}
     :debug/continue {:doc "Continue from the break: let the error unwind." :scope :window
                      :call [:continue-fn]}
+    :debug/step {:doc "Step to the next line: run the paused breakpoint on to the next line it reaches (Jolt)."
+                 :scope :window :call [:step-fn]}
     :restart/retry {:doc "Retry the last failed evaluation." :scope :window :call [:retry-fn]}
     :restart/edit {:doc "Edit the last failed evaluation at the prompt." :scope :window
                    :call [:edit-retry-fn]}
     :restart/define {:doc "Define the name the last error couldn't resolve, then retry." :scope :window
                      :call [:define-retry-fn]}}
-   :panels [{:id :debugger :label "Frames"}]})
+   :panels [{:id :debugger :label "Frames"}]
+   ;; F10: free in keymap.edn, and macOS reserves no F10 shortcut
+   :bindings {:window [{:key "F10" :exact #{} :command :debug/step}]}})

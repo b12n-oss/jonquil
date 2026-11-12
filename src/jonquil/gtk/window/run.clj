@@ -313,7 +313,7 @@
           (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                 ;; LM5: the tab's breakpoints go in the text sent
                 _ (say-dropped! cv ed @ev* text nil)
-                warning (ev/eval! @ev* (gbp/sent-text ed @ev* text nil) (opts))]
+                warning (ev/eval! @ev* (gbp/sent-text ed @ev* text nil (:id tab)) (opts))]
             (say-busy! cv notify warning)))))))
 
 (defn do-run!
@@ -452,7 +452,7 @@
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         ;; LM5: sent with the breakpoints in its range; echoed and recorded as typed
         (say-dropped! cv ed @ev* (:text snap) (selection-range snap text))
-        (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) (selection-range snap text))
+        (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) (selection-range snap text) (:id tab))
                        {:ns-source (:text snap) :owner (:id tab) :hook-code text
                         :hook-source :selection :hook-tab (:id tab)
                         :record (tab-record tab ev* {:source :selection :code text
@@ -662,7 +662,7 @@
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         ;; LM5: sent with the breakpoints in the form
         (say-dropped! cv ed @ev* (:text snap) {:start start :end end})
-        (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) {:start start :end end})
+        (do-repl-eval! ctx ed (gbp/sent-text ed @ev* (:text snap) {:start start :end end} (:id tab))
                        {:ns-source (:text snap) :owner (:id tab) :hook-code text
                         :hook-source :form :hook-tab (:id tab)
                         :record (tab-record tab ev* {:source :form :code text
@@ -687,7 +687,7 @@
       (before-run-stopped ctx :form tab forms) :refused
       :else
       (do (cview/echo-entry! cv forms true)
-          (do-repl-eval! ctx ed (joined (fn [r] (gbp/sent-text ed @ev* text r)))
+          (do-repl-eval! ctx ed (joined (fn [r] (gbp/sent-text ed @ev* text r (:id tab))))
                          {:ns-source text :owner (:id tab) :hook-code forms
                           :hook-source :form :hook-tab (:id tab) :then then
                           :record (tab-record tab ev* {:source :form :code forms :buffer-text text})})

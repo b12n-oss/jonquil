@@ -1076,6 +1076,13 @@
                    (on-done r))))
     nil)
   (breakpoints-on? [_] (boolean (:breakpoints-on? @state)))
+  (step-break! [this]
+    ;; as continue-break!: answered from :paused?, the op on a future
+    (if-let [{:keys [conn session]} (when (:paused? @state) (runtime this))]
+      (do (future (try (client/request-sync conn {:op "jonquil-break-step" :session session} request-timeout-ms)
+                       (catch Throwable _ nil)))
+          true)
+      false))
   (macro-heads! [this ns-name syms on-done]
     (child-op! this {:op "jonquil-breakpoints" :msg {:ns (str ns-name) :heads (pr-str (vec syms))}
                      :unavailable "Breakpoints need Jolt's session middleware in the child."

@@ -232,7 +232,12 @@
   (macro-heads! [ev ns-name syms on-done]
     "What each symbol text in syms names in namespace ns-name, off the
     caller's thread: on-done gets {:heads m :ns-found? b}
-    (jonquil.debugger/macro-heads) or {:error s}."))
+    (jonquil.debugger/macro-heads) or {:error s}.")
+  (step-break! [ev]
+    "Step (stepping): lets the paused breakpoint run on with stepping on,
+    so the next step point or breakpoint it reaches pauses. True when a
+    pause was waiting. Continue, Stop and the evaluation's end turn
+    stepping off."))
 
 (defprotocol Trace
   "Tracing functions where the code runs (jonquil.trace-rt): the two Jolt

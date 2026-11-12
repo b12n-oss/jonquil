@@ -577,3 +577,101 @@
         rng (bp/resend-range t 2)]
     (is (false? (bp/edited? t nil rng {:disk-text (str/replace t "\n" "\r\n")})) "CRLF on disk is the same form")
     (is (true? (bp/edited? t nil rng {:disk-text :too-big})) "a file too big to read counts as edited")))
+
+;; --- stepping (LM5) ----------------------------------------------------------------
+
+(defn- forms-in
+  "The breakpoint forms in out, as [line step?] in text order."
+  [out]
+  (mapv (fn [[_ n step]] [(parse-long n) (some? step)])
+        (re-seq #"\{:jonquil/breakpoint (\d+)( :jonquil/step true)?" out)))
+
+(deftest step-points-fill-the-form-that-holds-a-dot-test
+  (let [t (lines "(defn sa [x]"
+                 "  (let [y (inc x)]"
+                 "    (* y 2)))"
+                 "(defn other [z]"
+                 "  (dec z))")
+        {out :text ls :lines steps :steps} (instrument-h t [2])]
+    (is (= [2] ls) "the user's breakpoint")
+    (is (= [3] steps) "every other line of sa that can pause is a step point")
+    (is (= [[2 false] [3 true]] (forms-in out)) "and none in other, which holds no dot")
+    (is (= 6 ((eval (read-string (first (str/split out #"\n\(defn other"))))
+              2))
+        "with the hook empty they all do nothing")))
+
+(deftest step-points-follow-a-range-and-comment-blocks-test
+  (let [t (lines "(comment"
+                 "  (defn cf [x]"
+                 "    (inc x)"
+                 "    (dec x))"
+                 "  (defn cg []"
+                 "    (str 1)))")
+        {steps :steps} (instrument-h t [3])]
+    (is (= [4] steps) "a comment block's forms are units of their own: cg gets none")))
+
+(deftest breakpoint-form-carries-its-kind-and-tab-test
+  (let [user (read-string (bp/breakpoint-form 4 {:tab 7}))
+        step (read-string (bp/breakpoint-form 5 {:step? true :tab 7}))
+        data (fn [form] (some #(when (and (map? %) (:jonquil/breakpoint %)) %) (tree-seq coll? seq form)))]
+    (is (= {:jonquil/breakpoint 4 :jonquil/tab 7} (data user)))
+    (is (= {:jonquil/breakpoint 5 :jonquil/step true :jonquil/tab 7} (data step)))
+    (is (= {:jonquil/breakpoint 4} (data (read-string (bp/breakpoint-form 4)))) "the old shape without opts")))
+
+(deftest pause-decision-test
+  (is (true? (debugger/pause-here? {:step? false :stepping? false})) "a user breakpoint always")
+  (is (true? (debugger/pause-here? {:step? false :stepping? true})))
+  (is (false? (debugger/pause-here? {:step? true :stepping? false})) "a step point only while stepping")
+  (is (true? (debugger/pause-here? {:step? true :stepping? true}))))
+
+(deftest nothing-new-pauses-with-stepping-off-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [brk (debugger/make-break)
+          stepping (atom false)
+          pauses (atom [])
+          hook (debugger/breakpoint-handler brk (fn [] {:on-pause (fn [d] (swap! pauses conj (:title d))
+                                                                    (future (debugger/continue! brk)))})
+                                            (constantly true) stepping)]
+      (try
+        (debugger/arm-breakpoints! hook)
+        (let [f (eval (read-string (:text (instrument-h (lines "(fn [x]"
+                                                               "  (let [y (inc x)]"
+                                                               "    (* y"
+                                                               "       2)))")
+                                                        [2]))))]
+          (is (= 4 (deref (future (f 1)) 5000 :blocked)))
+          (is (= ["Breakpoint at line 2"] @pauses) "the dot pauses, its step points don't"))
+        (finally (debugger/disarm-breakpoints! hook) (debugger/set-debug-mode! false))))))
+
+(deftest step-pauses-at-the-next-line-then-continue-runs-on-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [brk (debugger/make-break)
+          stepping (atom false)
+          paused (atom (promise))
+          hook (debugger/breakpoint-handler brk (fn [] {:on-pause (fn [d] (deliver @paused d))})
+                                            (constantly true) stepping)]
+      (try
+        (debugger/arm-breakpoints! hook)
+        (let [f (eval (read-string (:text (instrument-h (lines "(fn [x]"
+                                                               "  (let [y (inc x)]"
+                                                               "    (str y)"
+                                                               "    (* y 2)))")
+                                                        [2]))))
+              fut (future (f 1))]
+          (is (= "Breakpoint at line 2" (:title (deref @paused 5000 nil))))
+          (reset! paused (promise))
+          (is (true? (debugger/step! brk stepping)))
+          (let [d (deref @paused 5000 nil)]
+            (is (= "Stepped to line 3" (:title d)))
+            (is (= 3 (:breakpoint d)))
+            (is (:step? d)))
+          (is (false? @stepping) "the pause turned stepping off again")
+          (reset! paused (promise))
+          (is (true? (debugger/step! brk stepping)))
+          (is (= "Stepped to line 4" (:title (deref @paused 5000 nil))))
+          (reset! stepping false)
+          (is (true? (debugger/continue! brk)))
+          (is (= 4 (deref fut 5000 :blocked)) "Continue runs to the end: no step point pauses"))
+        (finally (debugger/disarm-breakpoints! hook) (debugger/set-debug-mode! false))))))

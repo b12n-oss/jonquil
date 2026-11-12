@@ -105,10 +105,12 @@
 (defn sent-text
   "What a Run sends from ed: text's range ({:start :end}, the whole text
   when nil) with ed's breakpoints in, when evaluator e has them armed and
-  some lie in the range; the range's text as it is otherwise."
-  [ed e text range]
+  some lie in the range; the range's text as it is otherwise. tab-id
+  goes in each breakpoint (the gutter's arrow finds the tab by it), and
+  the forms holding one get step points (jonquil.breakpoints/instrument)."
+  [ed e text range tab-id]
   (let [{:keys [start end] :or {start 0 end (count text)}} range
         ls (when (and (supported? e) (ev/breakpoints-on? e)) (seq (lines ed text)))]
     (if ls
-      (:text (bp/instrument text ls (merge {:start start :end end} (heads ed text))))
+      (:text (bp/instrument text ls (merge {:start start :end end :tab tab-id} (heads ed text))))
       (subs text start end))))

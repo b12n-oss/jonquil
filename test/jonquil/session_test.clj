@@ -600,3 +600,72 @@
         (set-breakpoints-sync s false)
         (is (false? (ev/breakpoints-on? s)))
         (finally (debugger/set-debug-mode! false))))))
+
+;; --- stepping (LM5) ------------------------------------------------------------------
+
+(def ^:private step-text
+  ;; a dot on line 2 of sa, and one on line 7 in its caller sb
+  "(defn sa [x]\n  (let [y (inc x)]\n    (str y)\n    (* y 2)))\n(defn sb [x]\n  (let [r (sa x)]\n    (+ r 1)))")
+
+(defn- define-step-fns! [s]
+  (repl-sync s (:text (bp/instrument step-text [2 7]
+                                     (debugger/macro-heads "user" (bp/head-symbols step-text))))))
+
+(deftest stepping-in-process-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          paused (atom (promise))
+          next-pause (fn [] (let [d (deref @paused 5000 nil)] (reset! paused (promise)) d))]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync s true)))
+        (is (= :ok (:status (define-step-fns! s))))
+        (testing "Step from a breakpoint pauses at the next line, then the caller's"
+          (let [done (promise)]
+            (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (= "Breakpoint at line 2" (:title (next-pause))))
+            (is (true? (ev/step-break! s)))
+            (is (= "Stepped to line 3" (:title (next-pause))))
+            (is (true? (ev/step-break! s)))
+            (is (= "Stepped to line 4" (:title (next-pause))))
+            (is (true? (ev/step-break! s)))
+            (is (= "Breakpoint at line 7" (:title (next-pause))) "back in the caller")
+            (is (true? (ev/continue-break! s)))
+            (is (= "5" (:printed (deref done 5000 :timeout))))))
+        (testing "Continue turns stepping off: only the breakpoints pause"
+          (let [done (promise)]
+            (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (= "Breakpoint at line 2" (:title (next-pause))))
+            (is (true? (ev/continue-break! s)))
+            (is (= "Breakpoint at line 7" (:title (next-pause))))
+            (is (true? (ev/continue-break! s)))
+            (is (= "5" (:printed (deref done 5000 :timeout))))))
+        (testing "Stop while stepping ends the run, and the next one starts with stepping off"
+          (let [done (promise)]
+            (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (some? (next-pause)))
+            (is (true? (ev/step-break! s)))
+            (is (= "Stepped to line 3" (:title (next-pause))))
+            (ev/interrupt! s)
+            (is (= :interrupted (:status (deref done 5000 :timeout))))
+            (let [done2 (promise)]
+              (session/submit-repl! s "(sb 1)" {:on-complete (fn [r] (deliver done2 r))})
+              (is (= "Breakpoint at line 2" (:title (next-pause))) "not a step point")
+              (ev/continue-break! s)
+              (is (= "Breakpoint at line 7" (:title (next-pause))))
+              (ev/continue-break! s)
+              (is (= "5" (:printed (deref done2 5000 :timeout)))))))
+        (testing "a Step whose run ends without pausing leaves stepping off for the next run"
+          (let [done (promise)]
+            (session/submit-repl! s "(sa 1)" {:on-complete (fn [r] (deliver done r))})
+            (is (= "Breakpoint at line 2" (:title (next-pause))))
+            (ev/step-break! s) (next-pause) (ev/step-break! s) (next-pause)
+            (is (true? (ev/step-break! s)) "the last line: the run ends while stepping")
+            (is (= "4" (:printed (deref done 5000 :timeout))))
+            (let [done2 (promise)]
+              (session/submit-repl! s "(sa 1)" {:on-complete (fn [r] (deliver done2 r))})
+              (is (= "Breakpoint at line 2" (:title (next-pause))))
+              (ev/continue-break! s)
+              (is (= "4" (:printed (deref done2 5000 :timeout)))))))
+        (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
