@@ -95,6 +95,7 @@
     jonquil.locations
     jonquil.usages
     jonquil.resolve
+    jonquil.file-refs
     jonquil.timing
     jonquil.gtk.locations-pane
     jonquil.gtk.debugger-pane

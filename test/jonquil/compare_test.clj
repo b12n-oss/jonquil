@@ -111,3 +111,14 @@
            (c/splice-form buf "(ns a)\n" (c/form-key buf 12) "the last Run")))
     (is (= {:error "This tab has no (defn f ...) any more."}
            (c/splice-form "(ns a)\n" head-text {:sig ["defn" "f"] :nth 0 :name "defn f"} "HEAD")))))
+
+(deftest form-key-guards-a-shifted-place-test
+  (testing "a same-signature form added or removed since the compare: refused, not taken from the wrong one"
+    (let [t "(comment 1)\n(comment 2)\n"
+          k (c/form-key t 14)]
+      (is (= 2 (:of k)) "the key remembers how many shared its signature")
+      (is (= {:error "This tab's (comment ...) forms changed since the compare: compare again."}
+             (c/splice-form (str "(comment 0)\n" t) t k "HEAD")))
+      (is (= {:error "This tab's (comment ...) forms changed since the compare: compare again."}
+             (c/splice-form "(comment 2)\n" t k "HEAD")))
+      (is (:text (c/splice-form t t k "HEAD")) "unchanged: fine"))))

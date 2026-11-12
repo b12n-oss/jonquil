@@ -23,7 +23,8 @@
    :copy "Copy This Result"
    :define "Define a Var for This Result"
    :jump "Jump to This Var"
-   :doc "Quick Doc for This Var"})
+   :doc "Quick Doc for This Var"
+   :open-location "Open This File and Line"})
 
 (defn label [verb] (get labels verb))
 
