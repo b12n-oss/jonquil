@@ -6,7 +6,8 @@
   in Tabs and Delete. An agent's jonquil_change_set_propose lands as a kept
   set through the :change-set-propose!* ui hook; nothing here applies a set
   on its own."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.change-sets :as cs]
             [jonquil.clj :as clj]
@@ -224,18 +225,65 @@
                                                         (apply-one! ctx s entries (inc i))
                                                         (stop! (str "it ended " (if status (name status) "badly")))))))))))))))))
 
+(defn not-loaded-message [n] (str n " isn't loaded: Run its file first"))
+
+(defn check-namespaces!
+  "Asks evaluator e, with one quiet eval, which of names (strings) exist,
+  and calls cb once with {:missing [name ...]} or {:error msg}. For the Jolt
+  child, which falls back to its session's namespace for one that doesn't
+  exist and so can't be left to find out per form. cb runs on the eval
+  worker, not the GTK thread."
+  [e names cb]
+  (if (empty? names)
+    (cb {:missing []})
+    (let [code (str "(mapv (fn [n] (some? (find-ns n))) '" (pr-str (mapv symbol names)) ")")
+          warning (ev/eval! e code {:quiet (str "jq-change-set-ns-" (System/nanoTime))
+                                    :on-output (fn [_ _] nil)
+                                    :on-complete
+                                    (fn [r]
+                                      (let [answer (when (= :ok (:status r))
+                                                     (try (edn/read-string (:printed r)) (catch :default _ nil)))]
+                                        (cb (if (and (vector? answer) (= (count names) (count answer)))
+                                              {:missing (vec (keep identity (map (fn [n ok] (when-not ok n)) names answer)))}
+                                              {:error "couldn't ask the runtime which namespaces are loaded"}))))})]
+      (when warning (cb {:error (str warning)})))))
+
+(defn- child-namespaces
+  "The namespaces the set's files name, when the evaluator is the Jolt
+  child (a quiet-capable runtime other than the in-process session, which
+  checks each form itself); else nil."
+  [{:keys [ev*] :as ctx} entries]
+  (let [e @ev*]
+    (when (and (satisfies? ev/QuietEval e) (not (instance? jonquil.session.InProcess e)))
+      (vec (distinct (keep #(clj/buffer-ns (entry-source-text ctx (:path %))) entries))))))
+
 (defn- apply-set!
   "Apply to REPL: every form of the shown set, in order, in the namespace of
-  its file; each result lands in the console."
+  its file; each result lands in the console. The Jolt child is first asked
+  which of the files' namespaces exist, and nothing is sent when one
+  doesn't."
   [{:keys [shown* panep ev*] :as ctx}]
-  (let [{:keys [set draft?]} @shown*]
+  (let [{:keys [set draft?]} @shown*
+        go (fn []
+             (pane/report! panep (str "Applying " (plural (count (:entries set)) "form" "forms") ": see the console."))
+             (say! ctx (str "Applying the change set \"" (:name set) "\" to the REPL"))
+             (apply-one! ctx set (:entries set) 0))]
     (cond
       (or (nil? set) draft?) (pane/report! panep "; Save the set first.")
       (ev/evaluating? @ev*) (pane/report! panep "; Something is already running: Stop it first.")
       :else
-      (do (pane/report! panep (str "Applying " (plural (count (:entries set)) "form" "forms") ": see the console."))
-          (say! ctx (str "Applying the change set \"" (:name set) "\" to the REPL"))
-          (apply-one! ctx set (:entries set) 0)))))
+      (if-let [names (seq (child-namespaces ctx (:entries set)))]
+        (check-namespaces!
+         @ev* (vec names)
+         (fn [{:keys [missing error]}]
+           (on-gui! (fn []
+                      (cond
+                        error (do (pane/report! panep (str "; " error))
+                                  (say! ctx (str "Nothing was sent: " error)))
+                        (seq missing) (do (pane/report! panep (str "; " (not-loaded-message (first missing))))
+                                          (say! ctx (str (not-loaded-message (first missing)) ". The forms were not sent.")))
+                        :else (go))))))
+        (go)))))
 
 ;; --- Revert in Tabs -----------------------------------------------------------------
 

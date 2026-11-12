@@ -93,8 +93,9 @@ diffs and three buttons:
   file's `ns` form names, while the console's prompt stays in the namespace it
   was in. Every form is echoed and its result lands in the console. The first
   form that ends with an error stops the rest, and the console names it. In
-  the in-process session a namespace that isn't loaded stops the apply with
-  "my.app isn't loaded: Run its file first". A runtime that can't evaluate in
+  the in-process session and the Jolt child, a namespace that isn't loaded
+  stops the apply with "my.app isn't loaded: Run its file first" (the child
+  is asked once, before anything is sent). A runtime that can't evaluate in
   another namespace (JVM Clojure over nREPL, ClojureScript) refuses a file that
   has an `ns` form instead of sending its forms to the wrong place. Apply
   doesn't mark the forms as run.

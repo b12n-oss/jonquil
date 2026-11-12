@@ -1091,3 +1091,42 @@
   (let [e (jvm/->Jvm nil nil nil nil nil)]
     (is (str/includes? (:stop (change-sets-part/eval-opts e "(ns cs.app)\n")) "can't evaluate in a file's namespace"))
     (is (= {:opts {:ns-source "(def a 1)"}} (change-sets-part/eval-opts e "(def a 1)")))))
+
+;; The Jolt child can't be asked per form, so Apply asks it once which
+;; namespaces exist
+
+(defn- fake-child
+  "A QuietEval evaluator answering every eval with printed, recording the
+  code and opts it got."
+  [printed seen]
+  (reify
+    ev/Evaluator
+    (eval! [_ code opts]
+      (swap! seen conj {:code code :quiet (:quiet opts)})
+      ((:on-complete opts) {:status :ok :printed printed})
+      nil)
+    ev/QuietEval
+    (quiet-eval? [_] true)))
+
+(deftest apply-asks-the-child-which-namespaces-exist
+  (let [seen (atom [])
+        got (promise)]
+    (change-sets-part/check-namespaces! (fake-child "[true false]" seen) ["a.b" "c.d"] #(deliver got %))
+    (is (= {:missing ["c.d"]} (deref got 1000 :timeout)))
+    (is (= "(mapv (fn [n] (some? (find-ns n))) '[a.b c.d])" (:code (first @seen))))
+    (is (some? (:quiet (first @seen))) "a quiet eval, so the prompt and history are untouched"))
+  (testing "all loaded"
+    (let [got (promise)]
+      (change-sets-part/check-namespaces! (fake-child "[true true]" (atom [])) ["a.b" "c.d"] #(deliver got %))
+      (is (= {:missing []} (deref got 1000 :timeout)))))
+  (testing "an answer that can't be read is an error, not a pass"
+    (let [got (promise)]
+      (change-sets-part/check-namespaces! (fake-child "nonsense (" (atom [])) ["a.b"] #(deliver got %))
+      (is (string? (:error (deref got 1000 :timeout))))))
+  (testing "no namespaces, nothing to ask"
+    (let [seen (atom []) got (promise)]
+      (change-sets-part/check-namespaces! (fake-child "[]" seen) [] #(deliver got %))
+      (is (= {:missing []} (deref got 1000 :timeout)))
+      (is (= [] @seen))))
+  (testing "the message names the namespace"
+    (is (= "c.d isn't loaded: Run its file first" (change-sets-part/not-loaded-message "c.d")))))
