@@ -2,8 +2,11 @@
   "LM3's compare: the buffer against another version of its file (on disk,
   or in git HEAD), as differences a person steps through in the Locations
   list and takes the other version of one at a time. Lines are counted
-  from 0 here; the list shows them from 1. No GTK here."
+  from 0 here; the list shows them from 1. One form can be compared too:
+  splice-form puts the other version's form in place of the buffer's, so
+  only that form's lines differ. No GTK here."
   (:require [clojure.string :as str]
+            [jonquil.commands :as commands]
             [jonquil.plugin-review :as review]))
 
 (defn- lines [s] (if (empty? s) [] (str/split-lines s)))
@@ -118,3 +121,47 @@
                     (<= l line (+ l (count here) -1)))
               h))
           hs)))
+
+;; --- one form ------------------------------------------------------------------
+
+(defn- form-sig
+  "A top-level form's signature in text: its first two elements' text for
+  a bracketed form ((defn f ...) is [\"defn\" \"f\"]), else its own text."
+  [^String text {:keys [start end open kids]}]
+  (if open
+    (mapv (fn [{s :start e :end}] (subs text s e)) (take 2 kids))
+    [(subs text start end)]))
+
+(defn form-key
+  "{:sig :nth :name} for the top-level form of text around caret: its
+  signature, how many earlier forms share it (so a second (comment ...) is
+  told apart from the first) and a name for messages, \"defn f\". nil
+  when the caret is between forms."
+  [text caret]
+  (let [forms (commands/top-level-forms text)]
+    (when-let [f (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))]
+      (let [sig (form-sig text f)]
+        {:sig sig
+         :nth (count (filter #(= sig (form-sig text %)) (take-while #(not= f %) forms)))
+         :name (str/join " " sig)}))))
+
+(defn- find-form
+  "The top-level form of text with key's signature, at its :nth place, or nil."
+  [text {:keys [sig] k :nth}]
+  (nth (filterv #(= sig (form-sig text %)) (commands/top-level-forms text)) k nil))
+
+(defn splice-form
+  "{:text t}: buffer with the form key names replaced by the same form in
+  other, so comparing other's text with buffer shows only that form's
+  differences, or {:error msg} when label's version (\"HEAD\", \"disk\")
+  or the buffer has no such form."
+  [buffer other key label]
+  (let [here (find-form buffer key)
+        there (find-form other key)
+        shown (str "(" (:name key) " ...)")]
+    (cond
+      (nil? here) {:error (str "This tab has no " shown " any more.")}
+      (nil? there) {:error (str (if (= "disk" label) "The file on disk" label) " has no " shown ".")}
+      :else {:text (str (subs buffer 0 (:start here))
+                        (subs other (:start there) (:end there))
+                        (subs buffer (:end here)))})))

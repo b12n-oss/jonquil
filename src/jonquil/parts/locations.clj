@@ -1,6 +1,6 @@
 (ns jonquil.parts.locations
   "The Locations list and Compare as a window part's data half: the panel
-  command, the six list commands and the four compare commands (their chords
+  command, the six list commands and the seven compare commands (their chords
   stay in keymap.edn) and the panel it contributes. The install half is
   jonquil.gtk.parts.locations.")
 
@@ -18,6 +18,14 @@
                    :call [:compare-head-fn]}
     :compare/last-run {:doc "Compare with the last Run: list the differences from what the tab's last whole Run sent."
                        :scope :window :call [:compare-last-run-fn]}
+    ;; "This form: ..." sorts after "Compare with ...", so typing "compare
+    ;; with git head" still picks the whole tab first
+    :compare-form/disk {:doc "This form: compare with the file on disk, listing the differences in the top-level form at the caret only."
+                        :scope :window :call [:compare-form-disk-fn]}
+    :compare-form/head {:doc "This form: compare with git HEAD, listing the differences in the top-level form at the caret only."
+                        :scope :window :call [:compare-form-head-fn]}
+    :compare-form/last-run {:doc "This form: compare with the last Run, listing the differences in the top-level form at the caret only."
+                            :scope :window :call [:compare-form-last-run-fn]}
     :compare/take {:doc "Take the other version here: the compared file's lines for the difference at the caret."
                    :scope :window :call [:compare-take-fn]}
     ;; the locations list: three ways to fill it, F8 and Shift+F8 to step

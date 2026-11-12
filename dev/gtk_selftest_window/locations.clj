@@ -433,6 +433,33 @@
               (editor/mark-saved! ed)
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
+(defn row-compare-this-form-and-take
+  "This form: compare with the file on disk, with the caret in defn f, lists
+  only f's difference, titled for it, though (def b ...) differs too; Take
+  puts f's disk line back and leaves b's edit alone."
+  [ui]
+  (go-row :compare-this-form-and-take support/check
+    (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-compare-form-") "c.clj")
+          _ (spit f "(ns c)\n(defn f [x]\n  (inc x))\n(def b 2)\n")
+          _ (on-gtk ((:open-file! ui) (.getPath f)))
+          ed (on-gtk (:ed ((:active-tab* ui))))
+          edited "(ns c)\n(defn f [x]\n  (dec x))\n(def b 20)\n"
+          _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count (editor/editor-text ed)) edited]] :caret 0})
+                    (support/place-cursor! (:buf ed) 10)
+                    (run-palette! ui "this form: compare with the file on disk"))
+          listed? (await-until 3000 20 #(= 1 (count (lpane/row-texts (:locations-pane ui)))))
+          title (on-gtk (lpane/title-text (:locations-pane ui)))
+          _ (on-gtk (support/place-cursor! (:buf ed) 22)
+                    (run-palette! ui "take the other version here"))
+          want "(ns c)\n(defn f [x]\n  (inc x))\n(def b 20)\n"
+          took? (await-until 3000 20 #(= want (editor/editor-text ed)))
+          text (on-gtk (editor/editor-text ed))]
+      (on-gtk (support/check :compare-this-form-and-take
+                             (and listed? took? (= "Differences in defn f from disk" title))
+                             {:listed listed? :title title :took took? :text text :status (status ui)})
+              (editor/mark-saved! ed)
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+
 (defn row-compare-with-head
   "Compare with git HEAD lists what changed since the last commit; a file
   outside any repository says git's own reason."

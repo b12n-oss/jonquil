@@ -294,6 +294,7 @@
    locations-rows/row-find-usages-resolved
    locations-rows/row-locations-empty-says-no-places
    locations-rows/row-compare-with-disk-and-take
+   locations-rows/row-compare-this-form-and-take
    locations-rows/row-compare-with-head
    locations-rows/row-compare-line-only-on-disk
    locations-rows/row-compare-with-tab
