@@ -167,6 +167,16 @@
                                   :input input :none none? :none-status none-status})))
         (finally (on-gtk (cview/clear-input! cv) (to-prompt!)))))))
 
+(defn- result-line-offset
+  "An offset inside the last console line that starts with result, a printed
+  result such as \"=> #'clojure.core/inc\", or nil. Anchored at the line's
+  start, so the echo of the typed input (\"user=> #'clojure.core/inc\"),
+  which holds the same text, never counts: the evaluation goes idle before
+  its result line is queued (jonquil.eval/finish-run!), so a wait on idle
+  plus a bare substring can be met by the echo alone."
+  [ui result]
+  (some-> (str/last-index-of (console-text ui) (str "\n" result)) (+ 4)))
+
 (defn row-result-quick-doc
   "The quick-doc verb on a var result prints that var's doc in the console
   as comment lines; on a value it says the result isn't a var."
@@ -177,14 +187,18 @@
           to-prompt! (fn [] (console-caret! ui (g/gtk-text-buffer-get-char-count (:buf cv))))]
       (try
         (let [m (enter! ui "#'clojure.core/inc")
-              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> #'clojure.core/inc")))
-              at (offset-in ui "=> #'clojure.core/inc")
+              ;; the result line itself, never the echo of the typed input
+              _ (await-until 5000 20 #(and (support/idle? ui) (re-find #"(?m)^=> #'clojure.core/inc" (support/since ui m))))
+              at (on-gtk (result-line-offset ui "=> #'clojure.core/inc"))
               d (on-gtk (support/out-end-offset ui))
               _ (on-gtk (console-caret! ui at) (fire! "result-doc"))
               printed? (await-until 5000 20 #(re-find #"(?m)^; .*one greater than num" (support/since ui d)))
+              ;; back to the prompt: the caret sat in read-only output, where
+              ;; typing does nothing
+              _ (on-gtk (to-prompt!))
               m2 (enter! ui "(+ 40 2)")
-              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m2) "=> 42")))
-              _ (on-gtk (console-caret! ui (offset-in ui "=> 42")) (fire! "result-doc"))
+              _ (await-until 5000 20 #(and (support/idle? ui) (re-find #"(?m)^=> 42$" (support/since ui m2))))
+              _ (on-gtk (console-caret! ui (result-line-offset ui "=> 42")) (fire! "result-doc"))
               not-var? (await-until 3000 20 #(= "; That result isn't a var." (status ui)))]
           (on-gtk (support/check :result-quick-doc (and printed? not-var?)
                                  {:printed printed? :not-var not-var? :since (support/since ui d)
