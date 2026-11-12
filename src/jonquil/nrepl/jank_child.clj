@@ -95,6 +95,20 @@
       (doseq [c (.listFiles f)] (delete-tree! c)))
     (.delete f)))
 
+(defn- wait-gone!
+  "Waits up to kill-wait-ms for proc to exit."
+  [proc]
+  (loop [n 0]
+    (when (and (p/alive? proc) (< (* n 20) kill-wait-ms))
+      (Thread/sleep 20)
+      (recur (inc n)))))
+
+(defn- close-stdin!
+  "Closes the child's stdin, ignoring a failure."
+  [child]
+  (when-let [in (:stdin child)]
+    (try (.close ^java.io.OutputStream in) (catch Exception _ nil))))
+
 (defn kill!
   "Kills the child's process tree first, then closes its stdin (closing it
   first lets jank exit on EOF before the tree is signalled, which would
@@ -103,18 +117,13 @@
   dir. Idempotent; nil is fine."
   [child]
   (when child
-    (let [proc (:proc child)
-          wait! (fn []
-                  (loop [n 0]
-                    (when (and (p/alive? proc) (< (* n 20) kill-wait-ms))
-                      (Thread/sleep 20)
-                      (recur (inc n)))))]
+    (let [proc (:proc child)]
       (when (p/alive? proc) (p/destroy-tree proc))
-      (when-let [in (:stdin child)] (try (.close ^java.io.OutputStream in) (catch Exception _ nil)))
-      (wait!)
+      (close-stdin! child)
+      (wait-gone! proc)
       (when (p/alive? proc)
         (.destroyForcibly ^java.lang.Process (:proc proc))
-        (wait!)))
+        (wait-gone! proc)))
     (when-let [d (:run-dir child)] (delete-tree! d))
     nil))
 
@@ -135,6 +144,58 @@
     (cond-> {:dir dir :out (io/file log) :err :out}
       path (assoc :extra-env {"PATH" path}))))
 
+(defn- create-run-dir!
+  "A fresh owner-only <tmpdir>/jonquil-jank-run-<suffix>, as a canonical
+  path. createTempDirectory makes the folder itself and fails rather than
+  reusing a folder or symlink someone else made at a guessable name."
+  []
+  (.getCanonicalPath
+   (.toFile (java.nio.file.Files/createTempDirectory
+             "jonquil-jank-run-"
+             (make-array java.nio.file.attribute.FileAttribute 0)))))
+
+(defn- spawn-jank!
+  "Spawns jank in run-dir with its output in log. Returns the process, or
+  {:spawn-error text} after removing run-dir when the spawn throws."
+  [{:keys [binary module-path run-dir log]}]
+  (try (apply p/process (process-options {:dir run-dir :log log})
+              (launch-command binary module-path))
+       (catch Exception e
+         ;; e.g. a stale JONQUIL_JANK: nothing was spawned.
+         (delete-tree! run-dir)
+         {:spawn-error (str "couldn't start jank: " (ex-message e))})))
+
+(defn- start-failure
+  "A failed start: kills the tree and returns {:error e}."
+  [child e]
+  (kill! child)
+  {:error e})
+
+(defn- poll-start
+  "One look at the port file. Returns the finished result (the child with
+  its :port, or an {:error ...} map), or nil to keep waiting."
+  [{:keys [child run-dir log cancelled? timeout-ms t0]}]
+  (let [port (read-port run-dir)]
+    (cond
+      port (assoc child :port port)
+      (and cancelled? (cancelled?)) (start-failure child :cancelled)
+      (not (p/alive? (:proc child)))
+      (let [r (deref (:proc child) 500 nil)]
+        (start-failure child (str "jank exited (exit " (:exit r) "): " (tail log 5))))
+      (> (- (System/currentTimeMillis) t0) timeout-ms)
+      (start-failure child (str "jank didn't write a port file within " timeout-ms " ms: " (tail log 5))))))
+
+(defn- await-port
+  "Polls until poll-start has a result. Anything thrown while waiting
+  (cancelled?, reading the port) must not leave the spawned tree behind."
+  [child opts]
+  (let [ctx (assoc opts :child child :t0 (System/currentTimeMillis))]
+    (try
+      (loop []
+        (or (poll-start ctx)
+            (do (Thread/sleep 50) (recur))))
+      (catch Throwable e (kill! child) (throw e)))))
+
 (defn start!
   "Starts jank in a fresh <tmpdir>/jonquil-jank-run-<suffix> and waits for its
   port file. Returns {:proc :pid :port :run-dir}, or {:error text} when
@@ -145,43 +206,15 @@
   :cancelled?."
   [{:keys [binary module-path timeout-ms cancelled?]}]
   (leftovers/prune!)
-  (let [timeout-ms (or timeout-ms default-timeout-ms)
-        ;; :dir must be canonical absolute: a relative or symlinked one
-        ;; makes the spawn misbehave (see nrepl.child).
-        ;; createTempDirectory makes the folder itself (owner-only, and it
-        ;; fails rather than reusing a folder or symlink someone else made
-        ;; at a guessable name).
-        run-dir (.getCanonicalPath
-                 (.toFile (java.nio.file.Files/createTempDirectory
-                           "jonquil-jank-run-"
-                           (make-array java.nio.file.attribute.FileAttribute 0))))
+  ;; :dir must be canonical absolute: a relative or symlinked one
+  ;; makes the spawn misbehave (see nrepl.child).
+  (let [run-dir (create-run-dir!)
         log (str run-dir "/server.log")
-        spawned (try (apply p/process (process-options {:dir run-dir :log log})
-                            (launch-command binary module-path))
-                     (catch Exception e
-                       ;; e.g. a stale JONQUIL_JANK: nothing was spawned.
-                       (delete-tree! run-dir)
-                       {:spawn-error (str "couldn't start jank: " (ex-message e))}))]
+        spawned (spawn-jank! {:binary binary :module-path module-path :run-dir run-dir :log log})]
     (if-let [e (:spawn-error spawned)]
       {:error e}
-      (let [proc spawned
-            child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir
-                   :stdin (:in proc)}
-            _ (leftovers/write-pid! run-dir (:pid child))
-            fail (fn [e] (kill! child) {:error e})
-            t0 (System/currentTimeMillis)]
-        ;; Anything thrown while waiting (cancelled?, reading the port)
-        ;; must not leave the spawned tree behind.
-        (try
-          (loop []
-            (let [port (read-port run-dir)]
-              (cond
-                port (assoc child :port port)
-                (and cancelled? (cancelled?)) (fail :cancelled)
-                (not (p/alive? proc))
-                (let [r (deref proc 500 nil)]
-                  (fail (str "jank exited (exit " (:exit r) "): " (tail log 5))))
-                (> (- (System/currentTimeMillis) t0) timeout-ms)
-                (fail (str "jank didn't write a port file within " timeout-ms " ms: " (tail log 5)))
-                :else (do (Thread/sleep 50) (recur)))))
-          (catch Throwable e (kill! child) (throw e)))))))
+      (let [child {:proc spawned :pid (.pid ^java.lang.Process (:proc spawned)) :run-dir run-dir
+                   :stdin (:in spawned)}]
+        (leftovers/write-pid! run-dir (:pid child))
+        (await-port child {:run-dir run-dir :log log :cancelled? cancelled?
+                           :timeout-ms (or timeout-ms default-timeout-ms)})))))

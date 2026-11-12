@@ -97,6 +97,68 @@
 
 (defn- canonical [path] (.getCanonicalPath (io/file path)))
 
+(defn- create-run-dir!
+  "A fresh owner-only <tmpdir>/jonquil-cljs-run-<suffix>, as a canonical path.
+  createTempDirectory makes the folder itself and fails rather than reusing
+  a folder or symlink someone else made at a guessable name."
+  []
+  (.getCanonicalPath
+   (.toFile (java.nio.file.Files/createTempDirectory
+             "jonquil-cljs-run-"
+             (make-array java.nio.file.attribute.FileAttribute 0)))))
+
+(defn- project-needs-cljs-dep?
+  "True when the deps.edn in dir (if any) lacks the ClojureScript dep."
+  [dir]
+  (let [deps-file (io/file dir "deps.edn")]
+    (cljs-node/needs-cljs-dep?
+     (when (.isFile deps-file) (try (slurp deps-file) (catch Exception _ nil))))))
+
+(defn- spawn-launcher!
+  "Spawns argv in dir with its output in log. Returns the process, or
+  {:spawn-error text} after removing run-dir when the spawn throws."
+  [{:keys [dir log run-dir argv]}]
+  (try (apply p/process (process-options {:dir dir :log log}) argv)
+       (catch Exception e
+         (delete-tree! run-dir)
+         {:spawn-error (str "couldn't start clojure: " (ex-message e))})))
+
+(defn- start-failure
+  "A failed start: kills the process (the log stays, the error names it)
+  and returns {:error text} with the log's tail."
+  [child text]
+  (kill-process! child)
+  {:error (str text "\n" (tail (:log child) 5) "\nThe log: " (:log child))})
+
+(defn- poll-start
+  "One look at the launcher's log. Returns the finished result (the child
+  with its :port, or an {:error ...} map), or nil to keep waiting."
+  [{:keys [child target cancelled? timeout-ms t0]}]
+  (let [text (read-log (:log child))
+        port (cljs-node/ready-port text)]
+    (cond
+      port (assoc child :port port :url (cljs-node/ready-url text)
+                  :stdin-path (cljs-node/ready-stdin text))
+      (and (= :browser target) (port-taken? text))
+      (do (kill! child) {:error :http-port-taken})
+      (and cancelled? (cancelled?)) (do (kill! child) {:error :cancelled})
+      (not (p/alive? (:proc child)))
+      (let [r (deref (:proc child) 500 nil)]
+        (start-failure child (str "clojure exited (exit " (:exit r) "):")))
+      (> (- (System/currentTimeMillis) t0) timeout-ms)
+      (start-failure child (str "clojure didn't start within " timeout-ms " ms:")))))
+
+(defn- await-start
+  "Polls the launcher's log until poll-start has a result. Anything thrown
+  while waiting must not leave the tree behind."
+  [child opts]
+  (let [ctx (assoc opts :child child :t0 (System/currentTimeMillis))]
+    (try
+      (loop []
+        (or (poll-start ctx)
+            (do (Thread/sleep 50) (recur))))
+      (catch Throwable e (kill! child) (throw e)))))
+
 (defn start!
   "Starts the launcher with clojure in a fresh <tmpdir>/jonquil-cljs-run-<suffix>
   and waits for its ready line. Returns {:proc :pid :port :url :run-dir :log
@@ -117,55 +179,20 @@
   [{:keys [clojure launcher project-dir timeout-ms cancelled? args-fn target http-port console?
            page-token]}]
   (leftovers/prune!)
-  (let [timeout-ms (or timeout-ms default-timeout-ms)
-        args-fn (or args-fn cljs-node/launch-args)
+  (let [args-fn (or args-fn cljs-node/launch-args)
         ;; :dir must be canonical absolute: a relative or symlinked one
         ;; makes the spawn misbehave (see nrepl.child).
-        ;; createTempDirectory makes the folder itself (owner-only, and it
-        ;; fails rather than reusing a folder or symlink someone else made
-        ;; at a guessable name).
-        run-dir (.getCanonicalPath
-                 (.toFile (java.nio.file.Files/createTempDirectory
-                           "jonquil-cljs-run-"
-                           (make-array java.nio.file.attribute.FileAttribute 0))))
+        run-dir (create-run-dir!)
         log (str run-dir "/server.log")
         dir (if project-dir (canonical project-dir) run-dir)
-        deps-file (io/file dir "deps.edn")
-        add-dep? (cljs-node/needs-cljs-dep?
-                  (when (.isFile deps-file) (try (slurp deps-file) (catch Exception _ nil))))
-        argv (args-fn {:clojure clojure :launcher launcher :add-dep? add-dep?
+        argv (args-fn {:clojure clojure :launcher launcher :add-dep? (project-needs-cljs-dep? dir)
                        :target target :http-port http-port :console? console?
                        :page-token page-token})
-        spawned (try (apply p/process (process-options {:dir dir :log log}) argv)
-                     (catch Exception e
-                       (delete-tree! run-dir)
-                       {:spawn-error (str "couldn't start clojure: " (ex-message e))}))]
+        spawned (spawn-launcher! {:dir dir :log log :run-dir run-dir :argv argv})]
     (if-let [e (:spawn-error spawned)]
       {:error e}
-      (let [proc spawned
-            child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir
-                   :log log :stdin (:in proc)}
-            _ (leftovers/write-pid! run-dir (:pid child))
-            ;; A failure keeps the log (the error names it), so only the
-            ;; process dies; a cancel leaves nothing.
-            fail (fn [text] (kill-process! child)
-                   {:error (str text "\n" (tail log 5) "\nThe log: " log)})
-            t0 (System/currentTimeMillis)]
-        ;; Anything thrown while waiting must not leave the tree behind.
-        (try
-          (loop []
-            (let [text (read-log log)
-                  port (cljs-node/ready-port text)]
-              (cond
-                port (assoc child :port port :url (cljs-node/ready-url text)
-                            :stdin-path (cljs-node/ready-stdin text))
-                (and (= :browser target) (port-taken? text))
-                (do (kill! child) {:error :http-port-taken})
-                (and cancelled? (cancelled?)) (do (kill! child) {:error :cancelled})
-                (not (p/alive? proc))
-                (let [r (deref proc 500 nil)]
-                  (fail (str "clojure exited (exit " (:exit r) "):")))
-                (> (- (System/currentTimeMillis) t0) timeout-ms)
-                (fail (str "clojure didn't start within " timeout-ms " ms:"))
-                :else (do (Thread/sleep 50) (recur)))))
-          (catch Throwable e (kill! child) (throw e)))))))
+      (let [child {:proc spawned :pid (.pid ^java.lang.Process (:proc spawned)) :run-dir run-dir
+                   :log log :stdin (:in spawned)}]
+        (leftovers/write-pid! run-dir (:pid child))
+        (await-start child {:target target :cancelled? cancelled?
+                            :timeout-ms (or timeout-ms default-timeout-ms)})))))

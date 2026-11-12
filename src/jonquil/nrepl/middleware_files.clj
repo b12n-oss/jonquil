@@ -123,6 +123,28 @@
     (prune-old! base (.getName dir) now)
     (.getCanonicalPath dir)))
 
+(defn- move-stale-aside!
+  "Moves dir (present but incomplete) aside and deletes it, so a rename onto
+  its name can succeed."
+  [base ^java.io.File dir]
+  (when (and (.exists dir) (not (complete? dir)))
+    (let [aside (io/file base (str (.getName dir) ".stale-" (System/nanoTime)))]
+      (when (.renameTo dir aside) (delete-tree! aside)))))
+
+(defn- install-tmp!
+  "Renames the written temp folder tmp onto dir (clearing a stale dir once
+  when the first rename fails) and returns dir's path, marked in use. Throws
+  when dir is still incomplete. tmp is deleted if it is left over."
+  [base ^java.io.File dir ^java.io.File tmp]
+  (try
+    (when-not (.renameTo tmp dir)
+      (move-stale-aside! base dir)
+      (.renameTo tmp dir))
+    (if (complete? dir)
+      (in-use! base dir)
+      (throw (ex-info (str "couldn't write " (.getPath dir)) {:dir (.getPath dir)})))
+    (finally (when (.exists tmp) (delete-tree! tmp)))))
+
 (defn ensure-root!
   "The folder under base holding this Jonquil's nREPL middleware files, written
   first when it isn't there. The files go into a temp sibling that is then
@@ -147,14 +169,5 @@
        (when (.exists dir) (.setLastModified dir (System/currentTimeMillis)))
        (if (complete? dir)
          (in-use! base dir)
-         (let [tmp (write-tmp! dir)]
-           (try
-             (when-not (.renameTo tmp dir)
-               (when (and (.exists dir) (not (complete? dir)))
-                 (let [aside (io/file base (str (.getName dir) ".stale-" (System/nanoTime)))]
-                   (when (.renameTo dir aside) (delete-tree! aside))))
-               (.renameTo tmp dir))
-             (if (complete? dir)
-               (in-use! base dir)
-               (throw (ex-info (str "couldn't write " (.getPath dir)) {:dir (.getPath dir)})))
-             (finally (when (.exists tmp) (delete-tree! tmp))))))))))
+         (install-tmp! base dir (write-tmp! dir)))))))
+

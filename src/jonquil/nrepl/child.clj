@@ -99,6 +99,35 @@
   [path]
   (when (and path (login-path/executable-file? path)) path))
 
+(defn- jolt-program
+  "The jolt program: the JONQUIL_JOLT override, else jolt's absolute path on
+  login-path's PATH, else the bare name."
+  []
+  (or (jolt-override (System/getenv "JONQUIL_JOLT"))
+      (tool-path/resolve-program "jolt" (login-path/path)
+                                 login-path/executable-file?)
+      "jolt"))
+
+(defn- deps-entries
+  "The -Sdeps entries (as strings) for the server coordinate and the
+  middleware folder, each present only when given."
+  [coord jonquil-root]
+  (cond-> []
+    coord (conj (str "nrepl/nrepl " coord))
+    jonquil-root (conj (str middleware-files/lib " {:local/root " (pr-str jonquil-root) "}"))))
+
+(defn- middleware-entries
+  "The middleware names the server starts with, in order: stdin and break
+  first (only with both a coordinate and the folder), then the defaults,
+  then the inspector and info."
+  [coord jonquil-root]
+  (cond-> []
+    (and coord jonquil-root) (conj (str middleware-files/stdin-middleware)
+                                   (str middleware-files/break-middleware))
+    coord (conj "nrepl.middleware/default-middleware")
+    jonquil-root (conj (str middleware-files/inspect-middleware)
+                       (str middleware-files/info-middleware))))
+
 (defn launch-args
   "The child's argv. With a middleware source: jolt -Sdeps '{:deps
   {nrepl/nrepl COORD}}' -e (server-form P [nrepl.middleware/default-middleware]),
@@ -118,21 +147,11 @@
   too bare), or the bare \"jolt\" when none is found."
   ([port source] (launch-args port (dissoc source :jonquil) (:jonquil source)))
   ([port {:keys [local git]} jonquil-root]
-   (let [program (or (jolt-override (System/getenv "JONQUIL_JOLT"))
-                     (tool-path/resolve-program "jolt" (login-path/path)
-                                                login-path/executable-file?)
-                     "jolt")
+   (let [program (jolt-program)
          coord (cond local (str "{:local/root " (pr-str local) "}")
                      git (binding [*print-namespace-maps* false] (pr-str git)))
-         deps (cond-> []
-                coord (conj (str "nrepl/nrepl " coord))
-                jonquil-root (conj (str middleware-files/lib " {:local/root " (pr-str jonquil-root) "}")))
-         middleware (cond-> []
-                      (and coord jonquil-root) (conj (str middleware-files/stdin-middleware)
-                                                     (str middleware-files/break-middleware))
-                      coord (conj "nrepl.middleware/default-middleware")
-                      jonquil-root (conj (str middleware-files/inspect-middleware)
-                                         (str middleware-files/info-middleware)))]
+         deps (deps-entries coord jonquil-root)
+         middleware (middleware-entries coord jonquil-root)]
      (if (seq deps)
        [program "-Sdeps" (str "{:deps {" (str/join " " deps) "}}")
         "-e" (server-form port middleware)]
@@ -206,29 +225,39 @@
             (:exit (deref proc term-grace-ms nil)))
         (:exit r)))))
 
+(defn- try-port!
+  "Starts the child on port and records it in spawned. Returns the child map
+  when it is ready, ::port-taken when the bind failed (its log deleted), and
+  throws for any other failure."
+  [dir source spawned port]
+  (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
+        proc (apply p/process (process-options {:dir dir :log log})
+                    (launch-args port source))
+        _ (reset! spawned proc)
+        state (wait-ready proc log port ready-deadline-ms)]
+    (case state
+      :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
+              :dir dir :log log :source source}
+      :exited (if (str/includes? (tail log 20) "bind() failed")
+                (do (io/delete-file log true)
+                    ::port-taken)
+                ;; The log is left on disk on purpose here, unlike kill!:
+                ;; it's the only post-mortem for a start that never ran.
+                (throw (ex-info (str "jolt nrepl-server exited: " (tail log 5)) {:log log})))
+      :timeout (throw (ex-info (str "jolt nrepl-server didn't answer within "
+                                    ready-deadline-ms " ms: " (tail log 5))
+                               {:log log})))))
+
 (defn- start-loop!
   "start!'s port scan. Each spawned proc goes into spawned (an atom) so
   start! can end it if anything throws."
   [dir source spawned]
   (loop [ports (filter port-free? (range port-base (+ port-base port-span)))]
     (if-let [port (first ports)]
-      (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
-            proc (apply p/process (process-options {:dir dir :log log})
-                        (launch-args port source))
-            _ (reset! spawned proc)
-            state (wait-ready proc log port ready-deadline-ms)]
-        (case state
-          :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
-                  :dir dir :log log :source source}
-          :exited (if (str/includes? (tail log 20) "bind() failed")
-                    (do (io/delete-file log true)
-                        (recur (rest ports)))
-                    ;; The log is left on disk on purpose here, unlike kill!:
-                    ;; it's the only post-mortem for a start that never ran.
-                    (throw (ex-info (str "jolt nrepl-server exited: " (tail log 5)) {:log log})))
-          :timeout (throw (ex-info (str "jolt nrepl-server didn't answer within "
-                                        ready-deadline-ms " ms: " (tail log 5))
-                                   {:log log}))))
+      (let [r (try-port! dir source spawned port)]
+        (if (= ::port-taken r)
+          (recur (rest ports))
+          r))
       (throw (ex-info (str "no free port in " port-base "-" (+ port-base port-span -1)) {})))))
 
 (defn start!

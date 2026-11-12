@@ -37,17 +37,21 @@
     (doseq [[id h] hs]
       (deliver-safely! h {:id id :status ["done" disconnected-status]}))))
 
+(defn- dispatch-message!
+  "Hands message m to the handler waiting on its id, and drops the handler
+  once the message is done."
+  [pending m]
+  (let [id (:id m)]
+    (when-let [h (get @pending id)]
+      (deliver-safely! h m)
+      (when (done? m) (swap! pending dissoc id)))))
+
 (defn- read-loop [{:keys [src pending] :as conn}]
   (try
     (loop []
       (let [raw (bencode/decode src)]
         (when-not (= raw ::bencode/eof)
-          (let [m (keywordize raw)
-                id (:id m)
-                h (get @pending id)]
-            (when h
-              (deliver-safely! h m)
-              (when (done? m) (swap! pending dissoc id))))
+          (dispatch-message! pending (keywordize raw))
           (recur))))
     (catch Throwable _ nil))
   (fail-pending! conn))

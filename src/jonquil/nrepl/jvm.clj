@@ -390,6 +390,16 @@
     ((ops/statuses r) ops/disconnected) {:status :not-attached}
     :else nil))
 
+(defn- retry-lookup
+  "resolve-lookup!'s second request, in ns2: the connection's failure if it
+  has one, {:status :retried :ns ns2 :reply r2} when (good? r2), else miss."
+  [{:keys [lookup! ns2 good? miss]}]
+  (let [r2 (lookup! ns2)]
+    (or (reply-failure r2)
+        (if (good? r2)
+          {:status :retried :ns ns2 :reply r2}
+          miss))))
+
 (defn- resolve-lookup!
   "Both lookup and full-doc's shared resolution: sends a lookup (op, from
   lookup-op) for sym,
@@ -420,27 +430,23 @@
   (let [ns1 (clj/help-ns text prompt-ns)
         ns2 (str prompt-ns)
         lookup! (fn [ns] (client/request-sync conn {:op op :sym sym :ns ns :session session} timeout-ms))
-        r1 (lookup! ns1)]
+        r1 (lookup! ns1)
+        names-sym? (fn [r] (ops/doc-info sym r))]
     (or
      (reply-failure r1)
      (cond
        ;; info answers a namespace it doesn't know with a bare done, no
        ;; error (Basilisp 0.5.1, measured), so a miss there tries the prompt
        ;; namespace once, and is a plain not-found when that misses too.
-       (and (= op "info") (not (ops/doc-info sym r1)) (not= ns1 ns2))
-       (let [r2 (lookup! ns2)]
-         (or (reply-failure r2)
-             (if (ops/doc-info sym r2)
-               {:status :retried :ns ns2 :reply r2}
-               {:status :ok :ns ns1 :reply r1})))
+       (and (= op "info") (not (names-sym? r1)) (not= ns1 ns2))
+       (retry-lookup {:lookup! lookup! :ns2 ns2 :good? names-sym?
+                      :miss {:status :ok :ns ns1 :reply r1}})
        (not (ns-errored? r1)) {:status :ok :ns ns1 :reply r1}
        (= ns1 ns2) {:status :not-loaded :ns1 ns1}
        :else
-       (let [r2 (lookup! ns2)]
-         (or (reply-failure r2)
-             (if (and (not (ns-errored? r2)) (ops/doc-info sym r2))
-               {:status :retried :ns ns2 :reply r2}
-               {:status :not-loaded :ns1 ns1})))))))
+       (retry-lookup {:lookup! lookup! :ns2 ns2
+                      :good? (fn [r] (and (not (ns-errored? r)) (names-sym? r)))
+                      :miss {:status :not-loaded :ns1 ns1}})))))
 
 (defn- doc-result
   "full-doc's answer to the doc request msg: its non-blank text as
@@ -471,6 +477,69 @@
       (try
         (client/request! conn {:op "stdin" :stdin "" :session session} (fn [_] nil))
         (catch Throwable _ nil)))))
+
+(defn- found-doc
+  "The doc map for sym from lookup reply r (nil when it names nothing):
+  :file and :line dropped for a generic server whose file doesn't open
+  here, and :location added when a :file remains."
+  [generic? sym r]
+  (when-let [d (ops/doc-info sym r)]
+    (let [d (cond-> d (and generic? (not (generic/local-file? (:file d)))) (dissoc :file :line))]
+      (cond-> d (:file d) (assoc :location (help/location-line (:file d) (:line d)))))))
+
+(defn- lookup-doc
+  "Quick doc's answer for resolve-lookup!'s result res."
+  [ev sym res]
+  (case (:status res)
+    :timeout (cljd/no-docs sym clj/lookup-timeout-doc)
+    :not-attached (cljd/no-docs sym clj/not-attached-doc)
+    :not-loaded (cljd/no-docs sym (clj/not-loaded-doc (:ns1 res)))
+    ;; :ok or :retried: resolve-lookup! already confirmed a
+    ;; retry's own reply names sym, so found-doc only ever returns
+    ;; nil here for :ok's plain not-found.
+    (found-doc (generic? ev) sym (:reply res))))
+
+(defn- full-doc-for
+  "full-doc's result for resolve-lookup!'s result res. request-doc is a fn
+  of the resolved ns that asks the server's doc op."
+  [res sym request-doc]
+  (case (:status res)
+    :timeout {:status :timeout}
+    :not-attached {:status :not-attached}
+    :not-loaded {:status :not-loaded :ns (:ns1 res)}
+    ;; The namespace answered, but it doesn't know sym. doc
+    ;; would hang the server for a symbol it can't resolve
+    ;; (an unknown alias like nope/zip), so it's never sent.
+    (if-not (ops/doc-info sym (:reply res))
+      {:status :not-found}
+      (request-doc (:ns res)))))
+
+(defn- inspect-result
+  "The reply to an inspector request on the server: {:error s} or the
+  parsed view. Throws when the round trip does."
+  [state timings op args]
+  (let [{:keys [conn session ops]} @state]
+    (cond
+      ;; A nil :conn is "never attached" (inspect-not-
+      ;; attached, "Run something first"); a non-nil :conn
+      ;; that's no longer open was attached and dropped (the
+      ;; connection's own reader thread flips client/open? to
+      ;; false on EOF, but leaves :conn in place until the
+      ;; NEXT connect! or an explicit detach!) -- that case
+      ;; is clj/lost-connection, same sentence and :lost? true
+      ;; the in-flight-request drop below already answers.
+      (nil? conn) {:error clj/inspect-not-attached}
+      (not (client/open? conn)) {:error clj/lost-connection :lost? true}
+      (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
+      ;; the server's inspector has no history: say so, send nothing
+      (#{:earlier :later} op) {:error inspect/no-history-message}
+      :else
+      (let [r (client/request-sync conn (assoc (inspect/request op args) :session session)
+                                   (:inspect-timeout-ms timings))]
+        (cond
+          (not (vector? r)) {:error inspect/timeout-message}
+          ((ops/statuses r) ops/disconnected) {:error clj/lost-connection :lost? true}
+          :else (inspect/parse-view (some :view r)))))))
 
 (defrecord Jvm [selection state history listeners timings]
   ev/Evaluator
@@ -617,24 +686,14 @@
   ;; giving up as not-loaded.
   (lookup [this sym text _pos]
     (try
-      (let [{:keys [conn session ops prompt-ns]} @state
-            found (fn [r] (when-let [d (ops/doc-info sym r)]
-                            (let [d (cond-> d (and (generic? this) (not (generic/local-file? (:file d)))) (dissoc :file :line))]
-                              (cond-> d (:file d) (assoc :location (help/location-line (:file d) (:line d)))))))]
+      (let [{:keys [conn session ops prompt-ns]} @state]
         (cond
           (not (client/open? conn)) (cljd/no-docs sym clj/not-attached-doc)
           (not (lookup-op ops)) (cljd/no-docs sym clj/no-lookup-doc)
           :else
-          (let [res (resolve-lookup! {:conn conn :session session :op (lookup-op ops) :sym sym :text text
-                                      :prompt-ns prompt-ns :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
-            (case (:status res)
-              :timeout (cljd/no-docs sym clj/lookup-timeout-doc)
-              :not-attached (cljd/no-docs sym clj/not-attached-doc)
-              :not-loaded (cljd/no-docs sym (clj/not-loaded-doc (:ns1 res)))
-              ;; :ok or :retried: resolve-lookup! already confirmed a
-              ;; retry's own reply names sym, so found only ever returns
-              ;; nil here for :ok's plain not-found.
-              (found (:reply res))))))
+          (lookup-doc this sym
+                      (resolve-lookup! {:conn conn :session session :op (lookup-op ops) :sym sym :text text
+                                        :prompt-ns prompt-ns :timeout-ms (ev/help-timeout (:help-timeout-ms timings))}))))
       (catch Throwable _ nil)))
   (limitations [this]
     (if (generic? this)
@@ -681,17 +740,10 @@
             (try
               (let [res (resolve-lookup! {:conn conn :session session :op (lookup-op ops) :sym sym :text text
                                           :prompt-ns prompt-ns :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
-                (case (:status res)
-                  :timeout (on-result {:status :timeout})
-                  :not-attached (on-result {:status :not-attached})
-                  :not-loaded (on-result {:status :not-loaded :ns (:ns1 res)})
-                  ;; The namespace answered, but it doesn't know sym. doc
-                  ;; would hang the server for a symbol it can't resolve
-                  ;; (an unknown alias like nope/zip), so it's never sent.
-                  (if-not (ops/doc-info sym (:reply res))
-                    (on-result {:status :not-found})
-                    (on-result (doc-result conn {:op "doc" :sym sym :session session :ns (:ns res)}
-                                           (:full-doc-timeout-ms timings))))))
+                (on-result (full-doc-for res sym
+                                         (fn [ns]
+                                           (doc-result conn {:op "doc" :sym sym :session session :ns ns}
+                                                       (:full-doc-timeout-ms timings))))))
               (catch Throwable _ (on-result {:status :timeout}))))))
       (catch Throwable _ (on-result {:status :timeout})))
     nil)
@@ -704,29 +756,7 @@
   (inspect! [_ op args on-view]
     (future
       (try
-        (let [result
-              (let [{:keys [conn session ops]} @state]
-                (cond
-                  ;; A nil :conn is "never attached" (inspect-not-
-                  ;; attached, "Run something first"); a non-nil :conn
-                  ;; that's no longer open was attached and dropped (the
-                  ;; connection's own reader thread flips client/open? to
-                  ;; false on EOF, but leaves :conn in place until the
-                  ;; NEXT connect! or an explicit detach!) -- that case
-                  ;; is clj/lost-connection, same sentence and :lost? true
-                  ;; the in-flight-request drop below already answers.
-                  (nil? conn) {:error clj/inspect-not-attached}
-                  (not (client/open? conn)) {:error clj/lost-connection :lost? true}
-                  (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
-                  ;; the server's inspector has no history: say so, send nothing
-                  (#{:earlier :later} op) {:error inspect/no-history-message}
-                  :else
-                  (let [r (client/request-sync conn (assoc (inspect/request op args) :session session)
-                                               (:inspect-timeout-ms timings))]
-                    (cond
-                      (not (vector? r)) {:error inspect/timeout-message}
-                      ((ops/statuses r) ops/disconnected) {:error clj/lost-connection :lost? true}
-                      :else (inspect/parse-view (some :view r))))))]
+        (let [result (inspect-result state timings op args)]
           (try (on-view result)
                (catch Throwable _)))
         (catch Throwable e
