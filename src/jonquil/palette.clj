@@ -64,6 +64,17 @@
   (vec (for [{:keys [id label]} recent :when (not= id current-id)]
          {:id [:tab/switch id] :doc (str "Switch to tab: " label) :chords [] :source "tab"})))
 
+(defn compare-tab-entries
+  "The palette's compare entries (LM3): every open tab but current-id, to
+  compare the current tab with, most recently used first, as {:id
+  [:compare/tab id] :doc \"Compare with tab: label\" :chords [] :source
+  \"compare\"}. recent is [{:id :label}] most recent first, as for
+  tab-entries. The window runs these itself; they are not registry
+  commands."
+  [recent current-id]
+  (vec (for [{:keys [id label]} recent :when (not= id current-id)]
+         {:id [:compare/tab id] :doc (str "Compare with tab: " label) :chords [] :source "compare"})))
+
 (def PANEL-LABELS
   "The right-hand panels a switch can bring back, by the window's key for
   each, with the name the palette gives it. Review and History are left

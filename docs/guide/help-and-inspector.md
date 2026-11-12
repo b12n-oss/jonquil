@@ -215,6 +215,13 @@ doesn't track, gets git's reason on the status bar. Line endings and trailing
 blank lines don't count as differences, and a Take keeps the tab's own line
 endings.
 
+**Compare with tab:** does the same against another open tab, as that tab
+is right now, saved or not. The palette has one entry per open tab, such as
+**Compare with tab: core.clj**, the tab you used most recently first. Take
+reads that tab again, so an edit made there after the compare is what
+comes back. If the tab has closed since, Take uses the text it had at the
+compare.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System
