@@ -789,6 +789,33 @@
             (is (= "5" (:printed (deref done 5000 :timeout))))))
         (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
 
+(deftest step-all-steps-into-a-form-with-no-dot-in-process-test
+  (if-not (debugger/break-available?)
+    (is true "skipped: this Jolt has no jolt.debug")
+    (let [s (session/make-session)
+          paused (atom (promise))
+          next-pause (fn [] (let [d (deref @paused 5000 nil)] (reset! paused (promise)) d))
+          heads (debugger/macro-heads "user" (bp/head-symbols over-out-text))
+          step-from-7 (fn []
+                        (let [done (promise)]
+                          (session/submit-repl! s "(b 1)" {:on-complete (fn [r] (deliver done r))})
+                          (is (= "Breakpoint at line 7" (:title (next-pause))))
+                          (is (true? (step-sync s :step)))
+                          (let [t (:title (next-pause))]
+                            (ev/continue-break! s)
+                            (is (= "5" (:printed (deref done 5000 :timeout))))
+                            t)))]
+      (try
+        (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d)) :on-resume (fn [_])})
+        (is (:on? (set-breakpoints-sync s true)))
+        (testing "a dot in b only: a runs through"
+          (repl-sync s (:text (bp/instrument over-out-text [7] heads)))
+          (is (= "Stepped to line 8" (step-from-7))))
+        (testing "an instrumented tab: Step Into goes into a, which holds no dot"
+          (repl-sync s (:text (bp/instrument over-out-text [7] (assoc heads :step-all? true))))
+          (is (= "Stepped to line 2" (step-from-7))))
+        (finally (set-breakpoints-sync s false) (debugger/set-debug-mode! false))))))
+
 (defn- over-run
   "Instruments text with dots, calls call, and answers the titles of the
   pauses as steps (a seq of :step/:over/:out) are taken one by one after

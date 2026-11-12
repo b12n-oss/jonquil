@@ -491,6 +491,8 @@
    debugger-rows/row-breakpoint-asks-again-after-a-run
    debugger-rows/row-step-follows-the-lines
    debugger-rows/row-step-over-and-out
+   debugger-rows/row-step-into-instrumented
+   debugger-rows/row-instrument-reads-the-text-at-send
    restarts-rows/row-restart-retry
    restarts-rows/row-restart-edit
    restarts-rows/row-restart-define

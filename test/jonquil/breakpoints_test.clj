@@ -610,6 +610,57 @@
         {steps :steps} (instrument-h t [3])]
     (is (= [4] steps) "a comment block's forms are units of their own: cg gets none")))
 
+(deftest step-all-instruments-every-defining-form-test
+  (let [t (lines "(defn sa [x]"
+                 "  (inc x))"
+                 "(def hits (atom 0))"
+                 "(swap! hits inc)"
+                 "(comment"
+                 "  (defn cf [x]"
+                 "    (dec x)))"
+                 "(def g (fn [y]"
+                 "  (str y)))")
+        {steps :steps ls :lines} (instrument-h t [] {:step-all? true})]
+    (is (= [] ls) "no user breakpoints")
+    (is (= [2 8 9] steps) "sa and g get step points; the def of an atom, the call and the comment block's cf get none")
+    (is (= [] (:steps (instrument-h t []))) "without :step-all? nothing changes")))
+
+(deftest instrument-ranges-reads-the-text-once-test
+  (let [t (lines "(defn sa [x]"
+                 "  (inc x))"
+                 "(swap! hits inc)"
+                 "(defn sb [y]"
+                 "  (let [z (dec y)]"
+                 "    (str z)))"
+                 "(def g (fn [y]"
+                 "  (str y)))")
+        rs (bp/step-all-ranges t)]
+    (doseq [opts [{:step-all? true} {}]]
+      (is (= (mapv #(:text (instrument-h t [5] (merge opts %))) rs)
+             (bp/instrument-ranges t [5] rs (merge opts (heads t))))
+          (str "one text per range, as instrument gives it " opts)))))
+
+(deftest step-all-ranges-test
+  (let [t (lines "(defn sa [x] x)" "(swap! a inc)" "(comment (defn cf [] 1))" "(defmethod m :k [_] 2)")]
+    (is (= ["(defn sa [x] x)" "(defmethod m :k [_] 2)"]
+           (map (fn [{:keys [start end]}] (subs t start end)) (bp/step-all-ranges t))))))
+
+(deftest instrument-message-test
+  (is (= "; Instrumented 2 forms for stepping, so Step Into goes into them now."
+         (bp/instrument-message {:on? true :n 2 :skipped 0 :sent :ok})))
+  (is (= "; Instrumented 1 form for stepping, so Step Into goes into it now. 1 form has edits that haven't run, so it wasn't sent: Run it to include it."
+         (bp/instrument-message {:on? true :n 1 :skipped 1 :sent :ok})))
+  (is (= "; Instrumented 0 forms for stepping. 2 forms have edits that haven't run, so they weren't sent: Run them to include them."
+         (bp/instrument-message {:on? true :n 0 :skipped 2 :sent nil})))
+  (is (= "; This tab defines no functions to instrument."
+         (bp/instrument-message {:on? true :n 0 :skipped 0 :sent nil})))
+  (is (= "; This tab is instrumented for stepping; its forms get step points when you next run them."
+         (bp/instrument-message {:on? true :n 2 :skipped 0 :sent :busy})))
+  (is (= "; Stopped instrumenting this tab; sent 2 forms again without step points. 2 forms have edits that haven't run, so they weren't sent: Run them to include them."
+         (bp/instrument-message {:on? false :n 2 :skipped 2 :sent :ok})))
+  (is (= "; This tab isn't instrumented now; its forms lose their step points when you next run them."
+         (bp/instrument-message {:on? false :n 2 :skipped 0 :sent :failed}))))
+
 (deftest breakpoint-form-carries-its-kind-and-tab-test
   (let [user (read-string (bp/breakpoint-form 4 {:tab 7}))
         step (read-string (bp/breakpoint-form 5 {:step? true :tab 7}))

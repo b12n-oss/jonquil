@@ -146,11 +146,13 @@
                       ["step to the next line" :debug/step]
                       ["step over the next line" :debug/step-over]
                       ["step out of this function" :debug/step-out]
+                      ["instrument this tab for stepping" :debug/instrument-tab]
+                      ["stop instrumenting this tab" :debug/uninstrument-tab]
                       ["go to the next place" :locations/next]]]
         (is (= id (first-id q)) q)
-        (if (#{:debug/toggle-breakpoint :debug/clear-breakpoints :debug/step :debug/step-over :debug/step-out} id)
+        (if (#{:debug/toggle-breakpoint :debug/clear-breakpoints :debug/step :debug/step-over :debug/step-out :debug/instrument-tab :debug/uninstrument-tab} id)
           (is (= id (:run (palette/bang-pick es (str "!" q)))) (str "!" q " runs it at the prompt"))
-          (is (= (palette/bang-pick (remove (comp #{:debug/toggle-breakpoint :debug/clear-breakpoints :debug/step :debug/step-over :debug/step-out} :id) es)
+          (is (= (palette/bang-pick (remove (comp #{:debug/toggle-breakpoint :debug/clear-breakpoints :debug/step :debug/step-over :debug/step-out :debug/instrument-tab :debug/uninstrument-tab} :id) es)
                                     (str "!" q))
                  (palette/bang-pick es (str "!" q)))
               (str "!" q " answers as it did before breakpoints")))))))

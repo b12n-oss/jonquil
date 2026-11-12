@@ -111,15 +111,47 @@
   (some-> (get-in ed [:changed :bp-sent]) (reset! text))
   nil)
 
+(defn step-all?
+  "True while ed's tab is instrumented for stepping."
+  [ed]
+  (boolean (some-> (get-in ed [:changed :bp-step-all]) deref)))
+
+(defn set-step-all!
+  "Turns ed's tab's instrumenting for stepping on or off."
+  [ed on?]
+  (some-> (get-in ed [:changed :bp-step-all]) (reset! (boolean on?)))
+  nil)
+
+(defn- send-opts
+  "What sent-text and sent-texts instrument ed's text with, or nil when
+  nothing goes in: evaluator e armed, and ed with dots or instrumented."
+  [ed e text tab-id]
+  (when (and (supported? e) (ev/breakpoints-on? e))
+    (let [ls (lines ed text)
+          all? (step-all? ed)]
+      (when (or (seq ls) all?)
+        {:lines ls :opts (merge {:tab tab-id :step-all? all?} (heads ed text))}))))
+
 (defn sent-text
   "What a Run sends from ed: text's range ({:start :end}, the whole text
   when nil) with ed's breakpoints in, when evaluator e has them armed and
-  some lie in the range; the range's text as it is otherwise. tab-id
-  goes in each breakpoint (the gutter's arrow finds the tab by it), and
-  the forms holding one get step points (jonquil.breakpoints/instrument)."
+  some lie in the range or the tab is instrumented for stepping
+  (step-all?); the range's text as it is otherwise. tab-id goes in each
+  breakpoint (the gutter's arrow finds the tab by it), and the forms
+  holding one, or every defining form of an instrumented tab, get step
+  points (jonquil.breakpoints/instrument)."
   [ed e text range tab-id]
-  (let [{:keys [start end] :or {start 0 end (count text)}} range
-        ls (when (and (supported? e) (ev/breakpoints-on? e)) (seq (lines ed text)))]
-    (if ls
-      (:text (bp/instrument text ls (merge {:start start :end end :tab tab-id} (heads ed text))))
+  (let [{:keys [start end] :or {start 0 end (count text)}} range]
+    (if-let [{ls :lines opts :opts} (send-opts ed e text tab-id)]
+      (:text (bp/instrument text ls (assoc opts :start start :end end)))
       (subs text start end))))
+
+(defn sent-texts
+  "sent-text for each of ranges, reading text once
+  (jonquil.breakpoints/instrument-ranges): what Live at once sends for
+  many forms."
+  [ed e text ranges tab-id]
+  (let [so (send-opts ed e text tab-id)]
+    (if so
+      (bp/instrument-ranges text (:lines so) ranges (:opts so))
+      (mapv (fn [{:keys [start end]}] (subs text start end)) ranges))))

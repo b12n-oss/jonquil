@@ -529,6 +529,8 @@
        (cond-> {:line (:line s)} (not= line (:line s)) (assoc :moved? true))
        {:error NOWHERE}))))
 
+(declare defining-forms)
+
 (defn- units
   "text's stepping units: its top-level forms, a (comment ...) block's
   forms taken one by one instead of the block."
@@ -545,6 +547,46 @@
       [[start (str bp " ") 0]]
       [[start (str "(do " bp " ") 0] [end ")" 1]])))
 
+(defn- prepare
+  "What instrument reads from the whole text, once for any number of
+  ranges: its spots (opts' :heads), the first spot on each line, its
+  stepping units and, with :step-all?, its defining forms."
+  [text {:keys [step-all?] :as opts}]
+  (let [all (spots text (select-keys opts [:heads]))]
+    {:all all
+     :first-on (reduce (fn [m sp] (if (contains? m (:line sp)) m (assoc m (:line sp) sp))) {} all)
+     :units (units text)
+     :defining (when step-all? (defining-forms text))}))
+
+(defn- overlaps? [start end x] (and (< (:start x) end) (< start (:end x))))
+
+(defn- within? [outer x] (and (<= (:start outer) (:start x)) (< (:start x) (:end outer))))
+
+(defn- instrument-range
+  "instrument for one range, from prepare's p."
+  [text lines {:keys [start end tab] :or {start 0}} {:keys [all first-on units defining]}]
+  (let [end (or end (count text))
+        inside? #(and (<= start (:start %)) (<= (:end %) end))
+        dots (->> (distinct lines) (keep first-on) (filter inside?))
+        dotted (set (map :line dots))
+        held (concat (filter (fn [u] (some #(within? u %) dots)) (filter #(overlaps? start end %) units))
+                     (filter #(overlaps? start end %) defining))
+        steps (->> all
+                   (filter (fn [sp] (some #(within? % sp) held)))
+                   (remove #(dotted (:line %)))
+                   (map :line) distinct
+                   (keep first-on)
+                   (filter inside?)
+                   (map #(assoc % :step? true)))
+        ;; from the end back, so earlier offsets stay good; at one offset
+        ;; an opening goes in first, so the closing ) inserted after it
+        ;; ends up in front of it
+        ins (sort-by (fn [[o _ order]] [(- o) order]) (mapcat #(edits tab %) (concat dots steps)))
+        sb (StringBuilder. ^String (subs text start end))]
+    (doseq [[o s] ins]
+      (.insert sb (int (- o start)) ^String s))
+    {:text (str sb) :lines (vec (sort (map :line dots))) :steps (vec (sort (map :line steps)))}))
+
 (defn instrument
   "text with a breakpoint at each of lines (1-based) that holds one, as
   {:text :lines}, :lines being the lines that got one. With range
@@ -556,32 +598,20 @@
   Stepping: every other line that can pause in a unit holding a
   breakpoint gets a step point (:steps, their lines), which pauses only
   while stepping. A unit is a top-level form, or a form directly inside a
-  (comment ...) block. Units without a breakpoint get none."
+  (comment ...) block. Units without a breakpoint get none, unless opts'
+  :step-all? is set (an instrumented tab): then every top-level form that
+  only defines code (defines-code?, never one inside a comment block) is
+  filled too, dot or not."
   ([text lines] (instrument text lines {}))
-  ([text lines {:keys [start end tab] :or {start 0} :as opts}]
-   (let [end (or end (count text))
-         all (spots text (select-keys opts [:heads]))
-         inside? #(and (<= start (:start %)) (<= (:end %) end))
-         dots (->> (distinct lines) (keep #(spot-on all %)) (filter inside?))
-         dotted (set (map :line dots))
-         held (filter (fn [u] (some #(and (<= (:start u) (:start %)) (< (:start %) (:end u))) dots))
-                      (units text))
-         steps (->> all
-                    (filter (fn [sp] (some #(and (<= (:start %) (:start sp)) (< (:start sp) (:end %))) held)))
-                    (remove #(dotted (:line %)))
-                    (map :line) distinct
-                    (keep #(spot-on all %))
-                    (filter inside?)
-                    (map #(assoc % :step? true)))
-         chosen (concat dots steps)
-         ;; from the end back, so earlier offsets stay good; at one offset
-         ;; an opening goes in first, so the closing ) inserted after it
-         ;; ends up in front of it
-         ins (sort-by (fn [[o _ order]] [(- o) order]) (mapcat #(edits tab %) chosen))
-         sb (StringBuilder. ^String (subs text start end))]
-     (doseq [[o s] ins]
-       (.insert sb (int (- o start)) ^String s))
-     {:text (str sb) :lines (vec (sort (map :line dots))) :steps (vec (sort (map :line steps)))})))
+  ([text lines opts] (instrument-range text lines opts (prepare text opts))))
+
+(defn instrument-ranges
+  "instrument's :text for each of ranges ({:start :end}) of text, reading
+  the whole text once: what Live at once and the instrument commands send
+  for many forms at a time. opts as instrument takes them, less the range."
+  [text lines ranges opts]
+  (let [p (prepare text opts)]
+    (mapv #(:text (instrument-range text lines (merge opts (select-keys % [:start :end])) p)) ranges)))
 
 ;; --- Live at once: which top-level form a toggle sends again -------------------
 
@@ -622,6 +652,57 @@
                             (commands/top-level-forms text)))]
     (when (and form (not (commands/comment-form? text form)) (defines-code? text form))
       {:start (:start form) :end (:end form)})))
+
+(defn- defining-forms
+  "text's top-level forms that only define code (defines-code?), outside
+  any (comment ...) block, in text order."
+  [text]
+  (filter #(and (not (commands/comment-form? text %)) (defines-code? text %))
+          (commands/top-level-forms text)))
+
+(defn step-all-ranges
+  "The {:start :end} of each top-level form Instrument this tab sends
+  again: every one that only defines code, outside comment blocks."
+  [text]
+  (mapv #(select-keys % [:start :end]) (defining-forms text)))
+
+(defn- forms-n [n] (str n (if (= 1 n) " form" " forms")))
+
+(defn- skipped-sentence
+  "What an instrument command says about k forms with edits that haven't
+  run, which it left unsent; nil for none."
+  [k]
+  (when (pos? k)
+    (if (= 1 k)
+      " 1 form has edits that haven't run, so it wasn't sent: Run it to include it."
+      (str " " (forms-n k) " have edits that haven't run, so they weren't sent: Run them to include them."))))
+
+(defn- instrumented-message
+  "instrument-message for Instrument this tab."
+  [n skipped sent]
+  (cond
+    (and (zero? n) (zero? skipped)) "; This tab defines no functions to instrument."
+    (and (pos? n) (not= :ok sent))
+    "; This tab is instrumented for stepping; its forms get step points when you next run them."
+    :else (str "; Instrumented " (forms-n n) " for stepping"
+               (when (pos? n) (str ", so Step Into goes into " (if (= 1 n) "it" "them") " now"))
+               "." (skipped-sentence skipped))))
+
+(defn- uninstrumented-message
+  "instrument-message for Stop instrumenting this tab."
+  [n skipped sent]
+  (if (and (pos? n) (not= :ok sent))
+    "; This tab isn't instrumented now; its forms lose their step points when you next run them."
+    (str "; Stopped instrumenting this tab; sent " (forms-n n) " again without step points."
+         (skipped-sentence skipped))))
+
+(defn instrument-message
+  "The status line after Instrument this tab (on? true) or Stop
+  instrumenting (on? false): n forms sent, skipped forms left out for
+  edits that haven't run, sent the re-send's outcome (:ok, or :failed,
+  :busy, :refused; nil when nothing was sent)."
+  [{:keys [on? n skipped sent]}]
+  ((if on? instrumented-message uninstrumented-message) n (or skipped 0) sent))
 
 (defn edited?
   "True when the form at rng ({:start :end}) of text has edits that

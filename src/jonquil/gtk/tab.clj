@@ -40,6 +40,10 @@
                          ;; LM5: the text a Run last sent breakpoints
                          ;; from, for the stepping arrow's line
                          :bp-sent (atom nil)
+                         ;; LM5: on while the tab is instrumented for
+                         ;; stepping, so every Run fills its defining
+                         ;; forms with step points
+                         :bp-step-all (atom false)
                          ;; LM5: what a Run that ended well calls, to ask
                          ;; again (installed when the tab is wired)
                          :bp-refresh (atom (fn []))

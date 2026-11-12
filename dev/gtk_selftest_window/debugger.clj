@@ -590,3 +590,93 @@
                                     :again again? :into into? :out out? :done2 done2?
                                     :title (dpane/title-text dp) :arrow (arrow-line ui) :status (status ui)})))
           (finally (breakpoints-off! ui true)))))))
+
+(defn row-step-into-instrumented
+  "Instrument this tab for stepping: with a dot only in b, on the line that
+  calls a, Step Into runs through a; once the tab is instrumented it goes
+  into a, still after a whole-tab Run; Stop instrumenting takes that back,
+  and Clear All Breakpoints ends both and disarms the runtime."
+  [ui]
+  (go-row :step-into-instrumented support/check
+    (if-not (debugger/break-available?)
+      (on-gtk (support/check :step-into-instrumented true {:available false}))
+      (let [dp (:debugger-pane ui)
+            step-from-7 (fn []
+                          (let [m (enter! ui "(b 1)")
+                                at7? (await-until 5000 20 #(= "Breakpoint at line 7" (dpane/title-text dp)))
+                                _ (on-gtk (dpane/press-restart! dp :step))
+                                _ (await-until 5000 20 #(str/starts-with? (str (dpane/title-text dp)) "Stepped to line"))
+                                title (dpane/title-text dp)
+                                arrow (arrow-line ui)
+                                _ (on-gtk (dpane/press-restart! dp :continue))
+                                done? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 5")))]
+                            [(and at7? done?) title arrow]))]
+        (try
+          (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-instrument-") "inst.clj")
+                _ (spit f (str "(defn a [x]\n  (when (neg? x)\n    (str \"never\"))\n  (let [y (inc x)]\n    (* y 2)))\n"
+                               "(defn b [x]\n  (let [r (a x)]\n    (+ r 1)))\n"))
+                m0 (on-gtk (let [m (support/out-end-offset ui)] ((:open-file! ui) (.getPath f)) ((:run!* ui)) m))
+                ran? (await-until 8000 20 #(and (support/idle? ui) (str/includes? (support/since ui m0) "#'user/b")))
+                _ (on-gtk (caret-to-line! ui 7) (run-palette! ui "toggle a breakpoint"))
+                dot7? (await-until 8000 20 #(str/starts-with? (status ui) "; Breakpoint set at line 7; it's live now."))
+                plain (step-from-7)
+                _ (on-gtk (run-palette! ui "instrument this tab for stepping"))
+                inst? (await-until 8000 20 #(str/starts-with? (status ui) "; Instrumented 2 forms for stepping"))
+                into (step-from-7)
+                m1 (on-gtk (let [m (support/out-end-offset ui)] ((:run!* ui)) m))
+                reran? (await-until 8000 20 #(and (support/idle? ui) (str/includes? (support/since ui m1) "#'user/b")))
+                after-run (step-from-7)
+                _ (on-gtk (run-palette! ui "stop instrumenting this tab"))
+                uninst? (await-until 8000 20 #(str/starts-with? (status ui) "; Stopped instrumenting this tab; sent 2 forms"))
+                undone (step-from-7)
+                _ (on-gtk (run-palette! ui "instrument this tab for stepping"))
+                inst2? (await-until 8000 20 #(str/starts-with? (status ui) "; Instrumented 2 forms for stepping"))
+                _ (on-gtk (run-palette! ui "clear all breakpoints"))
+                cleared? (await-until 8000 20 #(str/starts-with? (status ui) "; Cleared 1 breakpoint and stopped instrumenting this tab"))
+                disarmed? (await-until 5000 20 #(nil? @debugger/breakpoint-hook))]
+            (on-gtk (support/check :step-into-instrumented
+                                   (and ran? dot7? (= [true "Stepped to line 8" 8] plain)
+                                        inst? (= [true "Stepped to line 2" 2] into)
+                                        reran? (= [true "Stepped to line 2" 2] after-run)
+                                        uninst? (= [true "Stepped to line 8" 8] undone)
+                                        inst2? cleared? disarmed?)
+                                   {:ran ran? :dot7 dot7? :plain plain :inst inst? :into into :reran reran?
+                                    :after-run after-run :uninst uninst? :undone undone :inst2 inst2?
+                                    :cleared cleared? :disarmed disarmed? :status (status ui)})))
+          (finally (breakpoints-off! ui true)))))))
+
+(defn row-instrument-reads-the-text-at-send
+  "Instrument this tab for stepping, then text typed before the runtime
+  answers (in the same GTK tick, so the answer can only come after): the
+  forms sent are cut from the text as it is when they go, so both defns
+  are defined again whole, and the runtime was asked which heads are
+  macros, though the tab has no dot."
+  [ui]
+  (go-row :instrument-reads-the-text-at-send support/check
+    (if-not (debugger/break-available?)
+      (on-gtk (support/check :instrument-reads-the-text-at-send true {:available false}))
+      (try
+        (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-instrument-typing-") "typing.clj")
+              _ (spit f "(defn ia [x]\n  (inc x))\n(defn ib [x]\n  (ia (dec x)))\n")
+              m0 (on-gtk (let [m (support/out-end-offset ui)] ((:open-file! ui) (.getPath f)) ((:run!* ui)) m))
+              ran? (await-until 8000 20 #(and (support/idle? ui) (str/includes? (support/since ui m0) "#'user/ib")))
+              m (on-gtk (let [m (support/out-end-offset ui)
+                              ed (active-ed ui)]
+                          (run-palette! ui "instrument this tab for stepping")
+                          (g/with-iters* (:buf ed) 0 0
+                            (fn [a _] (g/gtk-text-buffer-insert (:buf ed) a ";; typed while it armed\n" -1)))
+                          m))
+              inst? (await-until 8000 20 #(str/starts-with? (status ui) "; Instrumented 2 forms for stepping"))
+              out (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "#'user/ib")))
+              text (on-gtk (support/since ui m))
+              heads? (on-gtk (some? (some-> (active-ed ui) :changed :bp-heads deref)))]
+          (on-gtk (support/check :instrument-reads-the-text-at-send
+                                 ;; one entry: both forms echoed whole, the last one's value
+                                 (and ran? inst? out
+                                      (str/includes? text "(defn ia [x]\n  (inc x))\n(defn ib [x]\n  (ia (dec x)))")
+                                      (not (str/includes? text "rror")) heads?)
+                                 {:ran ran? :inst inst? :out out :heads heads? :text text :status (status ui)})))
+        ;; the typed line made the tab dirty: marked saved, so closing it
+        ;; doesn't ask about saving (and leave it, instrumented, open)
+        (finally (on-gtk (editor/mark-saved! (active-ed ui)))
+                 (breakpoints-off! ui true))))))

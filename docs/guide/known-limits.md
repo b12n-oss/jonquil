@@ -61,8 +61,10 @@ Known rough edges, parked for later:
   Jonquil doesn't know is treated as reading its arguments as data, so
   nothing inside it is wrapped, and a dot there doesn't pause. A breakpoint pauses only
   during an evaluation you started, and in process only on its own thread.
-- Stepping reaches only the forms that hold a breakpoint: a call into a
-  form without a dot runs through. Step Over at the end of a function that a
+- Stepping reaches only the forms that hold a breakpoint, or every
+  defining form of a tab instrumented for stepping: a call into another
+  form runs through, and so does a function value made before the tab was
+  instrumented. Step Over at the end of a function that a
   library loop calls (`mapv`, `reduce`, `run!`) pauses in that function's
   next call, since the loop itself has no frame to return to. Chrome's
   debugger does the same. Use Continue, or Step Out to leave the loop's
