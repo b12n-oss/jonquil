@@ -1,13 +1,14 @@
 (ns jonquil.usages
   "Find Usages in Project, pure: every use of a name in the project's
-  Clojure files, and how each one uses it. By name, so a same-named symbol
-  in another namespace counts too; telling them apart needs a resolved
-  index, a later step (ROADMAP LM2). jonquil.gtk.window runs scan on a
-  future and turns its result into a jonquil.locations list."
+  Clojure files, how each one uses it, and whether it names the var the
+  search started from (jonquil.resolve reads each file's ns form and
+  bindings for that). jonquil.gtk.parts.locations runs scan on a future and
+  turns its result into a jonquil.locations list."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.file-tree :as file-tree]
             [jonquil.locations :as loc]
+            [jonquil.resolve :as resolve]
             [jonquil.syntax :as syntax]))
 
 (def ^:private code-kinds
@@ -28,62 +29,6 @@
       (and (> (count t) (inc (count name)))
            (str/ends-with? t (str "/" name))
            (= (search-name t) name))))
-
-(defn- just-before?
-  "Whether text right before offset i, past spaces, ends with prefix."
-  [^String text i prefix]
-  (str/ends-with? (str/trimr (subs text 0 i)) prefix))
-
-(defn- opener?
-  "Whether ch opens a list, vector or map."
-  [ch]
-  (contains? #{\( \[ \{} ch))
-
-(defn- top-level-or-reader-conditional?
-  "Whether a form opened with stack (the offsets of the openers around it)
-  is at the top level, or directly inside a reader conditional."
-  [text stack]
-  (or (empty? stack)
-      (and (= 1 (count stack))
-           (let [p (peek stack)]
-             (or (just-before? text p "#?") (just-before? text p "#?@"))))))
-
-(defn- ns-opener?
-  "Whether the ( at offset s, followed by token next, starts a live ns form."
-  [text stack s next-token]
-  (let [[nk ns' ne] next-token]
-    (and (contains? code-kinds nk) (= "ns" (subs text ns' ne))
-         (not (just-before? text s "#_"))
-         (top-level-or-reader-conditional? text stack))))
-
-(defn- bracket-step
-  "[stack spans] after the bracket token at the head of ts (at offset s, the
-  next token second in ts): an opener is pushed (and its ns form's span
-  recorded), a closer pops."
-  [{:keys [text matches]} [stack spans] ts]
-  (let [[_ s] (first ts)
-        next-token (second ts)]
-    (if (opener? (.charAt ^String text (int s)))
-      (let [close (when (and (= \( (.charAt ^String text (int s)))
-                             (ns-opener? text stack s next-token))
-                    (get matches s))]
-        [(conj stack s) (cond-> spans close (conj [s (inc close)]))])
-      [(if (seq stack) (pop stack) stack) spans])))
-
-(defn- ns-spans
-  "[[start end] ...] of text's ns forms: a (ns ...) at the top level, or
-  directly inside a reader conditional (#?(:clj (ns ...))), but never one
-  in a (comment ...) block or after #_."
-  [text tokens]
-  (let [{:keys [matches]} (syntax/compute-brackets text)
-        ctx {:text text :matches matches}]
-    (loop [ts (seq tokens) stack [] spans []]
-      (if-let [[kind] (first ts)]
-        (if (= :bracket kind)
-          (let [[stack' spans'] (bracket-step ctx [stack spans] ts)]
-            (recur (rest ts) stack' spans'))
-          (recur (rest ts) stack spans))
-        spans))))
 
 (defn- use-kind
   "How the use spanning [s e) is made: :ns inside an ns form's span,
@@ -118,7 +63,7 @@
     (if (or (str/blank? name) (not (str/includes? text name)))
       []
       (let [tokens (vec (remove #(= :comment (first %)) (syntax/tokenize text)))
-            spans (ns-spans text tokens)
+            spans (resolve/ns-spans text tokens)
             defs (set (map (juxt :start :end) (syntax/find-definitions text name)))
             ctx {:text text :tokens tokens :spans spans :defs defs :name name}]
         (into [] (keep-indexed #(hit-at ctx %1 %2)) tokens)))))
@@ -153,26 +98,54 @@
                    (mapcat #(dir-paths ignore walk %) (or (.listFiles dir) [])))))]
     (vec (sort (distinct (walk (io/file root)))))))
 
+(defn- match
+  "How hit h in a file (ctx, a resolve/file-context) relates to target, a
+  resolution of the symbol the search started from: :this when it names
+  the same var, :unresolved when the file can't tell (or resolving threw),
+  else :other (another var, or a local). Every hit is :this when target
+  isn't a var."
+  [ctx target text h]
+  (if-not (:var target)
+    :this
+    (let [r (try (resolve/resolve-at ctx (:start h) (subs text (:start h) (:end h)))
+                 ;; one odd file shouldn't fail the whole search
+                 (catch :default _ {:unresolved true}))]
+      (cond (= (:var r) (:var target)) :this
+            (:unresolved r) :unresolved
+            :else :other))))
+
+(defn- file-entries
+  "The scan's result for one readable file at path p with text."
+  [{:keys [name target features]} p text]
+  (let [hs (hits text name)
+        ctx (when (and (seq hs) (:var target))
+              (resolve/file-context text (resolve/features-for p features)))]
+    {:path p :hash (hash text)
+     :entries (map (fn [e h] (assoc e :path p :how (:how h) :match (match ctx target text h)))
+                   (loc/entries text (map (juxt :start :end) hs))
+                   hs)}))
+
 (defn scan
-  "{:entries [{:path :start :end :line :text :how}] :files n :matched n
-  :unreadable n :hashes {path h}}: every use of name in root's
-  project-files, files in path order. texts maps a path to an open tab's
-  text, which replaces the file's own. :hashes holds the hash of the text
-  each matched file was searched in, so a caller can tell whether its
-  offsets still fit. A file that can't be read is skipped and counted."
-  [{:keys [root name texts]}]
+  "{:entries [{:path :start :end :line :text :how :match}] :files n :matched n
+  :unreadable n :hashes {path h} :target target}: every use of name in
+  root's project-files, files in path order. texts maps a path to an open
+  tab's text, which replaces the file's own. target is the resolution of
+  the symbol the search started from (resolve/resolve-at), or nil;
+  features the window dialect's reader features, for .cljc files. Each
+  entry's :match is :this, :other or :unresolved (see match). :hashes holds
+  the hash of the text each matched file was searched in, so a caller can
+  tell whether its offsets still fit. A file that can't be read is skipped
+  and counted."
+  [{:keys [root texts target] :as opts}]
   (let [paths (project-files root)
         results (for [p paths]
                   (let [text (or (get texts p) (try (slurp p) (catch Throwable _ ::unreadable)))]
                     (if (= ::unreadable text)
                       {:unreadable 1}
-                      (let [hs (hits text name)]
-                        {:path p :hash (hash text)
-                         :entries (map (fn [e h] (assoc e :path p :how (:how h)))
-                                       (loc/entries text (map (juxt :start :end) hs))
-                                       hs)}))))]
+                      (file-entries opts p text))))]
     {:entries (vec (mapcat :entries results))
      :files (count paths)
      :matched (count (filter (comp seq :entries) results))
      :unreadable (reduce + 0 (keep :unreadable results))
-     :hashes (into {} (keep (fn [r] (when (seq (:entries r)) [(:path r) (:hash r)]))) results)}))
+     :hashes (into {} (keep (fn [r] (when (seq (:entries r)) [(:path r) (:hash r)]))) results)
+     :target target}))

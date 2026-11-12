@@ -96,3 +96,33 @@
           e (first (:entries (usages/scan {:root root :name "join"})))]
       (is (= [5 9] [(:start e) (:end e)]))
       (is (str/includes? (:text e) "(join 1)")))))
+
+(deftest scan-resolved-test
+  (let [root (temp-project
+              {"src/my/text.clj" "(ns my.text)\n(defn join [xs] xs)\n(join [1])\n"
+               "src/app/a.clj" (str "(ns app.a (:require [clojure.string :as str] [my.text :as t]))\n"
+                                    "(str/join [1]) (t/join [2]) (let [join inc] (join 3))\n")
+               "src/app/b.clj" "(ns app.b (:require [my.text :refer [join]]))\n(join [4])\n"
+               "src/app/c.clj" "(ns app.c (:use my.text))\n(join [5])\n"
+               "src/app/d.cljc" "(ns app.d (:require #?(:clj [my.text :as z] :cljs [other :as z])))\n(z/join 6)\n"})
+        rel (fn [r] (mapv (fn [{:keys [path text match]}] [(subs path (inc (count root))) text match])
+                          (:entries r)))
+        target {:var 'my.text/join}]
+    (testing "each hit says whether it names the target var"
+      (is (= [["src/app/a.clj" "(str/join [1]) (t/join [2]) (let [join inc] (join 3))" :other]
+              ["src/app/a.clj" "(str/join [1]) (t/join [2]) (let [join inc] (join 3))" :this]
+              ["src/app/a.clj" "(str/join [1]) (t/join [2]) (let [join inc] (join 3))" :other]
+              ["src/app/a.clj" "(str/join [1]) (t/join [2]) (let [join inc] (join 3))" :other]
+              ["src/app/b.clj" "(ns app.b (:require [my.text :refer [join]]))" :this]
+              ["src/app/b.clj" "(join [4])" :this]
+              ["src/app/c.clj" "(join [5])" :unresolved]
+              ["src/app/d.cljc" "(z/join 6)" :this]
+              ["src/my/text.clj" "(defn join [xs] xs)" :this]
+              ["src/my/text.clj" "(join [1])" :this]]
+             (rel (usages/scan {:root root :name "join" :target target :features #{:jolt :clj}})))))
+    (testing "the cljc alias follows the window's features"
+      (is (= :other (->> (usages/scan {:root root :name "join" :target target :features #{:cljs}})
+                         :entries (filter #(str/ends-with? (:path %) "d.cljc")) first :match))))
+    (testing "a target that isn't a var: every hit is :this, as a by-name search"
+      (is (= #{:this} (set (map :match (:entries (usages/scan {:root root :name "join" :target {:local true}})))))))
+    (is (= target (:target (usages/scan {:root root :name "join" :target target}))))))

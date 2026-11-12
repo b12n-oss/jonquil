@@ -467,17 +467,18 @@
         true)
       true)))
 
-(defn- local-binding
+(defn local-binding-in
   "The innermost binding of sym-name in scope at pos, as {:symbol :start
   :end}, or nil. Walks '(' forms enclosing pos outward; the first ancestor
   with a match wins, and within that ancestor's own name list the LAST
   match wins (a repeated name in one binding vector prefers the one
   closest to the body). scoped-for? skips an ancestor
   entirely -- as if it bound nothing -- when it's an if-let/if-some whose
-  binding doesn't reach pos (the ELSE branch)."
-  [text pos sym-name]
-  (let [{:keys [matches]} (syntax/compute-brackets text)
-        src {:text text :tokens (non-comment-tokens text) :matches matches}]
+  binding doesn't reach pos (the ELSE branch). src is {:text :tokens
+  :matches}: text's non-comment tokens and bracket matches, so a caller
+  asking about many places in one text builds them once."
+  [src pos sym-name]
+  (let [{:keys [text matches]} src]
     (or
      ;; #()'s own args have no textual binding site: the innermost
      ;; enclosing #( binds them (the reader rewrites % inside #(), so it
@@ -493,6 +494,13 @@
                (last (filter #(= sym-name (:symbol %))
                              (ancestor-names src open close)))))
            (enclosing-parens text matches pos)))))
+
+(defn local-binding
+  "local-binding-in for text, building its tokens and matches."
+  [text pos sym-name]
+  (local-binding-in {:text text :tokens (non-comment-tokens text)
+                     :matches (:matches (syntax/compute-brackets text))}
+                    pos sym-name))
 
 (defn jump-target
   "Where jump to definition goes from snapshot: {:kind :buffer :offset n} for

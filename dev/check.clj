@@ -94,6 +94,7 @@
     jonquil.restarts
     jonquil.locations
     jonquil.usages
+    jonquil.resolve
     jonquil.timing
     jonquil.gtk.locations-pane
     jonquil.gtk.debugger-pane

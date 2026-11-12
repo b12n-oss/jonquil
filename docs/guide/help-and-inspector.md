@@ -188,8 +188,22 @@ from: closing that tab clears it.
 the project's Clojure files: the folder the file tree shows, or the file's
 own folder when there's no tree, minus what `.gitignore`, dot folders,
 `target` and `node_modules` hide. An open tab counts with its unsaved text.
-It matches by name, so `str/join` and `clojure.string/join` count as uses of
-`join`, and so does a `join` of your own in another namespace. Each row
+It works out which var the symbol at the caret names, from the file's `ns`
+form (its aliases, `:refer` lists and `:refer-clojure` options), the file's
+own definitions, the local bindings around the symbol and `clojure.core`,
+and decides each place it finds the same way. So with the caret on
+`str/join`, a `join` of your own in another namespace isn't listed, and
+neither is a `let`-bound `join`. Two more check boxes under the kinds bring
+the rest back: **Other vars** (another var, or a local, with the same name)
+and **Unresolved**, for places a file can't decide from its own text, such
+as a name brought in by `:refer :all`, `(:use ...)` or a top-level
+`require` (in a file with `:refer :all` or `:use`, a `clojure.core` name
+too, since one of those may shadow it), or one a macro defines. Each box shows how many places it holds,
+and their rows say `other var` or `unresolved` after the kind. When the
+symbol at the caret is itself a local, or can't be decided, the list
+matches by name instead, so `str/join` and `clojure.string/join` both count
+as uses of `join`, and the two boxes stay hidden. A `.cljc` file is read
+for the window's dialect. Each row
 reads `path:line: kind: text`, where the kind says how the name is used: a
 `call` (the first thing in a list, `(join ...)` or `#(join ...)`), a `value`
 (passed around, `(map join xs)`), a `def` (the name a `def` form defines),

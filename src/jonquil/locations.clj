@@ -69,43 +69,94 @@
   "The kinds a project usage can be, in the order the filter shows them."
   [:call :value :definition :ns])
 
-(defn project-uses
-  "A list from jonquil.usages/scan's result for name: :scope :project, every
-  kind shown, each entry carrying :path, :how and :id, its place in :all,
-  the whole list the filter picks from. :hashes is the scan's, the text
-  each file was searched in."
-  [{:keys [entries matched hashes]} name]
-  (let [n (count entries)
-        all (into [] (map-indexed (fn [i e] (assoc e :id i))) (take LIST-MAX entries))]
-    {:title (str "Usages of " name " (" n " in " matched (if (= 1 matched) " file" " files") ")"
-                 (when (> n LIST-MAX) (str ", the first " LIST-MAX)))
-     :scope :project :all all :entries all :hows (set hows) :index nil
-     :hashes (or hashes {})}))
+(def match-kinds
+  "The kinds of place that aren't the searched-for var, in the order the
+  filter shows them: another var or a local, and a place the file can't
+  decide (jonquil.usages/scan's :match)."
+  [:other :unresolved])
 
-(defn set-hows
-  "lst showing only the entries whose :how is in shown, in order. The
-  current place stays when it's still shown, else moves to the next shown
-  entry, else the last; nil when nothing shows."
-  [lst shown]
+(defn- keep-first
+  "At most LIST-MAX of entries, in order, the target's own (:match :this, or
+  none given) kept before any other."
+  [entries]
+  (if (<= (count entries) LIST-MAX)
+    (vec entries)
+    (let [this? #(= :this (:match % :this))
+          n-this (min LIST-MAX (count (filter this? entries)))
+          keep-this (set (take n-this (keep-indexed (fn [i e] (when (this? e) i)) entries)))
+          room (- LIST-MAX n-this)
+          keep-other (set (take room (keep-indexed (fn [i e] (when-not (this? e) i)) entries)))]
+      (into [] (keep-indexed (fn [i e] (when (or (keep-this i) (keep-other i)) e))) entries))))
+
+(defn- shown?
+  "Whether entry e shows under lst's :hows and :matches."
+  [lst e]
+  (and (contains? (:hows lst) (:how e))
+       (contains? (:matches lst) (:match e :this))))
+
+(defn- refilter
+  "lst with :entries recomputed from :all, the current place kept when it's
+  still shown, else the next shown entry, else the last; nil when nothing
+  shows."
+  [lst]
   (let [cur (some->> (:index lst) (nth (:entries lst)) :id)
-        es (filterv #(contains? shown (:how %)) (:all lst))
+        es (filterv #(shown? lst %) (:all lst))
         idx (when (and cur (seq es))
               (or (first (keep-indexed (fn [i e] (when (>= (:id e) cur) i)) es))
                   (dec (count es))))]
-    (assoc lst :hows shown :entries es :index idx)))
+    (assoc lst :entries es :index idx)))
+
+(defn project-uses
+  "A list from jonquil.usages/scan's result for name: :scope :project, each
+  entry carrying :path, :how, :match and :id, its place in :all, the whole
+  list the filter picks from. When the scan's :target is a var
+  (:target-var?), only that var's own places show at first (:matches
+  #{:this}) and :match-counts counts the rest for their buttons; the title
+  names the var. :hashes is the scan's, the text each file was searched in."
+  [{:keys [entries matched hashes target]} name]
+  (let [var-name (:var target)
+        this (if var-name (filterv #(= :this (:match %)) entries) entries)
+        n (count this)
+        files (if var-name (count (distinct (map :path this))) matched)
+        all (into [] (map-indexed (fn [i e] (assoc e :id i))) (keep-first entries))]
+    (refilter
+     {:title (str "Usages of " (or var-name name) " (" n " in " files (if (= 1 files) " file" " files") ")"
+                  (when (> (count entries) LIST-MAX) (str ", the first " LIST-MAX)))
+      :scope :project :all all :index nil :entries []
+      :hows (set hows)
+      :matches (if var-name #{:this} (into #{:this} match-kinds))
+      :target-var? (some? var-name)
+      :match-counts (into {} (map (fn [k] [k (count (filter #(= k (:match %)) entries))])) match-kinds)
+      :hashes (or hashes {})})))
+
+(defn set-hows
+  "lst showing only the entries whose :how is in shown and, for a list
+  whose target is a var, whose :match is :this or in shown (the filter's
+  ticked set mixes hows and match-kinds). The current place stays when
+  it's still shown, else moves to the next shown entry, else the last;
+  nil when nothing shows."
+  [lst shown]
+  (refilter (assoc lst
+                   :hows (into #{} (filter (set hows)) shown)
+                   :matches (if (:target-var? lst)
+                              (into #{:this} (filter (set match-kinds)) shown)
+                              (:matches lst)))))
 
 (def ^:private how-words {:call "call" :value "value" :definition "def" :ns "ns"})
 
+(def ^:private match-words {:other ", other var" :unresolved ", unresolved"})
+
 (defn row-text
   "The panel's row for entry e of lst: line: text, and for a project list
-  path:line: kind: text, the path relative to lst's :root."
-  [lst {:keys [line text path how]}]
+  path:line: kind: text, the path relative to lst's :root, the kind saying
+  when the place isn't the searched-for var."
+  [lst {:keys [line text path how match]}]
   (if (= :project (:scope lst))
     (let [root (:root lst)
           rel (if (and root path (str/starts-with? path (str root "/")))
                 (subs path (inc (count root)))
                 path)]
-      (str rel ":" line ": " (how-words how) ": " text))
+      (str rel ":" line ": " (how-words how) (match-words match) ": " text))
     (str line ": " text)))
 
 (defn step
