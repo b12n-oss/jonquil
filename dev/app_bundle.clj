@@ -9,7 +9,8 @@
   (:require [app-linux]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [jolt.process :as p]))
+            [jolt.process :as p]
+            [jonquil.version :as version]))
 
 (def bundle-id "net.b12n.jonquil")
 (def bundle-dir "Jonquil.app")
@@ -73,16 +74,9 @@
   (binding [*out* *err*] (println (str "app-bundle: " msg)))
   (System/exit 1))
 
-(defn version-from-describe
-  "`git describe` output as the bundle's version: a release tag's leading v
-  goes (v0.1.0 -> 0.1.0), since CFBundleShortVersionString wants the bare
-  number. Anything else passes through."
-  [s]
-  (str/replace-first s #"^v(?=\d)" ""))
-
 (defn git-version []
   (let [r (p/sh "git" "describe" "--tags" "--always")]
-    (if (zero? (:exit r)) (version-from-describe (str/trim (:out r))) "0.0.0")))
+    (if (zero? (:exit r)) (version/version-from-describe (str/trim (:out r))) "0.0.0")))
 
 (defn build-number
   "The commit count as CFBundleVersion (Apple wants period-separated integers)."

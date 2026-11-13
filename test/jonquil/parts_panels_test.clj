@@ -407,14 +407,15 @@
     (is (= {:palette/open [:open-palette-fn]
             :help/describe-key [:describe-key-fn]
             :help/key-bindings [:key-bindings-fn]
-            :help/recent-keys [:recent-keys-fn]}
+            :help/recent-keys [:recent-keys-fn]
+            :help/version [:version-fn]}
            (update-vals (:commands spec) :call)))
     (is (false? (:palette? (:palette/open (:commands spec)))))
     (is (every? #(nil? (get @#'registry/core-window-commands %))
-                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys])
+                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version])
         "the core table keeps none of them")
     (is (every? #(some? (get registry/window-commands %))
-                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys]))
+                [:palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version]))
     (is (some? (:help/key-hints registry/window-commands)))))
 
 (defn- palette-wctx [bang*]
