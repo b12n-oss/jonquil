@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- Issue forms for bug reports (asking for the Jonquil and Jolt versions, how you run it, the OS and the dialect) and feature requests, a `SECURITY.md` that sends vulnerability reports to GitHub's private reporting, and a `.github/CONTRIBUTING.md` that points at the Contributing guide and `AI_POLICY.md`.
+
 ### Fixed
 
 - The README and Getting started point at the notarized 0.1.0 download, the Jolt notes say which features need v0.8.24 (the first release with `jolt.debug` and `jolt.profile`) instead of "not yet in a release", the release build lists `pkgconf` and the Xcode Command Line Tools, and the README's test count is today's.
