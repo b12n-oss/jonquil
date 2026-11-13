@@ -357,16 +357,21 @@ port.
   report as EDN through `ci/metrics-gate.clj`, which checks
   `ci/metrics-allow.edn`, and fails on two things:
   - **a critical finding under `src/` or `test/`:** a function past a
-    complexity, length, nesting or parameter limit, or a file past 1000
-    lines. A file jolt-metrics can't read there fails it too. There's no
-    list of accepted criticals, so a function that crosses a limit gets
-    split.
+    complexity, length, nesting, parameter, coupling or maintainability
+    limit, or a file past 1000 lines. Under `test/`, only helpers and the
+    file itself are queued, not `deftest` bodies. A file jolt-metrics can't
+    read there fails it too. There's no list of accepted criticals, so a
+    function that crosses a limit gets split.
   - **an unused require, private function or public function** that the
     allowlist doesn't name with a `:why`, and an allowlist entry that's no
     longer reported, so the list stays true.
 
-  `dev/` (the fake servers, demo shots and the self-test harness) isn't in
-  the gate yet. The `metrics` job in `.github/workflows/lint.yml` runs it,
+  The gate also refuses to run against an allowlist with no
+  `:critical-free` paths, or a report missing its sections, rather than
+  pass having checked nothing. `dev/` (the fake servers, demo shots and the
+  self-test harness) isn't in the gate yet. Bringing it in takes two edits:
+  add `"dev/"` to `:critical-free`, and take `dev` out of
+  `.jolt-metrics.edn`'s `:test-paths`. The `metrics` job in `.github/workflows/lint.yml` runs it,
   started by hand while the repo is private.
 - `jolt lsp:format` / `jolt lsp:format-check` and `jolt lsp:clean-ns` /
   `jolt lsp:clean-ns-check` reformat (or dry-run) code and `ns` forms with

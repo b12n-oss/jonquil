@@ -156,7 +156,9 @@
   cancelled pinentry, a missing entry)."
   [e]
   (let [{:keys [exit out]} (p/sh "env" (str "PASSWORD_STORE_DIR=" pass-env) "pass" "show" e)]
-    (when (or (not (zero? exit)) (str/blank? out)) (fail! (str "pass show " e " gave nothing (exit " exit ")")))
+    (when (or (not (zero? exit)) (str/blank? out))
+      (fail! (str "pass show " e " gave nothing (exit " exit ") from the store " pass-env
+                  " (set PASSWORD_STORE_DIR to the store that holds it)")))
     out))
 
 (defn- pass-line
