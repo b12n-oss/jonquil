@@ -141,7 +141,9 @@
   current version, which an older keg (:version) doesn't match: said so."
   [formulae]
   (str "Jonquil.app bundles these libraries, built by Homebrew, as separate dynamic\n"
-       "libraries, with only their install names and rpaths changed (install_name_tool) and re-signed.\n"
+       "libraries, with only their install names and rpaths changed (install_name_tool) and re-signed"
+       (when (some :note formulae) ", except where a note below says otherwise")
+       ".\n"
        "Each keeps its own licence. The source of each is at the URL given, at the version given.\n\n"
        (str/join "\n"
                  (for [{:keys [name version stable license url license-files note]} formulae]
@@ -250,9 +252,7 @@
                           (io/make-parents (str licenses "/" n "/" x))
                           (sh! "cp" (str dir "/" x) (str licenses "/" n "/" x)))
                         {:name n :version v :stable (get-in f ["versions" "stable"]) :license (str (get f "license"))
-                         :note (when (= "cairo" n)
-                                 (str "libcairo-script-interpreter: built from " (:url app-cairo-script/PIN)
-                                      " (sha256 " (:sha256 app-cairo-script/PIN) ") with -Dlzo=disabled"))
+                         :note (when (= "cairo" n) (app-cairo-script/build-note))
                          :url (str (get-in f ["urls" "stable" "url"])) :license-files files})))]
     (when-let [old (seq (outdated formulae))]
       (warn! (str "these formulae are older than Homebrew's source links: " (str/join ", " old))))

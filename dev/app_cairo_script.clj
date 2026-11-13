@@ -41,6 +41,20 @@
 
 (defn- fail! [msg] (throw (ex-info (str "app-cairo-script: " msg) {})))
 
+(defn cache-decision
+  "What interpreter-path does for Homebrew's cairo keg version kv and
+  whether the cache holds a build: :use-cache or :build; fails on a pin
+  mismatch either way, so a cached build never sits beside another cairo."
+  [kv cached?]
+  (when-let [m (keg-mismatch kv)] (fail! m))
+  (if cached? :use-cache :build))
+
+(defn build-note
+  "SOURCES.txt's line on how the bundled interpreter was built."
+  []
+  (str "libcairo-script-interpreter: built from " (:url PIN) " (sha256 " (:sha256 PIN) ") with "
+       (str/join " " MESON-OPTS)))
+
 (defn- run!*
   "Runs argv in dir; fails with what and the tail of the output when it fails."
   [what dir argv]
@@ -62,7 +76,6 @@
   (doseq [tool ["meson" "ninja"]]
     (when-not (zero? (:exit (p/sh "/bin/sh" "-c" (str "command -v " tool))))
       (fail! (str tool " isn't on PATH: brew install meson"))))
-  (when-let [m (keg-mismatch (keg-version))] (fail! m))
   (let [tmp (str/trim (:out (p/sh "mktemp" "-d" "-t" "jonquil-cairo")))
         tarball (str tmp "/cairo.tar.xz")
         src (str tmp "/cairo-" (:version PIN))
@@ -93,4 +106,6 @@
   cache doesn't have it."
   []
   (let [out (cache-path)]
-    (if (.isFile (java.io.File. out)) out (build!))))
+    (case (cache-decision (keg-version) (.isFile (java.io.File. out)))
+      :use-cache out
+      :build (build!))))

@@ -114,6 +114,12 @@
                                        :license-files ["COPYING"] :note "libcairo-script-interpreter: built from X with -Dlzo=disabled"}])
                      "  licence files: licenses/cairo/COPYING\n  libcairo-script-interpreter: built from X with -Dlzo=disabled\n")))
 
+(deftest sources-header-admits-a-note-test
+  (is (str/includes? (ar/sources-txt [{:name "cairo" :version "1" :license "L" :url "u" :license-files [] :note "n"}])
+                     "except where a note below says otherwise"))
+  (is (not (str/includes? (ar/sources-txt [{:name "glib" :version "1" :license "L" :url "u" :license-files []}])
+                          "except where")) "no note, no exception"))
+
 (deftest lzo-test
   (is (true? (ar/lzo? ["libgtk-4.1.dylib" "liblzo2.2.dylib"])))
   (is (false? (ar/lzo? ["libgtk-4.1.dylib"]))))
