@@ -49,5 +49,5 @@ works, the languages Jonquil runs, and how it's put together.
 6. **[Contributing](contributing.md)**: the local setup a change needs,
    the gates it must pass, and how to send it.
 
-`CHANGELOG.md` lists what changed, and `UPSTREAM.md` holds the file-by-file provenance table that Porting and
-attribution summarizes.
+`CHANGELOG.md` lists what changed, and `UPSTREAM.md` holds the
+file-by-file provenance table that Porting and attribution summarizes.
