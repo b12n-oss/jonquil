@@ -72,6 +72,52 @@
         "nil")
       :else (default-value @loaded current form))))
 
+(defn- finish-forms!
+  "Ends a request whose forms are all answered (load-file answers its last
+  value first)."
+  [{:keys [reply eval?]} current last-value]
+  (when-not eval? (reply {"value" (or last-value "nil") "ns" current}))
+  (reply {"status" ["done"]}))
+
+(defn- fail-form!
+  "Answers a :fail-on form with its report."
+  [{:keys [opts reply]}]
+  (let [report (:fail-report opts fail-report)]
+    (reply {"err" report})
+    (reply {"ex" report})
+    (reply {"status" ["done" "eval-error"]})))
+
+(defn- ns-after-form!
+  "The current namespace after form f, marking a namespace that in-ns or ns
+  names as loaded."
+  [loaded f current]
+  (case (str (head f))
+    "in-ns" (let [t (str (second (second f)))] (swap! loaded conj t) t)
+    "ns" (let [t (str (second f))] (swap! loaded conj t) t)
+    current))
+
+(defn- answer-form!
+  "Waits out f's :slow delay, then answers it. Returns :dropped when the
+  server stopped meanwhile, else {:next [current last-value]}."
+  [{:keys [srv opts loaded stop-latch closed reply eval?]} f current]
+  (let [ms (some (fn [[marker ms]] (when (matches? marker f) ms)) (:slow opts))]
+    (when ms (wait! stop-latch closed ms))
+    (if-not (live? stop-latch closed)
+      :dropped
+      (let [new-current (ns-after-form! loaded f current)
+            v (form-value srv new-current f)]
+        (when eval? (reply {"value" v "ns" new-current}))
+        {:next [new-current v]}))))
+
+(defn- form-step!
+  "Handles the form at the head of fs. Returns {:next [current last-value]}
+  to go on with the rest, anything else ends the request."
+  [{:keys [opts] :as ctx} fs current last-value]
+  (cond
+    (nil? fs) (finish-forms! ctx current last-value)
+    (matches? (:fail-on opts) (first fs)) (fail-form! ctx)
+    :else (answer-form! ctx (first fs) current)))
+
 (defn- evaluate!
   "Answers one eval or load-file request on the connection's own thread
   (jank handles requests one at a time)."
@@ -80,28 +126,14 @@
     (let [eval? (= "eval" (get m "op"))
           text (or (get m "code") (get m "file") "")
           req-ns (get m "ns")
-          start-ns (if (and req-ns (contains? @loaded req-ns)) req-ns "user")]
+          start-ns (if (and req-ns (contains? @loaded req-ns)) req-ns "user")
+          ctx {:srv srv :opts opts :loaded loaded :stop-latch stop-latch
+               :closed closed :reply reply :eval? eval?}]
       (loop [fs (seq (read-forms text)) current start-ns last-value nil]
-        (if (nil? fs)
-          (do (when-not eval? (reply {"value" (or last-value "nil") "ns" current}))
-              (reply {"status" ["done"]}))
-          (let [f (first fs)]
-            (if (matches? (:fail-on opts) f)
-              (let [report (:fail-report opts fail-report)]
-                (reply {"err" report})
-                (reply {"ex" report})
-                (reply {"status" ["done" "eval-error"]}))
-              (let [ms (some (fn [[marker ms]] (when (matches? marker f) ms)) (:slow opts))]
-                (when ms (wait! stop-latch closed ms))
-                (if-not (live? stop-latch closed)
-                  :dropped
-                  (let [new-current (case (str (head f))
-                                      "in-ns" (let [t (str (second (second f)))] (swap! loaded conj t) t)
-                                      "ns" (let [t (str (second f))] (swap! loaded conj t) t)
-                                      current)
-                        v (form-value srv new-current f)]
-                    (when eval? (reply {"value" v "ns" new-current}))
-                    (recur (next fs) new-current v)))))))))
+        (let [r (form-step! ctx fs current last-value)]
+          (if-let [[c v] (when (map? r) (:next r))]
+            (recur (next fs) c v)
+            r))))
     (catch Throwable e
       (try
         (let [report (str (ex-message e) "\n")]
