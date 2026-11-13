@@ -201,12 +201,16 @@
       (on-gtk (start-on-area! ed)
               (run-palette! ui "list the definitions"))
       (await-palette-closed ed)
-      (on-gtk (dotimes [_ 4] (f8! ui false)))
-      (let [st (await-status ui "; End of the list.")
+      ;; the selection in the turn F8 ran is the whole place on every
+      ;; platform; only the later read can find it dropped (place-selected?)
+      (let [at-once (on-gtk (dotimes [_ 4] (f8! ui false))
+                            (sel ed))
+            st (await-status ui "; End of the list.")
             s (on-gtk (sel ed))]
         (on-gtk (close-panel! ui)
-                (support/check :locations-ends (and (= "; End of the list." st) (place-selected? ed last-def s))
-                               {:status st :sel s :want last-def}))))))
+                (support/check :locations-ends
+                               (and (= "; End of the list." st) (= last-def at-once) (place-selected? ed last-def s))
+                               {:status st :at-once at-once :sel s :want last-def}))))))
 
 (defn row-locations-next-from-the-palette-keeps-its-selection
   "Go to the next place, run from the command palette, leaves that place
