@@ -408,6 +408,11 @@ change is described by what it does. [AI_POLICY.md](../../AI_POLICY.md)
 says how the project stands on AI assistance. To check a branch before
 pushing, run `sh ci/attributioncheck.sh main..HEAD`.
 
+Four commits from September 2026 carry such lines. They were public before
+the rule, and removing the lines would rewrite history for everyone with a
+clone, so they stay. The script names them, and nothing is added to that
+list.
+
 ## Benchmark
 
 `jolt bench:edit [sizes...]` times what typing costs in a large file. For

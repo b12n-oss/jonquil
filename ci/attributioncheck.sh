@@ -10,6 +10,16 @@
 #   ci/attributioncheck.sh --text      the text on stdin
 set -eu
 
+# Four commits from September 2026 carry such lines. They were public before
+# this rule, and taking the lines out would rewrite history for everyone who
+# has a clone, so they stay and are named here. Nothing is added to this list.
+before_the_rule="
+253f7d3bb3c3f7a0acd31080b1b1c01a73987a22
+f934beec8f81ad9bba95db1163ac27a5867e3856
+1bc6256267c5cdb10a379412bfd0860c90a59879
+6c36dad12a5cb0bd6b79c40d5a7d1148d2b32cc4
+"
+
 markers='Claude-Session:|claude\.ai/code/session_|Co-Authored-By:.*[Cc]laude|Generated with \[?Claude Code|noreply@anthropic\.com'
 
 case "${1:-}" in
@@ -25,7 +35,10 @@ case "${1:-}" in
     echo "attributioncheck: the text is clean" ;;
   *)
     range=$1
-    commits=$(git log --format=%H -E -i --grep="$markers" "$range")
+    commits=$(git log --format=%H -E -i --grep="$markers" "$range" | while read -r c; do
+      # patterns with an opening paren: bash 3.2 misreads the bare form here
+      case "$before_the_rule" in (*"$c"*) ;; (*) echo "$c" ;; esac
+    done)
     if [ -n "$commits" ]; then
       echo "attributioncheck: commits in $range carry AI attribution:" >&2
       for c in $commits; do
