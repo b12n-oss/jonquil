@@ -82,6 +82,3 @@ Three things set it apart:
 - **It stays a Clojure IDE.** Emacs turns everything into a buffer: mail, a
   shell, a file manager. Jonquil takes Lisp Machine ideas only where they
   help you write and understand Clojure code, and leaves the rest.
-
-The `ROADMAP.md` "Lisp Machine (LM)" section lists the ideas taken so far and
-the ones still to come.

@@ -3,7 +3,7 @@
   ns form's aliases, refers and refer-clojure options, its top-level defs,
   the local bindings around the symbol, and clojure.core. Used by Find
   Usages in Project (jonquil.usages) to tell same-named symbols apart
-  (ROADMAP LM2). Whatever the text alone can't decide (a :refer :all, a
+  (the Lisp Machine track's locations work). Whatever the text alone can't decide (a :refer :all, a
   :use, a name a macro defines, an ns form that doesn't read) is
   {:unresolved true}, never a guess."
   (:require [clojure.string :as str]

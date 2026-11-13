@@ -175,7 +175,7 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   a new session on its recycled port, while a bare request (a hand-typed
   URL) falls through and serves. A launcher started without a `token:`
   argument installs no gate. This closes the reload path; the client's
-  own bounded POST retries remain a seconds-wide residual (ROADMAP). A
+  own bounded POST retries remain a seconds-wide residual. A
   page busy running a form can't fire
   `pagehide` until the form finishes, so a tab closed during a long
   evaluation still leaves it waiting until Stop.

@@ -312,7 +312,7 @@ container, skipping `jonquil`, `jonquil.build`, `Jonquil.app`, `_site` and
 A non-host arch runs under emulation, several times slower.
 `jolt linux:selftest` then sets `JONQUIL_SELFTEST_EMULATED=1`, widening the
 paint-async row's budget from 150 to 750 ms. The 20 s wait for a Jolt nREPL
-child can still run out on a busy host (parked in the ROADMAP).
+child can still run out on a busy host.
 
 ### The noVNC hand check
 
