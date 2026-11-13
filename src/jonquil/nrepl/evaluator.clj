@@ -428,8 +428,12 @@
     ;; buffer's vars would point at the wrong text. The same key binds
     ;; *file*, so such a Run has no *file* (the JVM child still gets the
     ;; path).
+    ;; A Run starts in user, as it does in-process (jonquil.session). With
+    ;; no :ns it started in the middleware session's own namespace, which
+    ;; the last REPL entry had set, so a buffer with no ns form put its
+    ;; vars wherever the prompt had been.
     (let [saved (session/saved-file path code)]
-      (cond-> {:op "load-file" :file code
+      (cond-> {:op "load-file" :file code :ns "user"
                :file-name (or (some-> path (str/split #"/") last) "untitled.clj") :session session}
         saved (assoc :file-path saved)))
     ;; the prompt's namespace, as the JVM evaluator sends it: a plain
@@ -572,10 +576,20 @@
                                             (on-output k text)))))
     @(send-main! ev code opts)))
 
+(defn- prompt-after-unfinished-run
+  "The prompt's namespace after a Run that an error or Stop ended, which
+  answers with no ns: the buffer's ns when the child has it by now (names
+  is the child's namespaces after the Run), else user, where the Run
+  started. nil, which leaves the prompt alone, when names is unknown."
+  [code names]
+  (when names
+    (let [b (clj/buffer-ns code)]
+      (if (and b (some (fn [n] (= b (str n))) names)) (symbol b) 'user))))
+
 (defn- evaluation-result
   "The finished evaluation's result map: its status, the quiet reply, the
   kept-value :ref and, for a Run, the prompt's ns."
-  [{:keys [ev code msgs quiet-out] {:keys [run? on-output] :as opts} :opts}]
+  [{:keys [ev code msgs quiet-out names] {:keys [run? on-output] :as opts} :opts}]
   (let [r (cond-> (ops/eval-result msgs (stop-requested? ev))
             (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output))
         ;; LM1: the console's line keeps a handle to this value
@@ -586,9 +600,10 @@
     ;; JVM and jank evaluators do: a plain server
     ;; on a Jolt with #1460 answers load-file
     ;; with the ns it started in
-    (if (and run? (not (:quiet opts)))
-      (assoc r :ns (clj/prompt-after-run code r (:ns r)))
-      r)))
+    (cond
+      (or (not run?) (:quiet opts)) r
+      (= :ok (:status r)) (assoc r :ns (clj/prompt-after-run code r (:ns r)))
+      :else (assoc r :ns (or (:ns r) (prompt-after-unfinished-run code names))))))
 
 (defn- evaluate-and-finish!
   "Sends the evaluation between its two namespace snapshots, records what
@@ -601,7 +616,8 @@
     (when (and before after)
       (swap! (:state ev) update-in [:created owner] (fnil into #{})
              (session/namespaces-created (first before) (first after) (second after))))
-    (finish! ev opts (evaluation-result {:ev ev :code code :opts opts :msgs msgs :quiet-out quiet-out}))))
+    (finish! ev opts (evaluation-result {:ev ev :code code :opts opts :msgs msgs :quiet-out quiet-out
+                                         :names (first after)}))))
 
 (defn- run-started!
   "The worker's path once the runtime is up and no Stop came before the

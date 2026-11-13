@@ -6,4 +6,3 @@ clj-example-escape-refocuses-editor
 clj-full-doc-split-throws
 locations-ends
 no-plugins-reload-refuses
-nrepl-stop-interrupts
