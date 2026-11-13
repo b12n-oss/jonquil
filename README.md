@@ -161,7 +161,7 @@ jolt hooks:uninstall      # remove the git pre-commit hook
 metrics gate, on GitHub Actions, and `.github/workflows/site.yml` checks
 that the docs build. `.github/workflows/linux.yml` runs the unit suite and
 the GUI self-tests on Linux, in the same Docker image `jolt linux:test` uses.
-All three run on every push to `main` and every pull request. The site itself is [jonquil.b12n.app](https://jonquil.b12n.app).
+`.github/workflows/ci.yml` calls all three on every push to `main` and every pull request, adds the unit tests on macOS, and ends in `ci ok`, the one check a merge needs. The site itself is [jonquil.b12n.app](https://jonquil.b12n.app).
 
 ## Contributing
 

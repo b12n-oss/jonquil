@@ -8,6 +8,7 @@ everything that shipped before that.
 
 ### Changed
 
+- CI has one required check, `ci ok`. `.github/workflows/ci.yml` calls the lint, docs, attribution and Linux workflows as lanes, adds `jolt test` and `jolt test:nrepl` on an Apple Silicon macOS runner, and its last job fails unless every lane passed. The Linux GUI self-tests now count toward a merge.
 - `jolt metrics:gate` now covers `dev/` and `ci/` as well as `src/` and `test/`, so the fake servers, the screenshot script and the self-test harness meet the same limits as the app's code. The fourteen findings there were split into named steps and smaller files, with the self-tests' rows, order and results unchanged.
 
 ## [0.2.0] - 2026-11-14

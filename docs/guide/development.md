@@ -287,7 +287,7 @@ Every Linux check runs in a Docker container, so a Mac can verify the Linux
 build. Docker is the only requirement beyond the usual tools. CI runs the
 same image: `.github/workflows/linux.yml` builds it for amd64 and runs
 `jolt linux:test` and `jolt linux:selftest` on every push to `main` and every
-pull request. Six GUI rows still fail on Linux (issue #9) and are listed in
+pull request. Some GUI rows still fail on Linux (issue #9) and are listed in
 `ci/linux-known-failures.txt`. The GUI job passes while only those fail and
 fails when any other row does, and its summary names the rows.
 
@@ -390,13 +390,32 @@ port.
   `jolt hooks:uninstall` removes either. Installing runs the checks first and
   warns if the tree doesn't pass yet.
 
+### CI: one required check
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull
+request, and calls the other workflows as its lanes:
+
+| Lane | Workflow | What it runs |
+|---|---|---|
+| `lint` | `lint.yml` | clj-kondo, the format check and the metrics gate |
+| `site` | `site.yml` | the docs build and its checks |
+| `attribution` | `attribution.yml` | no AI assistant credit lines in commits or the description |
+| `linux` | `linux.yml` | the unit tests and the GUI self-tests in the Linux image |
+| `macos` | a job in `ci.yml` | `jolt test` and `jolt test:nrepl` on an Apple Silicon runner |
+
+Its last job, `ci ok`, fails unless every lane passed, and it is the one
+status the branch rule on `main` requires. Adding or renaming a lane is an
+edit to `ci.yml`, with no change to the branch rule. Every lane runs for a
+docs-only change too, because some unit tests read the guide pages. The
+macOS lane leaves the GUI self-tests out: they need a screen someone is
+logged in to, so they run on a developer's Mac before a pull request.
+
 ### The lint workflow
 
 `.github/workflows/lint.yml` runs `jolt lint:strict` and `jolt lsp:format-check`
 on `ubuntu-latest`, with Jolt installed to run the tasks, plus the `metrics`
-job (Jolt 0.8.27). It runs on
-every push to `main` and every pull request, and by hand from the Actions tab
-or with `gh workflow run lint.yml`.
+job (Jolt 0.8.27). `ci.yml` calls it, and it runs by hand from the Actions
+tab or with `gh workflow run lint.yml`.
 
 ### The attribution workflow
 

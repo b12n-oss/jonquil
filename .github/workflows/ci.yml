@@ -1,0 +1,88 @@
+name: ci
+
+# Every check a change has to pass, in one place. The branch rule on main
+# requires a single status, `ci ok`, the last job here: it fails unless every
+# lane before it passed. A lane is added, renamed or split in this file, and
+# the branch rule stays as it is.
+#
+# Every lane runs on every push to main and every pull request, docs-only
+# changes included: some unit tests read the guide pages (the in-app docs
+# panel is tested against them), so a docs change can break a test.
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # clj-kondo, the format check and the metrics gate
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  # the docs build and its checks. Publishing stays off (see site.yml); the
+  # extra permissions are the ones its gated deploy job declares.
+  site:
+    uses: ./.github/workflows/site.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  # no AI assistant attribution in commits or the pull request description
+  attribution:
+    uses: ./.github/workflows/attribution.yml
+
+  # the unit tests and the GUI self-tests in the Linux image
+  linux:
+    uses: ./.github/workflows/linux.yml
+
+  # The unit tests and the live nREPL tests on an Apple Silicon Mac, the
+  # platform the release is built for. Homebrew's gtk4 brings pango and glib,
+  # which the GTK namespaces load. The GUI self-tests are not run here: they
+  # need a screen someone is logged in to, and run on a developer's Mac.
+  macos:
+    name: unit tests (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GTK 4
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install gtk4
+          brew list --versions gtk4
+
+      - name: Install jolt
+        uses: jlt-commons/setup-jolt@v1
+        with:
+          version: "0.8.27"
+
+      - name: jolt test
+        run: jolt test
+
+      - name: jolt test:nrepl
+        run: jolt test:nrepl
+
+  ok:
+    name: ci ok
+    if: always()
+    needs: [lint, site, attribution, linux, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every lane passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$RESULTS" | jq -r 'to_entries[] | select(.value.result != "success") | .key' | tr '\n' ' ')
+          if [ -n "$bad" ]; then echo "::error::not passed: $bad"; exit 1; fi
+          echo "every lane passed"

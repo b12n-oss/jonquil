@@ -6,24 +6,21 @@ name: Linux
 # Docker. The image is dev/linux/Dockerfile: Ubuntu 26.04, GTK 4, Xvfb and the
 # pinned Jolt release, with its layers cached between runs.
 #
-# The unit suite is a required check. The GUI self-tests run on every pull
-# request too. Six rows fail on Linux today (issue #9) and are listed in
+# Both jobs count toward the one required check, `ci ok` (ci.yml). Some GUI
+# rows fail on Linux today (issue #9) and are listed in
 # ci/linux-known-failures.txt: the gui job passes while only those fail, and
 # fails when any other row does, so it catches a new Linux regression. It
 # reports the rows in its summary and uploads the full log.
 
+# Called by ci.yml on every push to main and every pull request, and run by
+# hand from the Actions tab.
+
 "on":
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: linux-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   unit:
