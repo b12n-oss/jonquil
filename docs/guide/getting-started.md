@@ -3,8 +3,8 @@
 ## Download
 
 On an Apple Silicon Mac with macOS 26 or later, download
-`Jonquil-0.1.0-macos-arm64.dmg` (or the `.zip`) from the
-[0.1.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.1.0),
+`Jonquil-0.2.0-macos-arm64.dmg` (or the `.zip`) from the
+[0.2.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.2.0),
 open it and drag Jonquil to Applications. It's signed and notarized, and it
 bundles GTK, so it needs no Homebrew. Running a project's Jolt out of process
 still needs `jolt` on your login `PATH` and `git` (see

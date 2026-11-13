@@ -6,6 +6,8 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-14
+
 ### Added
 
 - A `jonquil` command for your terminal. On macOS, Install the jonquil command for your terminal in the command palette links it to the app you are running: `jonquil` opens the current folder in a new window, `jonquil <folder>` does the same for that folder and reopens the tabs it had last time, `jonquil <file>` opens the file as a tab in the Jonquil that is running, and the prompt comes back at once. The link goes in `/usr/local/bin` when Jonquil can write there and in `~/.local/bin` otherwise, with no password prompt, and Remove the jonquil command from your terminal takes it out. On Linux, `jolt app:install` links `~/.local/bin/jonquil` to the installed binary.
@@ -17,6 +19,7 @@ everything that shipped before that.
 
 ### Fixed
 
+- The MCP server reports the version that is running in its `initialize` reply. It said 0.1.0 whatever the build.
 - A folder opened with Finder's Open With, or dropped on the Dock icon, while Jonquil isn't running now comes up with that folder's own tabs from last time. macOS hands the folder over after the window has started, and by then Jonquil had queued the tabs of the project used last, so those opened beside the new folder's file tree. A folder that reaches a window nobody has used yet, one clean Untitled tab, opens its tabs too.
 - `jolt gtk:selftest` and `jolt test:nrepl` no longer need a jolt-lang/nrepl checkout. Without one, the nREPL window self-test used to record one failing row and stop before its summary, and one live test failed. Both now get the middleware the way the app does: from a checkout when there is one, else as the pinned git dependency, which needs `git` and a network the first time.
 - Out of process, a Jolt Run now starts in `user`, as it does in process. It used to start in whatever namespace the last console entry had left the child's session in, so a buffer with no `ns` form put its vars there. A Run that Stop or an error ended also left the prompt where it was before the Run, and the vars it had defined couldn't be reached from the console by their plain names. The prompt now moves to the buffer's namespace when the child has it by then, and to `user` otherwise.

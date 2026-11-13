@@ -1,7 +1,8 @@
 (ns jonquil.mcp-test
   (:require [clojure.test :refer [deftest is]]
             [jonquil.mcp :as mcp]
-            [jonquil.mcp.json :as json])
+            [jonquil.mcp.json :as json]
+            [jonquil.version :as version])
   (:import (java.util.concurrent LinkedBlockingQueue)))
 
 (def ^:private stub-defs
@@ -25,8 +26,17 @@
     (is (= 1 (get r "id")))
     (is (= {"protocolVersion" "2025-03-26"
             "capabilities" {"tools" {}}
-            "serverInfo" {"name" "jonquil" "version" "0.1.0"}}
+            "serverInfo" {"name" "jonquil" "version" (version/current-version)}}
            (get r "result")))))
+
+(deftest initialize-reports-the-running-version
+  ;; it used to be a fixed "0.1.0", whatever was running
+  (let [v (get-in (mcp/handle-message tools (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+                  ["result" "serverInfo" "version"])]
+    (is (= (version/current-version) v))
+    ;; a number in a tagged checkout or a build, a bare commit hash in a
+    ;; checkout without tags (CI's), "dev" outside git
+    (is (and (string? v) (seq v)) (pr-str v))))
 
 (deftest initialize-unknown-version-gets-newest
   (is (= "2025-06-18"

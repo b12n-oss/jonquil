@@ -51,7 +51,7 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 
 ## Download
 
-On an Apple Silicon Mac with macOS 26 or later, download the notarized `Jonquil-0.1.0-macos-arm64.dmg` (or `.zip`) from the [0.1.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.1.0) and drag Jonquil to Applications. GTK is bundled, so it needs no Homebrew. Running a project's Jolt out of process still needs `jolt` and `git` (see Requirements). Intel Macs and Linux build from source, below.
+On an Apple Silicon Mac with macOS 26 or later, download the notarized `Jonquil-0.2.0-macos-arm64.dmg` (or `.zip`) from the [0.2.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.2.0) and drag Jonquil to Applications. GTK is bundled, so it needs no Homebrew. Running a project's Jolt out of process still needs `jolt` and `git` (see Requirements). Intel Macs and Linux build from source, below.
 
 ## Running
 
@@ -81,7 +81,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-14, 2190 tests pass (13447 assertions, on macOS).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-14, 2193 tests pass (13461 assertions, on macOS).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>

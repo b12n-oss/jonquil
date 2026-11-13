@@ -10,12 +10,17 @@
   is how the server learns when to send
   notifications/tools/list_changed."
   (:require [clojure.string :as str]
-            [jonquil.mcp.json :as json]))
+            [jonquil.mcp.json :as json]
+            [jonquil.version :as version]))
 
 ;; Oldest to newest. An unknown client version gets the last one.
 (def ^:private supported-versions ["2024-11-05" "2025-03-26" "2025-06-18"])
 
-(def ^:private server-info {"name" "jonquil" "version" "0.1.0"})
+(defn- server-info
+  "Asked at each initialize, not held in a def: a run from source reads its
+  version from git, which a def would do while the namespace loads."
+  []
+  {"name" "jonquil" "version" (version/current-version)})
 
 (defn- rpc-result [id result] {"jsonrpc" "2.0" "id" id "result" result})
 
@@ -30,7 +35,7 @@
     (rpc-result (get msg "id")
                 {"protocolVersion" v
                  "capabilities" {"tools" (if (:list-changed? tools) {"listChanged" true} {})}
-                 "serverInfo" server-info})))
+                 "serverInfo" (server-info)})))
 
 (defn- text-result [text error?]
   {"content" [{"type" "text" "text" text}] "isError" (boolean error?)})
