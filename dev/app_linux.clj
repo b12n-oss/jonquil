@@ -165,7 +165,9 @@
   "Removes :command when it is a link to :binary."
   [{:keys [command binary]}]
   (when (= binary (link-target command))
-    (java.nio.file.Files/deleteIfExists (.toPath (io/file command)))))
+    (try (java.nio.file.Files/deleteIfExists (.toPath (io/file command)))
+         (catch Exception e
+           (println (str "note: could not remove " command ": " (.getMessage e)))))))
 
 (defn install!
   "Installs the binary at :source under :home/.local/share. opts: :home,

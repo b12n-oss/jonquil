@@ -30,7 +30,9 @@ Edge cases sit in folded blocks: click a bold line to open one.
 
 To see which version you run, use **Show Jonquil's version** in the command
 palette, which prints it to the console, or run `jonquil --version` in a
-terminal, which prints it and exits without opening a window.
+terminal, which prints it and exits without opening a window. Before the
+`jonquil` command is installed (below), the downloaded app's own launcher
+does the same: `/Applications/Jonquil.app/Contents/MacOS/Jonquil --version`.
 
 ## The `jonquil` command
 
@@ -55,7 +57,8 @@ The link goes in `/usr/local/bin` when Jonquil can write there. Otherwise
 it goes in `~/.local/bin`, and the console shows the line that adds that
 folder to your `PATH`. Jonquil never asks for a password, and it only
 replaces or removes a link that points into a Jonquil app. **Remove the
-jonquil command from your terminal** takes the link out again. The command
+jonquil command from your terminal** takes the link out again, and says so
+if it can't. The command
 itself is a small script at `Contents/Resources/bin/jonquil` inside the
 app, so you can also link or alias it by hand.
 

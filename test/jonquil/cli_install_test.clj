@@ -50,7 +50,7 @@
                        "/opt/other/jonquil")))
   (testing "refusals"
     (is (str/includes? (first (:refuse (plan {:exe "/Users/me/dev/jonquil/jonquil"}))) "isn't running from a Jonquil.app"))
-    (is (str/includes? (first (:refuse (plan {:exe nil}))) "isn't running from a Jonquil.app"))
+    (is (str/includes? (first (:refuse (plan {:exe nil}))) "couldn't tell where it is running from"))
     (is (str/includes? (first (:refuse (plan {:writable? (constantly false)}))) "wasn't installed"))))
 
 (deftest removal-test
@@ -70,6 +70,23 @@
     (io/make-parents (ci/script-of app))
     (spit (ci/script-of app) "#!/bin/sh\n")
     (str app "/Contents/MacOS/jonquil-bin")))
+
+(deftest a-link-that-cant-be-removed-is-reported-test
+  (let [home (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-cli-remove-")))
+        exe (fake-app! home)
+        bin (str home "/bin")
+        link (str bin "/jonquil")
+        opts {:exe exe :home home :path-env bin :dirs [bin]}]
+    (.mkdirs (io/file bin))
+    (is (str/includes? (first (ci/install! opts)) "Installed"))
+    (.setWritable (io/file bin) false)
+    (try
+      (let [lines (ci/remove! opts)]
+        (is (str/includes? (first lines) (str "Couldn't remove the jonquil command at " link)))
+        (is (not-any? #(str/includes? % "Removed") lines))
+        (is (java.nio.file.Files/isSymbolicLink (.toPath (io/file link))) "still there"))
+      (finally (.setWritable (io/file bin) true)))
+    (is (= [(str "; Removed the jonquil command at " link ".")] (ci/remove! opts)))))
 
 (deftest install-and-remove-on-disk-test
   ;; the two folders stand in for /usr/local/bin and ~/.local/bin, so the

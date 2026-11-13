@@ -61,6 +61,23 @@
       (is (= ["open" "-a" app (str work "/a.clj")] (:got (run fx (str "'" work "/a.clj'"))))
           "an absolute path stays as it is"))))
 
+(deftest cdpath-doesnt-redirect-a-relative-folder-test
+  ;; with CDPATH set, a plain `cd sub` looks there first and prints the
+  ;; folder it found, so the path handed to open was another project's
+  (let [{:keys [root app work link out]} (fixture)
+        elsewhere (str root "/elsewhere")]
+    (.mkdirs (io/file elsewhere "sub"))
+    (io/delete-file out true)
+    (is (zero? (:exit (p/sh "sh" "-c" (str "cd '" work "' && CDPATH='" elsewhere "' PATH='" root "/fakebin':\"$PATH\" '" link "' sub a.clj")))))
+    (is (= ["open" "-n" "-a" app (str work "/sub") (str work "/a.clj")] (str/split-lines (slurp out))))))
+
+(deftest a-file-in-the-root-folder-test
+  ;; dirname gives /, and "//hosts" would be a different path on some systems
+  (let [{:keys [app] :as fx} (fixture)]
+    (is (= ["open" "-a" app "/etc/hosts"] (:got (run fx "/etc/hosts"))))
+    (when (.exists (io/file "/etc"))
+      (is (= ["open" "-n" "-a" app "/etc"] (:got (run fx "/etc/")))))))
+
 (deftest a-missing-path-is-an-error-test
   (let [fx (fixture)
         r (run fx "a.clj nope.clj")]

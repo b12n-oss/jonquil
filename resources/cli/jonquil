@@ -15,6 +15,9 @@
 # file lives at Jonquil.app/Contents/Resources/bin/jonquil and finds its app from
 # there, through any symlinks that lead to it.
 
+# with CDPATH set, cd looks there first and prints where it went
+unset CDPATH
+
 self="$0"
 while [ -L "$self" ]; do
   target="$(readlink "$self")"
@@ -55,7 +58,9 @@ while [ "$n" -gt 0 ]; do
     new_window=-n
     arg="$(cd "$arg" && pwd)"
   else
-    arg="$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")"
+    dir="$(cd "$(dirname "$arg")" && pwd)"
+    [ "$dir" = / ] && dir=
+    arg="$dir/$(basename "$arg")"
   fi
   set -- "$@" "$arg"
   n=$((n - 1))

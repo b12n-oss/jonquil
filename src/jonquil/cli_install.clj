@@ -54,6 +54,8 @@
         link (str dir "/jonquil")
         there (get existing link :none)]
     (cond
+      (nil? exe)
+      {:refuse ["; Jonquil couldn't tell where it is running from, so the jonquil command wasn't installed. You can link it by hand: it is Contents/Resources/bin/jonquil inside the app."]}
       (nil? bundle)
       {:refuse ["; This Jonquil isn't running from a Jonquil.app, so there is no command to install. From a checkout, ./jonquil <path> is the command."]}
       (nil? dir)
@@ -70,7 +72,8 @@
 
 (defn removal
   "What Remove does: {:remove [links] :lines}, the links among dirs'
-  (default link-dirs) that point into a Jonquil.app."
+  (default link-dirs) that point into a Jonquil.app. :lines is what to say
+  when there are none; remove! says how each delete went."
   [{:keys [home existing dirs]}]
   (let [links (for [dir (or dirs (link-dirs home))
                     :let [link (str dir "/jonquil")
@@ -78,8 +81,7 @@
                     :when (and (vector? there) (ours? (second there)))]
                 link)]
     {:remove (vec links)
-     :lines (if (seq links)
-              (mapv (fn [l] (str "; Removed the jonquil command at " l ".")) links)
+     :lines (when (empty? links)
               ["; No jonquil command that points at a Jonquil.app was found, so nothing was removed."])}))
 
 ;; --- IO ---------------------------------------------------------------
@@ -140,5 +142,11 @@
   ([{:keys [home dirs]}]
    (let [dirs (or dirs (link-dirs home))
          {links :remove lines :lines} (removal {:home home :dirs dirs :existing (existing dirs)})]
-     (doseq [l links] (io/delete-file l true))
-     lines)))
+     (or lines
+         (mapv (fn [l]
+                 (let [problem (try (java.nio.file.Files/delete (.toPath (io/file l))) nil
+                                    (catch Throwable e (or (ex-message e) (str e))))]
+                   (if problem
+                     (str "; Couldn't remove the jonquil command at " l ": " problem)
+                     (str "; Removed the jonquil command at " l "."))))
+               links)))))
