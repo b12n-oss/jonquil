@@ -197,6 +197,51 @@
         (is (= "1" (:printed (first (run e "before" false)))) "the session keeps its state"))
       (finally (ev/stop! e)))))
 
+(deftest prompt-after-unfinished-run-test
+  (let [f #'nrepl/prompt-after-unfinished-run]
+    (is (= 'demo.a (f "(ns demo.a)\n(def x 1)" '[user demo.a])) "the child has the buffer's ns")
+    (is (= 'user (f "(ns demo.a)\n(def x 1)" '[user])) "Stop came before the ns form")
+    (is (= 'user (f "(def x 1)" '[user demo.a])) "no ns form")
+    (is (= 'user (f "(ns demo.a)" nil)) "no snapshot, as after Stop's restart")))
+
+(deftest a-run-starts-in-user-test
+  ;; as in-process. A Run used to start in the session's own namespace, which
+  ;; the last REPL entry had set, and a Run that Stop or an error ended left
+  ;; the prompt where it was, since such a Run answers with no ns.
+  (let [dir (temp-project) e (make dir)
+        marker (io/file dir "looping")
+        stopped (fn [code]
+                  (let [done (promise)]
+                    (io/delete-file marker true)
+                    (ev/eval! e (str code "\n(spit " (pr-str (.getPath marker)) " \"x\")\n(loop [] (recur))")
+                              {:run? true :on-complete (fn [r] (deliver done r))})
+                    (is (wait-until #(.exists marker) 10000) "the loop is running")
+                    (ev/interrupt! e)
+                    (:status (deref done 5000 :timeout))))]
+    (try
+      (ev/start! e)
+      (is (= :ok (:status (first (run e "(ns demo.core)\n(def a 1)" true)))))
+      (is (= "#'demo.core/from-repl" (:printed (first (run e "(def from-repl 1)" false)))))
+      (testing "a Run that ends"
+        (is (= "#'user/finished" (:printed (first (run e "(def finished 1)" true)))))
+        (is (= 'user (ev/prompt-ns e))))
+      (testing "a Run that Stop ended"
+        (run e "(in-ns 'demo.core)" false)
+        (is (= 'demo.core (ev/prompt-ns e)))
+        (is (= :interrupted (stopped "(def before 1)")))
+        (is (= 'user (ev/prompt-ns e)))
+        (is (= "1" (:printed (first (run e "before" false))))))
+      (testing "a Run that Stop ended after its ns form"
+        (is (= :interrupted (stopped "(ns demo.late)\n(def later 2)")))
+        (is (= 'demo.late (ev/prompt-ns e)))
+        (is (= "2" (:printed (first (run e "later" false))))))
+      (testing "a Run that threw"
+        (run e "(in-ns 'demo.core)" false)
+        (is (= :error (:status (first (run e "(def thrown 3)\n(throw (ex-info \"no\" {}))" true)))))
+        (is (= 'user (ev/prompt-ns e)))
+        (is (= "3" (:printed (first (run e "thrown" false))))))
+      (finally (ev/stop! e)))))
+
 (deftest stop-while-unresponsive-restarts-test
   (let [e (make (temp-project)) done (promise) out (atom [])]
     (try
