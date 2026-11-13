@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- Six popular themes: Gruvbox Dark, Gruvbox Light, Dracula, Nord, Zenburn and Monokai, taking each original's colours (credited in `NOTICE`) with Jonquil's own token mapping and the same contrast floors as the first four. The command palette now has a "Use theme: <name>" entry for each theme and for auto, so you can pick one by name; Cmd/Ctrl+Shift+M still cycles through them all.
+
 ### Fixed
 
 - The README and Getting started point at the notarized 0.1.0 download, the Jolt notes say which features need v0.8.24 (the first release with `jolt.debug` and `jolt.profile`) instead of "not yet in a release", the release build lists `pkgconf` and the Xcode Command Line Tools, and the README's test count is today's.

@@ -47,7 +47,7 @@
                   cview/append! (fn [cv kind text] (swap! got conj [:append cv kind text]))
                   win-status/set-status! (fn [l t] (swap! got conj [:status l t]))]
       (#'win-theme/do-cycle-theme! (ctx :dark false))
-      (#'win-theme/do-cycle-theme! (ctx :navy false))
+      (#'win-theme/do-cycle-theme! (ctx (last theme/theme-names) false))
       (#'win-theme/do-cycle-theme! (ctx :auto true)))
     (is (= [[:choice :solarized] [:save "/s.edn" {:theme :solarized}] [:status ::label "Theme: solarized"]
             [:choice :auto] [:save "/s.edn" {:theme :auto}] [:status ::label "Theme: auto (dark)"]
@@ -71,3 +71,13 @@
       (reset! theme-name :dark))
     (is (= #{[:source ::sp [:theme :dark]] [:inspector ::pane [:theme :dark]]} (set @log)))
     (is (= 2 (count @log)))))
+
+(deftest do-choose-theme-saves-and-says-test
+  (let [got (atom [])]
+    (with-redefs [win-theme/apply-choice! (fn [_ k] (swap! got conj [:choice k]) (theme/resolve-choice k false))
+                  settings/save-settings! (fn [p m] (swap! got conj [:save p m]) nil)
+                  win-status/set-status! (fn [l t] (swap! got conj [:status l t]))]
+      (#'win-theme/do-choose-theme! {:cv ::cv :theme-choice (atom :light) :settings-path (atom "/s.edn")
+                                     :status-label ::label :evaluating? (constantly false)}
+                                    :dracula))
+    (is (= [[:choice :dracula] [:save "/s.edn" {:theme :dracula}] [:status ::label "Theme: dracula"]] @got))))

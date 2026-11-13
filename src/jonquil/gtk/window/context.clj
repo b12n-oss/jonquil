@@ -199,7 +199,7 @@
   "The core fns every window chord and each tab's palette read, from
   build-keys's w. Returns that map, before the parts' :fns are merged in."
   [{:keys [panel-focus-fn hints-toggle-fn status-label toggle-focus-fn clear-console-fn clear-last-fn zoom-fn win
-           active-tab cycle-theme-fn close-popovers-fn inspect-last-fn inspect-form-fn pane
+           active-tab cycle-theme-fn choose-theme-fn close-popovers-fn inspect-last-fn inspect-form-fn pane
            close-inspector-fn source-keys parinfer-fn] :as w}]
   (merge
    (tab-key-fns w)
@@ -211,6 +211,7 @@
     :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn
     :zoom-fn zoom-fn
     :win win :active-tab active-tab :theme-cycle-fn cycle-theme-fn
+    :theme-use-fn choose-theme-fn
     :close-popovers-fn close-popovers-fn
     :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn
     :pane pane :close-inspector-fn close-inspector-fn

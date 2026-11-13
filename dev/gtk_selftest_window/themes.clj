@@ -218,12 +218,12 @@
                 ((:zoom!* ui) :reset))))))
 
 (defn row-theme-cycle
-  "Five :cycle-theme!* calls with no program running walk theme/choice-names
-  in order, starting from :light (the row sets it first: every row starts
-  on support/BASE-THEME, navy by default).
-  :theme-choice* reads :dark :solarized :navy :auto :light. :theme-name*
-  reads :dark :solarized :navy for the first three; the fake system is
-  light, so the :auto step resolves to :light whatever the Mac is showing.
+  "One :cycle-theme!* call per entry in theme/choice-names, with no program
+  running, walks them in order from :light (the row sets it first: every
+  row starts on support/BASE-THEME, navy by default) and wraps back to
+  :light. :theme-choice* reads each next choice, and :theme-name* reads the
+  same key for every palette; the fake system is light, so the :auto step
+  resolves to :light whatever the Mac is showing.
   After the FIRST call the status label reads \"Theme: dark\" and the
   settings file at (:settings-path* ui) reads back {:theme :dark} through
   jonquil.settings/load-settings itself, not a raw slurp.
@@ -239,28 +239,21 @@
             ((:set-theme!* ui) :light)
             ((:cycle-theme!* ui)))
     (let [status1-ok? (await-until 500 20 #(= "Theme: dark" (g/label-text (:status-label ui))))]
-      (on-gtk (let [choice1 ((:theme-choice* ui))
-                    name1 ((:theme-name* ui))
-                    status1 (g/label-text (:status-label ui))
+      (on-gtk (let [status1 (g/label-text (:status-label ui))
                     settings1 (settings/load-settings ((:settings-path* ui)))
-                    _ ((:cycle-theme!* ui))
-                    choice2 ((:theme-choice* ui))
-                    name2 ((:theme-name* ui))
-                    _ ((:cycle-theme!* ui))
-                    choice3 ((:theme-choice* ui))
-                    name3 ((:theme-name* ui))
-                    _ ((:cycle-theme!* ui))
-                    choice4 ((:theme-choice* ui))
-                    _ ((:cycle-theme!* ui))
-                    choice5 ((:theme-choice* ui))
-                    name5 ((:theme-name* ui))]
+                    steps (loop [acc [[((:theme-choice* ui)) ((:theme-name* ui))]] n (dec (count theme/choice-names))]
+                            (if (zero? n)
+                              acc
+                              (do ((:cycle-theme!* ui))
+                                  (recur (conj acc [((:theme-choice* ui)) ((:theme-name* ui))]) (dec n)))))
+                    choices (mapv first steps)
+                    names (mapv second steps)
+                    want (conj (vec (rest theme/choice-names)) (first theme/choice-names))]
                 (support/check :theme-cycle
-                               (and (= [:dark :solarized :navy :auto :light] [choice1 choice2 choice3 choice4 choice5])
-                                    (= [:dark :solarized :navy] [name1 name2 name3])
-                                    (= :light name5)
+                               (and (= want choices)
+                                    (= (mapv #(theme/resolve-choice % false) want) names)
                                     status1-ok? (= :dark (:theme settings1)))
-                               {:choices [choice1 choice2 choice3 choice4 choice5]
-                                :names [name1 name2 name3 name5]
+                               {:choices choices :names names :want want
                                 :status1 status1 :settings1 settings1})
                 ((:set-theme!* ui) :light)
                 ((:system-dark-fn!* ui) appearance/system-dark?)
@@ -457,7 +450,7 @@
     (str "background-color: rgb(" r "," g "," b ");")))
 
 (defn row-auto-follows-system
-  "From :navy, one :cycle-theme!* reaches :auto. With the fake system dark
+  "From the last palette in theme/theme-names, one :cycle-theme!* reaches :auto. With the fake system dark
   that shows the dark palette (a :keyword tag's foreground, as
   row-theme-retints-tags reads it), says \"Theme: auto (dark)\" and saves
   {:theme :auto}. Flipping the fake to light and running one poll tick
@@ -466,7 +459,7 @@
   [ui]
   (go-row :auto-follows-system support/check
     (let [dark? (on-gtk (let [d (start-fake-system! ui)]
-                          ((:set-theme!* ui) :navy)
+                          ((:set-theme!* ui) (last theme/theme-names))
                           ((:cycle-theme!* ui))
                           d))
           status-ok? (await-until 500 20 #(= "Theme: auto (dark)" (g/label-text (:status-label ui))))]
@@ -540,12 +533,12 @@
 (def ^:private mac? (= "Mac OS X" (System/getProperty "os.name")))
 
 (defn row-auto-poll-single-timer
-  "Choosing :auto five times in a row arms one poll timer, not five, and
+  "Choosing :auto again after a full cycle arms one poll timer, not five, and
   none off macOS, where there's no system appearance to poll. Every
   step runs inside one on-gtk block so no timer tick can fire between them.
   The window counts each real arming (:poll-arm-count*); the count must rise
-  by exactly 1 from :light with the fake dark, then cycle through
-  light..navy back to :auto. An earlier :auto row may have left a real
+  by exactly 1 from :auto with the fake dark, then one full cycle through
+  theme/choice-names back to :auto. An earlier :auto row may have left a real
   timer alive, so the row first sets :light and waits (a real tick within
   about 1 s drops it) until :poll-armed?* reads false."
   [ui]
@@ -554,7 +547,7 @@
     (let [idle? (await-until 2500 50 #(not ((:poll-armed?* ui))))]
       (on-gtk (let [before ((:poll-arm-count* ui))]
                 ((:set-theme!* ui) :auto)
-                (dotimes [_ 5] ((:cycle-theme!* ui)))
+                (dotimes [_ (count theme/choice-names)] ((:cycle-theme!* ui)))
                 (let [after ((:poll-arm-count* ui))
                       choice ((:theme-choice* ui))]
                   (support/check :auto-poll-single-timer

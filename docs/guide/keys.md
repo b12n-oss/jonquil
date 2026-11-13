@@ -72,7 +72,7 @@ to the previous track, and F10 without fn mutes the sound.
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
 | Cmd/Ctrl+- | anywhere in the window | Zoom out |
 | Cmd/Ctrl+0 | anywhere in the window | Reset zoom |
-| Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme (light, dark, solarized, navy, auto) |
+| Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme (light, dark, solarized, navy, the six popular themes, auto); the palette's Use theme entries pick one by name |
 | Cmd/Ctrl+Shift+P | anywhere in the window | Open the command palette |
 
 To check a key from inside Jonquil, plugins' keys included, run **Describe

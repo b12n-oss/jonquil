@@ -14,7 +14,8 @@
             [jonquil.layouts :as layouts]
             [jonquil.palette :as pal-data]
             [jonquil.plugin-registry :as plugin-registry]
-            [jonquil.settings :as settings]))
+            [jonquil.settings :as settings]
+            [jonquil.theme :as theme]))
 
 (defn- palette-entries
   "The palette's entries for the live plugins' commands and keys."
@@ -40,7 +41,7 @@
                     (into (into (pal-data/panel-entries @(:recent-panels right)
                                                         (showing-panel right))
                                 (layouts/entries (:layouts (settings/load-settings @settings-path*))))
-                          (palette-entries))))))
+                          (into (theme/palette-entries) (palette-entries)))))))
 
 (defn- run-bang!
   "The console's ! line: runs the palette command text names, or says what
