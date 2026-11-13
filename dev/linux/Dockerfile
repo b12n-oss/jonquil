@@ -1,4 +1,5 @@
-# A Linux box for checking Jonquil locally (no CI): `jolt linux:image` builds it.
+# A Linux box for checking Jonquil: `jolt linux:image` builds it locally, and
+# .github/workflows/linux.yml builds the amd64 image in CI.
 # Jolt runs the tasks too (it reads bb.edn), so there is no babashka here.
 #
 #   arm64  Jolt publishes no Linux arm64 binary, so it is built from its release

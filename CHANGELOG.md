@@ -9,11 +9,14 @@ everything that shipped before that.
 ### Added
 
 - Six more themes: Tokyo Night, Catppuccin Mocha, Catppuccin Latte, One Dark, Kanagawa and Rosé Pine, with the same contrast floors and "Use theme" palette entries as the other ten. One Dark's comment grey is a little lighter than the original's, since the original falls under Jonquil's contrast floor. Credits are in `NOTICE`.
+- Linux CI: `.github/workflows/linux.yml` builds the Linux image (`dev/linux/Dockerfile`) for amd64 and runs `jolt linux:test` and `jolt linux:selftest` on every push to `main` and every pull request. Six GUI rows fail on Linux today (issue #9) and are listed in `ci/linux-known-failures.txt`: the GUI job passes while only those fail, fails on any other row, and uploads the log.
 - Six popular themes: Gruvbox Dark, Gruvbox Light, Dracula, Nord, Zenburn and Monokai, taking each original's colours (credited in `NOTICE`) with Jonquil's own token mapping and the same contrast floors as the first four. The command palette now has a "Use theme: <name>" entry for each theme and for auto, so you can pick one by name. Cmd/Ctrl+Shift+M still cycles through them all.
 - Issue forms for bug reports (asking for the Jonquil and Jolt versions, how you run it, the OS and the dialect) and feature requests, a `SECURITY.md` that sends vulnerability reports to GitHub's private reporting, and a `.github/CONTRIBUTING.md` that points at the Contributing guide and `AI_POLICY.md`.
 
 ### Fixed
 
+- On Linux, a login shell that prints without end is now stopped by a file size limit while Jonquil looks up your PATH. The lookup already stopped the shell once its output passed 1 MB, by checking the size every 100 ms. On a GitHub Linux runner the first check took 219 seconds, and the shell wrote 90 GB in that time. The cause isn't known yet, so the kernel's limit now bounds the output whether or not the check runs in time.
+- The notarize helper's test checks the file mode with GNU `stat` on Linux, so `jolt test` passes there too.
 - The README and Getting started point at the notarized 0.1.0 download, the Jolt notes say which features need v0.8.24 (the first release with `jolt.debug` and `jolt.profile`) instead of "not yet in a release", the release build lists `pkgconf` and the Xcode Command Line Tools, and the README's test count is today's.
 
 ## [0.1.0] - 2026-11-13
