@@ -28,6 +28,9 @@ editor and fails a row without anything being wrong.
 
 - `jolt lint` runs clj-kondo over `src`, `test` and `dev`; keep it at zero
   errors and don't add warnings.
+- `jolt metrics:gate` must pass. Nothing under `src/` or `test/` may cross
+  a jolt-metrics critical limit, so split the function or the file. Unused
+  code goes, unless `ci/metrics-allow.edn` names it with why it stays.
 - `jolt lsp:format` and `jolt lsp:clean-ns` apply the formatter and namespace
   hygiene; the `-check` variants are dry runs.
 - Match the idioms of the file you are in, comment density included. New
