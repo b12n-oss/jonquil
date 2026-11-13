@@ -9,7 +9,8 @@
   (:require [app-linux]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [jolt.process :as p]))
+            [jolt.process :as p]
+            [jonquil.version.describe :as describe]))
 
 (def bundle-id "net.b12n.jonquil")
 (def bundle-dir "Jonquil.app")
@@ -73,16 +74,27 @@
   (binding [*out* *err*] (println (str "app-bundle: " msg)))
   (System/exit 1))
 
-(defn version-from-describe
-  "`git describe` output as the bundle's version: a release tag's leading v
-  goes (v0.1.0 -> 0.1.0), since CFBundleShortVersionString wants the bare
-  number. Anything else passes through."
-  [s]
-  (str/replace-first s #"^v(?=\d)" ""))
+(defn git-version
+  "The version for the Info.plist, the zip name and the stale-app check:
+  JONQUIL_VERSION when non-empty (the same value build-env bakes into the
+  binary), else the checkout's git describe, else 0.0.0."
+  []
+  (or (describe/build-version (System/getenv "JONQUIL_VERSION") #(describe/describe-checkout "."))
+      "0.0.0"))
 
-(defn git-version []
-  (let [r (p/sh "git" "describe" "--tags" "--always")]
-    (if (zero? (:exit r)) (version-from-describe (str/trim (:out r))) "0.0.0")))
+(defn build-env
+  "The environment a `jolt build` of Jonquil gets so the binary carries its
+  version: see jonquil.version.describe/build-env."
+  []
+  (describe/build-env (System/getenv "JONQUIL_VERSION") #(describe/describe-checkout ".")))
+
+(defn build!
+  "Runs `jolt build` of jonquil.main into ./jonquil, with build-env, echoing
+  its output. Exits with its status."
+  [args]
+  (let [{:keys [exit]} (apply p/shell {:continue true :extra-env (build-env)}
+                              "jolt" "build" "-m" "jonquil.main" "-o" "jonquil" args)]
+    (System/exit exit)))
 
 (defn build-number
   "The commit count as CFBundleVersion (Apple wants period-separated integers)."
@@ -157,6 +169,7 @@
     "bundle" (if (linux?)
                (fail! "app:bundle builds a macOS .app; on Linux use jolt app:install")
                (bundle!))
+    "build" (build! (rest args))
     "install" (if (linux?)
                 (let [status (app-linux/install! {:home (System/getProperty "user.home")
                                                   :source "jonquil"
@@ -167,5 +180,5 @@
                   (let [status (app-linux/uninstall! {:home (System/getProperty "user.home")})]
                     (when-not (zero? status) (System/exit status)))
                   (println "on macOS, drag ~/Applications/Jonquil.app to the Trash"))
-    (fail! (str "unknown command " (pr-str (first args)) "; use bundle, install or uninstall")))
+    (fail! (str "unknown command " (pr-str (first args)) "; use build, bundle, install or uninstall")))
   (System/exit 0))

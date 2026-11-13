@@ -16,6 +16,13 @@
     (is (= {:launch {:file "/f.clj"} :rest ["/d"]} (window/launch-split ["/f.clj" "/d"] dir?)))
     (is (= {:launch {:file "/missing.clj"} :rest []} (window/launch-split ["/missing.clj"] dir?)))))
 
+(deftest version-arg-test
+  (is (true? (main/version-arg? ["--version"])))
+  (is (true? (main/version-arg? ["--version" "x.clj"])))
+  (is (false? (main/version-arg? [])))
+  (is (false? (main/version-arg? ["a.clj" "--version"])) "only the first arg counts")
+  (is (false? (main/version-arg? ["--mcp"]))))
+
 (deftest mcp-args-test
   (let [cwd (System/getProperty "user.dir")]
     (is (= {:dir cwd :window? false} (main/mcp-args ["--mcp"])))

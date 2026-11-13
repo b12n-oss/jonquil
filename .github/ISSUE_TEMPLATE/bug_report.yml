@@ -35,7 +35,7 @@ body:
     id: jonquil-version
     attributes:
       label: Jonquil version
-      description: "The downloaded app: Finder, Get Info on Jonquil.app (or `defaults read /Applications/Jonquil.app/Contents/Info CFBundleShortVersionString`). From source: `git rev-parse --short HEAD`."
+      description: "Run `jonquil --version` (for the downloaded app, `/Applications/Jonquil.app/Contents/MacOS/Jonquil --version`), or use Show Jonquil's version in the command palette. Version 0.1.0 has neither: use Finder, Get Info on Jonquil.app, or `git rev-parse --short HEAD` if you build from source."
       placeholder: 0.1.0
     validations:
       required: true

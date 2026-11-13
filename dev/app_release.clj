@@ -318,7 +318,9 @@
   (sh! "rm" "-rf" app)
   (doseq [d [(str contents "/MacOS") frameworks licenses]] (.mkdirs (io/file d)))
   (println "building jonquil-bin")
-  (sh! "jolt" "build" "-m" "jonquil.main" "--signable" "-o" bin)
+  (let [{:keys [exit err]} (p/sh {:extra-env (app-bundle/build-env)}
+                                 "jolt" "build" "-m" "jonquil.main" "--signable" "-o" bin)]
+    (when-not (zero? exit) (fail! (str "jolt build failed:\n" err))))
   (sh! "rm" "-rf" (str bin ".build"))
   (spit launcher (launcher-text))
   (.setExecutable (io/file launcher) true)

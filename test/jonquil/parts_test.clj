@@ -73,7 +73,7 @@
            :compare-form/disk :compare-form/head :compare-form/last-run
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
            :debug/break-on-error :debug/continue :debug/step :debug/step-over :debug/step-out :restart/retry :restart/edit :restart/define
-           :palette/open :help/describe-key :help/key-bindings :help/recent-keys
+           :palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version
            :debug/toggle-breakpoint :debug/clear-breakpoints :debug/instrument-tab :debug/uninstrument-tab
            :pages/show :pages/bookmark :pages/bookmarks :pages/guide}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
