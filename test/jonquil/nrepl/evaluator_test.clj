@@ -197,6 +197,13 @@
         (is (= "1" (:printed (first (run e "before" false)))) "the session keeps its state"))
       (finally (ev/stop! e)))))
 
+(deftest prompt-after-unfinished-run-test
+  (let [f #'nrepl/prompt-after-unfinished-run]
+    (is (= 'demo.a (f "(ns demo.a)\n(def x 1)" '[user demo.a])) "the child has the buffer's ns")
+    (is (= 'user (f "(ns demo.a)\n(def x 1)" '[user])) "Stop came before the ns form")
+    (is (= 'user (f "(def x 1)" '[user demo.a])) "no ns form")
+    (is (= 'user (f "(ns demo.a)" nil)) "no snapshot, as after Stop's restart")))
+
 (deftest a-run-starts-in-user-test
   ;; as in-process. A Run used to start in the session's own namespace, which
   ;; the last REPL entry had set, and a Run that Stop or an error ended left

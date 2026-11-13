@@ -580,11 +580,11 @@
   "The prompt's namespace after a Run that an error or Stop ended, which
   answers with no ns: the buffer's ns when the child has it by now (names
   is the child's namespaces after the Run), else user, where the Run
-  started. nil, which leaves the prompt alone, when names is unknown."
+  started. Also user when names is unknown, as after Stop's restart: the
+  new child has no other namespace of the program's yet."
   [code names]
-  (when names
-    (let [b (clj/buffer-ns code)]
-      (if (and b (some (fn [n] (= b (str n))) names)) (symbol b) 'user))))
+  (let [b (clj/buffer-ns code)]
+    (if (and b (some (fn [n] (= b (str n))) names)) (symbol b) 'user)))
 
 (defn- evaluation-result
   "The finished evaluation's result map: its status, the quiet reply, the
@@ -603,7 +603,7 @@
     (cond
       (or (not run?) (:quiet opts)) r
       (= :ok (:status r)) (assoc r :ns (clj/prompt-after-run code r (:ns r)))
-      :else (assoc r :ns (or (:ns r) (prompt-after-unfinished-run code names))))))
+      :else (assoc r :ns (prompt-after-unfinished-run code names)))))
 
 (defn- evaluate-and-finish!
   "Sends the evaluation between its two namespace snapshots, records what
