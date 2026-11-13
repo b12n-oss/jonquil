@@ -8,7 +8,7 @@ everything that shipped before that.
 
 ### Added
 
-- Six more themes: Tokyo Night, Catppuccin Mocha, Catppuccin Latte, One Dark, Kanagawa and Rosé Pine, with the same contrast floors and palette entries as the first twelve. One Dark's comment grey is a little lighter than the original's, since the original falls under Jonquil's contrast floor. Credits are in `NOTICE`.
+- Six more themes: Tokyo Night, Catppuccin Mocha, Catppuccin Latte, One Dark, Kanagawa and Rosé Pine, with the same contrast floors and "Use theme" palette entries as the other ten. One Dark's comment grey is a little lighter than the original's, since the original falls under Jonquil's contrast floor. Credits are in `NOTICE`.
 - Six popular themes: Gruvbox Dark, Gruvbox Light, Dracula, Nord, Zenburn and Monokai, taking each original's colours (credited in `NOTICE`) with Jonquil's own token mapping and the same contrast floors as the first four. The command palette now has a "Use theme: <name>" entry for each theme and for auto, so you can pick one by name. Cmd/Ctrl+Shift+M still cycles through them all.
 - Issue forms for bug reports (asking for the Jonquil and Jolt versions, how you run it, the OS and the dialect) and feature requests, a `SECURITY.md` that sends vulnerability reports to GitHub's private reporting, and a `.github/CONTRIBUTING.md` that points at the Contributing guide and `AI_POLICY.md`.
 
