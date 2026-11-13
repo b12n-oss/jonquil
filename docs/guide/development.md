@@ -287,9 +287,9 @@ Every Linux check runs in a Docker container, so a Mac can verify the Linux
 build. Docker is the only requirement beyond the usual tools. CI runs the
 same image: `.github/workflows/linux.yml` builds it for amd64 and runs
 `jolt linux:test` and `jolt linux:selftest` on every push to `main` and every
-pull request. The unit suite is a required check. The GUI self-tests report
-in the job's summary but don't block a merge yet, because six rows still fail
-on Linux (issue #9).
+pull request. Six GUI rows still fail on Linux (issue #9) and are listed in
+`ci/linux-known-failures.txt`. The GUI job passes while only those fail and
+fails when any other row does, and its summary names the rows.
 
 | Task | What it does |
 |---|---|

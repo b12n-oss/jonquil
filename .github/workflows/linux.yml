@@ -7,9 +7,10 @@ name: Linux
 # pinned Jolt release, with its layers cached between runs.
 #
 # The unit suite is a required check. The GUI self-tests run on every pull
-# request too, but don't fail it yet: six rows fail on Linux today (issue
-# #9). The job reports them in its summary and uploads the full log. Remove
-# `continue-on-error` from the gui job once those rows pass.
+# request too. Six rows fail on Linux today (issue #9) and are listed in
+# ci/linux-known-failures.txt: the gui job passes while only those fail, and
+# fails when any other row does, so it catches a new Linux regression. It
+# reports the rows in its summary and uploads the full log.
 
 "on":
   push:
@@ -55,10 +56,9 @@ jobs:
         run: jolt linux:test --arch amd64
 
   gui:
-    name: GUI self-tests under Xvfb (Linux, not yet required)
+    name: GUI self-tests under Xvfb (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -79,27 +79,41 @@ jobs:
         with:
           version: "0.8.27"
 
+      # The task exits non-zero while the known rows fail, so its status is
+      # kept for the next step to judge instead of failing the job here.
       - name: jolt linux:selftest --arch amd64
         run: |
-          set -o pipefail
-          jolt linux:selftest --arch amd64 2>&1 | tee selftest.log
+          set +e
+          jolt linux:selftest --arch amd64 > selftest.log 2>&1
+          echo "status=$?" >> "$GITHUB_ENV"
+          grep -E '^SUMMARY|^gtk:selftest:|^\[[^]]+\] [^ ]+ FAIL ' selftest.log || true
 
-      - name: Summary of the self-test rows
+      - name: Compare the failed rows with ci/linux-known-failures.txt
         if: always()
         run: |
+          set -euo pipefail
+          grep -v '^#' ci/linux-known-failures.txt | sed '/^$/d' | sort -u > known.txt
+          { grep -E '^\[[^]]+\] [^ ]+ FAIL ' selftest.log || true; } | sed -E 's/^\[[^]]*\] //; s/ FAIL .*//' | sort -u > failed.txt
+          comm -23 failed.txt known.txt > new.txt
+          comm -13 failed.txt known.txt > fixed.txt
+          summaries=$(grep -c '^SUMMARY' selftest.log || true)
           {
             echo "### GUI self-tests on Linux"
             echo
             echo '```'
             grep -E '^SUMMARY|^gtk:selftest:' selftest.log || echo "no SUMMARY lines: see the log"
             echo '```'
-            if grep -q ' FAIL ' selftest.log; then
-              echo
-              echo "Failed rows:"
-              echo
-              grep ' FAIL ' selftest.log | sed -E 's/^\[[^]]*\] //; s/ FAIL .*//' | sort -u | sed 's/^/- /'
-            fi
+            if [ -s new.txt ]; then echo; echo "**New failures (not in ci/linux-known-failures.txt):**"; echo; sed 's/^/- /' new.txt; fi
+            if [ -s failed.txt ]; then echo; echo "Failed rows:"; echo; sed 's/^/- /' failed.txt; fi
+            if [ -s fixed.txt ]; then echo; echo "Known rows that passed this run (issue #9):"; echo; sed 's/^/- /' fixed.txt; fi
           } >> "$GITHUB_STEP_SUMMARY"
+          # A run that printed no SUMMARY never got as far as the rows (the
+          # image, Xvfb or Jolt failed), which mustn't read as a pass.
+          if [ "$summaries" -eq 0 ]; then echo "::error::the self-test printed no SUMMARY line (exit ${status:-?})"; exit 1; fi
+          if [ -s new.txt ]; then echo "::error::new failing rows on Linux: $(tr '\n' ' ' < new.txt)"; exit 1; fi
+          # A non-zero exit with no failed row at all (a crash between suites) fails too.
+          if [ "${status:-1}" != "0" ] && [ ! -s failed.txt ]; then echo "::error::linux:selftest exited ${status:-?} without a failed row"; exit 1; fi
+          echo "only known rows failed: $(tr '\n' ' ' < failed.txt)"
 
       - name: Upload the self-test log
         if: always()

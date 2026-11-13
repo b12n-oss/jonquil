@@ -8,7 +8,7 @@ everything that shipped before that.
 
 ### Added
 
-- Linux CI: `.github/workflows/linux.yml` builds the Linux image (`dev/linux/Dockerfile`) for amd64 and runs `jolt linux:test` and `jolt linux:selftest` on every push to `main` and every pull request. The unit suite is required. The GUI self-tests report their rows and upload the log, but don't block a merge until the six rows in issue #9 pass on Linux.
+- Linux CI: `.github/workflows/linux.yml` builds the Linux image (`dev/linux/Dockerfile`) for amd64 and runs `jolt linux:test` and `jolt linux:selftest` on every push to `main` and every pull request. Six GUI rows fail on Linux today (issue #9) and are listed in `ci/linux-known-failures.txt`: the GUI job passes while only those fail, fails on any other row, and uploads the log.
 
 - Six popular themes: Gruvbox Dark, Gruvbox Light, Dracula, Nord, Zenburn and Monokai, taking each original's colours (credited in `NOTICE`) with Jonquil's own token mapping and the same contrast floors as the first four. The command palette now has a "Use theme: <name>" entry for each theme and for auto, so you can pick one by name. Cmd/Ctrl+Shift+M still cycles through them all.
 - Issue forms for bug reports (asking for the Jonquil and Jolt versions, how you run it, the OS and the dialect) and feature requests, a `SECURITY.md` that sends vulnerability reports to GitHub's private reporting, and a `.github/CONTRIBUTING.md` that points at the Contributing guide and `AI_POLICY.md`.
