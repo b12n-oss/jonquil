@@ -1,0 +1,17 @@
+;; What ci/metrics-gate.clj (jolt metrics:gate) holds the jolt-metrics report to.
+;;
+;; :critical-free: path prefixes where a critical finding, or a file
+;; jolt-metrics can't read, fails the gate. No list of accepted criticals: a
+;; tree joins once it has none. dev/ (test scaffolding: the fake servers, demo
+;; shots, the self-test harness) joins once its criticals are split, and that
+;; takes two edits: "dev/" here, and dev out of .jolt-metrics.edn's
+;; :test-paths (test paths are never queued, so adding the prefix alone would
+;; gate nothing).
+;;
+;; :unused-requires, :unused-private, :unused-public: unused code that stays,
+;; each {:path :lib-or-:name :why}. The gate fails on unused code missing here,
+;; and on an entry here that's no longer reported.
+{:critical-free ["src/" "test/"]
+ :unused-requires []
+ :unused-private []
+ :unused-public []}

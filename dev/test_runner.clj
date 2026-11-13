@@ -17,6 +17,7 @@
   '[gtk-async-test
     jonquil.app-bundle-test
     jonquil.app-release-test
+    jonquil.metrics-gate-test
     jonquil.app-cairo-script-test
     jonquil.app-notarize-test
     jonquil.bundle-env-test
@@ -61,6 +62,7 @@
     jonquil.results-test
     jonquil.keymap-test
     jonquil.parts-test
+    jonquil.parts-panels-test
     jonquil.command-registry-test
     jonquil.keymap-shipped-test
     jonquil.palette-test
@@ -168,6 +170,7 @@
   ;; checkout. Run with `jolt test:nrepl`, not `jolt test`.
   '[jonquil.nrepl.child-test
     jonquil.nrepl.evaluator-test
+    jonquil.nrepl.child-debugging-test
     jonquil.runtime-registry-test])
 
 (def live-clj-namespaces

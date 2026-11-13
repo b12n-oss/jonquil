@@ -127,8 +127,6 @@
          (when line
            (str "\nLocation: line " line (when column (str ", col " column)))))))
 
-(defn format-value [v] (pr-str v))
-
 ;; --- REPL Command History (upstream, verbatim) ---
 
 (defn create-history [] {:items [] :index 0 :draft ""})
@@ -501,8 +499,8 @@
        :value happens under the bound *out*/*ns* (its side effects go to
        on-output, not the caller's console) and a Stop during that
        realization yields :interrupted like any other Stop. :error also
-       carries :error. format-value is unchanged; the GUI should print
-       :printed rather than re-deriving it from :value.
+       carries :error. The GUI prints :printed rather than re-deriving it
+       from :value.
      :ns-name symbol (default 'user)
      :quiet any non-nil value: *1 *2 *3 and *e stay as they were
      :source-path the file code is the text of, which its forms carry as

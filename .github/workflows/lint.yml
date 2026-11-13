@@ -32,3 +32,29 @@ jobs:
 
       - name: clojure-lsp format check (jolt lsp:format-check)
         run: jolt lsp:format-check
+
+  # jolt metrics:gate: a critical jolt-metrics finding under src/ or test/, or
+  # unused code ci/metrics-allow.edn doesn't list, fails the run.
+  metrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # churn and hotspots come from the git history
+          fetch-depth: 0
+
+      - name: Install jolt
+        uses: jlt-commons/setup-jolt@v1
+        with:
+          version: "0.8.27"
+
+      - name: jolt metrics:gate
+        run: jolt metrics:gate
+
+      - name: The report
+        if: always()
+        run: |
+          jolt metrics target/metrics-report.md --top 30 >/dev/null
+          awk '/^## Cleanup candidates/{exit} {print}' target/metrics-report.md >> "$GITHUB_STEP_SUMMARY"

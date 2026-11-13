@@ -3,7 +3,7 @@
   notarizes and staples it, and writes the notarized zip and dmg:
   jolt -M:bundle -m app-notarize, which the jolt task app:notarize runs.
 
-  The key comes from b12n-pass into a throwaway keychain, never the login
+  The key comes from the pass store into a throwaway keychain, never the login
   keychain; the App Store Connect key that notarytool uses comes from pass
   into a temp file. Both go when the run ends, however it ends.
 
@@ -149,14 +149,16 @@
     {:out out :err err}))
 
 (def ^:private pass-env
-  (or (System/getenv "PASSWORD_STORE_DIR") (str (System/getProperty "user.home") "/dev/b12n-pass")))
+  (or (System/getenv "PASSWORD_STORE_DIR") (str (System/getProperty "user.home") "/.password-store")))
 
 (defn- pass-text
   "pass entry e's text; fails when pass fails or gives nothing (a
   cancelled pinentry, a missing entry)."
   [e]
   (let [{:keys [exit out]} (p/sh "env" (str "PASSWORD_STORE_DIR=" pass-env) "pass" "show" e)]
-    (when (or (not (zero? exit)) (str/blank? out)) (fail! (str "pass show " e " gave nothing (exit " exit ")")))
+    (when (or (not (zero? exit)) (str/blank? out))
+      (fail! (str "pass show " e " gave nothing (exit " exit ") from the store " pass-env
+                  " (set PASSWORD_STORE_DIR to the store that holds it)")))
     out))
 
 (defn- pass-line
@@ -170,7 +172,7 @@
   (let [dir (java.io.File. (str pass-env "/secrets/cfg/appstore-connect"))
         f (first (filter #(re-matches #"AuthKey_.*\.p8\.gpg" %) (sort (.list dir))))]
     (or (some->> f (re-find #"(.*)\.gpg$") second (str "secrets/cfg/appstore-connect/"))
-        (fail! "no secrets/cfg/appstore-connect/AuthKey_*.p8 in b12n-pass"))))
+        (fail! (str "no secrets/cfg/appstore-connect/AuthKey_*.p8 in the pass store " pass-env " (set PASSWORD_STORE_DIR)")))))
 
 (defn- random-hex [n]
   (let [b (byte-array n)]

@@ -188,7 +188,7 @@ Apple's Developer ID G2 intermediate certificate is committed at
 signing works on a Mac that lacks it.
 
 The identity and the API key are read with `pass` from the store in
-`PASSWORD_STORE_DIR`. The entry names are in `dev/app_notarize.clj`: the
+`PASSWORD_STORE_DIR` (`~/.password-store` when it's unset). The entry names are in `dev/app_notarize.clj`: the
 Developer ID `.p12` and its password, and the App Store Connect key, its ID
 and its issuer. No secret is printed. Each is decoded into a 0600 file, or
 held in memory, and the throwaway keychain and every decoded file are

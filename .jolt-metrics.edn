@@ -1,5 +1,7 @@
 ;; jolt-metrics config for `jolt metrics` (report only, never a gate).
-;; test and dev are measured but kept out of the refactoring queue.
+;; dev (test scaffolding) is measured but kept out of the refactoring queue;
+;; test is in it, and jolt metrics:gate holds src/ and test/ critical-free
+;; (ci/metrics-allow.edn).
 ;; Left out: build output (target, the app build's jonquil.build),
 ;; clj-kondo's cache, the deliberately broken smoke fixtures and the
 ;; docs' demo files. Upstream-lifted code (see UPSTREAM.md) is left out
@@ -9,4 +11,4 @@
            "src/jonquil/syntax.clj" "src/jonquil/parinfer.clj"
            "src/jonquil/inspect/view.clj"
            "test/jonquil/upstream/**"]
- :test-paths ["test" "dev"]}
+ :test-paths ["dev"]}

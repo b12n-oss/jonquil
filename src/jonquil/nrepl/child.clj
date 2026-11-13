@@ -4,7 +4,8 @@
   -Sdeps), wait until it answers, and end it again, killing only the pid it
   spawned.
 
-  Port rules (~/.claude/rules/dynamic-port-selection.md): a candidate must
+  Port rules (pick the port at run time by trying the bind, never a fixed
+  one, and report the one chosen): a candidate must
   bind on both 127.0.0.1 and the wildcard address (a loopback bind
   succeeds on macOS while another process holds *:p), and the child's own
   bind is the real attempt: a child that exits because its bind failed
