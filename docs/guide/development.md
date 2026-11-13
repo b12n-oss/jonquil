@@ -114,8 +114,8 @@ real runtime.
 
 | # | File (`dev/`) | Covers | Needs |
 |---|---|---|---|
-| 1 | `gtk_selftest.clj` | Definitions editor and Interactions console | |
-| 2 | `gtk_selftest_window.clj` | the full window, rows split by feature under `gtk_selftest_window/` | |
+| 1 | `gtk_selftest.clj` | Definitions editor and Interactions console, rows split by feature under `gtk_selftest/` | |
+| 2 | `gtk_selftest_window.clj` | the full window, rows split by feature under `gtk_selftest_window/`, run in the order set by its `order_a` to `order_e` parts | |
 | 3 | `gtk_selftest_nrepl.clj` | a `{:runtime :nrepl}` project with a real Jolt child | jolt-lang/nrepl, from a checkout or fetched with `git` the first time |
 | 4 | `gtk_selftest_cljd.clj` | ClojureDart attach | fake server `fake_cljd_nrepl.clj` named by `NREPL.lock` |
 | 5 | `gtk_selftest_clj.clj` | JVM Clojure attach, including slow-answer rows (its `:delays` atom) | fake server `fake_jvm_nrepl.clj` named by `.nrepl-port` |
