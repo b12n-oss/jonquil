@@ -16,6 +16,9 @@
             [clojure.string :as str]
             [jolt.process :as p]))
 
+(defn- fail-msg! [msg]
+  (throw (ex-info msg {::fail true})))
+
 ;; --- what the signing carries ------------------------------------------------------
 
 (defn entitlements-plist
@@ -65,13 +68,75 @@
   [text]
   (boolean (and (re-find #": accepted" text) (str/includes? text "source=Notarized Developer ID"))))
 
+;; --- the review fixes' pure parts --------------------------------------------------
+
+(defn without-sign-keychains
+  "paths less any throwaway signing keychain (a crashed run's included)."
+  [paths]
+  (vec (remove #(str/includes? % "jonquil-sign") paths)))
+
+(defn safe-version
+  "v fit for a file name: a slash or whitespace becomes -."
+  [v]
+  (str/replace v #"[/\s]" "-"))
+
+(defn stale-app?
+  "True when the app was built at another version than the checkout's."
+  [app-version git-version]
+  (not= app-version git-version))
+
+(defn notary-outcome
+  "{:status :id} from a notarytool run ({:exit :out}), read whatever its
+  exit code; both nil when its output isn't the JSON answer."
+  [{:keys [out]}]
+  (try (notary-result out)
+       (catch Throwable _ {:status nil :id nil})))
+
+(defn once
+  "f, run at most once however often it's called."
+  [f]
+  (let [done (atom false)]
+    (fn [] (when (compare-and-set! done false true) (f)))))
+
+(defn on-exit!
+  "Runs f when the process ends, a ^C included: Jolt runs shutdown hooks
+  on SIGINT but unwinds no finally (measured, Jolt v0.8.27)."
+  [f]
+  (jolt.host/add-shutdown-hook f))
+
+(defn decode-b64!
+  "Writes base64 text, decoded, to out with mode 0600; fails naming what
+  when text is blank (a pass read that gave nothing) or decodes to nothing."
+  [what text out]
+  (when (str/blank? text) (fail-msg! (str what ": read nothing (empty)")))
+  (spit out "")
+  (p/sh "chmod" "600" out)
+  (let [{:keys [exit]} (p/sh {:in (str/trim text)} "/bin/sh" "-c" (str "base64 -d > \"$0\"") out)]
+    (when (or (not (zero? exit)) (zero? (.length (java.io.File. out))))
+      (fail-msg! (str what ": decoded to nothing (empty or not base64)")))))
+
+(defn rekey-p12!
+  "Re-exports the .p12 at src (password src-pw, fed on stdin) as dest under
+  new-pw, a one-time password: only that one ever reaches an argv. The
+  unencrypted pem in between lives 0600 beside dest and is deleted."
+  [src src-pw dest new-pw]
+  (let [pem (str dest ".pem")]
+    (try
+      (spit pem "")
+      (p/sh "chmod" "600" pem)
+      (let [r (p/sh {:in (str src-pw "\n")} "/usr/bin/openssl" "pkcs12" "-in" src "-nodes" "-passin" "stdin" "-out" pem)]
+        (when-not (zero? (:exit r)) (fail-msg! "the Developer ID .p12 didn't open with its password from pass")))
+      (let [r (p/sh "/usr/bin/openssl" "pkcs12" "-export" "-in" pem "-out" dest "-passout" (str "pass:" new-pw))]
+        (when-not (zero? (:exit r)) (fail-msg! "re-exporting the Developer ID .p12 failed")))
+      (p/sh "chmod" "600" dest)
+      (finally (p/sh "rm" "-f" pem)))))
+
 ;; --- running it ----------------------------------------------------------------------
 
 (def ^:private app "target/Jonquil.app")
 (def ^:private no-proxy ["/usr/bin/env" "-u" "HTTPS_PROXY" "-u" "https_proxy" "-u" "HTTP_PROXY" "-u" "http_proxy"])
 
-(defn- fail! [msg]
-  (throw (ex-info msg {::fail true})))
+(defn- fail! [msg] (fail-msg! msg))
 
 (defn- exec!
   "Runs argv, answering {:out :err}; fails naming only the tool (argv may
@@ -86,19 +151,18 @@
 (def ^:private pass-env
   (or (System/getenv "PASSWORD_STORE_DIR") (str (System/getProperty "user.home") "/dev/b12n-pass")))
 
-(defn- sh-c!
-  "Runs script with /bin/sh -c (pass's output piped straight to a file,
-  so no secret goes through argv); fails naming what."
-  [what script]
-  (let [{:keys [exit]} (p/sh "/bin/sh" "-c" (str "PASSWORD_STORE_DIR='" pass-env "' " script))]
-    (when-not (zero? exit) (fail! (str what " failed (exit " exit ")")))))
+(defn- pass-text
+  "pass entry e's text; fails when pass fails or gives nothing (a
+  cancelled pinentry, a missing entry)."
+  [e]
+  (let [{:keys [exit out]} (p/sh "env" (str "PASSWORD_STORE_DIR=" pass-env) "pass" "show" e)]
+    (when (or (not (zero? exit)) (str/blank? out)) (fail! (str "pass show " e " gave nothing (exit " exit ")")))
+    out))
 
 (defn- pass-line
   "The first line of pass entry e, trimmed."
   [e]
-  (let [{:keys [exit out]} (p/sh "env" (str "PASSWORD_STORE_DIR=" pass-env) "pass" "show" e)]
-    (when-not (zero? exit) (fail! (str "pass show " e " failed")))
-    (str/trim (first (str/split-lines out)))))
+  (str/trim (first (str/split-lines (pass-text e)))))
 
 (defn- auth-key-entry
   "The pass entry of the App Store Connect key: AuthKey_<id>.p8."
@@ -117,7 +181,7 @@
   (->> (str/split-lines (:out (exec! ["security" "list-keychains" "-d" "user"])))
        (map #(str/replace (str/trim %) "\"" ""))
        (remove str/blank?)
-       vec))
+       without-sign-keychains))
 
 (defn- identity-hash
   "The SHA-1 of keychain kc's Developer ID Application identity."
@@ -132,12 +196,18 @@
   [path {:keys [p8 key-id issuer]}]
   (println (str "notarizing " path " (this waits for Apple)"))
   (let [auth ["--key" p8 "--key-id" key-id "--issuer" issuer]
-        r (notary-result (:out (exec! (concat no-proxy ["xcrun" "notarytool" "submit" path "--wait" "--output-format" "json"] auth))))]
-    (println (str "  " (:status r) " (" (:id r) ")"))
-    (when-not (= "Accepted" (:status r))
-      (let [log (str "target/notarization-" (:id r) ".json")]
-        (apply p/sh (concat no-proxy ["xcrun" "notarytool" "log" (:id r) log] auth))
-        (fail! (str "notarization " (:status r) "; Apple's log is in " log))))))
+        sub (apply p/sh (concat no-proxy ["xcrun" "notarytool" "submit" path "--wait" "--output-format" "json"] auth))
+        r (notary-outcome sub)]
+    (println (str "  " (or (:status r) "no answer") (when (:id r) (str " (" (:id r) ")"))))
+    (cond
+      (= "Accepted" (:status r)) nil
+      (nil? (:id r)) (fail! (str "notarytool submit failed (exit " (:exit sub) ")"
+                                 (when-let [e (first (str/split-lines (str (:err sub))))] (str ": " e))))
+      :else (let [log (str "target/notarization-" (:id r) ".json")
+                  got (apply p/sh (concat no-proxy ["xcrun" "notarytool" "log" (:id r) log] auth))]
+              (fail! (str "notarization " (:status r) "; "
+                          (if (zero? (:exit got)) (str "Apple's log is in " log)
+                              (str "fetching Apple's log failed too (exit " (:exit got) "); notarytool log " (:id r) " fetches it"))))))))
 
 (defn- sign! [kc hash path & more]
   (exec! (vec (concat ["codesign" "--force" "--options" "runtime" "--timestamp" "--keychain" kc "-s" hash] more [path]))))
@@ -152,24 +222,32 @@
    ["app ticket stapled" (zero? (:exit (p/sh "xcrun" "stapler" "validate" app)))]
    ["dmg ticket stapled" (zero? (:exit (p/sh "xcrun" "stapler" "validate" dmg)))]])
 
+(defn- app-version
+  "The version target/Jonquil.app was built at (its Info.plist)."
+  []
+  (str/trim (:out (exec! ["plutil" "-extract" "CFBundleShortVersionString" "raw" "-o" "-" (str app "/Contents/Info.plist")]))))
+
 (defn- notarize-in!
   "The run, with tmp (a 700 directory) for the keychain and decoded
   secrets; old the user keychain list to restore."
   [tmp]
   (let [kc (str tmp "/jonquil-sign.keychain-db")
         kc-pw (random-hex 32)
+        p12-pw (random-hex 32)
         p12 (str tmp "/id.p12")
         p8 (str tmp "/key.p8")
-        version (app-bundle/git-version)
+        version (safe-version (app-version))
         zip (str "target/Jonquil-" version "-macos-arm64.zip")
         dmg (str "target/Jonquil-" version "-macos-arm64.dmg")]
-    (sh-c! "decoding the Developer ID .p12 from pass"
-           (str "pass show secrets/apple/developer-id-application-p12 | base64 -d > '" p12 "' && chmod 600 '" p12 "'"))
-    (sh-c! "decoding the App Store Connect key from pass"
-           (str "pass show '" (auth-key-entry) "' | base64 -d > '" p8 "' && chmod 600 '" p8 "'"))
+    (decode-b64! "the Developer ID .p12" (pass-text "secrets/apple/developer-id-application-p12") (str p12 ".orig"))
+    (decode-b64! "the App Store Connect key" (pass-text (auth-key-entry)) p8)
+    ;; the long-lived password only ever goes through stdin; a one-time one
+    ;; (p12-pw) is what security's argv shows
+    (rekey-p12! (str p12 ".orig") (pass-line "secrets/apple/developer-id-application-p12-password") p12 p12-pw)
+    (exec! ["rm" "-f" (str p12 ".orig")])
     (when-not (= G2-SHA256 (sha256-hex "resources/certs/DeveloperIDG2CA.cer"))
       (fail! "resources/certs/DeveloperIDG2CA.cer doesn't match its pinned SHA-256"))
-    (doseq [argv (keychain-commands {:kc kc :kc-pw kc-pw :p12 p12 :p12-pw (pass-line "secrets/apple/developer-id-application-p12-password")
+    (doseq [argv (keychain-commands {:kc kc :kc-pw kc-pw :p12 p12 :p12-pw p12-pw
                                      :ca "resources/certs/DeveloperIDG2CA.cer"})]
       (exec! (into ["security"] argv)))
     (exec! (into ["security" "list-keychains" "-d" "user" "-s" kc] (user-keychains)))
@@ -202,28 +280,48 @@
         (when-let [[n _] (first (remove second cs))] (fail! (str "check failed: " n))))
       (println (str "wrote " app " (notarized), " zip " and " dmg)))))
 
+(defn- sweep-stale!
+  "A run that died without its cleanup (SIGKILL, a power cut) can leave a
+  jonquil-sign keychain in the user list and its temp directory: both go."
+  []
+  (let [listed (str/split-lines (:out (exec! ["security" "list-keychains" "-d" "user"])))
+        stale (filter #(str/includes? % "jonquil-sign") (map #(str/replace (str/trim %) "\"" "") listed))]
+    (doseq [kc stale] (p/sh "security" "delete-keychain" kc))
+    (when (seq stale)
+      (apply p/sh "security" "list-keychains" "-d" "user" "-s" (user-keychains)))
+    (doseq [d (.listFiles (java.io.File. (System/getProperty "java.io.tmpdir")))
+            :when (str/starts-with? (.getName d) "jonquil-sign.")]
+      (p/sh "rm" "-rf" (str d)))))
+
 (defn notarize!
   "Signs, notarizes and staples target/Jonquil.app, then writes the
-  notarized zip and dmg. The keychain, the decoded .p12 and .p8 and the
-  temp directory go whatever happens, and the user keychain list is put
+  notarized zip and dmg. The keychain, the decoded secrets and the temp
+  directory go however the run ends, a ^C included (a shutdown hook, as
+  Jolt unwinds no finally on SIGINT), and the user keychain list is put
   back as it was."
   []
   (when-not (.isDirectory (java.io.File. app))
     (fail! "no target/Jonquil.app: run jolt app:release first"))
   (when-let [[n _] (first (remove second (app-release/checks)))]
     (fail! (str "target/Jonquil.app fails app:release's check \"" n "\": run jolt app:release again")))
+  (when (stale-app? (app-version) (app-bundle/git-version))
+    (fail! (str "target/Jonquil.app was built at " (app-version) ", but this checkout is "
+                (app-bundle/git-version) ": run jolt app:release again")))
   (when (some #(str/starts-with? % "liblzo2") (.list (java.io.File. (str app "/Contents/Frameworks"))))
     (binding [*out* *err*]
       (println "app-notarize: WARNING: liblzo2 (GPL-2.0-or-later) is in the bundle; notarizing isn't publishing, but don't publish this build")))
+  (sweep-stale!)
   (let [old (user-keychains)
-        tmp (str/trim (:out (exec! ["mktemp" "-d" "-t" "jonquil-sign"])))]
-    (exec! ["chmod" "700" tmp])
+        _ (when (empty? old) (fail! "the user keychain list reads empty; not touching it"))
+        tmp (str/trim (:out (exec! ["mktemp" "-d" "-t" "jonquil-sign"])))
+        cleanup! (once (fn []
+                         (p/sh "security" "delete-keychain" (str tmp "/jonquil-sign.keychain-db"))
+                         (apply p/sh "security" "list-keychains" "-d" "user" "-s" old)
+                         (p/sh "rm" "-rf" tmp)))]
+    (on-exit! cleanup!)
     (try
       (notarize-in! tmp)
-      (finally
-        (p/sh "security" "delete-keychain" (str tmp "/jonquil-sign.keychain-db"))
-        (apply p/sh "security" "list-keychains" "-d" "user" "-s" old)
-        (p/sh "rm" "-rf" tmp)))))
+      (finally (cleanup!)))))
 
 (defn -main [& _]
   (try
