@@ -120,6 +120,10 @@ window with no folder.
 - The console reports the child's pid, port and project directory at start.
 - Stop interrupts first; if the child doesn't answer in about a second, it
   kills and restarts the child and says so.
+- A Run starts in `user`, as it does in process. When Stop or an error ends
+  it, the prompt moves to the buffer's namespace if the child has that
+  namespace by then, and to `user` otherwise, so what the Run defined
+  before it ended is in reach.
 - Opening a file from a different project switches the session; the old
   evaluator is stopped and the console says so.
 - stdin, the inspector and jump to definition work through Jonquil's own
