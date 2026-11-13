@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Fixed
+
+- The README and Getting started point at the notarized 0.1.0 download, the Jolt notes say which features need v0.8.24 (the first release with `jolt.debug` and `jolt.profile`) instead of "not yet in a release", the release build lists `pkgconf` and the Xcode Command Line Tools, and the README's test count is today's.
+
 ## [0.1.0] - 2026-11-13
 
 The first release: a notarized `Jonquil-0.1.0-macos-arm64.dmg` and `.zip` for Apple Silicon Macs on macOS 26 or later. Linux and Intel builds aren't available yet.

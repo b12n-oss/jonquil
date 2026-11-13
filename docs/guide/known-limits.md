@@ -41,8 +41,8 @@ Known rough edges, parked for later:
   already loaded stays at its version. Run out of process when the version
   matters.
 - Jolt v0.8.23 and earlier: two projects with an identical namespace file
-  can make F12 open the other project's copy (jolt-lang/jolt#1404). Fixed on
-  Jolt's main branch, not yet released.
+  can make F12 open the other project's copy (jolt-lang/jolt#1404). Fixed in
+  Jolt v0.8.24.
 
 </details>
 
@@ -52,8 +52,8 @@ Known rough edges, parked for later:
 - Tracing is for Jolt only, and doesn't record a traced function's call to
   itself.
 - Live console results are for Jolt only; the last 100 are kept.
-- Frames, their locals and Break on error need a Jolt with `jolt.debug`,
-  which is on Jolt's main branch and not yet in a release.
+- Frames, their locals and Break on error need Jolt v0.8.24 or later, the
+  first release with `jolt.debug`.
 - A top-level expression typed at the prompt keeps no frame of its own: its
   error shows frames only inside a function it called.
 - Breakpoints live in the code a Run or a toggle sent: `require :reload` or
