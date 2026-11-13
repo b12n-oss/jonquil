@@ -49,16 +49,15 @@ only with `JONQUIL_BROWSER_LIVE=1 jolt test:cljs-node`.
 `JONQUIL_JOLT`, set to an executable, is the Jolt program the Jolt child
 runs, in place of the `jolt` on the login `PATH`.
 
-The released Jolt (v0.8.23) has no `jolt.debug`, so on it the debugger's
+Jolt v0.8.23 and earlier have no `jolt.debug`, so on them the debugger's
 tests (frames, Break on error, evaluating in a frame) take their "not
 available" path and pass without testing anything: a window self-test row
 reads `break-pauses PASS {:available false}`. `jolt test:debugger` runs them on
 a Jolt that has it, sets `JONQUIL_JOLT` for the live child test, and fails
 when one of them skipped or a debugger row took that path. Run it before
 merging a change that touches the debugger, the evaluators or the child's
-middleware, until a Jolt release carries `jolt.debug`. Build that Jolt from
-Jolt main at merge commit `440ea77a` (jolt-lang/jolt#1474) or later: the
-child's break also needs `jolt.nrepl/*eval-wrapper*`, so on an older build
+middleware. It needs Jolt v0.8.24 or later (jolt-lang/jolt#1474): the
+child's break also needs `jolt.nrepl/*eval-wrapper*`, so on an older Jolt
 the live child break test fails. `--no-window` leaves out the window self-test for a
 quicker pass.
 
@@ -389,7 +388,8 @@ port.
 ### The lint workflow
 
 `.github/workflows/lint.yml` runs `jolt lint:strict` and `jolt lsp:format-check`
-on `ubuntu-latest` with no Jolt involved, plus the `metrics` job. It runs on
+on `ubuntu-latest`, with Jolt installed to run the tasks, plus the `metrics`
+job (Jolt 0.8.27). It runs on
 every push to `main` and every pull request, and by hand from the Actions tab
 or with `gh workflow run lint.yml`.
 

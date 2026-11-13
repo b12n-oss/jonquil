@@ -39,8 +39,8 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 
 ## Requirements
 
-- [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and jolt-lang/jolt#1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`. Counting how often each line runs needs v0.8.24, which added `jolt.profile`, and says so on an older Jolt
-- GTK4 and pango: Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
+- [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and jolt-lang/jolt#1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`. Counting how often each line runs needs v0.8.24, which added `jolt.profile`, and so do the debugger's frames, Break on error and breakpoints (`jolt.debug`); each says so on an older Jolt. Tested on v0.8.27
+- GTK4 and pango, to build or run from source (the release download bundles them): Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
 - `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.2 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `jolt test:nrepl` needs it
 - A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork is private for now
 - Java 17+ and the `clojure` CLI, only for `jolt test:clj` and a JVM project's own server
@@ -48,6 +48,10 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 - The `clojure` CLI and `node` on `PATH` (or `JONQUIL_CLOJURE`), only for ClojureScript on node: Jonquil starts ClojureScript itself, and the first start can download the Closure Compiler
 - A web browser, only for ClojureScript in the browser (`.jonquil.edn {:cljs {:target :browser}}`, which also needs the `clojure` CLI but not `node`): Jonquil opens the page in your default browser
 - An nREPL server you started, only for the nREPL dialect (babashka's `bb nrepl-server`, Basilisp's `basilisp nrepl-server`, or any other). Jonquil never starts or stops it, and the server runs whatever it's sent, so keep a remote one on a network you trust or reach it through an ssh tunnel
+
+## Download
+
+On an Apple Silicon Mac with macOS 26 or later, download the notarized `Jonquil-0.1.0-macos-arm64.dmg` (or `.zip`) from the [0.1.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.1.0) and drag Jonquil to Applications. GTK is bundled, so it needs no Homebrew; running a project's Jolt out of process still needs `jolt` and `git` (see Requirements). Intel Macs and Linux build from source, below.
 
 ## Running
 
@@ -77,7 +81,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-07, 1559 tests pass (8892 assertions on macOS; 8837 on Linux, measured with `jolt linux:test` the same day).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-13, 2159 tests pass (12858 assertions, on macOS).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>

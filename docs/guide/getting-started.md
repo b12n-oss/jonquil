@@ -1,13 +1,28 @@
 # Getting started
 
+## Download
+
+On an Apple Silicon Mac with macOS 26 or later, download
+`Jonquil-0.1.0-macos-arm64.dmg` (or the `.zip`) from the
+[0.1.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.1.0),
+open it and drag Jonquil to Applications. It's signed and notarized, and it
+bundles GTK, so it needs no Homebrew. Running a project's Jolt out of process
+still needs `jolt` on your login `PATH` and `git` (see
+[Requirements](#requirements)), and each other dialect needs what's listed
+below. Intel Macs and Linux build from source, as the rest of this page
+describes.
+
 ## Requirements
 
-- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.23 or later (the
-  version last tested). Building Jolt from source needs a threaded Chez
-  Scheme 10.x on `PATH`; Jolt's own `make` provisions one if missing.
-- **GTK4 and pango**. On macOS, `brew install gtk4` pulls in `pango` and
-  `glib`. Jonquil loads them at startup rather than linking against them.
-  On Linux they come from your distribution; see [Linux](#linux).
+- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.23 or later, tested
+  on v0.8.27. Line counts, the last error's frames, Break on error and
+  breakpoints need v0.8.24 or later. Building Jolt from source needs a
+  threaded Chez Scheme 10.x on `PATH`; Jolt's own `make` provisions one if
+  missing.
+- **GTK4 and pango**, to build or run from source. On macOS,
+  `brew install gtk4` pulls in `pango` and `glib`. Jonquil loads them at
+  startup rather than linking against them. On Linux they come from your
+  distribution; see [Linux](#linux). The release download bundles them.
 
 Jolt runs the tasks below (`jolt app:run`, `jolt app:build`, the tests) from
 `bb.edn`, so you don't need babashka.
@@ -80,7 +95,8 @@ existing `~/Applications/Jonquil.app` only if it is a Jonquil bundle.
 
 The app still loads GTK4 and pango from Homebrew, so `brew install gtk4`
 stays a requirement. It isn't notarized either, so the quarantine note
-applies when you copy `Jonquil.app` to another Mac.
+applies when you copy `Jonquil.app` to another Mac. The release download
+is the self-contained, notarized build (see [Download](#download)).
 
 After a plain `jolt app:bundle`, the checkout's `./Jonquil.app` may show in
 Open With next to the installed one. Delete it or run
@@ -95,8 +111,10 @@ jolt app:release-check  # launch it with /opt/homebrew unreadable
 ```
 
 `jolt app:release` makes an app that runs on a Mac without Homebrew. The
-build Mac still needs Homebrew's GTK, because that is what gets bundled, and
-`meson` (`brew install meson`) for the one library built from source (below).
+build Mac still needs Homebrew's GTK, because that is what gets bundled,
+`meson` and `pkgconf` (`brew install meson pkgconf`) for the one library built
+from source (below), and the Xcode Command Line Tools (`xcode-select
+--install`) for `otool`, `codesign` and, when notarizing, `xcrun notarytool`.
 `deps.edn`'s GTK libraries, and every library they load (42 today, about
 27 MB), are copied into `Contents/Frameworks` and relinked to find each
 other.
