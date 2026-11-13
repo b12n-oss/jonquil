@@ -39,10 +39,10 @@
 
 (def ^:private row-fns
   (vec (concat order-a/rows
-              order-b/rows
-              order-c/rows
-              order-d/rows
-              order-e/rows)))
+               order-b/rows
+               order-c/rows
+               order-d/rows
+               order-e/rows)))
 
 ;; --- driver --------------------------------------------------------------
 
