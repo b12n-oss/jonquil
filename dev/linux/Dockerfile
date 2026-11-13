@@ -18,8 +18,8 @@ RUN apt-get update \
       build-essential uuid-dev libncurses-dev liblz4-dev xxd \
  && rm -rf /var/lib/apt/lists/*
 
-ARG JOLT_VERSION=v0.8.24
-ARG JOLT_SHA256_AMD64=8f5dc27988830c7cf1780fd877e2b35ae6a5aa2acce79760194ff007ed3447d7
+ARG JOLT_VERSION=v0.8.27
+ARG JOLT_SHA256_AMD64=7aedce645a5840772a74e0341da73e6e072f41107ee2b304fc7a4947021a64b4
 
 # Downloads use curl --retry 5 --retry-all-errors because GitHub drops the odd
 # connection from inside a build. The Jolt archive is unpacked with bsdtar, not
