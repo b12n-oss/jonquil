@@ -235,10 +235,18 @@
       [task & args]
       (if-let [engine (docs-engine-dir)]
         ;; jolt has its own build and run commands, so `jolt run <task>` reaches
-        ;; the engine's task of that name
-        (let [argv (into ["jolt" "run" task (str (fs/cwd))] (remove nil? args))
-              res  (apply shell {:dir (str engine) :continue true} argv)]
-          (when-not (zero? (:exit res)) (System/exit (:exit res))))
+        ;; the engine's task of that name. serve is the exception: the
+        ;; engine's server is http-kit, which jolt doesn't bundle, so its own
+        ;; info says serve stays babashka-only (bb serve <project> [port])
+        (let [bb?  (= "serve" task)
+              argv (into (if bb? ["bb" task (str (fs/cwd))] ["jolt" "run" task (str (fs/cwd))])
+                         (remove nil? args))]
+          (when (and bb? (not (fs/which "bb")))
+            (println "site:serve runs the docs engine's server, which needs babashka (bb) on PATH:")
+            (println "  https://github.com/babashka/babashka#installation")
+            (System/exit 1))
+          (let [res (apply shell {:dir (str engine) :continue true} argv)]
+            (when-not (zero? (:exit res)) (System/exit (:exit res)))))
         (do
           (println "The docs engine is not checked out anywhere I looked:")
           (println "  $JLT_DOCS_ENGINE, ~/dev/jlt-commons/docs-engine, ../docs-engine")
@@ -301,7 +309,7 @@
      (row "hooks:uninstall" "remove the git pre-commit hook")
      (hdr "Docs (local preview; the engine lives in jlt-commons/docs-engine)")
      (row "site:build" "build the documentation site into _site/")
-     (row "site:serve [port]" "build, then serve it (first free port from 3000)")
+     (row "site:serve [port]" "build, then serve it (first free port from 3000; needs bb)")
      (row "site:clean" "delete the _site/ build output")
      (hdr "Linux (local Docker, no CI)")
      (row "linux:image [--arch A]" "build the jonquil-linux:<arm64|amd64> image (host arch by default)")

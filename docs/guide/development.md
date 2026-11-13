@@ -405,6 +405,10 @@ preview this documentation site (`docs/guide/`) using a sibling checkout of
 [jlt-commons/docs-engine](https://github.com/jlt-commons/docs-engine),
 looked up as `$JLT_DOCS_ENGINE`, then `~/dev/jlt-commons/docs-engine`, then
 `../docs-engine` (a sibling there can be an unrelated older fork). If none
-exists, the task prints where to `git clone` it. There's no workflow or
+exists, the task prints where to `git clone` it. `site:serve` also needs
+[babashka](https://github.com/babashka/babashka) (`bb`) on `PATH`. The
+engine's preview server is http-kit, which Jolt doesn't bundle, so that one
+task runs the engine's `bb serve`. `site:build` and `site:clean` run under
+Jolt. There's no workflow or
 GitHub Pages site behind this: it's a local preview until the project is
 open-sourced.
