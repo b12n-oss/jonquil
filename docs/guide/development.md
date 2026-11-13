@@ -331,7 +331,7 @@ port.
 
 - `jolt lint` runs clj-kondo over `src`, `test` and `dev` in report mode.
   `jolt lint:strict` exits non-zero on any finding (2 for warnings, 3 for
-  errors); the manual CI workflow gates on it. The git hooks block only on
+  errors); the lint workflow gates on it. The git hooks block only on
   clj-kondo errors.
 - `jolt metrics` runs [jolt-metrics](https://github.com/jlt-commons/jolt-metrics)
   over the repo and prints its Markdown report: a refactoring queue worst
@@ -371,8 +371,8 @@ port.
   pass having checked nothing. `dev/` (the fake servers, demo shots and the
   self-test harness) isn't in the gate yet. Bringing it in takes two edits:
   add `"dev/"` to `:critical-free`, and take `dev` out of
-  `.jolt-metrics.edn`'s `:test-paths`. The `metrics` job in `.github/workflows/lint.yml` runs it,
-  started by hand while the repo is private.
+  `.jolt-metrics.edn`'s `:test-paths`. The `metrics` job in `.github/workflows/lint.yml` runs it
+  on every push to `main` and every pull request.
 - `jolt lsp:format` / `jolt lsp:format-check` and `jolt lsp:clean-ns` /
   `jolt lsp:clean-ns-check` reformat (or dry-run) code and `ns` forms with
   clojure-lsp; `jolt lsp:check` runs both dry-run checks.
@@ -386,11 +386,11 @@ port.
   `jolt hooks:uninstall` removes either. Installing runs the checks first and
   warns if the tree doesn't pass yet.
 
-### The manual lint workflow
+### The lint workflow
 
 `.github/workflows/lint.yml` runs `jolt lint:strict` and `jolt lsp:format-check`
-on `ubuntu-latest` with no Jolt involved. It has no push, pull request or
-schedule trigger (Jonquil is private for now); run it from the Actions tab
+on `ubuntu-latest` with no Jolt involved, plus the `metrics` job. It runs on
+every push to `main` and every pull request, and by hand from the Actions tab
 or with `gh workflow run lint.yml`.
 
 ## Benchmark

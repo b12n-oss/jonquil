@@ -153,11 +153,10 @@ jolt hooks:install:full   # the same, plus the test suite (slower)
 jolt hooks:uninstall      # remove the git pre-commit hook
 ```
 
-`.github/workflows/lint.yml` runs the same lint and format check on GitHub
-Actions, and `.github/workflows/site.yml` builds the docs site without publishing it, but both
-only when triggered by hand from the Actions tab. Jonquil is a private repo
-for now, so neither workflow carries a push, pull request or schedule
-trigger.
+`.github/workflows/lint.yml` runs the same lint and format check, plus the
+metrics gate, on GitHub Actions, and `.github/workflows/site.yml` checks
+that the docs build. Both run on every push to `main` and every pull
+request. The site itself is [jonquil.b12n.app](https://jonquil.b12n.app).
 
 ## Contributing
 

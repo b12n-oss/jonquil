@@ -1,10 +1,8 @@
 name: Site
 
-# Manual only, on purpose: Jonquil is a private repo and pays for every
-# Actions run, so this workflow carries no push or pull_request trigger.
-# Run it from the Actions tab (or `gh workflow run site.yml`) when you want
-# the answer; the push/pull_request triggers come back when the repo goes
-# public. The generator lives in jlt-commons/docs-engine; this repo owns
+# Builds and checks the docs on every push to main and every pull request,
+# and by hand from the Actions tab (or `gh workflow run site.yml`). The
+# generator lives in jlt-commons/docs-engine; this repo owns
 # its content, its config in docs/site.edn, and nothing else about the
 # rendering.
 #
@@ -14,10 +12,13 @@ name: Site
 # PUBLISHING IS OFF. The deploy job is gated on the PUBLISH_SITE repository
 # variable, which does not exist, and GitHub Pages is not enabled on this
 # repo. Both must change for anything to be served. That is deliberate:
-# this repo is private and its docs are not public until its owner decides
-# they are.
+# Jonquil's site is https://jonquil.b12n.app, built elsewhere, so this
+# workflow only checks that the docs build.
 
 "on":
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -31,7 +32,9 @@ env:
   # v0.4.x adds the nav search box (lunr, bundled under vendor/, with its
   # index in search-documents.json) and v0.4.3 escapes a bare < the way
   # GitHub does; v0.3.2 fixed `jolt run build`/`clean` (docs-engine#3).
-  DOCS_ENGINE_REF: v0.4.3
+  # v0.4.5 pins jolt-lang/time at a commit Jolt 0.8.25+ can read (the
+  # older pin's locale_data.clj docstring stops the build).
+  DOCS_ENGINE_REF: v0.4.5
   BASE_PATH: /jonquil
 
 jobs:
@@ -66,16 +69,16 @@ jobs:
           test -f "$out/css/screen.css"   || { echo "static assets missing"; exit 1; }
           test -f "$out/404.html"         || { echo "no 404 page generated"; exit 1; }
 
-          ! grep -rq '{{site-base}}' "$out"/index.html "$out"/guide/*.html \
+          ! grep -rq '{{site-base}}' "$out"/index.html "$out"/guide/*.html "$out"/guide/*/*.html \
             || { echo "unrendered template variable"; exit 1; }
 
-          # This project's diagrams are on the architecture page, not the
+          # This project's diagrams are on the architecture pages, not the
           # homepage. Both directions fail quietly: a diagram page that drops
           # the bundle renders unstyled source text, and a page without one
           # that loads it costs every reader a large download for nothing.
-          grep -q 'pre class="mermaid"' "$out/guide/architecture.html" \
+          grep -q 'pre class="mermaid"' "$out/guide/architecture/index.html" \
             || { echo "the architecture diagrams are missing"; exit 1; }
-          grep -q 'mermaid.min.js' "$out/guide/architecture.html" \
+          grep -q 'mermaid.min.js' "$out/guide/architecture/index.html" \
             || { echo "the architecture page has diagrams but is not loading mermaid"; exit 1; }
           ! grep -q 'mermaid.min.js' "$out/guide/index.html" \
             || { echo "a page with no diagram is loading mermaid"; exit 1; }
@@ -84,7 +87,7 @@ jobs:
           # b12n-oss.github.io/jonquil/, a root-absolute URL loads the
           # ORGANIZATION site's asset instead of this project's. The page still
           # renders, wearing the wrong clothes, so nothing but a check catches it.
-          if grep -ohE '(href|src)="/[^"]*"' "$out"/index.html "$out"/404.html "$out"/guide/*.html \
+          if grep -ohE '(href|src)="/[^"]*"' "$out"/index.html "$out"/404.html "$out"/guide/*.html "$out"/guide/*/*.html \
                | grep -vE "=\"$BASE_PATH/"; then
             echo "the URLs above escape $BASE_PATH and would resolve against the org site"
             exit 1

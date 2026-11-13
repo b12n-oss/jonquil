@@ -1,10 +1,11 @@
 name: Lint
 
-# Manual only, on purpose: Jonquil is a private repo and stays that way
-# until the user decides to open-source it, so this workflow carries no
-# push, pull_request or schedule trigger. Run it from the Actions tab (or
-# `gh workflow run lint.yml`) when you want the answer, not on every push.
+# Runs on every push to main and on every pull request, and by hand from
+# the Actions tab (or `gh workflow run lint.yml`).
 "on":
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -14,12 +15,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up the Clojure CLI, clj-kondo and clojure-lsp
+      # bb too: clojure-lsp sees bb.edn and runs `bb print-deps` to find the
+      # classpath, and the format check fails without it.
+      - name: Set up the Clojure CLI, clj-kondo and babashka
         uses: DeLaGuardo/setup-clojure@13.6.1
         with:
           cli: latest
           clj-kondo: latest
-          clojure-lsp: latest
+          bb: latest
+
+      # setup-clojure has no clojure-lsp input (it warns and installs
+      # nothing), so clojure-lsp comes from its own action, pinned to the
+      # version the format check was last run with locally.
+      - name: Set up clojure-lsp
+        uses: clojure-lsp/setup-clojure-lsp@v1.0.3
+        with:
+          clojure-lsp-version: 2026.10.15-11.42.38
 
       # jolt runs the tasks (it reads bb.edn). clj-kondo lints source text
       # with its own analysis, and clojure-lsp's format check reformats
