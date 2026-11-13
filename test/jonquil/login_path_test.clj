@@ -256,8 +256,8 @@
     (is (= {:out answer} (#'lp/exit-result 0 answer)))
     (is (= {:out "junk"} (#'lp/exit-result 0 "junk")) "a clean exit is parsed by the caller")
     (is (= {:out answer} (#'lp/exit-result 153 answer))
-        "a PATH printed before the limit stopped the shell is still used")
-    (is (= {:reason "wrote a file past the size limit the lookup sets"}
+        "output that already holds a complete PATH is still used")
+    (is (= {:reason "stopped at a file size limit"}
            (#'lp/exit-result 153 "junk")))
     (is (= {:reason "failed"} (#'lp/exit-result 1 answer)))
     (is (= {:reason "failed"} (#'lp/exit-result 143 "")))

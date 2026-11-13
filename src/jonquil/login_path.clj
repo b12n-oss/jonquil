@@ -158,14 +158,15 @@
 
 (defn- exit-result
   "What a shell that exited on its own with status exit and output out
-  gives: {:out out} for a clean exit, and also when the file size limit
-  stopped it (153, which is 128 + SIGXFSZ) after it had printed the PATH.
-  Otherwise {:reason r}, naming the limit when that is what stopped it."
+  gives: {:out out} for a clean exit, and also for 153 (128 + SIGXFSZ, a
+  stop at a file size limit) when out already holds a complete PATH.
+  Otherwise {:reason r}. The 153 reason doesn't say whose limit it was,
+  because the status alone can't tell bounded-command's from the user's own."
   [exit out]
   (cond
     (and exit (zero? exit)) {:out out}
     (and (= 153 exit) (tp/parse-answer out)) {:out out}
-    (= 153 exit) {:reason "wrote a file past the size limit the lookup sets"}
+    (= 153 exit) {:reason "stopped at a file size limit"}
     :else {:reason "failed"}))
 
 (defn- run-shell
