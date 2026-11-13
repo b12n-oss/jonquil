@@ -135,11 +135,11 @@
 
 (defn- new-session-state
   "The tab ctx's live session saving state: whether it is live, the last
-  snapshot written, the last error said, and whether a reopen is under
-  way. Each an atom."
+  snapshot written, the last error said, whether a reopen is under way,
+  and the entry that reopen will open. Each an atom."
   []
   {:session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
-   :session-restoring? (atom false)})
+   :session-restoring? (atom false) :session-pending (atom nil)})
 
 (defn- status-bar-ctx
   "The tab ctx's status bar keys: the Parinfer mode read fn, the hook's
@@ -226,7 +226,10 @@
                   (do (folder-result! {:path p})
                       ;; The tree now shows this folder, so show the tree
                       ;; too; the toggle handler saves it as a choice.
-                      (g/gtk-toggle-button-set-active files-btn 1))
+                      (g/gtk-toggle-button-set-active files-btn 1)
+                      ;; and its own remembered tabs, in place of the last
+                      ;; project's that a launch from Finder was about to open
+                      (win-reopen/folder-arrived! @*tab-ctx))
                   (when-let [err (:error (win-tabs/open-file! @*tab-ctx p))]
                     (win-status/set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
                 (catch :default e

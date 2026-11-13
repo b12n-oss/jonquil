@@ -64,6 +64,18 @@
     (first sessions)
     (first (filter #(= root (:root %)) sessions))))
 
+(defn arrival-step
+  "What a folder that arrives from outside (Finder's Open With, a Dock
+  drop) does to the window's tabs, once the tree shows it. :swap while
+  startup's reopen is still waiting for the first frame: that reopen was
+  for the project used last, and macOS hands a launch's folder over after
+  the window has started. :reopen in a window nobody has used yet (one
+  clean Untitled tab). :keep otherwise: the tabs are the user's."
+  [{:keys [restoring? pristine?]}]
+  (cond restoring? :swap
+        pristine? :reopen
+        :else :keep))
+
 (defn- resolved-target
   "path itself, unless it is a symlink, in which case the real file it
   points at. A copy of the private helper in jonquil.settings."

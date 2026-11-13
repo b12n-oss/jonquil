@@ -98,6 +98,10 @@ works on both.
 
 - A folder roots the file tree there. In a mixed command line, the first
   argument sets the project and the rest open as tabs.
+- A folder that starts Jonquil from Finder or the Dock comes up with that
+  folder's own tabs from last time. So does a folder dropped on a window
+  you haven't used yet, one still showing a single empty Untitled tab. In a
+  window that already has your tabs, a folder only moves the file tree.
 - Linux file managers don't offer Jonquil for folders. Run
   `~/.local/share/jonquil/jonquil <folder>` or
   `gtk4-launch net.b12n.jonquil <folder>` instead.
