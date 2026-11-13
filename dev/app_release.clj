@@ -324,7 +324,7 @@
   (.setExecutable (io/file launcher) true)
   (let [plan (closure-plan (roots) refs-of
                             ;; Homebrew's imports lzo (GPL-2.0); ours is built without it
-                            {"libcairo-script-interpreter.2.dylib" (app-cairo-script/interpreter-path)})]
+                           {"libcairo-script-interpreter.2.dylib" (app-cairo-script/interpreter-path)})]
     (when (empty? plan) (fail! "no library to bundle"))
     (doseq [e plan] (bundle-lib! e))
     (println (str (count plan) " libraries in Frameworks"))
