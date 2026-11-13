@@ -13,7 +13,8 @@
 (defn- recorder
   "A script that writes its name, then each argument, to out."
   [out label]
-  (str "#!/bin/sh\necho " label " > '" out "'\nfor a in \"$@\"; do echo \"$a\" >> '" out "'; done\n"))
+  ;; printf, not echo: dash's echo takes -n as its own option and prints nothing
+  (str "#!/bin/sh\nprintf '%s\\n' " label " > '" out "'\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" out "'; done\n"))
 
 (defn- executable! [path text]
   (io/make-parents path)
