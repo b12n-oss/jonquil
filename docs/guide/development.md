@@ -26,7 +26,7 @@ when their tool is missing.
 
 | Task | Runs against | Needs |
 |---|---|---|
-| `jolt test:nrepl` | a real Jolt child per test, over `jonquil.nrepl.child` | the jolt-lang/nrepl checkout ([where it comes from](dialects/index.md#where-the-nrepl-middleware-comes-from)) |
+| `jolt test:nrepl` | a real Jolt child per test, over `jonquil.nrepl.child` | jolt-lang/nrepl, from a checkout or fetched with `git` the first time ([where it comes from](dialects/index.md#where-the-nrepl-middleware-comes-from)) |
 | `jolt test:nightly` | the same suite on Jolt's `vnightly` build | `curl`; macOS (arm64, x86_64) or Linux x86_64 |
 | `jolt test:debugger` | the debugger's unit tests, the live Jolt-child break test and the window self-test, on a Jolt with `jolt.debug` | `JONQUIL_JOLT_DEBUG`, else `jolt-debug` on `PATH`, else `jolt` once it has `jolt.debug`; skips without one |
 | `jolt test:clj` | a real `clojure -M:serve`, started by `dev/clj_server.clj` | Java 17+, `clojure` CLI, network on a first run |
@@ -116,7 +116,7 @@ real runtime.
 |---|---|---|---|
 | 1 | `gtk_selftest.clj` | Definitions editor and Interactions console | |
 | 2 | `gtk_selftest_window.clj` | the full window, rows split by feature under `gtk_selftest_window/` | |
-| 3 | `gtk_selftest_nrepl.clj` | a `{:runtime :nrepl}` project with a real Jolt child | the jolt-lang/nrepl checkout (one failing row without it) |
+| 3 | `gtk_selftest_nrepl.clj` | a `{:runtime :nrepl}` project with a real Jolt child | jolt-lang/nrepl, from a checkout or fetched with `git` the first time |
 | 4 | `gtk_selftest_cljd.clj` | ClojureDart attach | fake server `fake_cljd_nrepl.clj` named by `NREPL.lock` |
 | 5 | `gtk_selftest_clj.clj` | JVM Clojure attach, including slow-answer rows (its `:delays` atom) | fake server `fake_jvm_nrepl.clj` named by `.nrepl-port` |
 | 6 | `gtk_selftest_tree.clj` | session restore from `sessions.edn` (two files plus one that's gone) | |

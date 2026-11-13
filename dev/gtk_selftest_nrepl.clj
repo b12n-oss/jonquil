@@ -10,11 +10,10 @@
     an NRepl evaluator has no :ctx for support/idle? to read -- with a
     20000 ms deadline, longer than the window group's own 2000 ms, because
     the eager start (or a restart) can still be in flight when a row runs.
-  - -main requires a jolt-lang/nrepl middleware checkout
-    (jonquil.nrepl.child/middleware-root) before it starts a window at
-    all; without one, it records a single failing check and never opens
-    anything (by design: child-test/middleware-root-test fails the same
-    way).
+  - The child gets jolt-lang/nrepl's middleware the way the app gets it
+    (jonquil.nrepl.child/middleware-source): a checkout when there is one,
+    else the pinned git dependency, which needs git and a network the
+    first time.
 
   The real close row (row-nrepl-close-kills-child, deliberately last in
   row-fns) and after-close-checks! at the end of the run: the close row
@@ -49,7 +48,6 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.main :as main]
-            [jonquil.nrepl.child :as child]
             [temp-dirs]))
 
 (def ^:private row-fns
@@ -154,34 +152,31 @@
            (System/exit 1))))))
 
 (defn -main [& _]
-  (if (child/middleware-root)
-    (let [fixture (rows/fixture!)
-          driver-done (a/promise-chan)]
-      (main/start!
-       {:file (:file fixture)
-        :settings-path (support/fresh-settings-path)
-        :on-ready (fn [ui]
-                    (selftest-keys/watch! (:window ui))
-                    (g/g-signal-connect-data (:window ui) "destroy"
-                                             (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
-                                                          [:pointer :pointer] :void)
-                                             ffi/null ffi/null g/CONNECT-DEFAULT)
-                    (go (<! (timeout 300))
-                        (<! (ga/run-rows (map (fn [row] (fn [] (run-row ui row))) row-fns)
-                                         PER-ROW-MS support/check))
-                        (<! (finish ui))
-                        (a/put! driver-done :done)))})
-      ;; The GTK loop is gone once main/start! returns -- rows/
-      ;; after-close-checks!'s own blocking shell/sh calls are safe here,
-      ;; unlike inside a row (which must go through sh-within, bounded to
-      ;; 5000 ms, so a row never hangs the whole run waiting on a shell
-      ;; command). SUMMARY (and finished?) wait for these three checks so
-      ;; the exit code reflects all of them, not just the rows.
-      (a/alts!! [driver-done (timeout 5000)])
-      (rows/after-close-checks!)
-      (print-summary!))
-    (support/check :middleware-root-present false
-                   {:reason "no jolt-lang/nrepl checkout: set JONQUIL_JOLT_NREPL or clone it to ~/dev/jolt-lang/nrepl"}))
+  (let [fixture (rows/fixture!)
+        driver-done (a/promise-chan)]
+    (main/start!
+     {:file (:file fixture)
+      :settings-path (support/fresh-settings-path)
+      :on-ready (fn [ui]
+                  (selftest-keys/watch! (:window ui))
+                  (g/g-signal-connect-data (:window ui) "destroy"
+                                           (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
+                                                        [:pointer :pointer] :void)
+                                           ffi/null ffi/null g/CONNECT-DEFAULT)
+                  (go (<! (timeout 300))
+                      (<! (ga/run-rows (map (fn [row] (fn [] (run-row ui row))) row-fns)
+                                       PER-ROW-MS support/check))
+                      (<! (finish ui))
+                      (a/put! driver-done :done)))})
+    ;; The GTK loop is gone once main/start! returns -- rows/
+    ;; after-close-checks!'s own blocking shell/sh calls are safe here,
+    ;; unlike inside a row (which must go through sh-within, bounded to
+    ;; 5000 ms, so a row never hangs the whole run waiting on a shell
+    ;; command). SUMMARY (and finished?) wait for these three checks so
+    ;; the exit code reflects all of them, not just the rows.
+    (a/alts!! [driver-done (timeout 5000)])
+    (rows/after-close-checks!)
+    (print-summary!))
   (when-not @finished?
     (binding [*out* *err*]
       (println "[gtk-selftest-nrepl] run ended before the last row; no SUMMARY, exiting 1")))

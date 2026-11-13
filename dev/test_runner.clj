@@ -168,8 +168,9 @@
     jonquil.inspect-test])
 
 (def live-namespaces
-  ;; Tests that spawn real Jolt nREPL children and need the jolt-lang/nrepl
-  ;; checkout. Run with `jolt test:nrepl`, not `jolt test`.
+  ;; Tests that spawn real Jolt nREPL children, with jolt-lang/nrepl from a
+  ;; checkout or the pinned git dependency. Run with `jolt test:nrepl`, not
+  ;; `jolt test`.
   '[jonquil.nrepl.child-test
     jonquil.nrepl.evaluator-test
     jonquil.nrepl.child-debugging-test

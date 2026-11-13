@@ -266,7 +266,7 @@
       (hdr "Verify")
      (row "check" "require every project namespace headlessly, exit 0")
      (row "test" "run the unit suite; pass namespace names to run a subset")
-     (row "test:nrepl" "live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)")
+     (row "test:nrepl" "live nREPL tests: spawn Jolt children (jolt-lang/nrepl from a checkout, else fetched with git)")
      (row "test:debugger [--no-window]" "the debugger's tests on a Jolt with jolt.debug (JONQUIL_JOLT_DEBUG, jolt-debug or jolt; skips without one)")
      (row "test:nightly [--offline]" "test:nrepl against Jolt's nightly build, cached under ~/.cache/jonquil/jolt-nightly (needs curl)")
      (row "test:clj" "live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)")
@@ -330,7 +330,7 @@
 
   test  {:doc "Run tests; pass namespace names to run a subset"
          :task (apply shell "jolt" "-M:test" *command-line-args*)}
-  test:nrepl {:doc "Live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)"
+  test:nrepl {:doc "Live nREPL tests: spawn Jolt children (jolt-lang/nrepl from a checkout, else fetched with git)"
               :task (shell "jolt" "-M:test" "--live")}
   test:debugger {:doc "The debugger's tests on a Jolt with jolt.debug (JONQUIL_JOLT_DEBUG, jolt-debug or jolt; skips without one); --no-window leaves out the window self-test"
                  :task (apply shell "jolt" "dev/debugger_check.clj" *command-line-args*)}
