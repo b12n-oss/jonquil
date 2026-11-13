@@ -38,46 +38,35 @@
   window.clj's stdin/REPL rows do it, via gtk_text_buffer_insert_
   interactive_at_cursor + handle-return!."
   (:require [clj-server]
+            [demo-shots.panels :as panels]
+            [demo-shots.support :refer [await-windows check! console-text demo-path idle? image-path log
+                                        out-end-offset own-pid place-cursor! record-gif results
+                                        screenshot-by-id since]]
             [clojure.core.async :as a :refer [<! go timeout]]
-            [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.java.shell :as sh]
             [clojure.string :as str]
             [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [jolt.ffi :as ffi]
             [jolt.process :as p]
             [jonquil.eval :as eval]
-            [jonquil.debugger :as debugger]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :as cb]
-            [jonquil.gtk.change-sets-pane :as change-sets-pane]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
-            [jonquil.gtk.debugger-pane :as dpane]
-            [jonquil.gtk.docs-pane :as docs-pane]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
-            [jonquil.gtk.locations-pane :as lpane]
-            [jonquil.gtk.messages-pane :as messages-pane]
-            [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
-            [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.source-pane :as source-pane]
-            [jonquil.gtk.trace-pane :as trace-pane]
             [jonquil.login-path :as login-path]
             [jonquil.main :as main]
-            [jonquil.mcp.window :as window]
             [jonquil.nrepl.cljs-child :as cljs-child]
             [jonquil.nrepl.jank-child :as jank-child]
             [jonquil.tool-path :as tool-path]
             [temp-dirs]))
-
-(def ^:private images-dir "docs/images")
-(def ^:private demos-dir "docs/demos")
 
 (defn- fresh-settings-path
   "A settings.edn under a fresh temp directory (one per
@@ -87,96 +76,6 @@
   startup load defaults to :light -- every scene starts in :light."
   []
   (str (temp-dirs/temp-dir! "jonquil-demoshots-settings-") "/settings.edn"))
-
-(defonce results (atom []))
-
-(defn- log [& args]
-  (binding [*out* *err*]
-    (apply println "[demo-shots]" args)))
-
-(defn- check! [scene ok? detail]
-  (swap! results conj {:scene scene :ok (boolean ok?) :detail detail})
-  (log (name scene) (if ok? "PASS" "FAIL") (pr-str detail)))
-
-(defn- own-pid [] (.pid (java.lang.ProcessHandle/current)))
-
-(defn- demo-path [name] (str demos-dir "/" name))
-(defn- image-path [id ext] (str images-dir "/" (clojure.core/name id) "." ext))
-
-;; --- copied from dev/gtk_selftest_window.clj (small state-reading
-;; helpers; see that file's own docstring for why each is a small copy,
-;; not a refactor of it) -----------------------------------------------
-
-(defn- console-text [ui] (g/buffer-text (:buf (:console ui))))
-(defn- idle?
-  "As gtk-selftest-window.support/idle?: nothing running, every run's
-  on-complete returned, and the console drained."
-  [ui]
-  (let [cv (:console ui)]
-    (and (eval/settled? (:ctx (:session ui)))
-         (empty? @(:queue cv))
-         (not @(:drain-scheduled? cv)))))
-
-(defn- mark-offset [buf mark]
-  (let [it (ffi/alloc g/ITER-BYTES)]
-    (try
-      (g/gtk-text-buffer-get-iter-at-mark buf it mark)
-      (g/gtk-text-iter-get-offset it)
-      (finally (ffi/free it)))))
-
-(defn- out-end-offset [ui]
-  (let [cv (:console ui)]
-    (mark-offset (:buf cv) (:out-end cv))))
-
-(defn- since [ui mark] (subs (console-text ui) mark))
-
-(defn- place-cursor!
-  "Places buf's cursor at offset -- an ordinary GtkTextBuffer call,
-  copied from dev/gtk_selftest_window.clj's own place-cursor! (same
-  category as this file's own g/gtk-text-buffer-insert-interactive-at-
-  cursor calls elsewhere: never a synthesized keystroke)."
-  [buf offset]
-  (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
-
-;; --- helpers beyond gtk-async's own: the close-prompt scene's alert-
-;; window lookup and the GIF recording, both off the GTK thread ----------
-
-(defn- windows
-  "`cgevent windows --pid <pid> --edn` on its own thread (ga/sh), parsed. A
-  failed or unparseable call reads as no windows, never an exception, so a
-  poller sees it as \"not there yet\"."
-  [pid]
-  (let [{:keys [out exit]} (ga/sh "cgevent" "windows" "--pid" (str pid) "--edn")]
-    (if (zero? exit)
-      (try (edn/read-string out) (catch Exception _ []))
-      [])))
-
-(defn- await-windows
-  "Like await-until, but the condition is (pred? (windows pid)), checked
-  every interval-ms up to deadline-ms. Returns the last windows read,
-  whether or not pred? passed. Never touches the GTK thread."
-  [pid deadline-ms interval-ms pred?]
-  (ga/assert-off-gtk! "await-windows")
-  (let [t0 (System/currentTimeMillis)]
-    (loop []
-      (let [ws (windows pid)]
-        (if (or (pred? ws) (>= (- (System/currentTimeMillis) t0) deadline-ms))
-          ws
-          (do (<! (timeout interval-ms)) (recur)))))))
-
-(defn- screenshot-by-id
-  "Like ga/screenshot, but by --window-id instead of --pid, for a window
-  that isn't this process's main one (the close-prompt scene's alert)."
-  [path window-id]
-  (ga/sh "cgevent" "screenshot" path "--window-id" (str window-id)))
-
-(defn- record-gif
-  "Starts cgevent record-gif on its own thread (a/thread) and returns the
-  channel that delivers its result map once the recording ends, so a scene
-  can go on driving the window meanwhile and take the result later."
-  [path pid duration-secs fps width]
-  (a/thread (sh/sh "cgevent" "record-gif" "--pid" (str pid) "--duration" (str duration-secs)
-                   "-o" path "--fps" (str fps) "--width" (str width))))
 
 ;; --- scenes ----------------------------------------------------------------
 ;; Each scene is (fn [ui] ch): a go-row that drives ui, records exactly one
@@ -1159,320 +1058,6 @@
         (finally
           (doseq [child (reverse (file-seq dir))] (.delete child)))))))
 
-;; --- Lisp Machine panels -------------------------------------------------------
-;; Each scene stages its own demo project under a fresh temp directory named
-;; like a project (my-talk), so only file and folder names reach the image.
-
-(defn- demo-project!
-  "A temp folder named my-talk holding files ({rel text}); returns its
-  canonical path. The scene's own, deleted with the rest by temp-dirs."
-  [files]
-  (let [dir (io/file (temp-dirs/temp-dir! "jonquil-demoshots-lm-") "my-talk")]
-    (doseq [[rel text] files]
-      (let [f (io/file dir rel)] (io/make-parents f) (spit f text)))
-    (.getCanonicalPath dir)))
-
-(defn- run-palette!
-  "Opens the palette, filters it to query and runs the first entry. GTK
-  thread only."
-  [ui query]
-  (let [p (:palette ((:active-tab* ui)))]
-    ((:open-palette!* ui))
-    (palette/set-query! p query)
-    (palette/run-selected! p)
-    (when (popover/open? p) (popover/hide! p))))
-
-(defn- panel-key!
-  "Cmd/Ctrl+Alt+digit through the window's key handler."
-  [ui digit]
-  ((:handle-window-key! ui) ffi/null (int digit) 0 (bit-or g/META-MASK g/ALT-MASK) ffi/null))
-
-(defn- status-text [ui] (g/label-text (:status-label ui)))
-
-(defn- console-enter!
-  "Types code at the console prompt and presses Return; the out offset
-  before it."
-  [ui code]
-  (on-gtk (let [cv (:console ui)
-                m (out-end-offset ui)]
-            (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) code -1 1)
-            (cview/handle-return! cv false)
-            m)))
-
-(defn- caret-to-line!
-  "The caret at the start of line n (1-based) of ed's text."
-  [ed n]
-  (let [text (editor/editor-text ed)
-        at (loop [i 0 l 1] (if (= l n) i (recur (inc (str/index-of text "\n" i)) (inc l))))]
-    (place-cursor! (:buf ed) at)))
-
-(defn- all-saved!
-  "Every tab marked saved, so the harness's close isn't held up by the
-  unsaved-changes alert."
-  [ui]
-  (doseq [t ((:tabs* ui))] (editor/mark-saved! (:ed t))))
-
-(defn- scene-find-usages
-  "Find Usages in Project with the caret on a/join: the def and the call of
-  demo.a/join, with str/join (another var) and c.clj's join, which :use
-  brought in and the file can't decide, offered as Other vars and
-  Unresolved."
-  [ui]
-  (go-row :find-usages check!
-    (let [ns-b "(ns demo.b\n  (:require [demo.a :as a]\n            [clojure.string :as str]))\n"
-          root (demo-project! {"deps.edn" "{:paths [\"src\"]}\n"
-                               ".jonquil.edn" "{:runtime :in-process}\n"
-                               "src/demo/a.clj" "(ns demo.a)\n\n(defn join [x]\n  (str \"<\" x \">\"))\n"
-                               "src/demo/b.clj" (str ns-b "\n(a/join 1)\n(str/join \", \" [2 3])\n")
-                               "src/demo/c.clj" "(ns demo.c\n  (:use demo.a))\n\n(join 3)\n"})
-          b-path (str root "/src/demo/b.clj")
-          pane (:locations-pane ui)
-          _ (on-gtk ((:simulate-folder-result! ui) {:path root})
-                    ((:toggle-file-tree!* ui))
-                    ((:open-file! ui) b-path))
-          ed (on-gtk (:ed ((:active-tab* ui))))
-          _ (on-gtk (place-cursor! (:buf ed) (+ (count ns-b) 4))
-                    (run-palette! ui "find usages in project"))
-          listed? (await-until 5000 20 #(= 2 (count (lpane/row-texts pane))))
-          rows (on-gtk (lpane/row-texts pane))
-          title (on-gtk (lpane/title-text pane))
-          labels (on-gtk (lpane/match-labels-text pane))
-          _ (ga/settle 2)
-          {:keys [exit err]} (ga/screenshot (image-path :find-usages "png") (own-pid))]
-      (on-gtk (all-saved! ui)
-              (check! :find-usages
-                      (and listed? (= 2 (count rows)) (= ["Other vars (1)" "Unresolved (1)"] labels)
-                           (str/starts-with? title "Usages of demo.a/join") (zero? exit))
-                      {:rows rows :title title :labels labels :screenshot-exit exit :screenshot-err err})))))
-
-(defn- scene-compare-form
-  "This form vs the file on disk: the tab's defn greet edited, and the
-  Locations list titled for that form only, though another form differs
-  too."
-  [ui]
-  (go-row :compare-form check!
-    (let [root (demo-project! {"src/talk/greeting.clj"
-                               "(ns talk.greeting)\n\n(defn greet [name]\n  (str \"Hello, \" name \"!\"))\n\n(def punctuation \"!\")\n"})
-          path (str root "/src/talk/greeting.clj")
-          _ (on-gtk ((:open-file! ui) path))
-          ed (on-gtk (:ed ((:active-tab* ui))))
-          edited "(ns talk.greeting)\n\n(defn greet [name]\n  (str \"Hi, \" name \"!\"))\n\n(def punctuation \"?\")\n"
-          _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count (editor/editor-text ed)) edited]] :caret 0})
-                    (place-cursor! (:buf ed) 40)
-                    (run-palette! ui "this form vs the file on disk"))
-          pane (:locations-pane ui)
-          listed? (await-until 3000 20 #(= 1 (count (lpane/row-texts pane))))
-          title (on-gtk (lpane/title-text pane))
-          _ (ga/settle 2)
-          {:keys [exit err]} (ga/screenshot (image-path :compare-form "png") (own-pid))]
-      (on-gtk (all-saved! ui)
-              (check! :compare-form (and listed? (= "Differences in defn greet from disk" title) (zero? exit))
-                      {:title title :screenshot-exit exit :screenshot-err err})))))
-
-(defn- scene-reader
-  "The Reader on clojure.core/map: opened from a symbol at the caret, then a
-  click on the qualified name follows to a second page, so Back is live,
-  and the page is bookmarked. In process, so the doc is quick doc's text."
-  [ui]
-  (go-row :reader check!
-    (let [pane (:docs-pane ui)
-          _ (on-gtk (editor/set-text! (:editor ui) "(map inc [1 2 3])")
-                    (place-cursor! (:buf (:editor ui)) 2)
-                    (panel-key! ui \9))
-          shown? (await-until 3000 20 #(and (pos? (g/gtk-widget-get-visible (:root pane)))
-                                            (str/starts-with? (docs-pane/title-text pane) "map")))
-          text (on-gtk (docs-pane/view-text pane))
-          at (str/index-of text "clojure.core/map")
-          _ (on-gtk (when at (docs-pane/follow-offset! pane (+ at 3))))
-          followed? (await-until 3000 20 #(str/includes? (docs-pane/title-text pane) "page 2 of 2"))
-          _ (on-gtk ((:on-bookmark @(:handlers pane))))
-          marked? (await-until 3000 20 #(= "Bookmarked" (docs-pane/bookmark-label pane)))
-          _ (ga/settle 2)
-          title (on-gtk (docs-pane/title-text pane))
-          {:keys [exit err]} (ga/screenshot (image-path :reader "png") (own-pid))]
-      (on-gtk (check! :reader (and shown? at followed? marked? (zero? exit))
-                      {:title title :screenshot-exit exit :screenshot-err err})))))
-
-(defn- scene-change-sets
-  "The change sets panel on a set of two changed forms: a Run, edits to
-  greet and shout, Make a Change Set from the forms, kept under a name."
-  [ui]
-  (go-row :change-sets check!
-    (let [ran "(ns talk.greeting)\n\n(defn greet [name]\n  (str \"Hello, \" name \"!\"))\n\n(defn shout [s]\n  (str s \"!\"))\n"
-          edited "(ns talk.greeting)\n\n(defn greet [name]\n  (str \"Hi, \" name \"!\"))\n\n(defn shout [s]\n  (.toUpperCase (str s \"!\")))\n"
-          ;; the panel prints each form's absolute path, so the project sits
-          ;; at a short one; removed again below
-          dir (io/file "/tmp/my-talk")
-          _ (do (.mkdirs dir) (spit (io/file dir "greeting.clj") ran))
-          p (:change-sets-pane ui)
-          _ (on-gtk ((:open-file! ui) (.getPath (io/file dir "greeting.clj"))))
-          ed (on-gtk (:ed ((:active-tab* ui))))
-          _ (on-gtk ((:run!* ui)))
-          recorded? (await-until 8000 20 #(= ran @(:last-run (:changed ed))))
-          _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count ran) edited]] :caret 0})
-                    (run-palette! ui "make a change set from the forms"))
-          drafted? (await-until 3000 20 #(str/includes? (change-sets-pane/summary-text p) "2 forms in 1 file"))
-          _ (on-gtk (change-sets-pane/set-name! p "friendlier-greetings")
-                    (change-sets-pane/click! p :save))
-          kept? (await-until 3000 20 #(not (str/includes? (change-sets-pane/summary-text p) "(not kept yet)")))
-          _ (ga/settle 2)
-          diff (on-gtk (change-sets-pane/diff-text p))
-          summary (on-gtk (change-sets-pane/summary-text p))
-          {:keys [exit err]} (ga/screenshot (image-path :change-sets "png") (own-pid))]
-      (on-gtk (all-saved! ui)
-              (doseq [f (reverse (file-seq (io/file "/tmp/my-talk")))] (.delete f))
-              (check! :change-sets
-                      (and recorded? drafted? kept? (str/includes? diff "+   (.toUpperCase") (zero? exit))
-                      {:summary summary :diff diff :screenshot-exit exit :screenshot-err err})))))
-
-(defn- scene-breakpoint
-  "A breakpoint on line 3 of a saved file: the red dot in the gutter, then
-  a console call of the function pauses there with the Frames panel titled
-  Breakpoint at line 3 and the locals listed. Continue afterwards."
-  [ui]
-  (go-row :breakpoint check!
-    (if-not (debugger/break-available?)
-      (on-gtk (check! :breakpoint false {:reason "this Jolt has no jolt.debug; nothing captured"}))
-      (let [dp (:debugger-pane ui)
-            root (demo-project! {"src/shop/price.clj"
-                                 "(defn total [price qty]\n  (let [subtotal (* price qty)]\n    (+ subtotal 5)))\n"})
-            _ (on-gtk ((:open-file! ui) (str root "/src/shop/price.clj")))
-            ed (on-gtk (:ed ((:active-tab* ui))))
-            _ (on-gtk (caret-to-line! ed 3)
-                      (run-palette! ui "toggle a breakpoint"))
-            live? (await-until 8000 20 #(str/starts-with? (status-text ui) "; Breakpoint set at line 3; it's live now."))
-            dot? (on-gtk (= 1 (count @(:dots (:gutter (:changed ed))))))
-            _ (console-enter! ui "(total 20 3)")
-            paused? (await-until 5000 20 #(= "Breakpoint at line 3" (dpane/title-text dp)))
-            rows (on-gtk (dpane/row-texts dp))
-            local? (boolean (some #{"    subtotal = 60"} rows))
-            _ (ga/settle 2)
-            {:keys [exit err]} (ga/screenshot (image-path :breakpoint "png") (own-pid))
-            _ (on-gtk (dpane/press-restart! dp :continue))
-            _ (await-until 5000 20 #(idle? ui))
-            _ (on-gtk (let [m @(:dots (:gutter (:changed ed)))]
-                        (doseq [d m] (g/gtk-text-buffer-delete-mark (:buf ed) d))
-                        (reset! (:dots (:gutter (:changed ed))) [])
-                        (reset! debugger/breakpoint-hook nil)
-                        (debugger/set-debug-mode! false)
-                        (all-saved! ui)))]
-        (on-gtk (check! :breakpoint (and live? dot? paused? local? (zero? exit))
-                        {:live live? :dot dot? :paused paused? :rows (take 6 rows)
-                         :screenshot-exit exit :screenshot-err err}))))))
-
-(defn- scene-trace
-  "Trace on a small recursive function and its helper: sum-squares calls
-  itself and square, both traced, so the Trace panel lists the outer call
-  with each square call indented under it (Jolt doesn't record a traced
-  function's call to itself)."
-  [ui]
-  (go-row :trace check!
-    (let [code "(defn square [x]\n  (* x x))\n\n(defn sum-squares [n]\n  (if (zero? n)\n    0\n    (+ (square n) (sum-squares (dec n)))))"
-          mark (on-gtk (let [m (out-end-offset ui)]
-                         (editor/set-text! (:editor ui) code)
-                         ((:run!* ui))
-                         m))
-          ran? (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark) "#'user/sum-squares")))
-          trace-at! (fn [needle want]
-                      (on-gtk (place-cursor! (:buf (:editor ui)) (+ 1 (str/index-of code needle)))
-                              (run-palette! ui "trace the function at the caret"))
-                      (await-until 3000 20 #(= want (status-text ui))))
-          t1? (trace-at! "square [x]" "; Tracing user/square.")
-          t2? (trace-at! "sum-squares [n]" "; Tracing user/sum-squares.")
-          m2 (console-enter! ui "(sum-squares 3)")
-          called? (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui m2) "=> 14")))
-          _ (on-gtk (run-palette! ui "show the calls of the traced"))
-          pane (:trace-pane ui)
-          shown? (await-until 3000 20 #(= 4 (count (trace-pane/row-texts pane))))
-          rows (on-gtk (trace-pane/row-texts pane))
-          _ (ga/settle 2)
-          {:keys [exit err]} (ga/screenshot (image-path :trace "png") (own-pid))]
-      (on-gtk (check! :trace (and ran? t1? t2? called? shown? (zero? exit))
-                      {:rows rows :screenshot-exit exit :screenshot-err err})))))
-
-(defn- scene-line-counts
-  "Count how often each line runs, then Run a saved file: the gutter labels
-  each line that ran with its hits."
-  [ui]
-  (go-row :line-counts check!
-    (let [code "(ns demo.spin)\n\n(defn spin [n]\n  (loop [i 0]\n    (when (< i n)\n      (recur (inc i)))))\n\n(spin 5)\n"
-          root (demo-project! {"src/demo/spin.clj" code})
-          _ (on-gtk ((:open-file! ui) (str root "/src/demo/spin.clj")))
-          ed (on-gtk (:ed ((:active-tab* ui))))
-          counts-of (fn [] (mapv second @(:counts (:gutter (:changed ed)))))
-          _ (on-gtk (run-palette! ui "count how often each line runs"))
-          on? (await-until 8000 20 #(= "; Line counts on: Run your file to count its lines." (status-text ui)))
-          _ (on-gtk ((:run!* ui)))
-          counted? (await-until 8000 20 #(some #{"6"} (counts-of)))
-          labels (on-gtk (counts-of))
-          _ (ga/settle 2)
-          {:keys [exit err]} (ga/screenshot (image-path :line-counts "png") (own-pid))
-          _ (on-gtk (run-palette! ui "count how often each line runs")
-                    (all-saved! ui))]
-      (on-gtk (check! :line-counts (and on? counted? (zero? exit))
-                      {:labels labels :screenshot-exit exit :screenshot-err err})))))
-
-(defn- scene-processes
-  "The Processes panel after a Run that spawned two fibers that keep
-  yielding and one that finished."
-  [ui]
-  (go-row :processes check!
-    (let [code (str "(def stop? (atom false))\n"
-                    "(defn worker []\n"
-                    "  (loop []\n"
-                    "    (when-not @stop?\n"
-                    "      (jolt.fibers/yield)\n"
-                    "      (recur))))\n"
-                    "(jolt.fibers/spawn worker)\n"
-                    "(jolt.fibers/spawn worker)\n"
-                    "(jolt.fibers/spawn (fn [] :done))\n"
-                    ":spawned")
-          procp (:processes-pane ui)
-          _ (on-gtk (panel-key! ui \8))
-          shown? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root procp))))
-          mark (on-gtk (let [m (out-end-offset ui)]
-                         (editor/set-text! (:editor ui) code)
-                         ((:run!* ui))
-                         m))
-          ran? (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark) "=>")))
-          rows-of (fn [] (processes-pane/row-texts procp))
-          listed? (await-until 4000 50 #(and (<= 3 (count (rows-of)))
-                                             (some (fn [r] (str/includes? r "done")) (rows-of))))
-          rows (on-gtk (rows-of))
-          _ (ga/settle 2)
-          {:keys [exit err]} (ga/screenshot (image-path :processes "png") (own-pid))
-          _ (on-gtk (reset! @(resolve 'user/stop?) true))]
-      (on-gtk (check! :processes (and shown? ran? listed? (zero? exit))
-                      {:rows rows :screenshot-exit exit :screenshot-err err})))))
-
-(defn- scene-messages
-  "The Messages panel with a few entries: a client called Claude Code
-  replaced the text of two tabs and read the tab list (Reads ticked), and
-  with the Reads filter ticked."
-  [ui]
-  (go-row :messages check!
-    (let [mp (:messages-pane ui)
-          root (demo-project! {"src/talk/core.clj" "(ns talk.core)\n\n(defn hello [] \"hi\")\n"
-                               "src/talk/demo.clj" "(ns talk.demo)\n"})
-          [t1 t2] (on-gtk ((:open-file! ui) (str root "/src/talk/core.clj"))
-                          ((:open-file! ui) (str root "/src/talk/demo.clj"))
-                          (take-last 2 ((:tabs* ui))))
-          tools (window/with-messages
-                  (fn [] (window/make-window-tools {:ui ui :dir root})) ui (atom {:client "Claude Code"}))
-          call (fn [tname args] ((:call (tools)) tname args))
-          _ (call "jonquil_tabs" {})
-          r1 (call "jonquil_replace_text" {"text" "(ns talk.core)\n\n(defn hello [name]\n  (str \"hi \" name))\n" "id" (:id t1)})
-          r2 (call "jonquil_replace_text" {"text" "(ns talk.demo\n  (:require [talk.core :as c]))\n\n(c/hello \"Jonquil\")\n" "id" (:id t2)})
-          _ (on-gtk (panel-key! ui \7)
-                    (messages-pane/set-kind! mp :agent-read true))
-          listed? (await-until 3000 20 #(<= 3 (count (messages-pane/row-texts mp))))
-          rows (on-gtk (messages-pane/row-texts mp))
-          _ (ga/settle 2)
-          {:keys [exit err]} (ga/screenshot (image-path :messages "png") (own-pid))]
-      (on-gtk (all-saved! ui)
-              (check! :messages (and (not (:error? r1)) (not (:error? r2)) listed? (zero? exit))
-                      {:rows rows :screenshot-exit exit :screenshot-err err})))))
-
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
@@ -1521,15 +1106,15 @@
    [:cljs-browser scene-cljs-browser]
    [:nrepl-bb scene-nrepl-bb]
    [:cljs-shadow scene-cljs-shadow]
-   [:find-usages scene-find-usages]
-   [:compare-form scene-compare-form]
-   [:reader scene-reader]
-   [:change-sets scene-change-sets]
-   [:breakpoint scene-breakpoint]
-   [:trace scene-trace]
-   [:line-counts scene-line-counts]
-   [:processes scene-processes]
-   [:messages scene-messages]])
+   [:find-usages panels/scene-find-usages]
+   [:compare-form panels/scene-compare-form]
+   [:reader panels/scene-reader]
+   [:change-sets panels/scene-change-sets]
+   [:breakpoint panels/scene-breakpoint]
+   [:trace panels/scene-trace]
+   [:line-counts panels/scene-line-counts]
+   [:processes panels/scene-processes]
+   [:messages panels/scene-messages]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
@@ -1569,31 +1154,126 @@
     (await-until 2000 20 #(clj-idle? ui))
     (<! (scene ui))))
 
+(defn- skip-log
+  "The log arguments explaining why scene-id can't be captured on this
+  machine, or nil when it can."
+  [scene-id]
+  (cond
+    (and (= :jank scene-id) (nil? (jank-child/find-binary)))
+    ["jank: no jank binary found (set JONQUIL_JANK); nothing captured"]
+
+    (and (cljs-scenes scene-id) (nil? (cljs-child/find-clojure)))
+    [(name scene-id) ": no clojure CLI found (set JONQUIL_CLOJURE); nothing captured"]
+
+    (and (= :cljs-node scene-id)
+         (nil? (tool-path/resolve-program "node" (login-path/path) login-path/executable-file?)))
+    ["cljs-node: no node on the login PATH; nothing captured"]
+
+    (and (= :nrepl-bb scene-id)
+         (nil? (tool-path/resolve-program "bb" (login-path/path) login-path/executable-file?)))
+    ["nrepl-bb: no bb on the login PATH; nothing captured"]
+
+    (and (= :cljs-shadow scene-id)
+         (or (nil? (cljs-child/find-clojure)) (some nil? (map login-program ["node" "npm"]))))
+    ["cljs-shadow: needs the clojure CLI, node and npm; nothing captured"]))
+
+(defn- stage-jank-file!
+  "The jank scene's demo source in a fresh temp project; returns its path."
+  []
+  (let [f (io/file (temp-dirs/temp-dir! "jonquil-demoshots-jank-") "src/demo/core.jank")]
+    (io/make-parents f)
+    (spit f jank-demo-text)
+    (.getPath f)))
+
+(defn- stage-cljs-file!
+  "A ClojureScript scene's demo project in a fresh temp directory; returns the source path."
+  [edn]
+  (let [dir (temp-dirs/temp-dir! "jonquil-demoshots-cljs-")
+        f (io/file dir "src/demo/core.cljs")]
+    (io/make-parents f)
+    (spit (io/file dir "deps.edn") cljs-deps-text)
+    (spit (io/file dir ".jonquil.edn") edn)
+    (spit f cljs-demo-text)
+    (.getCanonicalPath f)))
+
+(defn- stage-clj-server!
+  "Starts the JVM Clojure server the :clj-* scenes attach to."
+  []
+  (let [srv (clj-server/start!)]
+    (spit (io/file (:dir srv) ".jonquil.edn") "{:dialect :clj}\n")
+    srv))
+
+(defn- stage-scene!
+  "Starts whatever outside project or server scene-id needs; returns its
+  handles and the file the window opens."
+  [scene-id]
+  (let [jank-file (when (= :jank scene-id) (stage-jank-file!))
+        cljs-file (when-let [edn (cljs-scenes scene-id)] (stage-cljs-file! edn))
+        bb-srv (when (= :nrepl-bb scene-id) (start-bb-nrepl!))
+        shadow (when (= :cljs-shadow scene-id) (start-shadow!))
+        srv (when (clj-scenes scene-id) (stage-clj-server!))]
+    {:srv srv :bb-srv bb-srv :shadow shadow
+     :file (or jank-file cljs-file (:file bb-srv) (:file shadow)
+               (when srv (str (:dir srv) "/src/demo/core.clj")))}))
+
+(defn- stop-scene!
+  "Stops what stage-scene! started."
+  [{:keys [srv bb-srv shadow]}]
+  (clj-server/stop! srv)
+  (stop-bb-nrepl! bb-srv)
+  (stop-procs! (:procs shadow)))
+
+(defn- close-window-after-scene!
+  "Closes the window once the scene's checks are in. scene-close-prompt (or
+  any scene) could leave the buffer dirty with an alert pending if its own
+  cleanup didn't run; a plain gtk-window-close would then meet
+  close-request-fn's dirty branch, which never quits, and g_application_run
+  would never return. close-window-bounded!'s on-stuck is the way out: it
+  records a FAIL and exits from this go thread, since -main's own thread
+  would otherwise stay parked inside main/start! forever."
+  [ui staged]
+  (ga/close-window-bounded!
+   (:window ui) window-destroyed? WINDOW-CLOSE-DEADLINE-MS
+   (fn []
+     (check! :window-close-stuck false
+             {:reason "window still open after the close; exiting to avoid hanging the run"})
+     (stop-scene! staged)
+     (System/exit 1))))
+
+(defn- on-ready-fn
+  "The :on-ready callback: watches the window's destroy signal, runs the one
+  scene under its time limit, then closes the window."
+  [scene-id scene-fn staged]
+  (fn [ui]
+    (g/g-signal-connect-data (:window ui) "destroy"
+                             (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
+                                          [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (go (<! (timeout 300))
+        (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))]
+                         (if (cljs-scenes scene-id) CLJS-SCENE-MS PER-SCENE-MS) check!))
+        (<! (timeout 50))
+        (close-window-after-scene! ui staged))))
+
+(defn- run-in-window!
+  "Opens the window for scene-fn, runs it, then stops the staged resources,
+  cleans the temp directories and exits 0 when every check passed."
+  [scene-id scene-fn]
+  (let [staged (stage-scene! scene-id)]
+    (try
+      (main/start! {:file (:file staged)
+                    :settings-path (fresh-settings-path)
+                    :on-ready (on-ready-fn scene-id scene-fn staged)})
+      (finally (stop-scene! staged)))
+    (temp-dirs/delete-made!)
+    (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))
+
 (defn -main [& args]
   (let [scene-id (some-> (first args) keyword)
         scene-fn (some (fn [[id f]] (when (= id scene-id) f)) scenes)]
     (cond
-      (and scene-fn (= :jank scene-id) (nil? (jank-child/find-binary)))
-      (do (log "jank: no jank binary found (set JONQUIL_JANK); nothing captured")
-          (System/exit 0))
-
-      (and scene-fn (cljs-scenes scene-id) (nil? (cljs-child/find-clojure)))
-      (do (log (name scene-id) ": no clojure CLI found (set JONQUIL_CLOJURE); nothing captured")
-          (System/exit 0))
-
-      (and (= :cljs-node scene-id)
-           (nil? (tool-path/resolve-program "node" (login-path/path) login-path/executable-file?)))
-      (do (log "cljs-node: no node on the login PATH; nothing captured")
-          (System/exit 0))
-
-      (and (= :nrepl-bb scene-id)
-           (nil? (tool-path/resolve-program "bb" (login-path/path) login-path/executable-file?)))
-      (do (log "nrepl-bb: no bb on the login PATH; nothing captured")
-          (System/exit 0))
-
-      (and (= :cljs-shadow scene-id)
-           (or (nil? (cljs-child/find-clojure)) (some nil? (map login-program ["node" "npm"]))))
-      (do (log "cljs-shadow: needs the clojure CLI, node and npm; nothing captured")
+      (and scene-fn (skip-log scene-id))
+      (do (apply log (skip-log scene-id))
           (System/exit 0))
 
       (not scene-fn)
@@ -1602,59 +1282,4 @@
           (log "got:" (pr-str (first args)))
           (System/exit 1))
 
-      :else
-      (let [jank-file (when (= :jank scene-id)
-                        (let [f (io/file (temp-dirs/temp-dir! "jonquil-demoshots-jank-") "src/demo/core.jank")]
-                          (io/make-parents f)
-                          (spit f jank-demo-text)
-                          (.getPath f)))
-            cljs-file (when-let [edn (cljs-scenes scene-id)]
-                        (let [dir (temp-dirs/temp-dir! "jonquil-demoshots-cljs-")
-                              f (io/file dir "src/demo/core.cljs")]
-                          (io/make-parents f)
-                          (spit (io/file dir "deps.edn") cljs-deps-text)
-                          (spit (io/file dir ".jonquil.edn") edn)
-                          (spit f cljs-demo-text)
-                          (.getCanonicalPath f)))
-            bb-srv (when (= :nrepl-bb scene-id) (start-bb-nrepl!))
-            shadow (when (= :cljs-shadow scene-id) (start-shadow!))
-            srv (when (clj-scenes scene-id)
-                  (let [srv (clj-server/start!)]
-                    (spit (io/file (:dir srv) ".jonquil.edn") "{:dialect :clj}\n")
-                    srv))]
-        (try
-          (main/start!
-           {:file (or jank-file cljs-file (:file bb-srv) (:file shadow) (when srv (str (:dir srv) "/src/demo/core.clj")))
-            :settings-path (fresh-settings-path)
-            :on-ready (fn [ui]
-                        (g/g-signal-connect-data (:window ui) "destroy"
-                                                 (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
-                                                              [:pointer :pointer] :void)
-                                                 ffi/null ffi/null g/CONNECT-DEFAULT)
-                        (go (<! (timeout 300))
-                            (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))]
-                                             (if (cljs-scenes scene-id) CLJS-SCENE-MS PER-SCENE-MS) check!))
-                            (<! (timeout 50))
-                          ;; scene-close-prompt (or any scene) could leave
-                          ;; the buffer dirty with an alert pending if its own
-                          ;; cleanup didn't run; a plain gtk-window-close would
-                          ;; then meet close-request-fn's dirty branch, which
-                          ;; never quits, and g_application_run would never
-                          ;; return. close-window-bounded!'s on-stuck is the
-                          ;; way out: it records a FAIL and exits from this go
-                          ;; thread, since -main's own thread would otherwise
-                          ;; stay parked inside main/start! forever.
-                            (ga/close-window-bounded!
-                             (:window ui) window-destroyed? WINDOW-CLOSE-DEADLINE-MS
-                             (fn []
-                               (check! :window-close-stuck false
-                                       {:reason "window still open after the close; exiting to avoid hanging the run"})
-                               (clj-server/stop! srv)
-                               (stop-bb-nrepl! bb-srv)
-                               (stop-procs! (:procs shadow))
-                               (System/exit 1)))))})
-          (finally (clj-server/stop! srv)
-                   (stop-bb-nrepl! bb-srv)
-                   (stop-procs! (:procs shadow))))
-        (temp-dirs/delete-made!)
-        (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))
+      :else (run-in-window! scene-id scene-fn))))
