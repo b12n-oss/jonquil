@@ -1,0 +1,110 @@
+name: Linux
+
+# Jonquil's Linux checks on GitHub's amd64 runners, through the same tasks a
+# Mac runs locally (`jolt linux:image`, `linux:test`, `linux:selftest`), so a
+# failure here reproduces with `jolt linux:test --arch amd64` on a Mac with
+# Docker. The image is dev/linux/Dockerfile: Ubuntu 26.04, GTK 4, Xvfb and the
+# pinned Jolt release, with its layers cached between runs.
+#
+# The unit suite is a required check. The GUI self-tests run on every pull
+# request too, but don't fail it yet: six rows fail on Linux today (issue
+# #9). The job reports them in its summary and uploads the full log. Remove
+# `continue-on-error` from the gui job once those rows pass.
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  unit:
+    name: unit tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the Linux image (jonquil-linux:amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: dev/linux
+          platforms: linux/amd64
+          tags: jonquil-linux:amd64
+          load: true
+          cache-from: type=gha,scope=jonquil-linux
+          cache-to: type=gha,scope=jonquil-linux,mode=max
+
+      # jolt on the runner reads bb.edn and runs the task; the tests run
+      # inside the image on a copy of the checkout.
+      - name: Install jolt
+        uses: jlt-commons/setup-jolt@v1
+        with:
+          version: "0.8.27"
+
+      - name: jolt linux:test --arch amd64
+        run: jolt linux:test --arch amd64
+
+  gui:
+    name: GUI self-tests under Xvfb (Linux, not yet required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the Linux image (jonquil-linux:amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: dev/linux
+          platforms: linux/amd64
+          tags: jonquil-linux:amd64
+          load: true
+          cache-from: type=gha,scope=jonquil-linux
+          cache-to: type=gha,scope=jonquil-linux,mode=max
+
+      - name: Install jolt
+        uses: jlt-commons/setup-jolt@v1
+        with:
+          version: "0.8.27"
+
+      - name: jolt linux:selftest --arch amd64
+        run: |
+          set -o pipefail
+          jolt linux:selftest --arch amd64 2>&1 | tee selftest.log
+
+      - name: Summary of the self-test rows
+        if: always()
+        run: |
+          {
+            echo "### GUI self-tests on Linux"
+            echo
+            echo '```'
+            grep -E '^SUMMARY|^gtk:selftest:' selftest.log || echo "no SUMMARY lines: see the log"
+            echo '```'
+            if grep -q ' FAIL ' selftest.log; then
+              echo
+              echo "Failed rows:"
+              echo
+              grep ' FAIL ' selftest.log | sed -E 's/^\[[^]]*\] //; s/ FAIL .*//' | sort -u | sed 's/^/- /'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the self-test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-selftest-log
+          path: selftest.log
+          retention-days: 14

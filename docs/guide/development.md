@@ -283,9 +283,13 @@ says to drag the app to the Trash.
 
 ## Linux checks in Docker
 
-Every Linux check runs in a local Docker container, so a Mac can verify the
-Linux build. There is no CI for it: the workflows in `.github/` stay
-manual. Docker is the only requirement beyond the usual tools.
+Every Linux check runs in a Docker container, so a Mac can verify the Linux
+build. Docker is the only requirement beyond the usual tools. CI runs the
+same image: `.github/workflows/linux.yml` builds it for amd64 and runs
+`jolt linux:test` and `jolt linux:selftest` on every push to `main` and every
+pull request. The unit suite is a required check. The GUI self-tests report
+in the job's summary but don't block a merge yet, because six rows still fail
+on Linux (issue #9).
 
 | Task | What it does |
 |---|---|
