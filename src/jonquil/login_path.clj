@@ -92,6 +92,24 @@
   "At most this many bytes of the shell's output are read."
   (* 1024 1024))
 
+(def ^:private write-limit-blocks
+  "The file size limit the probe shell runs under, in `ulimit -f` blocks:
+  32 MiB where a block is 512 bytes (dash), 64 MiB where it is 1024 (bash as
+  /bin/sh on macOS). Far above read-cap, so a shell rc that writes a history
+  file or a cache during startup isn't cut off, and small enough that a
+  runaway shell can't fill the disk."
+  65536)
+
+(defn- bounded-command
+  "argv run under a file size limit, by /bin/sh, which then execs it, so the
+  process tree and the exit status stay argv's own. The kernel stops a
+  process that writes more than write-limit-blocks to one file. wait-for's
+  poll of the output's size stops it sooner, at read-cap, but only when this
+  process gets to run: on a GitHub Linux runner (2026-11-14) the first poll
+  took 219 s while `yes` wrote 90 GB."
+  [argv]
+  (into ["/bin/sh" "-c" (str "ulimit -f " write-limit-blocks " 2>/dev/null; exec \"$@\"") "sh"] argv))
+
 (defn- read-capped [^java.io.File f]
   (try
     (with-open [in (java.io.FileInputStream. f)]
@@ -132,12 +150,13 @@
   covers the shell's whole run (a pipe would also wait for every process
   holding it open). Returns {:out s} or {:reason r}. On timeout, or once the
   output passes read-cap, the shell's process tree is killed, and whatever it
-  had printed is still parsed."
+  had printed is still parsed. The shell also runs under bounded-command's
+  file size limit, which holds even when this process is too starved to poll."
   [{:keys [shell default timeout-ms]}]
   (let [tmp (java.io.File/createTempFile "jonquil-login-path-" ".out")]
     (try
       (let [proc (apply p/process {:in (io/file "/dev/null") :out tmp :err :discard}
-                        (tp/shell-command shell default))
+                        (bounded-command (tp/shell-command shell default)))
             r (wait-for proc tmp timeout-ms)
             stopped? (contains? #{::timeout ::too-much} r)]
         (when stopped? (kill-tree! proc))

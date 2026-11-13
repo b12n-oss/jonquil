@@ -15,6 +15,7 @@ everything that shipped before that.
 
 ### Fixed
 
+- A login shell that prints without end can no longer fill the disk while Jonquil looks up your PATH. The lookup already stopped the shell once its output passed 1 MB, but that depended on Jonquil getting to check. On a fast Linux machine the check itself stalled, and the shell wrote 90 GB before anything stopped it. The shell now also runs under a file size limit that the kernel enforces.
 - The notarize helper's test checks the file mode with GNU `stat` on Linux, so `jolt test` passes there too.
 
 - The README and Getting started point at the notarized 0.1.0 download, the Jolt notes say which features need v0.8.24 (the first release with `jolt.debug` and `jolt.profile`) instead of "not yet in a release", the release build lists `pkgconf` and the Xcode Command Line Tools, and the README's test count is today's.
