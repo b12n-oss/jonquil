@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The guide
+    url: https://jonquil.b12n.app
+    about: How to use Jonquil, its keys, dialects and known limits.
+  - name: Report a security problem
+    url: https://github.com/b12n-oss/jonquil/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.
