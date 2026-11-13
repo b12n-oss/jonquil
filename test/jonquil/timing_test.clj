@@ -41,8 +41,13 @@
         [r out] (run "(Thread/sleep 50)")
         ms (/ (- (System/nanoTime) t0) 1e6)]
     (is (< ms 400) (str ms " ms for a 100 ms budget"))
-    (is (<= 3 (:batches r) 5) (str r))
-    (is (str/includes? out (str "over " (:batches r) " batches")) out)))
+    ;; On a loaded machine the 50 ms sleep itself can take the whole 100 ms
+    ;; budget (120 ms on a GitHub macOS runner, 2026-11-14). The harness then
+    ;; rightly times it once, and this test has nothing to say about batches.
+    (if (>= (:ns-per-call r) 1e8)
+      (is (= 1 (:batches r)) (str "slower than the budget, so timed once: " r))
+      (do (is (<= 3 (:batches r) 5) (str r))
+          (is (str/includes? out (str "over " (:batches r) " batches")) out)))))
 
 (deftest form-slower-than-the-budget-runs-once-test
   (let [t0 (System/nanoTime)
