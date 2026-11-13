@@ -95,8 +95,9 @@ jolt app:release-check  # launch it with /opt/homebrew unreadable
 ```
 
 `jolt app:release` makes an app that runs on a Mac without Homebrew. The
-build Mac still needs Homebrew's GTK, because that is what gets bundled.
-`deps.edn`'s GTK libraries, and every library they load (43 today, about
+build Mac still needs Homebrew's GTK, because that is what gets bundled, and
+`meson` (`brew install meson`) for the one library built from source (below).
+`deps.edn`'s GTK libraries, and every library they load (42 today, about
 27 MB), are copied into `Contents/Frameworks` and relinked to find each
 other.
 
@@ -137,10 +138,17 @@ library from anywhere but the bundle and the system.
 - **It needs macOS 26 and Apple Silicon.** Homebrew builds its libraries
   for the macOS they were built on, and the plist's minimum version is
   read from them.
-- **It isn't for publishing yet.** cairo's script interpreter, which GTK
-  links, brings in lzo, which is GPL-2.0. The task prints a warning while
-  it's there. It also warns when a Homebrew package is older than its
-  source link, or when a package ships no licence file.
+- **One library is built from source.** GTK links cairo's script
+  interpreter, and Homebrew's build of it imports lzo, which is GPL-2.0.
+  So the release builds that one library itself:
+  - from the pinned cairo source, with `-Dlzo=disabled`;
+  - the source must be the version of Homebrew's cairo;
+  - it's built once and cached in
+    `~/.cache/jonquil/cairo-script/<version>-nolzo/`.
+
+  A check fails the release if lzo is ever bundled. The task warns when a
+  Homebrew package is older than its source link, or when a package ships
+  no licence file.
 
 ### Notarized builds
 
