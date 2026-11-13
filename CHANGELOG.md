@@ -16,6 +16,7 @@ everything that shipped before that.
 
 ### Fixed
 
+- `jolt gtk:selftest` and `jolt test:nrepl` no longer need a jolt-lang/nrepl checkout. Without one, the nREPL window self-test used to record one failing row and stop before its summary, and one live test failed. Both now get the middleware the way the app does: from a checkout when there is one, else as the pinned git dependency, which needs `git` and a network the first time.
 - On Linux, a login shell that prints without end is now stopped by a file size limit while Jonquil looks up your PATH. The lookup already stopped the shell once its output passed 1 MB, by checking the size every 100 ms. On a GitHub Linux runner the first check took 219 seconds, and the shell wrote 90 GB in that time. The cause isn't known yet, so the kernel's limit now bounds the output whether or not the check runs in time.
 - The notarize helper's test checks the file mode with GNU `stat` on Linux, so `jolt test` passes there too.
 - The README and Getting started point at the notarized 0.1.0 download, the Jolt notes say which features need v0.8.24 (the first release with `jolt.debug` and `jolt.profile`) instead of "not yet in a release", the release build lists `pkgconf` and the Xcode Command Line Tools, and the README's test count is today's.

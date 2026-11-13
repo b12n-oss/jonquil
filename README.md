@@ -120,7 +120,7 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 ```bash
 jolt check                  # require every namespace, exit 0
 jolt test                   # all test namespaces; exits 1 on any failure or error
-jolt test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)
+jolt test:nrepl             # live nREPL tests: spawn Jolt children (jolt-lang/nrepl from a checkout, else fetched with git)
 jolt test:nightly           # test:nrepl against Jolt's nightly build, cached under ~/.cache/jonquil/jolt-nightly (--offline reuses it)
 jolt test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
 jolt test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)

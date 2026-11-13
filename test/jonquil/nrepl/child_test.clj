@@ -1,6 +1,6 @@
 (ns jonquil.nrepl.child-test
   "Spawns real Jolt nREPL server children (jolt on PATH; the injected
-  middleware from child/middleware-root). Every child a test starts, the
+  middleware from child/middleware-source). Every child a test starts, the
   test kills by its own pid."
   (:require [clojure.java.io :as io]
             [clojure.java.shell]
@@ -133,11 +133,9 @@
           (is (= [(.getPath jolt) "-e" (child/server-form 7951 [])] (child/launch-args 7951 nil)))
           (is (= {"PATH" path} (:extra-env (child/process-options {:dir "/d" :log "/l"})))))))))
 
-(deftest middleware-root-test
-  (is (some? (child/middleware-root)) "these tests need the jolt-lang/nrepl checkout (JONQUIL_JOLT_NREPL or ~/dev/jolt-lang/nrepl)"))
-
 (deftest middleware-source-test
-  (is (= {:local (child/middleware-root)} (child/middleware-source)) "the checkout first")
+  (with-redefs [child/middleware-root (constantly "/a/checkout")]
+    (is (= {:local "/a/checkout"} (child/middleware-source)) "the checkout first"))
   (with-redefs [child/middleware-root (constantly nil)]
     (is (= {:git child/nrepl-git-coord} (child/middleware-source)) "else the pinned git dependency")))
 
