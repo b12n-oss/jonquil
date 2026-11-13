@@ -18,18 +18,17 @@
   (is (nil? (version/checkout-dir "file:/w/other/version.clj")) "not under src/jonquil")
   (is (nil? (version/checkout-dir nil))))
 
-(deftest pick-version-test
-  (is (= "9.9.9" (version/pick-version {:checkout "/w" :override "9.9.9" :describe "0.1.0-1-gabc" :compiled "x"}))
-      "from source the override wins")
-  (is (= "0.1.0-1-gabc" (version/pick-version {:checkout "/w" :describe "0.1.0-1-gabc" :compiled "stale"}))
-      "from source the checkout's describe beats the compiled string")
-  (is (= "dev" (version/pick-version {:checkout "/w" :compiled "stale"})) "source, no git")
-  (is (= "0.1.0" (version/pick-version {:override "9.9.9" :describe "1.1.1" :compiled "0.1.0"}))
-      "a built binary keeps its compile-time string and ignores the environment"))
+(deftest baked-test
+  (is (= "9.9.9" (version/baked "9.9.9")))
+  (is (nil? (version/baked "")) "an empty JONQUIL_VERSION bakes nothing")
+  (is (nil? (version/baked nil))))
 
-(deftest version-is-a-non-empty-string
-  (is (string? version/version))
-  (is (seq version/version)))
+(deftest pick-version-test
+  (is (= "9.9.9" (version/pick-version {:built "9.9.9" :source "0.1.0-1-gabc"}))
+      "a baked version wins over the checkout")
+  (is (= "0.1.0-1-gabc" (version/pick-version {:source "0.1.0-1-gabc"}))
+      "with nothing baked, the checkout's describe")
+  (is (= "dev" (version/pick-version {})) "nothing baked and no git"))
 
 (deftest version-line-test
   (is (= (str "Jonquil " (version/current-version)) (version/version-line)))

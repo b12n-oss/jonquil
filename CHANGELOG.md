@@ -8,7 +8,7 @@ everything that shipped before that.
 
 ### Added
 
-- `jonquil --version` prints the version and exits without opening a window, and the command palette has a Show Jonquil's version entry that prints it to the console. The version comes from the release tag or `git describe` when the binary is built, or from `JONQUIL_VERSION` if that is set.
+- `jonquil --version` prints the version and exits without opening a window, and the command palette has a Show Jonquil's version entry that prints it to the console. The build tasks bake the version into the binary from `JONQUIL_VERSION` if it is set, else `git describe`, so set it for a build, not for a run. A binary built by a bare `jolt build` bakes nothing and reports the checkout it runs in, or `dev`. A run from source asks git about its checkout each time.
 - Six popular themes: Gruvbox Dark, Gruvbox Light, Dracula, Nord, Zenburn and Monokai, taking each original's colours (credited in `NOTICE`) with Jonquil's own token mapping and the same contrast floors as the first four. The command palette now has a "Use theme: <name>" entry for each theme and for auto, so you can pick one by name. Cmd/Ctrl+Shift+M still cycles through them all.
 - Issue forms for bug reports (asking for the Jonquil and Jolt versions, how you run it, the OS and the dialect) and feature requests, a `SECURITY.md` that sends vulnerability reports to GitHub's private reporting, and a `.github/CONTRIBUTING.md` that points at the Contributing guide and `AI_POLICY.md`.
 

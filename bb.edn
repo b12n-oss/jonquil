@@ -425,8 +425,8 @@
   {:doc "Launch Jonquil, optionally opening a file or a project folder (the file tree roots there)"
    :task (apply shell "jolt" "-M" "-m" "jonquil.main" *command-line-args*)}
   app:build
-  {:doc "Build the ./jonquil binary (unsigned on macOS)"
-   :task (shell "jolt" "build" "-m" "jonquil.main" "-o" "jonquil")}
+  {:doc "Build the ./jonquil binary (unsigned on macOS), with its version baked in from JONQUIL_VERSION or git describe"
+   :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "build")}
   app:bundle
   {:doc "Rebuild ./jonquil, then make ./Jonquil.app from it (macOS)"
    :depends [app:build]

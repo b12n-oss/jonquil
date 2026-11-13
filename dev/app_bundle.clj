@@ -78,6 +78,25 @@
   (let [r (p/sh "git" "describe" "--tags" "--always")]
     (if (zero? (:exit r)) (version/version-from-describe (str/trim (:out r))) "0.0.0")))
 
+(defn build-env
+  "The environment a `jolt build` of Jonquil gets so the binary carries its
+  version: JONQUIL_VERSION as already set (when non-empty), else the
+  checkout's git describe. Empty when neither exists, which bakes nothing."
+  []
+  (if-let [v (or (version/baked (System/getenv "JONQUIL_VERSION"))
+                 (version/git-describe "."))]
+    {"JONQUIL_VERSION" v}
+    {}))
+
+(defn build!
+  "Runs `jolt build` of jonquil.main into ./jonquil (args after -o and the
+  like are passed on), with build-env, echoing its output. Exits with its
+  status."
+  [args]
+  (let [{:keys [exit]} (apply p/shell {:continue true :extra-env (build-env)}
+                              "jolt" "build" "-m" "jonquil.main" "-o" "jonquil" args)]
+    (System/exit exit)))
+
 (defn build-number
   "The commit count as CFBundleVersion (Apple wants period-separated integers)."
   []
@@ -151,6 +170,7 @@
     "bundle" (if (linux?)
                (fail! "app:bundle builds a macOS .app; on Linux use jolt app:install")
                (bundle!))
+    "build" (build! (rest args))
     "install" (if (linux?)
                 (let [status (app-linux/install! {:home (System/getProperty "user.home")
                                                   :source "jonquil"
@@ -161,5 +181,5 @@
                   (let [status (app-linux/uninstall! {:home (System/getProperty "user.home")})]
                     (when-not (zero? status) (System/exit status)))
                   (println "on macOS, drag ~/Applications/Jonquil.app to the Trash"))
-    (fail! (str "unknown command " (pr-str (first args)) "; use bundle, install or uninstall")))
+    (fail! (str "unknown command " (pr-str (first args)) "; use build, bundle, install or uninstall")))
   (System/exit 0))
