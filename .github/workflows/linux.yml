@@ -6,8 +6,9 @@ name: Linux
 # Docker. The image is dev/linux/Dockerfile: Ubuntu 26.04, GTK 4, Xvfb and the
 # pinned Jolt release, with its layers cached between runs.
 #
-# Both jobs count toward the one required check, `ci ok` (ci.yml). Some GUI
-# rows fail on Linux today (issue #9) and are listed in
+# Both jobs count toward the one required check, `ci ok` (ci.yml). The GUI
+# self-tests run with a window manager (dev/linux/selftest-session.sh). One
+# row crashes now and then on Linux (issue #9) and is listed in
 # ci/linux-known-failures.txt: the gui job passes while only those fail, and
 # fails when any other row does, so it catches a new Linux regression. It
 # reports the rows in its summary and uploads the full log.

@@ -222,15 +222,22 @@
   @(:open? pp))
 
 (defn- refocus!
-  "Gives view focus back, unless something other than view's own container
-  (where GTK leaves it when a popover parented there unmaps) holds it, or
-  view is no longer in a window (its tab closed while the popover was
-  open, or by a command run from it)."
-  [view]
+  "Gives view focus back when nothing else has taken it: focus is nowhere,
+  on view's own container (where GTK leaves it when a popover parented
+  there unmaps), or still inside pp's popover while pp is closed. The last
+  is X11: GTK moves focus out of the closed popover a little later there,
+  so without it focus ended on the container and stayed. Does nothing when
+  another widget holds the focus (a popover a command just opened, or pp
+  itself opened again since), or when view is no longer in a window (its
+  tab closed while the popover was open, or by a command run from it)."
+  [{:keys [view popover] :as pp}]
   (let [root (g/gtk-widget-get-root view)]
     (when-not (ffi/null? root)
       (let [f (g/gtk-root-get-focus root)]
-        (when (or (ffi/null? f) (= f (g/gtk-widget-get-parent view)))
+        (when (or (ffi/null? f)
+                  (= f (g/gtk-widget-get-parent view))
+                  (and (not (open? pp))
+                       (or (= f popover) (pos? (g/gtk-widget-is-ancestor f popover)))))
           (g/gtk-widget-grab-focus view))))))
 
 (defn refocus-view-on-close!
@@ -242,15 +249,18 @@
   after \"closed\" has run, so a grab in the handler is undone (measured
   with the command palette, and then on the rename popover:
   the root's focus was the scrolled window, not the view). And only while
-  focus is still there or nowhere, so a popover a command just opened
-  keeps the focus it took. The posted thunk holds its own ref on the view,
+  focus is still there, nowhere, or inside the popover that closed, so a
+  popover a command just opened keeps the focus it took. The posted thunk holds its own ref on the view,
   since closing a tab can finalize it before the thunk runs."
   [pp]
-  (let [view (:view pp)]
-    (g/g-signal-connect-data (:popover pp) "closed"
+  (let [view (:view pp)
+        pop (:popover pp)]
+    (g/g-signal-connect-data pop "closed"
                              (callable (fn [_pop _data]
                                          (g/g-object-ref view)
-                                         (on-gui! #(try (refocus! view) (finally (g/g-object-unref view))))
+                                         (g/g-object-ref pop)
+                                         (on-gui! #(try (refocus! pp)
+                                                        (finally (g/g-object-unref view) (g/g-object-unref pop))))
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

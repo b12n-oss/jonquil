@@ -745,12 +745,18 @@
     (let [fp (:full-doc-popover ui)
           orig (on-gtk (stub-var! #'doc-examples/split (fn [_] (throw (ex-info "split boom" {})))))]
       (try
+        ;; as open-full-doc!: the last row's close lands first. The wait
+        ;; below asks for this row's own render (open, no examples), since
+        ;; the text alone is what the row before left in the popover.
+        (ga/settle 10)
         (on-gtk (let [ed (:editor ui)]
                   (editor/set-text! ed "(shout \"x\")")
                   (support/place-cursor! (:buf ed) 2)
                   ((:quick-doc!* ui))
                   ((:quick-doc!* ui))))
-        (let [shown (await-until 2000 20 #(= full-doc-shout-text (help-popover/full-doc-text fp)))]
+        (let [shown (await-until 2000 20 #(and (popover/open? fp)
+                                               (= [] (help-popover/full-doc-examples fp))
+                                               (= full-doc-shout-text (help-popover/full-doc-text fp))))]
           (on-gtk (support/check :clj-full-doc-split-throws
                                  (and shown (popover/open? fp) (= [] (help-popover/full-doc-examples fp)))
                                  {:shown shown :open (popover/open? fp)

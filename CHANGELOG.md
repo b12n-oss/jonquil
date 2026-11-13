@@ -11,6 +11,11 @@ everything that shipped before that.
 - CI has one required check, `ci ok`. `.github/workflows/ci.yml` calls the lint, docs, attribution and Linux workflows as lanes, adds `jolt test` and `jolt test:nrepl` on an Apple Silicon macOS runner, and its last job fails unless every lane passed. The Linux GUI self-tests now count toward a merge.
 - `jolt metrics:gate` now covers `dev/` and `ci/` as well as `src/` and `test/`, so the fake servers, the screenshot script and the self-test harness meet the same limits as the app's code. The fourteen findings there were split into named steps and smaller files, with the self-tests' rows, order and results unchanged.
 
+### Fixed
+
+- On Linux, closing a popover with Escape while one of its buttons had the focus left the focus on the editor's scroll container, so typing didn't reach the editor. GTK moves focus out of a closed popover later on X11 than on macOS, and Jonquil's step that hands focus back ran before that. It now takes the focus when it is still inside the popover that closed.
+- The Linux GUI self-tests run with a window manager, and four rows that failed there now pass: one was the focus fix above, one needed an active window, one checked for "Cmd" in a list of bindings that says "Ctrl" on Linux, and one read a selection that X11 drops when no real key press came with it.
+
 ## [0.2.0] - 2026-11-14
 
 ### Added

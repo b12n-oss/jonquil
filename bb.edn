@@ -664,7 +664,7 @@
            (linux-docker {:arch arch
                           :command (str/join " " (cons "jolt test" (map sh-quote nss)))}))}
   linux:selftest
-  {:doc "Run jolt gtk:selftest under Xvfb in the Linux image (--arch arm64|amd64)"
+  {:doc "Run jolt gtk:selftest under Xvfb with a window manager in the Linux image (--arch arm64|amd64)"
    :task (let [arch (linux-arch *command-line-args*)
                ;; Another arch than the host's runs under emulation, several
                ;; times slower; rows with a time budget widen it (see
@@ -674,7 +674,9 @@
                           :command (str (when emulated? "JONQUIL_SELFTEST_EMULATED=1 ")
                                         "GDK_BACKEND=x11 xvfb-run -a -s "
                                         (sh-quote "-screen 0 1600x1200x24")
-                                        " jolt gtk:selftest")}))}
+                                        ;; openbox first: without a window
+                                        ;; manager no window is ever active
+                                        " sh dev/linux/selftest-session.sh jolt gtk:selftest")}))}
   linux:build
   {:doc "Build the Linux jonquil binary in the image; it lands in target/linux/<arch>/ (--arch arm64|amd64)"
    :task (let [arch (linux-arch *command-line-args*)

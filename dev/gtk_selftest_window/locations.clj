@@ -169,6 +169,29 @@
         (on-gtk (close-panel! ui)
                 (support/check :locations-gone (= "; That place is gone." st) {:status st}))))))
 
+(defn- await-palette-closed
+  "Waits until the editor view has the focus again, which the palette gives
+  back a turn after it closes. A row that then presses a key does it as a
+  person would, once the palette is gone."
+  [ed]
+  (await-until 1000 20 #(= (:view ed) (g/gtk-root-get-focus (g/gtk-widget-get-root (:view ed))))))
+
+(ffi/defcfn ^:private primary-clipboard "gtk_widget_get_primary_clipboard" [:pointer] :pointer)
+(ffi/defcfn ^:private clipboard-local? "gdk_clipboard_is_local" [:pointer] :int)
+
+(defn- place-selected?
+  "True when ed's selection is place [s e]. On Linux it may also be the
+  caret alone at s, when the editor doesn't hold the primary selection: X11
+  wants the claim stamped with a recent input event, the rows send none, and
+  GTK drops a selection whose claim was refused (measured: the selection was
+  right in the turn F8 ran and gone 9 ms later, with gdk_clipboard_is_local
+  0). A key press is such an event, so a person's F8 keeps it."
+  [ed [s e] got]
+  (or (= [s e] got)
+      (and (str/includes? (System/getProperty "os.name") "Linux")
+           (zero? (clipboard-local? (primary-clipboard (:view ed))))
+           (= [s s] got))))
+
 (defn row-locations-ends
   "F8 past the last place says so and leaves the selection on it."
   [ui]
@@ -176,13 +199,35 @@
     (let [ed (:editor ui)
           last-def (let [d (last (syntax/find-definitions fixture "area"))] [(:start d) (:end d)])]
       (on-gtk (start-on-area! ed)
-              (run-palette! ui "list the definitions")
-              (dotimes [_ 4] (f8! ui false)))
+              (run-palette! ui "list the definitions"))
+      (await-palette-closed ed)
+      (on-gtk (dotimes [_ 4] (f8! ui false)))
       (let [st (await-status ui "; End of the list.")
             s (on-gtk (sel ed))]
         (on-gtk (close-panel! ui)
-                (support/check :locations-ends (and (= "; End of the list." st) (= last-def s))
+                (support/check :locations-ends (and (= "; End of the list." st) (place-selected? ed last-def s))
                                {:status st :sel s :want last-def}))))))
+
+(defn row-locations-next-from-the-palette-keeps-its-selection
+  "Go to the next place, run from the command palette, leaves that place
+  selected once the palette has closed. The palette hides and then runs the
+  command in the same turn, so the place is selected while the popover is
+  still on its way out."
+  [ui]
+  (go-row :locations-next-from-the-palette-keeps-its-selection support/check
+    (let [ed (:editor ui)
+          first-def (let [d (first (syntax/find-definitions fixture "area"))] [(:start d) (:end d)])]
+      (on-gtk (start-on-area! ed)
+              (run-palette! ui "list the definitions"))
+      (await-palette-closed ed)
+      (let [at-once (on-gtk (run-palette! ui "go to the next place in the list")
+                            (sel ed))
+            _ (await-until 500 20 (constantly false))
+            settled (on-gtk (sel ed))]
+        (on-gtk (close-panel! ui)
+                (support/check :locations-next-from-the-palette-keeps-its-selection
+                               (and (= first-def at-once) (place-selected? ed first-def settled))
+                               {:at-once at-once :settled settled :want first-def}))))))
 
 (defn row-locations-definitions
   "List the definitions gives the defmulti and both defmethods, in order."
