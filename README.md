@@ -129,7 +129,7 @@ jolt test:basilisp          # the same against a real basilisp nrepl-server (JON
 jolt test:plugins           # live isolated plugin checks: run real jolt checker children (skips without jolt)
 jolt test:cljs-node         # live ClojureScript-on-node tests: launch a real clojure + node prepl (need the clojure CLI and node; skips without them)
 jolt test jonquil.edit-test # one namespace (the TDD loop)
-jolt linux:test             # jolt test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; no CI)
+jolt linux:test             # jolt test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; CI runs it too)
 jolt gtk:selftest           # real-window self-tests, opens ten windows (don't type while it runs)
 jolt docs:shots             # re-capture docs/images/*.png, one process per scene
 jolt smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows; cgevent is private for now)
@@ -159,8 +159,9 @@ jolt hooks:uninstall      # remove the git pre-commit hook
 
 `.github/workflows/lint.yml` runs the same lint and format check, plus the
 metrics gate, on GitHub Actions, and `.github/workflows/site.yml` checks
-that the docs build. Both run on every push to `main` and every pull
-request. The site itself is [jonquil.b12n.app](https://jonquil.b12n.app).
+that the docs build. `.github/workflows/linux.yml` runs the unit suite and
+the GUI self-tests on Linux, in the same Docker image `jolt linux:test` uses.
+All three run on every push to `main` and every pull request. The site itself is [jonquil.b12n.app](https://jonquil.b12n.app).
 
 ## Contributing
 
