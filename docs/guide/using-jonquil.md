@@ -49,7 +49,8 @@ jonquil --version      # prints the version and exits
 The prompt comes back at once. Files alone go to a Jonquil that is already
 running, the way a double click in Finder does, and start one when none
 is. A folder always gets a window of its own, so the project you already
-have open stays as it is. An
+have open stays as it is, and the new window reopens the tabs that folder
+had last time. An
 argument that starts with `-` runs Jonquil in the foreground with every
 argument, which `--version`, `--mcp` and `--attach` need.
 
