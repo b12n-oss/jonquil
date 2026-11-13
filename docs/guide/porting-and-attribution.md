@@ -116,7 +116,9 @@ table already names the one file it covers.
 ## Licence
 
 Jonquil ports and adapts DrClojure by Kim Taegyoon and clojure-cli.repl's
-inspector, both distributed under the Eclipse Public License 1.0 (see
-`LICENSE` and `NOTICE` in the repository root). Code lifted from either
-keeps its original copyright, and `UPSTREAM.md`'s table says exactly
-which files that covers.
+inspector, both distributed under the Eclipse Public License 1.0. Jonquil
+itself is under the Eclipse Public License 2.0 (see `LICENSE` and `NOTICE`
+in the repository root), and it distributes the code it took from both under
+that version too, which section 7 of EPL-1.0 allows once a new version is
+published. Code lifted from either keeps its original copyright, and
+`UPSTREAM.md`'s table says exactly which files that covers.

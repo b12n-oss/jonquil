@@ -1,5 +1,7 @@
-;; Adapted from jolt-lang/jolt's ci/metrics-gate.clj (EPL-2.0, the same
-;; licence as Jonquil). Jonquil's additions: it refuses an allowlist without
+;; SPDX-License-Identifier: EPL-2.0
+;;
+;; Adapted from jolt-lang/jolt's ci/metrics-gate.clj (EPL-2.0, like Jonquil).
+;; Jonquil's additions: it refuses an allowlist without
 ;; :critical-free or a report missing the sections it reads (either would
 ;; gate nothing and pass), requires a :why on every allowlist entry, compares
 ;; a required lib as text, and names an unused require's refers.

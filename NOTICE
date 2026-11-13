@@ -1,6 +1,8 @@
 Jonquil
 Copyright 2026 the Jonquil authors.
 
+Jonquil is distributed under the Eclipse Public License 2.0 (see LICENSE).
+
 Jonquil ports and adapts DrClojure by Kim Taegyoon
 (https://github.com/kimtg/DrClojure-Neo), distributed under the Eclipse
 Public License 1.0. Code lifted from DrClojure keeps its original copyright,
@@ -10,6 +12,10 @@ Jonquil's inspector view code (src/jonquil/inspect/view.clj) is lifted from
 clojure-cli.repl (https://github.com/clojure/clojure-cli.repl), also
 distributed under the Eclipse Public License 1.0. UPSTREAM.md records the
 pinned commit and the changes.
+
+Both were received under the Eclipse Public License 1.0. Jonquil distributes
+them, with its own code, under the Eclipse Public License 2.0, as section 7 of
+EPL-1.0 allows once a new version of the licence is published.
 
 Jonquil's Parinfer engine (src/jonquil/parinfer.clj), lifted from DrClojure,
 implements Parinfer v3.13.1 after parinfer.js
