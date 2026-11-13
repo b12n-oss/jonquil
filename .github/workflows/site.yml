@@ -1,7 +1,6 @@
 name: Site
 
-# Builds and checks the docs on every push to main and every pull request,
-# and by hand from the Actions tab (or `gh workflow run site.yml`). The
+# Builds and checks the docs. The
 # generator lives in jlt-commons/docs-engine; this repo owns
 # its content, its config in docs/site.edn, and nothing else about the
 # rendering.
@@ -15,18 +14,15 @@ name: Site
 # Jonquil's site is https://jonquil.b12n.app, built elsewhere, so this
 # workflow only checks that the docs build.
 
+# Called by ci.yml on every push to main and every pull request, and run by
+# hand from the Actions tab.
+
 "on":
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: site-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   # v0.4.x adds the nav search box (lunr, bundled under vendor/, with its

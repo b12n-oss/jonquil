@@ -1,11 +1,9 @@
 name: Lint
 
-# Runs on every push to main and on every pull request, and by hand from
-# the Actions tab (or `gh workflow run lint.yml`).
+# Called by ci.yml on every push to main and every pull request, and run by
+# hand from the Actions tab (or `gh workflow run lint.yml`).
 "on":
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 
 jobs:
