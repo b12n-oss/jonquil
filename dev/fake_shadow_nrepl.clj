@@ -78,6 +78,104 @@
                 "status" ["eval-error"]})
         (reply {"status" ["done"]}))))
 
+(defn- session-ns
+  "The session's current namespace."
+  [{:keys [sessions sid]}]
+  (get-in @sessions [sid :ns] "shadow.user"))
+
+(defn- single-select-form?
+  "True when forms is exactly one nrepl-select form."
+  [forms]
+  (and (= 1 (count forms)) (select-form? (first forms))))
+
+(defn- answer-select-in-cljs!
+  "Answers a select form sent from inside a cljs session. Measured: it
+  compiles as cljs there, where shadow.cljs.devtools.api doesn't exist."
+  [{:keys [reply] :as ctx}]
+  (reply {"err" select-in-cljs-err})
+  (reply {"ns" (session-ns ctx) "printed-value" 1 "value" "nil"})
+  (reply {"status" ["done"]}))
+
+(defn- answer-no-runtime!
+  "Answers a cljs eval with shadow's no-runtime error."
+  [{:keys [reply]}]
+  (reply {"err" no-runtime-err})
+  (reply {"ns" "cljs.user" "printed-value" 1 "value" "nil"})
+  (reply {"status" ["done"]}))
+
+(defn- answer-cljs-quit!
+  "Leaves the cljs session and answers the quit sentence."
+  [{:keys [sessions sid reply]} f]
+  (swap! sessions update sid assoc :cljs? false :ns "shadow.user")
+  (reply {"err" quit-err})
+  (reply {"ns" "shadow.user" "printed-value" 1 "value" (str f)})
+  (reply {"status" ["done"]}))
+
+(defn- answer-cljs-throw!
+  "Answers a throw form with the repl exception."
+  [{:keys [reply] :as ctx}]
+  (reply {"err" throw-err})
+  (reply {"ns" (session-ns ctx) "value" ":repl/exception!"}))
+
+(defn- answer-ordinary-form!
+  "Answers one ordinary form: an (ns x) form moves the session first."
+  [{:keys [opts sessions sid reply] :as ctx} f]
+  (when (= 'ns (head f)) (swap! sessions assoc-in [sid :ns] (str (second f))))
+  (reply {"ns" (session-ns ctx) "value" (canned-value opts (session-ns ctx) f)}))
+
+(defn- cljs-form-step!
+  "Answers one form of a cljs session. Returns ::continue to go on with the
+  next one, anything else ends the request."
+  [ctx f]
+  (cond
+    (#{:repl/quit :cljs/quit} f) (answer-cljs-quit! ctx f)
+    (= 'throw (head f)) (do (answer-cljs-throw! ctx) ::continue)
+    :else (do (answer-ordinary-form! ctx f) ::continue)))
+
+(defn- answer-cljs-forms!
+  "Answers a cljs session's forms: its pending state message first, then
+  each form until the end or a quit."
+  [{:keys [sid last-id reply raw-reply] :as ctx} forms]
+  (when last-id
+    (raw-reply {"id" last-id "session" sid "repl-type" "cljs" "status" ["state"] "changed-namespaces" {}}))
+  (loop [fs (seq forms)]
+    (if (nil? fs)
+      (reply {"status" ["done"]})
+      (let [r (cljs-form-step! ctx (first fs))]
+        (if (= ::continue r)
+          (recur (next fs))
+          r)))))
+
+(defn- answer-clj-forms!
+  "Answers a plain session's forms, then done."
+  [{:keys [reply] :as ctx} forms]
+  (doseq [f forms]
+    (answer-ordinary-form! ctx f))
+  (reply {"status" ["done"]}))
+
+(defn- slow-wait!
+  "Waits out the :slow delay whose marker the request's text holds."
+  [{:keys [opts stop-latch closed]} text]
+  (when-let [ms (some (fn [[marker ms]] (when (str/includes? text marker) ms)) (:slow opts))]
+    (wait! stop-latch closed ms)))
+
+(defn- answer-forms!
+  "Routes the request's forms by the session's state."
+  [{:keys [srv opts sid reply cljs?] :as ctx} forms]
+  (cond
+    (= ::unreadable forms)
+    (do (reply {"err" "Syntax error reading source"}) (reply {"status" ["done"]}))
+
+    (and cljs? (single-select-form? forms)) (answer-select-in-cljs! ctx)
+
+    (single-select-form? forms) (select! srv reply sid (first forms))
+
+    (and cljs? (:no-runtime? opts)) (answer-no-runtime! ctx)
+
+    cljs? (answer-cljs-forms! ctx forms)
+
+    :else (answer-clj-forms! ctx forms)))
+
 (defn- evaluate!
   "Answers one eval or load-file request. reply sends one message map
   (string keys) carrying the request's id and session."
@@ -86,59 +184,11 @@
         text (or (get m "file") (get m "code") "")
         forms (try (read-forms text) (catch Exception _ ::unreadable))
         {:keys [cljs? last-id]} (get @sessions sid)
-        cur (fn [] (get-in @sessions [sid :ns] "shadow.user"))]
-    (when-let [ms (some (fn [[marker ms]] (when (str/includes? text marker) ms)) (:slow opts))]
-      (wait! stop-latch closed ms))
-    (cond
-      (not (live? stop-latch closed)) nil
-
-      (= ::unreadable forms)
-      (do (reply {"err" "Syntax error reading source"}) (reply {"status" ["done"]}))
-
-      ;; Measured: inside a cljs session the select form compiles as cljs,
-      ;; where shadow.cljs.devtools.api doesn't exist.
-      (and cljs? (= 1 (count forms)) (select-form? (first forms)))
-      (do (reply {"err" select-in-cljs-err})
-          (reply {"ns" (cur) "printed-value" 1 "value" "nil"})
-          (reply {"status" ["done"]}))
-
-      (and (= 1 (count forms)) (select-form? (first forms)))
-      (select! srv reply sid (first forms))
-
-      (and cljs? (:no-runtime? opts))
-      (do (reply {"err" no-runtime-err})
-          (reply {"ns" "cljs.user" "printed-value" 1 "value" "nil"})
-          (reply {"status" ["done"]}))
-
-      cljs?
-      (do (when last-id
-            (raw-reply {"id" last-id "session" sid "repl-type" "cljs" "status" ["state"] "changed-namespaces" {}}))
-          (loop [fs (seq forms)]
-            (let [f (first fs)]
-              (cond
-                (nil? fs) (reply {"status" ["done"]})
-
-                (#{:repl/quit :cljs/quit} f)
-                (do (swap! sessions update sid assoc :cljs? false :ns "shadow.user")
-                    (reply {"err" quit-err})
-                    (reply {"ns" "shadow.user" "printed-value" 1 "value" (str f)})
-                    (reply {"status" ["done"]}))
-
-                (= 'throw (head f))
-                (do (reply {"err" throw-err})
-                    (reply {"ns" (cur) "value" ":repl/exception!"})
-                    (recur (next fs)))
-
-                :else
-                (do (when (= 'ns (head f)) (swap! sessions assoc-in [sid :ns] (str (second f))))
-                    (reply {"ns" (cur) "value" (canned-value opts (cur) f)})
-                    (recur (next fs)))))))
-
-      :else
-      (do (doseq [f forms]
-            (when (= 'ns (head f)) (swap! sessions assoc-in [sid :ns] (str (second f))))
-            (reply {"ns" (cur) "value" (canned-value opts (cur) f)}))
-          (reply {"status" ["done"]})))))
+        ctx {:srv srv :opts opts :sessions sessions :sid sid :reply reply :raw-reply raw-reply
+             :stop-latch stop-latch :closed closed :cljs? cljs? :last-id last-id}]
+    (slow-wait! ctx text)
+    (when (live? stop-latch closed)
+      (answer-forms! ctx forms))))
 
 (defn- handle!
   "Answers one request, incrementing srv's :busy count for its duration so

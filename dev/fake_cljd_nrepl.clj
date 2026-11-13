@@ -58,58 +58,107 @@
     (= 'comment (head form)) "nil"
     :else ":ok"))
 
+(defn- session-ns
+  "The session's current namespace."
+  [{:keys [sessions sid]}]
+  (get-in @sessions [sid :ns] "cljd.user"))
+
+(defn- announce-fresh-session!
+  "A new session's first request gets the banner, then its ns."
+  [{:keys [sessions sid reply]}]
+  (when (get-in @sessions [sid :fresh?])
+    (swap! sessions assoc-in [sid :fresh?] false)
+    (reply {"out" banner})
+    (reply {"ns" "cljd.user"})))
+
+(defn- still-asleep?
+  "True while the session's first :asleep-for requests are being served."
+  [{:keys [opts sessions sid]}]
+  (boolean (when-let [served (get-in @sessions [sid :served])]
+             (<= (swap! served inc) (:asleep-for opts 0)))))
+
+(defn- answer-asleep!
+  "Answers nil without evaluating, as a REPL that isn't awake yet does."
+  [{:keys [reply] :as ctx}]
+  (reply {"value" "nil"})
+  (reply {"ns" (session-ns ctx)})
+  (reply {"status" ["done"]}))
+
+(defn- drop-connection!
+  "Closes the connection without an answer."
+  [{:keys [sock closed]}]
+  (deliver closed true)
+  (.close ^java.net.Socket sock)
+  :dropped)
+
+(defn- switch-ns!
+  "An (ns x ...) form switches the session and answers only its ns."
+  [{:keys [sessions sid reply] :as ctx} f]
+  (swap! sessions assoc-in [sid :ns] (str (second f)))
+  (reply {"ns" (session-ns ctx)})
+  ::continue)
+
+(defn- fail-form!
+  "Answers a :fail-on form as the fork's did."
+  [{:keys [reply] :as ctx}]
+  (reply {"err" fail-err})
+  (reply {"ns" (session-ns ctx)})
+  (reply {"status" ["done" "eval-error"]}))
+
+(defn- run-form!
+  "Waits out the form's :slow delay, then answers its :prints text, value
+  and ns. Returns :dropped when the server stopped meanwhile."
+  [{:keys [opts stop-latch closed reply] :as ctx} f]
+  (when-let [ms (some (fn [[marker ms]] (when (matches? marker f) ms)) (:slow opts))]
+    (wait! stop-latch closed ms))
+  (if-not (live? stop-latch closed)
+    :dropped
+    (do (when-let [printed (some (fn [[marker text]] (when (matches? marker f) text)) (:prints opts))]
+          (reply {"out" printed}))
+        (reply {"value" (get (:answers opts) (pr-str f) (default-value f))})
+        (reply {"ns" (session-ns ctx)})
+        ::continue)))
+
+(defn- form-step!
+  "Answers one form. Returns ::continue to go on with the next one,
+  anything else ends the request."
+  [{:keys [opts reply] :as ctx} f]
+  (cond
+    (matches? (:drop-on opts) f) (drop-connection! ctx)
+    (= 'ns (head f)) (switch-ns! ctx f)
+    (= 'in-ns (head f)) (reply {"err" in-ns-err "status" ["done" "eval-error"]})
+    (and (#{'defn 'defn-} (head f)) (= "cljd.user" (session-ns ctx)))
+    (reply {"err" defn-in-cljd-user-err "status" ["done" "eval-error"]})
+    (matches? (:fail-on opts) f) (fail-form! ctx)
+    :else (run-form! ctx f)))
+
+(defn- eval-forms!
+  "Answers each of forms in order, then done."
+  [{:keys [reply] :as ctx} forms]
+  (loop [fs (seq forms)]
+    (if (nil? fs)
+      (reply {"status" ["done"]})
+      (let [r (form-step! ctx (first fs))]
+        (if (= ::continue r)
+          (recur (next fs))
+          r)))))
+
 (defn- evaluate!
   "Answers one eval or load-file request, form by form. reply sends one
   message map (string keys) with the request's id. Returns :dropped when a
   :drop-on form closed the connection, or when stop-latch or closed
   resolved while a :slow form was waiting."
   [{:keys [opts sessions]} sock stop-latch closed reply m]
-  (let [sid (get m "session")
-        text (or (get m "file") (get m "code") "")
-        fresh? (get-in @sessions [sid :fresh?])
-        cur (fn [] (get-in @sessions [sid :ns] "cljd.user"))]
-    (when fresh?
-      (swap! sessions assoc-in [sid :fresh?] false)
-      (reply {"out" banner})
-      (reply {"ns" "cljd.user"}))
-    (if (when-let [served (get-in @sessions [sid :served])]
-          (<= (swap! served inc) (:asleep-for opts 0)))
-      (do (reply {"value" "nil"}) (reply {"ns" (cur)}) (reply {"status" ["done"]}))
+  (let [ctx {:opts opts :sessions sessions :sock sock :stop-latch stop-latch
+             :closed closed :reply reply :sid (get m "session")}
+        text (or (get m "file") (get m "code") "")]
+    (announce-fresh-session! ctx)
+    (if (still-asleep? ctx)
+      (answer-asleep! ctx)
       (let [forms (try (read-forms text) (catch Exception e e))]
         (if (instance? Exception forms)
           (do (reply {"err" (str (ex-message forms) "\n")}) (reply {"status" ["done" "eval-error"]}))
-          (loop [fs (seq forms)]
-            (let [f (first fs)]
-              (cond
-                (nil? fs) (reply {"status" ["done"]})
-
-                (matches? (:drop-on opts) f)
-                (do (deliver closed true) (.close ^java.net.Socket sock) :dropped)
-
-                (= 'ns (head f))
-                (do (swap! sessions assoc-in [sid :ns] (str (second f)))
-                    (reply {"ns" (cur)})
-                    (recur (next fs)))
-
-                (= 'in-ns (head f))
-                (reply {"err" in-ns-err "status" ["done" "eval-error"]})
-
-                (and (#{'defn 'defn-} (head f)) (= "cljd.user" (cur)))
-                (reply {"err" defn-in-cljd-user-err "status" ["done" "eval-error"]})
-
-                (matches? (:fail-on opts) f)
-                (do (reply {"err" fail-err}) (reply {"ns" (cur)}) (reply {"status" ["done" "eval-error"]}))
-
-                :else
-                (do (when-let [ms (some (fn [[marker ms]] (when (matches? marker f) ms)) (:slow opts))]
-                      (wait! stop-latch closed ms))
-                    (if-not (live? stop-latch closed)
-                      :dropped
-                      (do (when-let [printed (some (fn [[marker text]] (when (matches? marker f) text)) (:prints opts))]
-                            (reply {"out" printed}))
-                          (reply {"value" (get (:answers opts) (pr-str f) (default-value f))})
-                          (reply {"ns" (cur)})
-                          (recur (next fs)))))))))))))
+          (eval-forms! ctx forms))))))
 
 (defn- handle!
   "Answers one request, incrementing srv's :busy count for its duration (a

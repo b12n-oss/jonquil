@@ -215,36 +215,48 @@
   (some (fn [d] (.canExecute (java.io.File. ^String d ^String program)))
         (str/split (or (System/getenv "PATH") "") #":")))
 
+(defn- skip-message
+  "The message for a live mode whose program is missing, or nil when it can run."
+  [args]
+  (cond
+    (and (= ["--live-bb"] args) (not (on-path? "bb")))
+    "test:bb: no bb on PATH; skipping"
+
+    (and (= ["--live-basilisp"] args)
+         (not (if-let [b (System/getenv "JONQUIL_BASILISP")] (.canExecute (java.io.File. ^String b)) (on-path? "basilisp"))))
+    "test:basilisp: no basilisp found (set JONQUIL_BASILISP or put basilisp on PATH); skipping"
+
+    (and (= ["--live-jank"] args) (nil? (jank-child/find-binary)))
+    "test:jank: no jank found (set JONQUIL_JANK or install jank); skipping"
+
+    (and (= ["--live-plugins"] args) (nil? (isolated/jolt-program)))
+    "test:plugins: no jolt on the login PATH; skipping"
+
+    (and (= ["--live-cljs-node"] args) (nil? (cljs-child/find-clojure)))
+    "test:cljs-node: no clojure CLI found (set JONQUIL_CLOJURE or install clojure); skipping"
+
+    (and (= ["--live-cljs-node"] args)
+         (nil? (tool-path/resolve-program "node" (login-path/path) login-path/executable-file?)))
+    "test:cljs-node: no node on the login PATH; skipping"))
+
+(defn- namespaces-for
+  "The namespaces to run for the command-line arguments."
+  [args]
+  (cond (= ["--live"] args) live-namespaces
+        (= ["--live-clj"] args) live-clj-namespaces
+        (= ["--live-jank"] args) live-jank-namespaces
+        (= ["--live-cljs-node"] args) live-cljs-node-namespaces
+        (= ["--live-bb"] args) live-bb-namespaces
+        (= ["--live-basilisp"] args) live-basilisp-namespaces
+        (= ["--live-plugins"] args) live-plugins-namespaces
+        (seq args) (mapv symbol args)
+        :else test-namespaces))
+
 (defn -main [& args]
-  (when (and (= ["--live-bb"] args) (not (on-path? "bb")))
-    (println "test:bb: no bb on PATH; skipping")
+  (when-let [msg (skip-message args)]
+    (println msg)
     (System/exit 0))
-  (when (and (= ["--live-basilisp"] args)
-             (not (if-let [b (System/getenv "JONQUIL_BASILISP")] (.canExecute (java.io.File. ^String b)) (on-path? "basilisp"))))
-    (println "test:basilisp: no basilisp found (set JONQUIL_BASILISP or put basilisp on PATH); skipping")
-    (System/exit 0))
-  (when (and (= ["--live-jank"] args) (nil? (jank-child/find-binary)))
-    (println "test:jank: no jank found (set JONQUIL_JANK or install jank); skipping")
-    (System/exit 0))
-  (when (and (= ["--live-plugins"] args) (nil? (isolated/jolt-program)))
-    (println "test:plugins: no jolt on the login PATH; skipping")
-    (System/exit 0))
-  (when (= ["--live-cljs-node"] args)
-    (when (nil? (cljs-child/find-clojure))
-      (println "test:cljs-node: no clojure CLI found (set JONQUIL_CLOJURE or install clojure); skipping")
-      (System/exit 0))
-    (when (nil? (tool-path/resolve-program "node" (login-path/path) login-path/executable-file?))
-      (println "test:cljs-node: no node on the login PATH; skipping")
-      (System/exit 0)))
-  (let [nss (cond (= ["--live"] args) live-namespaces
-                  (= ["--live-clj"] args) live-clj-namespaces
-                  (= ["--live-jank"] args) live-jank-namespaces
-                  (= ["--live-cljs-node"] args) live-cljs-node-namespaces
-                  (= ["--live-bb"] args) live-bb-namespaces
-                  (= ["--live-basilisp"] args) live-basilisp-namespaces
-                  (= ["--live-plugins"] args) live-plugins-namespaces
-                  (seq args) (mapv symbol args)
-                  :else test-namespaces)]
+  (let [nss (namespaces-for args)]
     (apply require nss)
     (let [{:keys [test pass fail error]} (apply t/run-tests nss)]
       (println (str "\nSUMMARY: " test " tests, " (+ pass fail error)

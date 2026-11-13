@@ -113,71 +113,124 @@
         [form text (subs buf end)])
       (catch Throwable _ nil))))
 
-(defn- serve-connection! [{:keys [opts forms stopped?] :as srv} ^java.net.Socket sock]
+(defn- setup-require? [text]
+  (boolean (re-find #"\(require\s+'cljs\.repl" text)))
+
+(defn- note-form!
+  "Records the form's source text, waits out the configured delays for it,
+  and returns whether the cljs.repl setup has been seen (setup? or this
+  form)."
+  [{:keys [opts forms]} text setup?]
+  (swap! forms conj text)
+  (let [setup? (or setup? (setup-require? text))]
+    (when (and (:hold-setup-ms opts) (setup-require? text))
+      (Thread/sleep (long (:hold-setup-ms opts))))
+    (when (and (:slow-ms opts) (str/includes? text "slow"))
+      (Thread/sleep (long (:slow-ms opts))))
+    (when (and (:hold-apropos-ms opts) (str/includes? text "cljs.repl/apropos"))
+      (Thread/sleep (long (:hold-apropos-ms opts))))
+    setup?))
+
+(defn- answer-canned-apropos!
+  "The real prepl expands the macro on the compiler side; this sandbox
+  can't, so the answer is canned. Returns the unchanged ns."
+  [{:keys [opts w lock]} {:keys [text current]}]
+  (send! w lock {:tag :ret :val (:apropos-val opts) :ns current :ms 0 :form text})
+  current)
+
+(defn- answer-read-line-setup!
+  "Answers the reader setup's set! with nil, remembering the thrower's
+  message when the setup defined one. Returns the unchanged ns."
+  [{:keys [w lock thrower]} {:keys [form text current]}]
+  (reset! thrower (thrower-message form))
+  (send! w lock {:tag :ret :val "nil" :ns current :ms 0 :form text})
+  current)
+
+(defn- answer-thrower-read-line!
+  "Answers (read-line) with the thrower's exception. Returns the unchanged
+  ns."
+  [{:keys [w lock thrower]} {:keys [text current]}]
+  (let [msg @thrower]
+    (send! w lock {:tag :ret :exception true :ns current :ms 0 :form text
+                   :val (pr-str {:via [{:type "Error" :message msg}] :cause msg})})
+    current))
+
+(defn- send-result!
+  "Sends a form's :out text (when it printed any), then its ret line."
+  [{:keys [w lock]} text new-ns result]
+  (when (seq (:out result))
+    (send! w lock {:tag :out :val (:out result)}))
+  (send! w lock (merge {:tag :ret :val (:val result) :ns new-ns :ms 0 :form text}
+                       (when (:exception result) {:exception true}))))
+
+(defn- answer-stdin-dance!
+  "Answers (read-line) as the real reader does: need-input marker, one
+  input line, got-input marker, then the form's ret. Returns the new ns."
+  [{:keys [w lock] :as conn} {:keys [form text current]}]
+  (send! w lock {:tag :err :val (str need-input-marker "\n")})
+  (let [line (take-input-line! conn)
+        eof? (or (nil? line) (= line input-eof-marker))
+        result (eval-form (create-ns (symbol current)) (strip-setup form)
+                          (if eof? "" (str line "\n")))
+        new-ns (ns-after form current)]
+    (send! w lock {:tag :err :val (str got-input-marker "\n")})
+    (send-result! conn text new-ns result)
+    new-ns))
+
+(defn- form-result
+  "The eval result for a form: the failing setup when :fail-setup? says so,
+  else the form evaluated in the connection's namespace."
+  [{:keys [opts]} {:keys [form text current]}]
+  (if (and (:fail-setup? opts) (setup-require? text))
+    {:out "" :exception true :val (error-val (ex-info "no page" {}))}
+    (eval-form (create-ns (symbol current)) (strip-setup form))))
+
+(defn- answer-evaluated!
+  "Evaluates and answers an ordinary form. Returns the new ns, or nil when
+  the wedge bug swallowed the connection (it drains until EOF)."
+  [{:keys [opts in stopped?] :as conn} {:keys [form text current setup?]}]
+  (let [result (form-result conn {:form form :text text :current current})]
+    (if (and (:exception result) (:wedge-on-throw-without-setup? opts) (not setup?))
+      ;; the real bug: never answer again, just drain until EOF
+      (loop [] (when (and (.readLine in) (not @stopped?)) (recur)))
+      (let [new-ns (ns-after form current)]
+        (send-result! conn text new-ns result)
+        new-ns))))
+
+(defn- answer-form!
+  "Answers one form read off the connection. Returns the connection's ns
+  afterwards, or nil when the connection ends there."
+  [{:keys [opts thrower] :as conn} {:keys [form text] :as fm}]
+  (cond
+    (and (:apropos-val opts) (str/includes? text "cljs.repl/apropos"))
+    (answer-canned-apropos! conn fm)
+
+    (read-line-set!? form) (answer-read-line-setup! conn fm)
+
+    (and @thrower (re-find #"\(read-line\)" text)) (answer-thrower-read-line! conn fm)
+
+    (and (:stdin-dance? opts) (re-find #"\(read-line\)" text)) (answer-stdin-dance! conn fm)
+
+    :else (answer-evaluated! conn fm)))
+
+(defn- serve-connection! [srv ^java.net.Socket sock]
   ;; Lines are read with readLine and forms cut from the buffer: on Jolt a
   ;; reader over the socket blocks until it has more than one line.
   (let [in (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
-        w (java.io.OutputStreamWriter. (.getOutputStream sock) "UTF-8")
-        lock (Object.)
-        ;; set when the reader setup defined read-line as a thrower
-        thrower (atom nil)]
+        stopped? (:stopped? srv)
+        ;; thrower is set when the reader setup defined read-line as a thrower
+        conn (assoc srv
+                    :in in
+                    :w (java.io.OutputStreamWriter. (.getOutputStream sock) "UTF-8")
+                    :lock (Object.)
+                    :thrower (atom nil))]
     (try
       (loop [buf "" current "cljs.user" setup? false]
         (if-let [[form text more] (next-form buf)]
-          (do
-            (swap! forms conj text)
-            (let [setup? (or setup? (boolean (re-find #"\(require\s+'cljs\.repl" text)))]
-              (when (and (:hold-setup-ms opts) (re-find #"\(require\s+'cljs\.repl" text))
-                (Thread/sleep (long (:hold-setup-ms opts))))
-              (when (and (:slow-ms opts) (str/includes? text "slow"))
-                (Thread/sleep (long (:slow-ms opts))))
-              (when (and (:hold-apropos-ms opts) (str/includes? text "cljs.repl/apropos"))
-                (Thread/sleep (long (:hold-apropos-ms opts))))
-              (cond
-                (and (:apropos-val opts) (str/includes? text "cljs.repl/apropos"))
-                ;; the real prepl expands the macro on the compiler side;
-                ;; this sandbox can't, so the answer is canned
-                (do (send! w lock {:tag :ret :val (:apropos-val opts) :ns current :ms 0 :form text})
-                    (recur more current setup?))
-
-                (read-line-set!? form)
-                (do (reset! thrower (thrower-message form))
-                    (send! w lock {:tag :ret :val "nil" :ns current :ms 0 :form text})
-                    (recur more current setup?))
-
-                (and @thrower (re-find #"\(read-line\)" text))
-                (let [msg @thrower]
-                  (send! w lock {:tag :ret :exception true :ns current :ms 0 :form text
-                                 :val (pr-str {:via [{:type "Error" :message msg}] :cause msg})})
-                  (recur more current setup?))
-
-                (and (:stdin-dance? opts) (re-find #"\(read-line\)" text))
-                (do (send! w lock {:tag :err :val (str need-input-marker "\n")})
-                    (let [line (take-input-line! srv)
-                          eof? (or (nil? line) (= line input-eof-marker))
-                          result (eval-form (create-ns (symbol current)) (strip-setup form)
-                                            (if eof? "" (str line "\n")))
-                          new-ns (ns-after form current)]
-                      (send! w lock {:tag :err :val (str got-input-marker "\n")})
-                      (when (seq (:out result))
-                        (send! w lock {:tag :out :val (:out result)}))
-                      (send! w lock (merge {:tag :ret :val (:val result) :ns new-ns :ms 0 :form text}
-                                           (when (:exception result) {:exception true})))
-                      (recur more new-ns setup?)))
-
-                :else
-                (let [result (if (and (:fail-setup? opts) (re-find #"\(require\s+'cljs\.repl" text))
-                               {:out "" :exception true :val (error-val (ex-info "no page" {}))}
-                               (eval-form (create-ns (symbol current)) (strip-setup form)))]
-                  (if (and (:exception result) (:wedge-on-throw-without-setup? opts) (not setup?))
-                    ;; the real bug: never answer again, just drain until EOF
-                    (loop [] (when (and (.readLine in) (not @stopped?)) (recur)))
-                    (let [new-ns (ns-after form current)]
-                      (when (seq (:out result))
-                        (send! w lock {:tag :out :val (:out result)}))
-                      (send! w lock (merge {:tag :ret :val (:val result) :ns new-ns :ms 0 :form text}
-                                           (when (:exception result) {:exception true})))
-                      (recur more new-ns setup?)))))))
+          (let [setup? (note-form! conn text setup?)]
+            (when-let [new-ns (answer-form! conn {:form form :text text
+                                                  :current current :setup? setup?})]
+              (recur more new-ns setup?)))
           (when-let [line (and (not @stopped?) (.readLine in))]
             (recur (str buf line "\n") current setup?))))
       (catch Throwable _ nil)

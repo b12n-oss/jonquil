@@ -298,7 +298,7 @@
      (row "lint" "clj-kondo over src, test and dev (report only)")
      (row "lint:strict" "lint, but exit non-zero if there are any findings")
      (row "metrics [OUT] [opts]" "jolt-metrics report: refactoring queue, hotspots, cleanup (report only)")
-     (row "metrics:gate" "fail on a critical under src/ or test/, or unused code not in ci/metrics-allow.edn")
+     (row "metrics:gate" "fail on a critical under src/, test/, dev/ or ci/, or unused code not in ci/metrics-allow.edn")
      (row "metrics:edn [OUT] [opts]" "the same metrics, every finding as EDN")
      (row "metrics:json [OUT] [opts]" "the same metrics as lean JSON, for tools")
      (row "metrics:html [OUT] [opts]" "the same metrics as one HTML page (target/metrics.html)")
@@ -537,7 +537,7 @@
   ;; bad usage or a missing directory, and that exit passes through.
   ;; metrics:gate is the one that fails.
   metrics:gate
-  {:doc "Fail on a critical jolt-metrics finding under ci/metrics-allow.edn's :critical-free paths (src/, test/), or on unused code not listed there with its reason (ci/metrics-gate.clj)"
+  {:doc "Fail on a critical jolt-metrics finding under ci/metrics-allow.edn's :critical-free paths (src/, test/, dev/, ci/), or on unused code not listed there with its reason (ci/metrics-gate.clj)"
    :task (do (fs/create-dirs "target")
              (shell "jolt" "-M:metrics" "." "target/metrics-report.edn" "--format" "edn")
              (shell "jolt" "ci/metrics-gate.clj" "target/metrics-report.edn" "ci/metrics-allow.edn"))}

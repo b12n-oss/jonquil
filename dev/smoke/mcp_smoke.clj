@@ -244,7 +244,16 @@
     (check! "read smoke-p shows its history"
             (and (string? (:text r)) (str/includes? (:text r) "History:\nv1 rejected (agent, ")) r)))
 
-(defn- window-main []
+(defn- print-summary-and-exit!
+  "Prints the pass count and exits 0 when every check passed, else 1."
+  []
+  (let [fails (count (remove true? @results))]
+    (println (str "[mcp-smoke] " (- (count @results) fails) "/" (count @results) " passed"))
+    (System/exit (if (zero? fails) 0 1))))
+
+(defn- window-fixture!
+  "Creates the temp project and XDG dir with a startup plugin; returns their paths."
+  []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
         xdg (str tmp "/xdg")
         proj (str tmp "/proj")
@@ -262,92 +271,108 @@
                "   :mcp-tools [{:name \"twice\" :doc \"The text twice.\"\n"
                "                :args {\"text\" {:type \"string\" :doc \"The text.\" :required? true}}\n"
                "                :run (fn [_ a] (str (get a \"text\") (get a \"text\")))}]})\n"))
-    (let [srv (launch! proj xdg)
-          pid (.pid ^java.lang.Process (:proc (:proc srv)))]
-      (try
-        (let [h (handshake! srv "window")]
-          (check! "initialize declares tools.listChanged"
-                  (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
-        ;; the startup plugin load runs on the plugin agent, so the first
-        ;; tools/list can come before it; then its swap sends list_changed
-        ;; and the next list has the tool
-        (let [want (conj window-tool-names "plugin_smoke-t_twice")
-              names-of (fn [r] (set (map #(get % "name") (get-in r ["result" "tools"]))))
-              r1 (request! srv "tools/list" {} 60000)
-              [path r] (if (= want (names-of r1))
-                         [:first-list r1]
-                         (if (await-note srv "notifications/tools/list_changed" 30000)
-                           [:after-list-changed (request! srv "tools/list" {} 60000)]
-                           [:no-list-changed r1]))]
-          (println "[mcp-smoke] startup plugin tool seen" (name path))
-          (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
-                  (and (not= :no-list-changed path)
-                       (= 21 (count (get-in r ["result" "tools"])))
-                       (= want (names-of r)))
-                  {:path path :r r}))
-        (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
-          (check! "a plugin's tool answers over real stdio"
-                  (and (= "abab" (:text r)) (not (:error? r))) r))
-        (let [r (tool! srv "jonquil_open" {"path" a} 60000)]
-          (check! "open a.clj" (and (string? (:text r)) (not (:error? r))) r))
-        (let [r (tool! srv "jonquil_run" {} 60000)]
-          (check! "run => 7" (ends-with? r "=> 7") r))
-        (let [r (tool! srv "jonquil_replace_text" {"text" "(def z 9) z"} 30000)
-              t (tool! srv "jonquil_tabs" {} 30000)]
-          (check! "replace_text makes the tab dirty"
-                  (and (not (:fail r)) (string? (:text t)) (str/includes? (:text t) " dirty ")
-                       (str/includes? (:text t) a))
-                  {:r r :t t}))
-        (let [r (tool! srv "jonquil_save" {} 30000)
-              disk (slurp a)]
-          (check! "save writes the new bytes to disk"
-                  (and (not (:fail r)) (not (:error? r)) (= "(def z 9) z" disk))
-                  {:r r :disk disk}))
-        (let [r (tool! srv "jonquil_run" {} 60000)]
-          (check! "run after save => 9" (ends-with? r "=> 9") r))
-        (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
-          (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
-        (let [r (tool! srv "jonquil_console" {"since" 0} 30000)]
-          (check! "console since 0 starts with mark and has the banner"
-                  (and (string? (:text r))
-                       (str/starts-with? (:text r) "mark ")
-                       (str/includes? (:text r) "; --- Running a.clj ---"))
-                  r))
-        (let [t0 (System/currentTimeMillis)
-              r (tool! srv "jonquil_eval" {"code" "(loop [] (recur))" "timeout_ms" 500} 10000)
-              dt (- (System/currentTimeMillis) t0)]
-          (check! "runaway eval times out as isError within 10 s"
-                  (and (not (:fail r)) (:error? r) (str/includes? (str (:text r)) "Timed out after") (< dt 10000))
-                  {:r r :ms dt}))
-        (let [r (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 60000)]
-          (check! "eval after the timeout => 4" (ends-with? r "=> 4") r))
-        (plugin-checks! srv xdg)
-        ;; dirty EOF: an unsaved edit, then stdin closes; the quit discards it
-        (let [r (tool! srv "jonquil_replace_text" {"text" "(def w 1) w"} 30000)
-              before (slurp a)
-              dirty (tool! srv "jonquil_tabs" {} 30000)]
-          (check! "unsaved edit is pending before EOF"
-                  (and (not (:fail r)) (str/includes? (str (:text dirty)) " dirty "))
-                  {:r r :t dirty})
-          (.close ^java.io.Writer (:in srv))
-          (let [x (deref (:proc srv) 20000 ::timeout)]
-            (check! "window exits within 20 s after stdin closes"
-                    (and (not= x ::timeout) (zero? (:exit x)))
-                    (if (= x ::timeout) "still running after 20 s" (:exit x)))
-            (when (= x ::timeout) (p/destroy-tree (:proc srv))))
-          (Thread/sleep 500)
-          (check! "no jolt child remains" (empty? (children pid)) (children pid))
-          (check! "the discard really discarded: bytes on disk unchanged"
-                  (= before (slurp a) "(def z 9) z") {:before before :after (slurp a)}))
-        (check! "every stdout line is JSON"
-                (every? json-line?
-                        @(:lines srv))
-                @(:lines srv))
-        (finally (p/destroy-tree (:proc srv)))))
+    {:tmp tmp :xdg xdg :proj proj :a a}))
+
+(defn- window-startup-checks!
+  "The handshake and the startup plugin's tool showing up in tools/list."
+  [srv]
+  (let [h (handshake! srv "window")]
+    (check! "initialize declares tools.listChanged"
+            (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
+  ;; the startup plugin load runs on the plugin agent, so the first
+  ;; tools/list can come before it; then its swap sends list_changed
+  ;; and the next list has the tool
+  (let [want (conj window-tool-names "plugin_smoke-t_twice")
+        names-of (fn [r] (set (map #(get % "name") (get-in r ["result" "tools"]))))
+        r1 (request! srv "tools/list" {} 60000)
+        [path r] (if (= want (names-of r1))
+                   [:first-list r1]
+                   (if (await-note srv "notifications/tools/list_changed" 30000)
+                     [:after-list-changed (request! srv "tools/list" {} 60000)]
+                     [:no-list-changed r1]))]
+    (println "[mcp-smoke] startup plugin tool seen" (name path))
+    (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
+            (and (not= :no-list-changed path)
+                 (= 21 (count (get-in r ["result" "tools"])))
+                 (= want (names-of r)))
+            {:path path :r r}))
+  (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
+    (check! "a plugin's tool answers over real stdio"
+            (and (= "abab" (:text r)) (not (:error? r))) r)))
+
+(defn- window-edit-checks!
+  "Open, run, edit, save, re-run and eval against the temp project's a.clj."
+  [srv a]
+  (let [r (tool! srv "jonquil_open" {"path" a} 60000)]
+    (check! "open a.clj" (and (string? (:text r)) (not (:error? r))) r))
+  (let [r (tool! srv "jonquil_run" {} 60000)]
+    (check! "run => 7" (ends-with? r "=> 7") r))
+  (let [r (tool! srv "jonquil_replace_text" {"text" "(def z 9) z"} 30000)
+        t (tool! srv "jonquil_tabs" {} 30000)]
+    (check! "replace_text makes the tab dirty"
+            (and (not (:fail r)) (string? (:text t)) (str/includes? (:text t) " dirty ")
+                 (str/includes? (:text t) a))
+            {:r r :t t}))
+  (let [r (tool! srv "jonquil_save" {} 30000)
+        disk (slurp a)]
+    (check! "save writes the new bytes to disk"
+            (and (not (:fail r)) (not (:error? r)) (= "(def z 9) z" disk))
+            {:r r :disk disk}))
+  (let [r (tool! srv "jonquil_run" {} 60000)]
+    (check! "run after save => 9" (ends-with? r "=> 9") r))
+  (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
+    (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
+  (let [r (tool! srv "jonquil_console" {"since" 0} 30000)]
+    (check! "console since 0 starts with mark and has the banner"
+            (and (string? (:text r))
+                 (str/starts-with? (:text r) "mark ")
+                 (str/includes? (:text r) "; --- Running a.clj ---"))
+            r))
+  (let [t0 (System/currentTimeMillis)
+        r (tool! srv "jonquil_eval" {"code" "(loop [] (recur))" "timeout_ms" 500} 10000)
+        dt (- (System/currentTimeMillis) t0)]
+    (check! "runaway eval times out as isError within 10 s"
+            (and (not (:fail r)) (:error? r) (str/includes? (str (:text r)) "Timed out after") (< dt 10000))
+            {:r r :ms dt}))
+  (let [r (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 60000)]
+    (check! "eval after the timeout => 4" (ends-with? r "=> 4") r)))
+
+(defn- window-dirty-eof-checks!
+  "An unsaved edit, then stdin closes; the quit discards it and leaves no child."
+  [srv a pid]
+  (let [r (tool! srv "jonquil_replace_text" {"text" "(def w 1) w"} 30000)
+        before (slurp a)
+        dirty (tool! srv "jonquil_tabs" {} 30000)]
+    (check! "unsaved edit is pending before EOF"
+            (and (not (:fail r)) (str/includes? (str (:text dirty)) " dirty "))
+            {:r r :t dirty})
+    (.close ^java.io.Writer (:in srv))
+    (let [x (deref (:proc srv) 20000 ::timeout)]
+      (check! "window exits within 20 s after stdin closes"
+              (and (not= x ::timeout) (zero? (:exit x)))
+              (if (= x ::timeout) "still running after 20 s" (:exit x)))
+      (when (= x ::timeout) (p/destroy-tree (:proc srv))))
+    (Thread/sleep 500)
+    (check! "no jolt child remains" (empty? (children pid)) (children pid))
+    (check! "the discard really discarded: bytes on disk unchanged"
+            (= before (slurp a) "(def z 9) z") {:before before :after (slurp a)})))
+
+(defn- window-main []
+  (let [{:keys [tmp xdg proj a]} (window-fixture!)
+        srv (launch! proj xdg)
+        pid (.pid ^java.lang.Process (:proc (:proc srv)))]
+    (try
+      (window-startup-checks! srv)
+      (window-edit-checks! srv a)
+      (plugin-checks! srv xdg)
+      (window-dirty-eof-checks! srv a pid)
+      (check! "every stdout line is JSON"
+              (every? json-line?
+                      @(:lines srv))
+              @(:lines srv))
+      (finally (p/destroy-tree (:proc srv))))
     (fs/delete-tree tmp)
-    (let [fails (count (remove true? @results))]
-      (println (str "[mcp-smoke] " (- (count @results) fails) "/" (count @results) " passed"))
-      (System/exit (if (zero? fails) 0 1)))))
+    (print-summary-and-exit!)))
 
 ;; --attach: a real normal window with the listener on, plus bridges to it.
 (defn- alive? [^java.lang.Process jp] (.isAlive jp))
@@ -374,19 +399,76 @@
               (> (System/currentTimeMillis) end) nil
               :else (do (Thread/sleep 250) (recur)))))))
 
-(defn- attach-main []
+(defn- attach-fixture!
+  "Creates the temp project and XDG dir with the listener on; returns their paths."
+  []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
         xdg (str tmp "/xdg")
-        proj (str tmp "/proj")
-        reg-dir (str xdg "/jonquil/mcp")
-        procs (atom [])
-        track! (fn [srv] (swap! procs conj (:proc srv)) srv)]
+        proj (str tmp "/proj")]
     (fs/create-dirs proj)
     (fs/create-dirs (str xdg "/jonquil"))
     (spit (str proj "/deps.edn") "{}")
     ;; In process, as this attach block was written against.
     (spit (str proj "/.jonquil.edn") "{:runtime :in-process}")
     (spit (str xdg "/jonquil/settings.edn") "{:mcp-listen? true}")
+    {:tmp tmp :xdg xdg :proj proj :reg-dir (str xdg "/jonquil/mcp")}))
+
+(defn- first-bridge-checks!
+  "The first bridge: handshake, tool list, eval, console, then detach."
+  [b1 wjp wpid]
+  (let [h (handshake! b1 "bridge 1")]
+    (check! "the listener declares tools.listChanged"
+            (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
+  (let [r (request! b1 "tools/list" {} 60000)
+        names (set (map #(get % "name") (get-in r ["result" "tools"])))]
+    (check! "tools/list has exactly the twenty window tools"
+            (and (= 20 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+  (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
+    (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
+  (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]
+    (check! "console since 0 starts with mark"
+            (and (string? (:text r)) (str/starts-with? (:text r) "mark ")) r))
+  (let [x (bridge-exit! b1)]
+    (check! "bridge 1 exits 0 within 10 s of stdin closing"
+            (and (not= x ::timeout) (zero? (:exit x)))
+            (if (= x ::timeout) "still running after 10 s" (:exit x))))
+  (check! "bridge 1 stdout is all JSON" (json-lines? b1) @(:lines b1))
+  (check! "the window process survives the detach" (alive? wjp) {:pid wpid}))
+
+(defn- second-bridge-checks!
+  "The second bridge: handshake, eval, then detach."
+  [b2 wjp wpid]
+  (handshake! b2 "bridge 2")
+  (let [r (tool! b2 "jonquil_eval" {"code" "(* 6 7)"} 60000)]
+    (check! "second bridge eval (* 6 7) => 42" (ends-with? r "=> 42") r))
+  (let [x (bridge-exit! b2)]
+    (check! "bridge 2 exits 0 within 10 s of stdin closing"
+            (and (not= x ::timeout) (zero? (:exit x)))
+            (if (= x ::timeout) "still running after 10 s" (:exit x))))
+  (check! "bridge 2 stdout is all JSON" (json-lines? b2) @(:lines b2))
+  (check! "the window process survives the second detach" (alive? wjp) {:pid wpid}))
+
+(defn- window-sigterm-checks!
+  "SIGTERM the window we launched: it exits, leaves no child and removes its registry file."
+  [win wjp wpid reg reg-dir]
+  (let [kids-before (children wpid)]
+    (.destroy wjp)
+    (let [x (deref (:proc win) 20000 ::timeout)]
+      (check! "window exits within 20 s of SIGTERM" (not= x ::timeout)
+              "still running after 20 s")
+      (Thread/sleep 500)
+      (check! "no window child remains"
+              (empty? (filter (fn [k] (zero? (:exit @(p/process ["kill" "-0" k] {:err :string :out :string}))))
+                              kids-before))
+              kids-before)
+      (check! "the registry file is gone"
+              (not (and reg (fs/exists? reg)))
+              {:reg reg :left (when (fs/exists? reg-dir) (mapv str (fs/list-dir reg-dir)))}))))
+
+(defn- attach-main []
+  (let [{:keys [tmp xdg proj reg-dir]} (attach-fixture!)
+        procs (atom [])
+        track! (fn [srv] (swap! procs conj (:proc srv)) srv)]
     (try
       (let [win (track! (launch! proj xdg []))
             wjp ^java.lang.Process (:proc (:proc win))
@@ -395,55 +477,13 @@
         (check! "the window registers under the temp XDG within 30 s" reg
                 {:dir reg-dir :files (when (fs/exists? reg-dir) (mapv str (fs/list-dir reg-dir)))})
         (when reg
-          (let [b1 (track! (launch! proj xdg ["--mcp-attach"]))]
-            (let [h (handshake! b1 "bridge 1")]
-              (check! "the listener declares tools.listChanged"
-                      (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
-            (let [r (request! b1 "tools/list" {} 60000)
-                  names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-              (check! "tools/list has exactly the twenty window tools"
-                      (and (= 20 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
-            (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
-              (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
-            (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]
-              (check! "console since 0 starts with mark"
-                      (and (string? (:text r)) (str/starts-with? (:text r) "mark ")) r))
-            (let [x (bridge-exit! b1)]
-              (check! "bridge 1 exits 0 within 10 s of stdin closing"
-                      (and (not= x ::timeout) (zero? (:exit x)))
-                      (if (= x ::timeout) "still running after 10 s" (:exit x))))
-            (check! "bridge 1 stdout is all JSON" (json-lines? b1) @(:lines b1))
-            (check! "the window process survives the detach" (alive? wjp) {:pid wpid}))
-          (let [b2 (track! (launch! proj xdg ["--mcp-attach"]))]
-            (handshake! b2 "bridge 2")
-            (let [r (tool! b2 "jonquil_eval" {"code" "(* 6 7)"} 60000)]
-              (check! "second bridge eval (* 6 7) => 42" (ends-with? r "=> 42") r))
-            (let [x (bridge-exit! b2)]
-              (check! "bridge 2 exits 0 within 10 s of stdin closing"
-                      (and (not= x ::timeout) (zero? (:exit x)))
-                      (if (= x ::timeout) "still running after 10 s" (:exit x))))
-            (check! "bridge 2 stdout is all JSON" (json-lines? b2) @(:lines b2))
-            (check! "the window process survives the second detach" (alive? wjp) {:pid wpid})))
-        ;; SIGTERM the window we launched
-        (let [kids-before (children wpid)]
-          (.destroy wjp)
-          (let [x (deref (:proc win) 20000 ::timeout)]
-            (check! "window exits within 20 s of SIGTERM" (not= x ::timeout)
-                    "still running after 20 s")
-            (Thread/sleep 500)
-            (check! "no window child remains"
-                    (empty? (filter (fn [k] (zero? (:exit @(p/process ["kill" "-0" k] {:err :string :out :string}))))
-                                    kids-before))
-                    kids-before)
-            (check! "the registry file is gone"
-                    (not (and reg (fs/exists? reg)))
-                    {:reg reg :left (when (fs/exists? reg-dir) (mapv str (fs/list-dir reg-dir)))}))))
+          (first-bridge-checks! (track! (launch! proj xdg ["--mcp-attach"])) wjp wpid)
+          (second-bridge-checks! (track! (launch! proj xdg ["--mcp-attach"])) wjp wpid))
+        (window-sigterm-checks! win wjp wpid reg reg-dir))
       (finally
         (doseq [pr @procs] (try (p/destroy-tree pr) (catch Throwable _ nil)))
         (fs/delete-tree tmp)))
-    (let [fails (count (remove true? @results))]
-      (println (str "[mcp-smoke] " (- (count @results) fails) "/" (count @results) " passed"))
-      (System/exit (if (zero? fails) 0 1)))))
+    (print-summary-and-exit!)))
 
 (cond (attach?) (attach-main)
       (window?) (window-main)
