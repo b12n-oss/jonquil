@@ -156,6 +156,18 @@
           (>= (System/currentTimeMillis) deadline) ::timeout
           :else (recur))))))
 
+(defn- exit-result
+  "What a shell that exited on its own with status exit and output out
+  gives: {:out out} for a clean exit, and also when the file size limit
+  stopped it (153, which is 128 + SIGXFSZ) after it had printed the PATH.
+  Otherwise {:reason r}, naming the limit when that is what stopped it."
+  [exit out]
+  (cond
+    (and exit (zero? exit)) {:out out}
+    (and (= 153 exit) (tp/parse-answer out)) {:out out}
+    (= 153 exit) {:reason "wrote a file past the size limit the lookup sets"}
+    :else {:reason "failed"}))
+
 (defn- run-shell
   "Spawns the probe with stdout going to a temp file, so the one deadline
   covers the shell's whole run (a pipe would also wait for every process
@@ -176,8 +188,7 @@
             (and stopped? (tp/parse-answer out)) {:out out}
             (= ::timeout r) {:reason "timed out"}
             (= ::too-much r) {:reason "printed no PATH"}
-            (zero? (:exit r)) {:out out}
-            :else {:reason "failed"})))
+            :else (exit-result (:exit r) out))))
       (finally (.delete tmp)))))
 
 (defn- lookup [{:keys [shell] :as opts}]

@@ -248,3 +248,17 @@
       (finally
         @(p/process {} "pkill" "-9" "-f" "jonquil-86495")
         (.delete out)))))
+
+(deftest exit-result-test
+  ;; 153 is 128 + SIGXFSZ (25 on Linux and macOS): the kernel stopped the
+  ;; shell, or the last thing it ran, at the file size limit.
+  (let [answer "\n__JONQUIL_PATH__/a:/b__END__\n"]
+    (is (= {:out answer} (#'lp/exit-result 0 answer)))
+    (is (= {:out "junk"} (#'lp/exit-result 0 "junk")) "a clean exit is parsed by the caller")
+    (is (= {:out answer} (#'lp/exit-result 153 answer))
+        "a PATH printed before the limit stopped the shell is still used")
+    (is (= {:reason "wrote a file past the size limit the lookup sets"}
+           (#'lp/exit-result 153 "junk")))
+    (is (= {:reason "failed"} (#'lp/exit-result 1 answer)))
+    (is (= {:reason "failed"} (#'lp/exit-result 143 "")))
+    (is (= {:reason "failed"} (#'lp/exit-result nil "")))))
