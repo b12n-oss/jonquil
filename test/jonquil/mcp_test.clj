@@ -34,7 +34,9 @@
   (let [v (get-in (mcp/handle-message tools (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
                   ["result" "serverInfo" "version"])]
     (is (= (version/current-version) v))
-    (is (re-matches #"\d+\.\d+\.\d+.*|dev" v) v)))
+    ;; a number in a tagged checkout or a build, a bare commit hash in a
+    ;; checkout without tags (CI's), "dev" outside git
+    (is (and (string? v) (seq v)) (pr-str v))))
 
 (deftest initialize-unknown-version-gets-newest
   (is (= "2025-06-18"
