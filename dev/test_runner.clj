@@ -99,6 +99,7 @@
     jonquil.login-path-test
     jonquil.main-test
     jonquil.version-test
+    jonquil.version.describe-test
     jonquil.dialect-test
     jonquil.evaluator-test
     jonquil.nrepl.bencode-test

@@ -10,7 +10,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [jolt.process :as p]
-            [jonquil.version :as version]))
+            [jonquil.version.describe :as describe]))
 
 (def bundle-id "net.b12n.jonquil")
 (def bundle-dir "Jonquil.app")
@@ -74,24 +74,23 @@
   (binding [*out* *err*] (println (str "app-bundle: " msg)))
   (System/exit 1))
 
-(defn git-version []
-  (let [r (p/sh "git" "describe" "--tags" "--always")]
-    (if (zero? (:exit r)) (version/version-from-describe (str/trim (:out r))) "0.0.0")))
+(defn git-version
+  "The version for the Info.plist, the zip name and the stale-app check:
+  JONQUIL_VERSION when non-empty (the same value build-env bakes into the
+  binary), else the checkout's git describe, else 0.0.0."
+  []
+  (or (describe/build-version (System/getenv "JONQUIL_VERSION") #(describe/describe-checkout "."))
+      "0.0.0"))
 
 (defn build-env
   "The environment a `jolt build` of Jonquil gets so the binary carries its
-  version: JONQUIL_VERSION as already set (when non-empty), else the
-  checkout's git describe. Empty when neither exists, which bakes nothing."
+  version: see jonquil.version.describe/build-env."
   []
-  (if-let [v (or (version/baked (System/getenv "JONQUIL_VERSION"))
-                 (version/git-describe "."))]
-    {"JONQUIL_VERSION" v}
-    {}))
+  (describe/build-env (System/getenv "JONQUIL_VERSION") #(describe/describe-checkout ".")))
 
 (defn build!
-  "Runs `jolt build` of jonquil.main into ./jonquil (args after -o and the
-  like are passed on), with build-env, echoing its output. Exits with its
-  status."
+  "Runs `jolt build` of jonquil.main into ./jonquil, with build-env, echoing
+  its output. Exits with its status."
   [args]
   (let [{:keys [exit]} (apply p/shell {:continue true :extra-env (build-env)}
                               "jolt" "build" "-m" "jonquil.main" "-o" "jonquil" args)]
