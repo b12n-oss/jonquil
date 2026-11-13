@@ -87,6 +87,61 @@ Open With next to the installed one. Delete it or run
 `lsregister -u ./Jonquil.app` (it lives under
 `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`).
 
+### A self-contained release build
+
+```bash
+jolt app:release        # target/Jonquil.app and target/Jonquil-<version>-macos-arm64.zip
+jolt app:release-check  # launch it with /opt/homebrew unreadable
+```
+
+`jolt app:release` makes an app that runs on a Mac without Homebrew. The
+build Mac still needs Homebrew's GTK, because that is what gets bundled.
+`deps.edn`'s GTK libraries, and every library they load (43 today, about
+27 MB), are copied into `Contents/Frameworks` and relinked to find each
+other.
+
+`Contents/MacOS/Jonquil` is a small launcher. It puts that folder on
+`DYLD_LIBRARY_PATH` and runs `Contents/MacOS/jonquil-bin`. A launcher is
+needed because Jolt reads an `@executable_path` library path as relative to
+the project. The binary isn't called `jonquil`, because macOS file names
+ignore case and it would be the launcher.
+
+Each bundled library's licence text goes in
+`Contents/Resources/licenses/`, with `SOURCES.txt` naming its version and
+where its source is.
+
+The app is signed ad hoc. With `JONQUIL_SIGN_IDENTITY` set, it's signed
+with that identity instead. The task ends with these checks:
+- no bundled file loads from, or keeps an rpath into, Homebrew;
+- every bundled library's only rpath is `@loader_path`;
+- the plist lints;
+- the signature verifies;
+- the launcher is executable;
+- GTK's file-chooser schema loads from the bundle.
+
+GTK's GSettings schemas are compiled into
+`Contents/Resources/share/glib-2.0/schemas`, and the launcher adds that
+folder to `GSETTINGS_SCHEMA_DIR`. Without them, GLib aborts at the first
+file dialog with "No GSettings schemas are installed on the system".
+
+It fails at the start when this Mac has no Homebrew GTK to bundle. Once
+Jonquil has loaded, it drops `DYLD_LIBRARY_PATH` from its own environment
+(`jonquil.bundle-env`), so git, node or jank that it starts load their own
+libraries, not the bundle's.
+
+`jolt app:release-check` launches the app for 10 seconds in a sandbox that
+can't read `/opt/homebrew`, and fails if it exits early or loads a
+library from anywhere but the bundle and the system.
+
+**Limits of this build:**
+- **It needs macOS 26 and Apple Silicon.** Homebrew builds its libraries
+  for the macOS they were built on, and the plist's minimum version is
+  read from them.
+- **It isn't for publishing yet.** cairo's script interpreter, which GTK
+  links, brings in lzo, which is GPL-2.0. The task prints a warning while
+  it's there. It also warns when a Homebrew package is older than its
+  source link, or when a package ships no licence file.
+
 ### Where tools come from in a Finder launch
 
 A Finder or Dock launch inherits a bare `PATH`, so `jolt`, `jank`,

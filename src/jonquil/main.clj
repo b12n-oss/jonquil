@@ -2,6 +2,7 @@
   "Jonquil's entry point: delegates to jonquil.gtk.window, which builds the
   window and blocks in the GTK main loop."
   (:require [clojure.java.io :as io]
+            [jonquil.bundle-env :as bundle-env]
             [jonquil.gtk.window :as window]
             [jonquil.login-path :as login-path]
             [jonquil.mcp :as mcp]
@@ -156,6 +157,9 @@
            (println "jonquil: stopping every runtime failed:" (ex-message e))))))
 
 (defn- run-main [args plugins?]
+  ;; a release Jonquil.app's launcher set DYLD_LIBRARY_PATH for GTK, now
+  ;; loaded: nothing Jonquil starts may inherit it
+  (bundle-env/drop-bundle-dyld!)
   (when-let [m (attach-args args)]
     (System/exit (attach-mcp! m)))
   ;; Asks the login shell for PATH in the background when launched from

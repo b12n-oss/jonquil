@@ -4,6 +4,7 @@
 (def namespaces
   ;; Project namespaces in dependency order. Add each one as it lands.
   '[jonquil.core
+    jonquil.bundle-env
     jonquil.dialect
     jonquil.parts.extra
     jonquil.parts.command-palette
