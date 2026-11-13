@@ -1,10 +1,8 @@
 name: Site
 
-# Manual only, on purpose: Jonquil is a private repo and pays for every
-# Actions run, so this workflow carries no push or pull_request trigger.
-# Run it from the Actions tab (or `gh workflow run site.yml`) when you want
-# the answer; the push/pull_request triggers come back when the repo goes
-# public. The generator lives in jlt-commons/docs-engine; this repo owns
+# Builds and checks the docs on every push to main and every pull request,
+# and by hand from the Actions tab (or `gh workflow run site.yml`). The
+# generator lives in jlt-commons/docs-engine; this repo owns
 # its content, its config in docs/site.edn, and nothing else about the
 # rendering.
 #
@@ -14,10 +12,13 @@ name: Site
 # PUBLISHING IS OFF. The deploy job is gated on the PUBLISH_SITE repository
 # variable, which does not exist, and GitHub Pages is not enabled on this
 # repo. Both must change for anything to be served. That is deliberate:
-# this repo is private and its docs are not public until its owner decides
-# they are.
+# Jonquil's site is https://jonquil.b12n.app, built elsewhere, so this
+# workflow only checks that the docs build.
 
 "on":
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:

@@ -1,10 +1,11 @@
 name: Lint
 
-# Manual only, on purpose: Jonquil is a private repo and stays that way
-# until the user decides to open-source it, so this workflow carries no
-# push, pull_request or schedule trigger. Run it from the Actions tab (or
-# `gh workflow run lint.yml`) when you want the answer, not on every push.
+# Runs on every push to main and on every pull request, and by hand from
+# the Actions tab (or `gh workflow run lint.yml`).
 "on":
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
