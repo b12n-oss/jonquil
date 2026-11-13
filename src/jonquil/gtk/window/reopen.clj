@@ -3,10 +3,12 @@
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.session :as win-session]
             [jonquil.gtk.window.tabs :as win-tabs]
-            [jonquil.last-session :as last-session]))
+            [jonquil.last-session :as last-session]
+            [jonquil.tabs :as tabs]))
 
 ;; --- last session's tabs -----------------------------------------------------
 ;; ctx is the window's tab map (tab-ctx), which carries :tree-pane,
@@ -56,6 +58,26 @@
                   (reduce (fn [acc p] (if (reopen-failed? ctx p) (conj acc (.getName (java.io.File. ^String p))) acc))
                           [] (:tabs entry))))
 
+(defn- pristine?
+  "True when the window holds one clean Untitled tab."
+  [{:keys [tabs]}]
+  (let [ts @tabs
+        t (first ts)]
+    (boolean (and (= 1 (count ts))
+                  (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))})))))
+
+(declare restore-session!)
+
+(defn folder-arrived!
+  "Brings the tabs in step with a folder the tree was just re-rooted to
+  from outside (last-session/arrival-step): the folder's own remembered tabs take the
+  place of a reopen still pending, or open now in an unused window."
+  [{:keys [session-restoring? session-pending] :as ctx}]
+  (case (last-session/arrival-step {:restoring? @session-restoring? :pristine? (pristine? ctx)})
+    :swap (reset! session-pending (session-entry! ctx {:reroot? false}))
+    :reopen (restore-session! ctx {:reroot? false})
+    :keep nil))
+
 (defn restore-session!
   "Reopens the tabs sessions.edn holds for the tree's root, in order, and
   selects the one that was active (session-entry! picks the entry and does
@@ -100,7 +122,8 @@
   two of them. Then done! runs, even when the reopen threw (said on the
   console). Does nothing if :session-restoring? went false first, which a
   quit does."
-  [{:keys [cv win session-restoring?] :as ctx} entry done!]
+  [{:keys [cv win session-restoring? session-pending] :as ctx} entry done!]
+  (reset! session-pending entry)
   (reset! session-restoring? true)
   (after-first-frame!
    win
@@ -108,7 +131,11 @@
      (when @session-restoring?
        (reset! session-restoring? false)
        (try
-         (reopen-entry! ctx entry)
+         ;; the entry as it is now: a folder that arrived meanwhile
+         ;; replaced it with its own (folder-arrived!)
+         (let [e @session-pending]
+           (reset! session-pending nil)
+           (when (seq (:tabs e)) (reopen-entry! ctx e)))
          (catch :default e
            (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))))
        (done!)))))

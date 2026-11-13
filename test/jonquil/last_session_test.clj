@@ -132,3 +132,10 @@
     (is (nil? (ls/write-atomically! p "{:a 1}" {:owner-only? true})))
     (is (= "{:a 1}" (slurp p)))
     (is (= "rw-------" (perms p)))))
+
+(deftest arrival-step-test
+  ;; a folder handed over from outside: Finder's Open With, a Dock drop
+  (is (= :swap (ls/arrival-step {:restoring? true :pristine? true})) "the pending reopen was for another project")
+  (is (= :swap (ls/arrival-step {:restoring? true :pristine? false})))
+  (is (= :reopen (ls/arrival-step {:restoring? false :pristine? true})) "an unused window takes the folder's tabs")
+  (is (= :keep (ls/arrival-step {:restoring? false :pristine? false})) "tabs the user has are left alone"))

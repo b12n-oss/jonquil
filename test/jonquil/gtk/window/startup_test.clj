@@ -121,6 +121,7 @@
                  :source-ctx :sel-ctx :settings-path* :inspect-last-fn :inspect-form-fn :open-find-fn :open-replace-fn
                  :tabs :next-id :notebook :theme-name :completion-opts :active-id :active-tab :popovers :tree-pane
                  :tree-saved! :folder-result* :session-live? :session-last :session-error :session-restoring?
+                 :session-pending
                  :window-key-args :repl-complete-fn :parinfer-mode-read :parinfer-status-fn :parinfer-label-update!
                  :part-contribution :part-error! :recent-tabs :hint-label :hints-on?}
                (set (keys ctx))))
@@ -147,6 +148,7 @@
                   cview/append! (fn [_ k t] (l [:append k t]))
                   win-status/set-status! (fn [_ t] (l [:status t]))
                   g/gtk-toggle-button-set-active (fn [o v] (l [:toggle o v]))
+                  win-reopen/folder-arrived! (fn [c] (l [:arrived c]))
                   win-tabs/open-file! (fn [c p] (l [:open c p]) (when (= p "/bad.clj") {:error "no"}))]
       (let [s (#'win-startup/build-first-tab (#'win-startup/build-tab-ctx w))
             folder-result! (:folder-result! s)]
@@ -161,7 +163,9 @@
           (is (= [[:show-model [:model "/p"]] [:apply [:selection "/p" :clj]] [:hooks :on-reroot [{:path "/p"}]]
                   [:append :error "; open folder: gone\n"] [:status "hi"]
                   [:show-model [:model dir]] [:apply [:selection dir :clj]] [:hooks :on-reroot [{:path dir}]]
-                  [:toggle ::files 1] [:open ::ctx "/a.clj"] [:open ::ctx "/bad.clj"] [:status "Couldn't open bad.clj: no"]]
+                  ;; a folder from outside: the tree, then its own tabs
+                  [:toggle ::files 1] [:arrived ::ctx]
+                  [:open ::ctx "/a.clj"] [:open ::ctx "/bad.clj"] [:status "Couldn't open bad.clj: no"]]
                  @log)))))))
 
 (deftest build-makes-the-first-bindings-test

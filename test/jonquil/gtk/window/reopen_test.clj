@@ -1,7 +1,8 @@
 (ns jonquil.gtk.window.reopen-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [jolt.ffi :as ffi]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.reopen :as win-reopen]
             [jonquil.gtk.window.session :as win-session]
@@ -102,7 +103,8 @@
 (deftest reopen-later-test
   (let [log (atom []) later (atom nil) throw? (atom false)
         r (atom false)
-        ctx {:cv ::cv :win ::win :session-restoring? r}
+        pending (atom nil)
+        ctx {:cv ::cv :win ::win :session-restoring? r :session-pending pending}
         done! (fn [] (swap! log conj :done))]
     (with-redefs [win-reopen/after-first-frame! (fn [win f] (swap! log conj [:frame win]) (reset! later f))
                   win-reopen/reopen-entry! (fn [c en] (swap! log conj [:reopen (= c ctx) en]) (when @throw? (throw (ex-info "boom" {}))))
@@ -122,4 +124,42 @@
       (#'win-reopen/reopen-later! ctx {:tabs ["/c"]} done!)
       (reset! r false)
       (@later)
-      (is (= [[:frame ::win]] @log)))))
+      (is (= [[:frame ::win]] @log))
+      (testing "the entry is read when the frame comes, so a folder that arrived meanwhile decides it"
+        (reset! log [])
+        (reset! throw? false)
+        (#'win-reopen/reopen-later! ctx {:tabs ["/last-project"]} done!)
+        (reset! pending {:tabs ["/arrived"]})
+        (@later)
+        (is (= [[:frame ::win] [:reopen true {:tabs ["/arrived"]}] :done] @log))
+        (is (nil? @pending)))
+      (testing "an arrived folder with nothing remembered opens nothing"
+        (reset! log [])
+        (#'win-reopen/reopen-later! ctx {:tabs ["/last-project"]} done!)
+        (reset! pending nil)
+        (@later)
+        (is (= [[:frame ::win] :done] @log))))))
+
+(deftest folder-arrived-test
+  (let [log (atom [])
+        tab (fn [path] {:path (atom path) :ed ::ed})
+        ctx (fn [restoring? tabs] {:session-restoring? (atom restoring?) :session-pending (atom ::old) :tabs (atom tabs)})]
+    (with-redefs [editor/editor-text (fn [_] "")
+                  win-reopen/session-entry! (fn [_ opts] (swap! log conj [:entry opts]) ::theirs)
+                  win-reopen/restore-session! (fn [_ opts] (swap! log conj [:restore opts]))]
+      (testing "a reopen is pending: the folder's entry takes its place, nothing opens yet"
+        (let [c (ctx true [(tab nil)])]
+          (win-reopen/folder-arrived! c)
+          (is (= ::theirs @(:session-pending c)))
+          (is (= [[:entry {:reroot? false}]] @log))))
+      (testing "an unused window: the folder's tabs open now"
+        (reset! log [])
+        (let [c (ctx false [(tab nil)])]
+          (win-reopen/folder-arrived! c)
+          (is (= [[:restore {:reroot? false}]] @log))
+          (is (= ::old @(:session-pending c)))))
+      (testing "a window with the user's tabs: nothing"
+        (reset! log [])
+        (win-reopen/folder-arrived! (ctx false [(tab "/mine.clj")]))
+        (win-reopen/folder-arrived! (ctx false [(tab nil) (tab nil)]))
+        (is (= [] @log))))))
