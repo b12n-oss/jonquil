@@ -1,4 +1,5 @@
-;; jolt-metrics config for `jolt metrics` (report only, never a gate).
+;; jolt-metrics config, read by `jolt metrics` (a report, which never fails)
+;; and by `jolt metrics:gate` (which does).
 ;; No :test-paths: dev (the fake servers, demo shots, the self-test harness)
 ;; is queued like src and test, and jolt metrics:gate holds src/, test/, dev/
 ;; and ci/ critical-free (ci/metrics-allow.edn). A path named in :test-paths

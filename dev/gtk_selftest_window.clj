@@ -19,15 +19,20 @@
   order-e, each requiring the row namespaces it lists. This file joins the
   parts into row-fns (the last row really closes the window, so order
   matters), and keeps the driver and -main."
+  ;; probe-part stays ahead of every require that loads jonquil.parts,
+  ;; jonquil.keymap, jonquil.palette or jonquil.command-registry, which the
+  ;; order-* parts do through their rows: those namespaces build their tables
+  ;; as they load, and the probe's spec has to be in them. Sorting this list
+  ;; by name puts order-a first and the :probe-part row then fails.
   (:require [selftest-keys]
             [clojure.core.async :as a :refer [<! go timeout]]
+            [gtk-selftest-window.probe-part]
             [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-window.order-a :as order-a]
             [gtk-selftest-window.order-b :as order-b]
             [gtk-selftest-window.order-c :as order-c]
             [gtk-selftest-window.order-d :as order-d]
             [gtk-selftest-window.order-e :as order-e]
-            [gtk-selftest-window.probe-part]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :as cb]
