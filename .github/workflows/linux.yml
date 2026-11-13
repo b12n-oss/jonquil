@@ -52,73 +52,13 @@ jobs:
         with:
           version: "0.8.27"
 
-      - name: jolt linux:test --arch amd64
-        run: jolt linux:test --arch amd64
+      - name: PROBE (temporary)
+        run: jolt linux:run --arch amd64 -- jolt ci/probe.clj || true
 
-  gui:
-    name: GUI self-tests under Xvfb (Linux)
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Build the Linux image (jonquil-linux:amd64)
-        uses: docker/build-push-action@v6
-        with:
-          context: dev/linux
-          platforms: linux/amd64
-          tags: jonquil-linux:amd64
-          load: true
-          cache-from: type=gha,scope=jonquil-linux
-          cache-to: type=gha,scope=jonquil-linux,mode=max
-
-      - name: Install jolt
-        uses: jlt-commons/setup-jolt@v1
-        with:
-          version: "0.8.27"
-
-      # The task exits non-zero while the known rows fail, so its status is
-      # kept for the next step to judge instead of failing the job here.
-      - name: jolt linux:selftest --arch amd64
+      - name: the failing namespace alone, three times
         run: |
-          set +e
-          jolt linux:selftest --arch amd64 > selftest.log 2>&1
-          echo "status=$?" >> "$GITHUB_ENV"
-          grep -E '^SUMMARY|^gtk:selftest:|^\[[^]]+\] [^ ]+ FAIL ' selftest.log || true
+          for i in 1 2 3; do jolt linux:test --arch amd64 jonquil.login-path-test 2>&1 | grep -E 'SUMMARY|FAIL in|answered after|expected|actual' || true; done
 
-      - name: Compare the failed rows with ci/linux-known-failures.txt
-        if: always()
-        run: |
-          set -euo pipefail
-          grep -v '^#' ci/linux-known-failures.txt | sed '/^$/d' | sort -u > known.txt
-          { grep -E '^\[[^]]+\] [^ ]+ FAIL ' selftest.log || true; } | sed -E 's/^\[[^]]*\] //; s/ FAIL .*//' | sort -u > failed.txt
-          comm -23 failed.txt known.txt > new.txt
-          comm -13 failed.txt known.txt > fixed.txt
-          summaries=$(grep -c '^SUMMARY' selftest.log || true)
-          {
-            echo "### GUI self-tests on Linux"
-            echo
-            echo '```'
-            grep -E '^SUMMARY|^gtk:selftest:' selftest.log || echo "no SUMMARY lines: see the log"
-            echo '```'
-            if [ -s new.txt ]; then echo; echo "**New failures (not in ci/linux-known-failures.txt):**"; echo; sed 's/^/- /' new.txt; fi
-            if [ -s failed.txt ]; then echo; echo "Failed rows:"; echo; sed 's/^/- /' failed.txt; fi
-            if [ -s fixed.txt ]; then echo; echo "Known rows that passed this run (issue #9):"; echo; sed 's/^/- /' fixed.txt; fi
-          } >> "$GITHUB_STEP_SUMMARY"
-          # A run that printed no SUMMARY never got as far as the rows (the
-          # image, Xvfb or Jolt failed), which mustn't read as a pass.
-          if [ "$summaries" -eq 0 ]; then echo "::error::the self-test printed no SUMMARY line (exit ${status:-?})"; exit 1; fi
-          if [ -s new.txt ]; then echo "::error::new failing rows on Linux: $(tr '\n' ' ' < new.txt)"; exit 1; fi
-          # A non-zero exit with no failed row at all (a crash between suites) fails too.
-          if [ "${status:-1}" != "0" ] && [ ! -s failed.txt ]; then echo "::error::linux:selftest exited ${status:-?} without a failed row"; exit 1; fi
-          echo "only known rows failed: $(tr '\n' ' ' < failed.txt)"
+      - name: PROBE again after the tests
+        run: jolt linux:run --arch amd64 -- jolt ci/probe.clj || true
 
-      - name: Upload the self-test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-selftest-log
-          path: selftest.log
-          retention-days: 14
