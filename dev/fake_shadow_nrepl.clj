@@ -161,7 +161,7 @@
 
 (defn- answer-forms!
   "Routes the request's forms by the session's state."
-  [{:keys [srv opts sessions sid reply cljs?] :as ctx} forms]
+  [{:keys [srv opts sid reply cljs?] :as ctx} forms]
   (cond
     (= ::unreadable forms)
     (do (reply {"err" "Syntax error reading source"}) (reply {"status" ["done"]}))
