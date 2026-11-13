@@ -11,8 +11,10 @@
 # Paths go to the app through open(1), so the prompt comes back at once.
 # Files alone go to a running Jonquil, as a double click in Finder does. A
 # folder among them starts another Jonquil, because a running one would
-# move its file tree to that folder and leave the project it had open. This
-# file lives at Jonquil.app/Contents/Resources/bin/jonquil and finds its app from
+# move its file tree to that folder and leave the project it had open. The
+# new one gets its paths as arguments: handed over as documents they arrive
+# after the window has started, which by then has reopened the tabs of the
+# project used last. This file lives at Jonquil.app/Contents/Resources/bin/jonquil and finds its app from
 # there, through any symlinks that lead to it.
 
 # with CDPATH set, cd looks there first and prints where it went
@@ -49,13 +51,13 @@ done
 
 # open(1) takes relative paths, but an absolute one reads the same wherever
 # the running Jonquil's own folder is
-new_window=
+has_folder=
 n=$#
 while [ "$n" -gt 0 ]; do
   arg="$1"
   shift
   if [ -d "$arg" ]; then
-    new_window=-n
+    has_folder=yes
     arg="$(cd "$arg" && pwd)"
   else
     dir="$(cd "$(dirname "$arg")" && pwd)"
@@ -66,4 +68,7 @@ while [ "$n" -gt 0 ]; do
   n=$((n - 1))
 done
 
-exec open $new_window -a "$app" "$@"
+if [ -n "$has_folder" ]; then
+  exec open -n -a "$app" --args "$@"
+fi
+exec open -a "$app" "$@"

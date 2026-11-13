@@ -52,10 +52,12 @@
 
 (deftest paths-go-to-open-test
   (let [{:keys [app work] :as fx} (fixture)]
+    ;; a new window gets its paths after --args, so it starts in that
+    ;; folder with that folder's own tabs
     (testing "no argument opens the current folder in a new window"
-      (is (= ["open" "-n" "-a" app work] (:got (run fx "")))))
+      (is (= ["open" "-n" "-a" app "--args" work] (:got (run fx "")))))
     (testing "a folder among the paths asks for a new window; relative paths become absolute, and a space survives"
-      (is (= ["open" "-n" "-a" app (str work "/a.clj") (str work "/sub") work]
+      (is (= ["open" "-n" "-a" app "--args" (str work "/a.clj") (str work "/sub") work]
              (:got (run fx "a.clj sub .")))))
     (testing "files alone go to the running Jonquil"
       (is (= ["open" "-a" app (str work "/a.clj")] (:got (run fx "a.clj"))))
@@ -70,14 +72,14 @@
     (.mkdirs (io/file elsewhere "sub"))
     (io/delete-file out true)
     (is (zero? (:exit (p/sh "sh" "-c" (str "cd '" work "' && CDPATH='" elsewhere "' PATH='" root "/fakebin':\"$PATH\" '" link "' sub a.clj")))))
-    (is (= ["open" "-n" "-a" app (str work "/sub") (str work "/a.clj")] (str/split-lines (slurp out))))))
+    (is (= ["open" "-n" "-a" app "--args" (str work "/sub") (str work "/a.clj")] (str/split-lines (slurp out))))))
 
 (deftest a-file-in-the-root-folder-test
   ;; dirname gives /, and "//hosts" would be a different path on some systems
   (let [{:keys [app] :as fx} (fixture)]
     (is (= ["open" "-a" app "/etc/hosts"] (:got (run fx "/etc/hosts"))))
     (when (.exists (io/file "/etc"))
-      (is (= ["open" "-n" "-a" app "/etc"] (:got (run fx "/etc/")))))))
+      (is (= ["open" "-n" "-a" app "--args" "/etc"] (:got (run fx "/etc/")))))))
 
 (deftest a-missing-path-is-an-error-test
   (let [fx (fixture)
