@@ -93,22 +93,33 @@
   (* 1024 1024))
 
 (def ^:private write-limit-blocks
-  "The file size limit the probe shell runs under, in `ulimit -f` blocks:
-  32 MiB where a block is 512 bytes (dash), 64 MiB where it is 1024 (bash as
-  /bin/sh on macOS). Far above read-cap, so a shell rc that writes a history
-  file or a cache during startup isn't cut off, and small enough that a
-  runaway shell can't fill the disk."
-  65536)
+  "The file size limit the probe shell runs under off macOS, in `ulimit -f`
+  blocks: 1 GiB where a block is 512 bytes (dash), 2 GiB where it is 1024
+  (bash as /bin/sh). It is that large because the limit is a hard one that
+  everything the shell's rc files start inherits and keeps, so a daemon
+  started from there must not meet it in normal use. A runaway shell still
+  stops within seconds."
+  2097152)
+
+(defn- limit-command
+  "argv run under a file size limit of blocks, by /bin/sh, which then execs
+  it, so the process tree and the exit status stay argv's own. The kernel
+  stops a process that writes more than that to one file."
+  [argv blocks]
+  (into ["/bin/sh" "-c" (str "ulimit -f " blocks " 2>/dev/null; exec \"$@\"") "sh"] argv))
 
 (defn- bounded-command
-  "argv run under a file size limit, by /bin/sh, which then execs it, so the
-  process tree and the exit status stay argv's own. The kernel stops a
-  process that writes more than write-limit-blocks to one file. wait-for's
-  poll of the output's size stops it sooner, at read-cap, but only when this
-  process gets to run: on a GitHub Linux runner (2026-11-14) the first poll
-  took 219 s while `yes` wrote 90 GB."
-  [argv]
-  (into ["/bin/sh" "-c" (str "ulimit -f " write-limit-blocks " 2>/dev/null; exec \"$@\"") "sh"] argv))
+  "argv as the probe runs it on os (the os.name property): unchanged on
+  macOS, under limit-command's file size limit elsewhere. wait-for's poll of
+  the output's size stops a runaway shell sooner, at read-cap, but on a
+  GitHub Linux runner (2026-11-14) the first poll took 219 s while `yes`
+  wrote 90 GB, for a reason not yet found. The limit holds whether or not
+  the poll runs in time. macOS keeps the plain command because the delay
+  wasn't seen there."
+  [argv os]
+  (if (= "Mac OS X" os)
+    argv
+    (limit-command argv write-limit-blocks)))
 
 (defn- read-capped [^java.io.File f]
   (try
@@ -150,13 +161,13 @@
   covers the shell's whole run (a pipe would also wait for every process
   holding it open). Returns {:out s} or {:reason r}. On timeout, or once the
   output passes read-cap, the shell's process tree is killed, and whatever it
-  had printed is still parsed. The shell also runs under bounded-command's
-  file size limit, which holds even when this process is too starved to poll."
+  had printed is still parsed. Off macOS the shell also runs under
+  bounded-command's file size limit, which holds even when the poll is late."
   [{:keys [shell default timeout-ms]}]
   (let [tmp (java.io.File/createTempFile "jonquil-login-path-" ".out")]
     (try
       (let [proc (apply p/process {:in (io/file "/dev/null") :out tmp :err :discard}
-                        (bounded-command (tp/shell-command shell default)))
+                        (bounded-command (tp/shell-command shell default) (System/getProperty "os.name")))
             r (wait-for proc tmp timeout-ms)
             stopped? (contains? #{::timeout ::too-much} r)]
         (when stopped? (kill-tree! proc))

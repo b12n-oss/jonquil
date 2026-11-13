@@ -96,7 +96,12 @@ jobs:
           { grep -E '^\[[^]]+\] [^ ]+ FAIL ' selftest.log || true; } | sed -E 's/^\[[^]]*\] //; s/ FAIL .*//' | sort -u > failed.txt
           comm -23 failed.txt known.txt > new.txt
           comm -13 failed.txt known.txt > fixed.txt
+          # gtk:selftest runs ten suites (bb.edn), each printing one SUMMARY.
+          # Fewer means a suite crashed or never started, which a list of
+          # failed rows can't show. Change this number with the task.
+          suites=10
           summaries=$(grep -c '^SUMMARY' selftest.log || true)
+          summaries=${summaries:-0}
           {
             echo "### GUI self-tests on Linux"
             echo
@@ -107,9 +112,7 @@ jobs:
             if [ -s failed.txt ]; then echo; echo "Failed rows:"; echo; sed 's/^/- /' failed.txt; fi
             if [ -s fixed.txt ]; then echo; echo "Known rows that passed this run (issue #9):"; echo; sed 's/^/- /' fixed.txt; fi
           } >> "$GITHUB_STEP_SUMMARY"
-          # A run that printed no SUMMARY never got as far as the rows (the
-          # image, Xvfb or Jolt failed), which mustn't read as a pass.
-          if [ "$summaries" -eq 0 ]; then echo "::error::the self-test printed no SUMMARY line (exit ${status:-?})"; exit 1; fi
+          if [ "$summaries" -ne "$suites" ]; then echo "::error::$summaries of $suites self-test suites printed a SUMMARY (exit ${status:-?}), so a suite didn't finish"; exit 1; fi
           if [ -s new.txt ]; then echo "::error::new failing rows on Linux: $(tr '\n' ' ' < new.txt)"; exit 1; fi
           # A non-zero exit with no failed row at all (a crash between suites) fails too.
           if [ "${status:-1}" != "0" ] && [ ! -s failed.txt ]; then echo "::error::linux:selftest exited ${status:-?} without a failed row"; exit 1; fi
