@@ -1,6 +1,7 @@
 (ns jonquil.gtk.parts.command-palette
   "The command palette, the console's ! line and the describe-keys commands
-  as a window part (the commands are jonquil.parts.command-palette/spec).
+  as a window part (the commands are jonquil.parts.command-palette/spec,
+  Show Jonquil's Version among them).
   Moved out of jonquil.gtk.window: the palette's entries, the ! line's
   handler, and Describe Key's pending flag, the recent keys and the key
   lists that the window's key handler reads from its context."
@@ -15,7 +16,8 @@
             [jonquil.palette :as pal-data]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.settings :as settings]
-            [jonquil.theme :as theme]))
+            [jonquil.theme :as theme]
+            [jonquil.version :as version]))
 
 (defn- palette-entries
   "The palette's entries for the live plugins' commands and keys."
@@ -85,7 +87,8 @@
                         (print! ["; Press the key to describe."]))
      :key-bindings-fn (fn [] (print! (describe/binding-lines
                                       (assoc (live-keys) :os (System/getProperty "os.name")))))
-     :recent-keys-fn (fn [] (print! (describe/recent-lines @recent-keys)))}))
+     :recent-keys-fn (fn [] (print! (describe/recent-lines @recent-keys)))
+     :version-fn (fn [] (print! [(str "; " (version/version-line))]))}))
 
 (defn- install
   "The command palette part for one window: opens the palette, resets the

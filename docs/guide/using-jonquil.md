@@ -28,6 +28,11 @@ Edge cases sit in folded blocks: click a bold line to open one.
 - The window title shows the open file (or `Untitled`) and a leading `* `
   for unsaved changes.
 
+To see which version you run, use **Show Jonquil's version** in the command
+palette, which prints it to the console, or run `jonquil --version` in a
+terminal, which prints it and exits without opening a window. For the
+downloaded app that is `/Applications/Jonquil.app/Contents/MacOS/Jonquil --version`.
+
 ## Running a program
 
 **Run**, **F5** or **Cmd/Ctrl+R** evaluates the whole Definitions pane. The
