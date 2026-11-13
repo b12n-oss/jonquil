@@ -85,6 +85,16 @@
 (deftest launcher-marks-the-bundle-test
   (is (str/includes? (ar/launcher-text) "export JONQUIL_BUNDLE_FRAMEWORKS=\"$here/../Frameworks\"")))
 
+(deftest launcher-points-glib-at-the-bundled-schemas-test
+  (is (str/includes? (ar/launcher-text)
+                     "export GSETTINGS_SCHEMA_DIR=\"$here/../Resources/share/glib-2.0/schemas${GSETTINGS_SCHEMA_DIR:+:$GSETTINGS_SCHEMA_DIR}\"")))
+
+(deftest gtk-schemas-test
+  (is (= ["org.gtk.gtk4.Inspector.gschema.xml" "org.gtk.gtk4.Settings.FileChooser.gschema.xml"]
+         (ar/gtk-schemas ["org.gtk.Demo4.gschema.xml" "org.gtk.gtk4.Settings.FileChooser.gschema.xml"
+                          "gschemas.compiled" "org.gtk.gtk4.Inspector.gschema.xml"]))
+      "GTK's own schemas, sorted; never the demo's or a compiled file"))
+
 (deftest lzo-test
   (is (true? (ar/lzo? ["libgtk-4.1.dylib" "liblzo2.2.dylib"])))
   (is (false? (ar/lzo? ["libgtk-4.1.dylib"]))))

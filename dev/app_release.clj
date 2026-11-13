@@ -79,6 +79,12 @@
                    (conj plan {:src src :name name :refs refs})))))
       plan)))
 
+(defn gtk-schemas
+  "GTK's own GSettings schema files among names (a keg's
+  share/glib-2.0/schemas), sorted: org.gtk.gtk4.*, never the demo's."
+  [names]
+  (vec (sort (filter #(re-matches #"org\.gtk\.gtk4\..*\.gschema\.xml" %) names))))
+
 (defn missing-natives
   "The :name of each :jolt/native entry with a :darwin list but none of
   its /opt/homebrew candidates in exists? (a set or fn of paths): the
@@ -108,6 +114,9 @@
        "# Jonquil drops DYLD_LIBRARY_PATH again once it's loaded, so git, node\n"
        "# or jank it starts load their own libraries (jonquil.bundle-env)\n"
        "export JONQUIL_BUNDLE_FRAMEWORKS=\"$here/../Frameworks\"\n"
+       "# GTK's GSettings schemas (a file dialog reads them), compiled into the\n"
+       "# bundle; searched before the system's, which it doesn't replace\n"
+       "export GSETTINGS_SCHEMA_DIR=\"$here/../Resources/share/glib-2.0/schemas${GSETTINGS_SCHEMA_DIR:+:$GSETTINGS_SCHEMA_DIR}\"\n"
        "exec \"$here/jonquil-bin\" \"$@\"\n"))
 
 (defn- older?
@@ -247,6 +256,23 @@
                "Contents/Frameworks are separate works under their own licences, listed\n"
                "with their sources in SOURCES.txt.\n"))))
 
+(def ^:private schemas (str contents "/Resources/share/glib-2.0/schemas"))
+
+(defn- write-schemas!
+  "Compiles GTK's GSettings schemas, from the gtk4 keg the bundle's
+  libgtk came from, into Resources/share/glib-2.0/schemas: without them
+  GLib aborts at the first file dialog."
+  [plan]
+  (let [gtk (some #(when (= "libgtk-4.1.dylib" (:name %)) (real-path (:src %))) plan)
+        [_ keg] (re-find #"^(/opt/homebrew/Cellar/gtk4/[^/]+)/" (str gtk))
+        src (str keg "/share/glib-2.0/schemas")
+        names (gtk-schemas (seq (.list (io/file src))))]
+    (when (empty? names) (fail! (str "no GTK GSettings schemas in " src)))
+    (.mkdirs (io/file schemas))
+    (doseq [n names] (sh! "cp" (str src "/" n) (str schemas "/" n)))
+    (sh! "/opt/homebrew/opt/glib/bin/glib-compile-schemas" schemas)
+    (println (str (count names) " GTK schemas compiled"))))
+
 (defn- macho-files
   "The Mach-O files of the bundle: the binary and every Frameworks dylib."
   []
@@ -272,7 +298,9 @@
    ["rpaths are @loader_path" (every? #(= ["@loader_path"] (otool-rpaths (sh! "otool" "-l" %))) (rest (macho-files)))]
    ["plutil -lint" (zero? (:exit (p/sh "plutil" "-lint" (str contents "/Info.plist"))))]
    ["codesign --verify --deep --strict" (zero? (:exit (p/sh "codesign" "--verify" "--deep" "--strict" app)))]
-   ["launcher executable" (.canExecute (io/file launcher))]])
+   ["launcher executable" (.canExecute (io/file launcher))]
+   ["GTK file chooser schema" (zero? (:exit (p/sh "/opt/homebrew/opt/glib/bin/gsettings" "--schemadir" schemas
+                                                  "list-keys" "org.gtk.gtk4.Settings.FileChooser")))]])
 
 (defn release!
   "Builds target/Jonquil.app and target/Jonquil-<version>-macos-arm64.zip."
@@ -290,7 +318,8 @@
     (println (str (count plan) " libraries in Frameworks"))
     (when (lzo? (map :name plan))
       (warn! "liblzo2 (GPL-2.0-or-later) is in the bundle (cairo's script interpreter needs it); don't publish this build"))
-    (write-licences! plan))
+    (write-licences! plan)
+    (write-schemas! plan))
   (sh! "cp" "resources/Jonquil.icns" (str contents "/Resources/Jonquil.icns"))
   (spit (str contents "/Info.plist")
         (app-bundle/info-plist {:version (app-bundle/git-version) :build (app-bundle/build-number)

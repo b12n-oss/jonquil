@@ -116,7 +116,13 @@ with that identity instead. The task ends with these checks:
 - every bundled library's only rpath is `@loader_path`;
 - the plist lints;
 - the signature verifies;
-- the launcher is executable.
+- the launcher is executable;
+- GTK's file-chooser schema loads from the bundle.
+
+GTK's GSettings schemas are compiled into
+`Contents/Resources/share/glib-2.0/schemas`, and the launcher adds that
+folder to `GSETTINGS_SCHEMA_DIR`. Without them, GLib aborts at the first
+file dialog with "No GSettings schemas are installed on the system".
 
 It fails at the start when this Mac has no Homebrew GTK to bundle. Once
 Jonquil has loaded, it drops `DYLD_LIBRARY_PATH` from its own environment
