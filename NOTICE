@@ -32,6 +32,20 @@ in src/jonquil/theme.clj, and includes none of their source:
 - Monokai: the original Monokai by Wimer Hazenberg, with the palette as
   https://github.com/oneKelvinSmith/monokai-emacs publishes it.
 
+Six more themes take their colours the same way:
+
+- Tokyo Night: tokyonight.nvim by folke, Apache-2.0
+  (https://github.com/folke/tokyonight.nvim, lua/tokyonight/colors/night.lua
+  and storm.lua).
+- Catppuccin Mocha and Latte: Catppuccin, MIT, copyright 2021 Catppuccin
+  (https://github.com/catppuccin/palette, palette.json).
+- One Dark: onedark.vim by Joshua Dick, MIT
+  (https://github.com/joshdick/onedark.vim, autoload/onedark.vim).
+- Kanagawa: kanagawa.nvim by Tommaso Laurenzi, MIT
+  (https://github.com/rebelot/kanagawa.nvim, lua/kanagawa/colors.lua).
+- Rosé Pine: Rosé Pine, MIT
+  (https://github.com/rose-pine/neovim, lua/rose-pine/palette.lua).
+
 Jonquil's Parinfer engine (src/jonquil/parinfer.clj), lifted from DrClojure,
 implements Parinfer v3.13.1 after parinfer.js
 (https://github.com/parinfer/parinfer.js), and its test cases

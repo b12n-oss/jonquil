@@ -37,11 +37,13 @@
       (is (not (contains? (set (:rainbow t)) (:red t)))))))
 
 (deftest dark-flags-test
-  (is (= [false true false true true false true true true true]
+  (is (= [false true false true true false true true true true
+          true true false true true true]
          (mapv #(:dark? (theme/theme %)) theme/theme-names))))
 
 (deftest popular-themes-test
-  (is (= [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai]
+  (is (= [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai
+          :tokyo-night :catppuccin-mocha :catppuccin-latte :one-dark :kanagawa :rose-pine]
          theme/theme-names))
   (doseq [k theme/theme-names]
     (testing (name k)
@@ -74,12 +76,14 @@
       (is (<= 2.4 (apply min (map #(contrast % bg) (concat (vals (:tokens t)) (:rainbow t) [(:red t)]))))))))
 
 (deftest next-theme-test
-  (is (= [:dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai :auto :light]
+  (is (= [:dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai
+          :tokyo-night :catppuccin-mocha :catppuccin-latte :one-dark :kanagawa :rose-pine :auto :light]
          (mapv theme/next-theme theme/choice-names)))
   (is (= :dark (theme/next-theme :bogus))))
 
 (deftest choice-test
-  (is (= [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai :auto]
+  (is (= [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai
+          :tokyo-night :catppuccin-mocha :catppuccin-latte :one-dark :kanagawa :rose-pine :auto]
          theme/choice-names))
   (is (every? theme/choice? theme/choice-names))
   (is (not (theme/choice? :bogus)))

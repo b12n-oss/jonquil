@@ -22,7 +22,16 @@
   for :string and :char, and the type or preprocessor face for :metatag.
   Which palette colours fill the rainbow and :red is Jonquil's choice,
   under the same two rules as above, and :find-highlight is the one colour
-  in each that is Jonquil's own, a dim tint picked to keep the text readable.")
+  in each that is Jonquil's own, a dim tint picked to keep the text readable.
+
+  Six more (Tokyo Night, Catppuccin Mocha and Latte, One Dark, Kanagawa,
+  Rosé Pine; added 2026-11-14) follow the same rules, with colours read from
+  folke/tokyonight.nvim's lua/tokyonight/colors/night.lua and storm.lua (night
+  builds on storm), catppuccin/palette's palette.json, joshdick/onedark.vim's
+  autoload/onedark.vim, rebelot/kanagawa.nvim's lua/kanagawa/colors.lua and
+  rose-pine/neovim's lua/rose-pine/palette.lua. One Dark's comment grey
+  (#5c6370 upstream) is a little lighter here, because the original sits
+  just under the 2.4 contrast floor against its background.")
 
 (def themes
   {:light
@@ -139,21 +148,92 @@
              :number "#ae81ff" :builtin "#66d9ef" :constant "#ae81ff"
              :metatag "#a6e22e"}
     :rainbow ["#fd971f" "#66d9ef" "#ae81ff" "#a6e22e" "#e6db74" "#fd5ff0" "#a1efe4"]
-    :console {:prompt "#66d9ef" :result "#e6db74" :system "#75715e"}}})
+    :console {:prompt "#66d9ef" :result "#e6db74" :system "#75715e"}}
+   :tokyo-night
+   {:name :tokyo-night :dark? true
+    :background "#1a1b26" :text "#c0caf5" :caret "#c0caf5"
+    :selection "#394b70" :find-highlight "#59502f" :red "#f7768e"
+    :changed-mark "#2ac3de"
+    :tokens {:comment "#565f89" :string "#9ece6a" :char "#9ece6a"
+             :regex "#b4f9f8" :keyword "#ff9e64" :special-form "#bb9af7"
+             :number "#ff9e64" :builtin "#7aa2f7" :constant "#ff9e64"
+             :metatag "#2ac3de"}
+    :rainbow ["#ff9e64" "#7aa2f7" "#bb9af7" "#9ece6a" "#e0af68" "#7dcfff" "#1abc9c"]
+    :console {:prompt "#7aa2f7" :result "#9ece6a" :system "#565f89"}}
+   :catppuccin-mocha
+   {:name :catppuccin-mocha :dark? true
+    :background "#1e1e2e" :text "#cdd6f4" :caret "#f5e0dc"
+    :selection "#45475a" :find-highlight "#5b5139" :red "#f38ba8"
+    :changed-mark "#74c7ec"
+    :tokens {:comment "#7f849c" :string "#a6e3a1" :char "#a6e3a1"
+             :regex "#f5c2e7" :keyword "#fab387" :special-form "#cba6f7"
+             :number "#fab387" :builtin "#89b4fa" :constant "#fab387"
+             :metatag "#f9e2af"}
+    :rainbow ["#fab387" "#89b4fa" "#cba6f7" "#a6e3a1" "#f9e2af" "#94e2d5" "#f5c2e7"]
+    :console {:prompt "#89b4fa" :result "#a6e3a1" :system "#7f849c"}}
+   :catppuccin-latte
+   {:name :catppuccin-latte :dark? false
+    :background "#eff1f5" :text "#4c4f69" :caret "#1e66f5"
+    :selection "#bcc0cc" :find-highlight "#f2d9a0" :red "#d20f39"
+    :changed-mark "#1e66f5"
+    :tokens {:comment "#7c7f93" :string "#40a02b" :char "#40a02b"
+             :regex "#e64553" :keyword "#fe640b" :special-form "#8839ef"
+             :number "#fe640b" :builtin "#1e66f5" :constant "#fe640b"
+             :metatag "#179299"}
+    :rainbow ["#fe640b" "#1e66f5" "#8839ef" "#40a02b" "#179299" "#7287fd" "#209fb5"]
+    :console {:prompt "#1e66f5" :result "#40a02b" :system "#7c7f93"}}
+   :one-dark
+   {:name :one-dark :dark? true
+    :background "#282c34" :text "#abb2bf" :caret "#61afef"
+    :selection "#3e4452" :find-highlight "#5c5230" :red "#e06c75"
+    :changed-mark "#61afef"
+    :tokens {:comment "#666f7e" :string "#98c379" :char "#98c379"
+             :regex "#56b6c2" :keyword "#d19a66" :special-form "#c678dd"
+             :number "#d19a66" :builtin "#61afef" :constant "#d19a66"
+             :metatag "#e5c07b"}
+    :rainbow ["#d19a66" "#61afef" "#c678dd" "#98c379" "#e5c07b" "#56b6c2" "#be5046"]
+    :console {:prompt "#61afef" :result "#98c379" :system "#666f7e"}}
+   :kanagawa
+   {:name :kanagawa :dark? true
+    :background "#1f1f28" :text "#dcd7ba" :caret "#c8c093"
+    :selection "#2d4f67" :find-highlight "#5a4f30" :red "#e82424"
+    :changed-mark "#7fb4ca"
+    :tokens {:comment "#727169" :string "#98bb6c" :char "#98bb6c"
+             :regex "#c0a36e" :keyword "#ffa066" :special-form "#957fb8"
+             :number "#d27e99" :builtin "#7e9cd8" :constant "#ffa066"
+             :metatag "#7aa89f"}
+    :rainbow ["#ffa066" "#7e9cd8" "#957fb8" "#98bb6c" "#e6c384" "#7fb4ca" "#d27e99"]
+    :console {:prompt "#7e9cd8" :result "#98bb6c" :system "#727169"}}
+   :rose-pine
+   {:name :rose-pine :dark? true
+    :background "#191724" :text "#e0def4" :caret "#ebbcba"
+    :selection "#403d52" :find-highlight "#5e5036" :red "#eb6f92"
+    :changed-mark "#9ccfd8"
+    :tokens {:comment "#6e6a86" :string "#f6c177" :char "#f6c177"
+             :regex "#95b1ac" :keyword "#c4a7e7" :special-form "#31748f"
+             :number "#c4a7e7" :builtin "#ebbcba" :constant "#c4a7e7"
+             :metatag "#9ccfd8"}
+    :rainbow ["#ebbcba" "#9ccfd8" "#c4a7e7" "#f6c177" "#31748f" "#95b1ac" "#908caa"]
+    :console {:prompt "#9ccfd8" :result "#f6c177" :system "#6e6a86"}}})
 
 (def theme-names
   "The palettes, one per entry in themes."
-  [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai])
+  [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai
+   :tokyo-night :catppuccin-mocha :catppuccin-latte :one-dark :kanagawa :rose-pine])
 
 (def choice-names
   "The cycle order Cmd/Ctrl+Shift+M walks. :auto is a choice, not a
   palette: resolve-choice maps it to :light or :dark."
-  [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai :auto])
+  [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai
+   :tokyo-night :catppuccin-mocha :catppuccin-latte :one-dark :kanagawa :rose-pine :auto])
 
 (def ^:private labels
   {:light "Light" :dark "Dark" :solarized "Solarized" :navy "Navy"
    :gruvbox-dark "Gruvbox Dark" :gruvbox-light "Gruvbox Light" :dracula "Dracula"
-   :nord "Nord" :zenburn "Zenburn" :monokai "Monokai" :auto "Auto"})
+   :nord "Nord" :zenburn "Zenburn" :monokai "Monokai"
+   :tokyo-night "Tokyo Night" :catppuccin-mocha "Catppuccin Mocha"
+   :catppuccin-latte "Catppuccin Latte" :one-dark "One Dark" :kanagawa "Kanagawa"
+   :rose-pine "Rosé Pine" :auto "Auto"})
 
 (defn label
   "The name a person reads for choice k: \"Gruvbox Dark\" for :gruvbox-dark."
