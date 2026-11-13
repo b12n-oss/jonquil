@@ -37,7 +37,30 @@
       (is (not (contains? (set (:rainbow t)) (:red t)))))))
 
 (deftest dark-flags-test
-  (is (= [false true false true] (mapv #(:dark? (theme/theme %)) theme/theme-names))))
+  (is (= [false true false true true false true true true true]
+         (mapv #(:dark? (theme/theme %)) theme/theme-names))))
+
+(deftest popular-themes-test
+  (is (= [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai]
+         theme/theme-names))
+  (doseq [k theme/theme-names]
+    (testing (name k)
+      (is (= k (:name (theme/theme k))))
+      (is (string? (theme/label k)))
+      (is (not-any? #{(:red (theme/theme k))} (:rainbow (theme/theme k)))
+          "an unmatched bracket never looks like a matched one"))))
+
+(deftest labels-test
+  (is (= "Gruvbox Dark" (theme/label :gruvbox-dark)))
+  (is (= "Auto" (theme/label :auto)))
+  (is (= "Light" (theme/label :light))))
+
+(deftest palette-entries-test
+  (let [es (theme/palette-entries)]
+    (is (= (mapv (fn [k] [:theme/use k]) theme/choice-names) (mapv :id es)))
+    (is (= "Use theme: Gruvbox Dark" (:doc (first (filter #(= [:theme/use :gruvbox-dark] (:id %)) es)))))
+    (is (every? #(= "theme" (:source %)) es))
+    (is (every? #(= [] (:chords %)) es))))
 
 (deftest readable-test
   ;; Floors are the measured minimums (2026-09-25). Solarized keeps the
@@ -51,11 +74,13 @@
       (is (<= 2.4 (apply min (map #(contrast % bg) (concat (vals (:tokens t)) (:rainbow t) [(:red t)]))))))))
 
 (deftest next-theme-test
-  (is (= [:dark :solarized :navy :auto :light] (mapv theme/next-theme theme/choice-names)))
+  (is (= [:dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai :auto :light]
+         (mapv theme/next-theme theme/choice-names)))
   (is (= :dark (theme/next-theme :bogus))))
 
 (deftest choice-test
-  (is (= [:light :dark :solarized :navy :auto] theme/choice-names))
+  (is (= [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai :auto]
+         theme/choice-names))
   (is (every? theme/choice? theme/choice-names))
   (is (not (theme/choice? :bogus)))
   (is (not (theme/choice? nil))))

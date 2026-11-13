@@ -435,11 +435,13 @@
   ;; A palette entry that is a vector ([:tab/switch id]) is the window's own,
   ;; not a registry command: the window-key-args fn that runs it, by the
   ;; entry's first element. The tab, panel (as its key does), Compare with
-  ;; tab (LM3), named layout (LM8) and Restore an Earlier World entries.
+  ;; tab (LM3), named layout (LM8), Use theme and Restore an Earlier World
+  ;; entries.
   {:tab/switch :switch-tab-fn
    :panel/switch :panel-focus-fn
    :compare/tab :compare-tab-fn
    :layout/use :layout-use-fn
+   :theme/use :theme-use-fn
    :pages/open :docs-page-fn
    :world/restore-from :world-restore-from-fn
    :change-set/open :change-set-open-fn})

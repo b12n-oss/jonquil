@@ -401,6 +401,7 @@
    :task (let [scene-ids ["window" "repl" "stdin" "stop" "unbalanced" "unicode" "run-while-running"
                           "find" "run-selection" "close-prompt"
                           "theme-light" "theme-dark" "theme-solarized" "theme-navy"
+                          "theme-gruvbox-dark" "theme-gruvbox-light" "theme-dracula" "theme-nord" "theme-zenburn" "theme-monokai"
                           "completion" "quick-doc" "rename" "inspector"
                           "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs" "file-tree"
                           "parinfer" "parinfer-project"

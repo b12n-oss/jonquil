@@ -17,6 +17,21 @@ Both were received under the Eclipse Public License 1.0. Jonquil distributes
 them, with its own code, under the Eclipse Public License 2.0, as section 7 of
 EPL-1.0 allows once a new version of the licence is published.
 
+Six of Jonquil's colour themes take their colours from popular editor themes.
+Jonquil uses only their published colour values, mapped to its own token kinds
+in src/jonquil/theme.clj, and includes none of their source:
+
+- Gruvbox Dark and Light: Gruvbox by morhetz, MIT/X11
+  (https://github.com/morhetz/gruvbox, colors/gruvbox.vim).
+- Dracula: Dracula Theme, MIT
+  (https://github.com/dracula/emacs, dracula-theme.el).
+- Nord: Nord by Sven Greb, MIT (https://github.com/nordtheme/nord,
+  src/nord.css, and the comment colour from https://github.com/nordtheme/vim).
+- Zenburn: the original Zenburn by Jani Nurminen (GNU GPL), with the palette
+  as https://github.com/bbatsov/zenburn-emacs publishes it.
+- Monokai: the original Monokai by Wimer Hazenberg, with the palette as
+  https://github.com/oneKelvinSmith/monokai-emacs publishes it.
+
 Jonquil's Parinfer engine (src/jonquil/parinfer.clj), lifted from DrClojure,
 implements Parinfer v3.13.1 after parinfer.js
 (https://github.com/parinfer/parinfer.js), and its test cases

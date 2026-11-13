@@ -423,13 +423,23 @@ normal behavior.
 
 ## Themes
 
-Cmd/Ctrl+Shift+M cycles light (the default), dark, solarized, navy and auto.
-The status bar shows the current one.
+Jonquil has ten themes: light (the default), dark, solarized and navy, and
+six popular ones from other editors, Gruvbox Dark, Gruvbox Light, Dracula,
+Nord, Zenburn and Monokai. To pick one by name, open the command palette
+(Cmd/Ctrl+Shift+P) and type "theme": each has a Use theme entry, and so does
+auto. Cmd/Ctrl+Shift+M cycles through them all in that order, ending with
+auto. The status bar shows the current one, and your choice is saved.
 
 ![Jonquil's window in the light theme](../images/theme-light.png)
 ![Jonquil's window in the dark theme](../images/theme-dark.png)
 ![Jonquil's window in the solarized theme](../images/theme-solarized.png)
 ![Jonquil's window in the navy theme](../images/theme-navy.png)
+![Jonquil's window in the Gruvbox Dark theme](../images/theme-gruvbox-dark.png)
+![Jonquil's window in the Gruvbox Light theme](../images/theme-gruvbox-light.png)
+![Jonquil's window in the Dracula theme](../images/theme-dracula.png)
+![Jonquil's window in the Nord theme](../images/theme-nord.png)
+![Jonquil's window in the Zenburn theme](../images/theme-zenburn.png)
+![Jonquil's window in the Monokai theme](../images/theme-monokai.png)
 
 A theme recolours both panes and GTK's chrome. Auto follows the system's
 Light or Dark mode on macOS; elsewhere it shows light.

@@ -116,25 +116,30 @@
     (when warning
       (cview/append! cv :system (str "; settings: " warning "\n")))))
 
-(defn- do-cycle-theme!
-  "The chord/:cycle-theme!* action. Advances to the next theme
-  (theme/next-theme over the choice, wrapping) and applies it, then saves {:theme k} to
+(defn- do-choose-theme!
+  "Applies choice k (a jonquil.theme choice key) and saves {:theme k} to
   settings-path -- read at CALL time (not captured once), so a self-test
   row can repoint it via :settings-path!* right before calling this. A
   save error is reported on the console as :system, but the theme switch
   itself already happened and is kept regardless. While a program is
   running, the status label is left alone --
   overwriting a live Running…/Waiting for input would make the status
-  lie, so only the idle case gets 'Theme: <name>'."
-  [{:keys [cv theme-choice settings-path status-label evaluating?] :as theme-ctx}]
-  (let [k (theme/next-theme @theme-choice)
-        r (apply-choice! theme-ctx k)]
+  lie, so only the idle case gets 'Theme: <name>'. Cycling and the
+  palette's Use theme entries both come here."
+  [{:keys [cv settings-path status-label evaluating?] :as theme-ctx} k]
+  (let [r (apply-choice! theme-ctx k)]
     (when-let [err (settings/save-settings! @settings-path {:theme k})]
       (cview/append! cv :system (str "; settings: " err "\n")))
     (when-not (evaluating?)
       (win-status/set-status! status-label (if (= :auto k)
                                              (str "Theme: auto (" (name r) ")")
                                              (str "Theme: " (name k)))))))
+
+(defn- do-cycle-theme!
+  "The chord/:cycle-theme!* action: the next theme (theme/next-theme over
+  the choice, wrapping), chosen through do-choose-theme!."
+  [{:keys [theme-choice] :as theme-ctx}]
+  (do-choose-theme! theme-ctx (theme/next-theme @theme-choice)))
 
 (defn- make-poll-cb
   "The appearance poll's GLib timeout callable. Built once, as the
@@ -160,7 +165,7 @@
     (assoc theme-ctx :poll-cb (make-poll-cb theme-ctx))))
 
 (defn build
-  "activate!'s theme and zoom bindings, in activate!'s order: the one shared GtkCssProvider, the zoom and theme atoms, zoom-fn, theme-ctx with its appearance poll callable, and the set and cycle fns. w holds what they read: :tabs :cv :settings-path* :status-label :evaluating-fn :closing?. Returns w with :provider :theme-name :theme-choice :system-dark-fn* :poll-armed? :arm-count :zoom-fn :theme-ctx :set-theme-fn and :cycle-theme-fn added; zoom-px and poll-cb are reached through theme-ctx."
+  "activate!'s theme and zoom bindings, in activate!'s order: the one shared GtkCssProvider, the zoom and theme atoms, zoom-fn, theme-ctx with its appearance poll callable, and the set and cycle fns. w holds what they read: :tabs :cv :settings-path* :status-label :evaluating-fn :closing?. Returns w with :provider :theme-name :theme-choice :system-dark-fn* :poll-armed? :arm-count :zoom-fn :theme-ctx :set-theme-fn, :cycle-theme-fn and :choose-theme-fn added; zoom-px and poll-cb are reached through theme-ctx."
   [w]
   (let [provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
@@ -181,11 +186,13 @@
                                               :arm-count arm-count})
         set-theme-fn (fn [k] (apply-choice! theme-ctx k))
         ;; The chord's/:cycle-theme!*'s action.
-        cycle-theme-fn (fn [] (do-cycle-theme! theme-ctx))]
+        cycle-theme-fn (fn [] (do-cycle-theme! theme-ctx))
+        ;; The palette's Use theme: <name> entries.
+        choose-theme-fn (fn [k] (do-choose-theme! theme-ctx k))]
     (assoc w :provider provider :theme-name theme-name :theme-choice theme-choice
            :system-dark-fn* system-dark-fn* :poll-armed? poll-armed? :arm-count arm-count
            :zoom-fn zoom-fn :theme-ctx theme-ctx :set-theme-fn set-theme-fn
-           :cycle-theme-fn cycle-theme-fn)))
+           :cycle-theme-fn cycle-theme-fn :choose-theme-fn choose-theme-fn)))
 
 (defn connect!
   "activate!'s theme statements, in activate!'s order: the console view's code CSS class, the one shared provider added to the display, and the source and inspector panels themed now and on every theme change. Called once per window; activate! reads nothing it returns. m holds :cv :provider :theme-name :sp and :pane."

@@ -6,7 +6,23 @@
   rainbow, :red, :find-highlight, :changed-mark (the gutter bar on a form
   edited since it last ran), :selection and :caret values are
   Jonquil's own, picked from each palette; :red is never in :rainbow, so
-  an unmatched bracket never looks like a matched one.")
+  an unmatched bracket never looks like a matched one.
+
+  The six popular themes after them (Gruvbox Dark and Light, Dracula, Nord,
+  Zenburn, Monokai; added 2026-11-13) take every token, rainbow, text and
+  background colour from each original's published palette, checked on
+  2026-11-13 against the source NOTICE names: morhetz/gruvbox's
+  colors/gruvbox.vim, dracula/emacs's dracula-theme.el, nordtheme/nord's
+  src/nord.css (plus nordtheme/vim's nord3_gui_bright #616E88 for comments,
+  as Nord's own editor ports use), bbatsov/zenburn-emacs's
+  zenburn-theme.el and oneKelvinSmith/monokai-emacs's monokai-theme.el. Their token mapping is Jonquil's own, worked
+  out from the Emacs font-lock faces each theme styles: the keyword face
+  for :special-form, the constant face for :keyword, :constant and
+  :number, the builtin or function-name face for :builtin, the string face
+  for :string and :char, and the type or preprocessor face for :metatag.
+  Which palette colours fill the rainbow and :red is Jonquil's choice,
+  under the same two rules as above, and :find-highlight is the one colour
+  in each that is Jonquil's own, a dim tint picked to keep the text readable.")
 
 (def themes
   {:light
@@ -57,16 +73,100 @@
              :number "#f78c6c" :builtin "#82aaff" :constant "#c792ea"
              :metatag "#a3afff"}
     :rainbow ["#f78c6c" "#82aaff" "#c792ea" "#c3e88d" "#ffcb6b" "#a3afff" "#7eb8da"]
-    :console {:prompt "#82aaff" :result "#c3e88d" :system "#6f7390"}}})
+    :console {:prompt "#82aaff" :result "#c3e88d" :system "#6f7390"}}
+   :gruvbox-dark
+   {:name :gruvbox-dark :dark? true
+    :background "#282828" :text "#ebdbb2" :caret "#fabd2f"
+    :selection "#504945" :find-highlight "#79740e" :red "#fb4934"
+    :changed-mark "#83a598"
+    :tokens {:comment "#928374" :string "#b8bb26" :char "#b8bb26"
+             :regex "#fabd2f" :keyword "#d3869b" :special-form "#fb4934"
+             :number "#d3869b" :builtin "#fe8019" :constant "#d3869b"
+             :metatag "#8ec07c"}
+    :rainbow ["#fe8019" "#83a598" "#d3869b" "#b8bb26" "#8ec07c" "#fabd2f" "#bdae93"]
+    :console {:prompt "#83a598" :result "#b8bb26" :system "#928374"}}
+   :gruvbox-light
+   {:name :gruvbox-light :dark? false
+    :background "#fbf1c7" :text "#3c3836" :caret "#076678"
+    :selection "#d5c4a1" :find-highlight "#fabd2f" :red "#9d0006"
+    :changed-mark "#076678"
+    :tokens {:comment "#928374" :string "#79740e" :char "#79740e"
+             :regex "#b57614" :keyword "#8f3f71" :special-form "#9d0006"
+             :number "#8f3f71" :builtin "#af3a03" :constant "#8f3f71"
+             :metatag "#427b58"}
+    :rainbow ["#af3a03" "#076678" "#8f3f71" "#79740e" "#427b58" "#b57614" "#7c6f64"]
+    :console {:prompt "#076678" :result "#79740e" :system "#928374"}}
+   :dracula
+   {:name :dracula :dark? true
+    :background "#282a36" :text "#f8f8f2" :caret "#f8f8f2"
+    :selection "#44475a" :find-highlight "#6d6a3a" :red "#ff5555"
+    :changed-mark "#bd93f9"
+    :tokens {:comment "#6272a4" :string "#f1fa8c" :char "#f1fa8c"
+             :regex "#ffb86c" :keyword "#bd93f9" :special-form "#ff79c6"
+             :number "#bd93f9" :builtin "#50fa7b" :constant "#bd93f9"
+             :metatag "#8be9fd"}
+    :rainbow ["#ffb86c" "#8be9fd" "#bd93f9" "#50fa7b" "#f1fa8c" "#ff79c6" "#ccccc7"]
+    :console {:prompt "#bd93f9" :result "#f1fa8c" :system "#6272a4"}}
+   :nord
+   {:name :nord :dark? true
+    :background "#2e3440" :text "#d8dee9" :caret "#d8dee9"
+    :selection "#434c5e" :find-highlight "#6b5f3e" :red "#bf616a"
+    :changed-mark "#88c0d0"
+    :tokens {:comment "#616e88" :string "#a3be8c" :char "#a3be8c"
+             :regex "#ebcb8b" :keyword "#8fbcbb" :special-form "#81a1c1"
+             :number "#b48ead" :builtin "#88c0d0" :constant "#81a1c1"
+             :metatag "#d08770"}
+    :rainbow ["#d08770" "#88c0d0" "#b48ead" "#a3be8c" "#ebcb8b" "#81a1c1" "#8fbcbb"]
+    :console {:prompt "#88c0d0" :result "#a3be8c" :system "#616e88"}}
+   :zenburn
+   {:name :zenburn :dark? true
+    :background "#3f3f3f" :text "#dcdccc" :caret "#ffffef"
+    :selection "#5f5f5f" :find-highlight "#5f5f3f" :red "#dca3a3"
+    :changed-mark "#8cd0d3"
+    :tokens {:comment "#7f9f7f" :string "#cc9393" :char "#cc9393"
+             :regex "#dfaf8f" :keyword "#bfebbf" :special-form "#f0dfaf"
+             :number "#8cd0d3" :builtin "#93e0e3" :constant "#bfebbf"
+             :metatag "#7cb8bb"}
+    :rainbow ["#dfaf8f" "#8cd0d3" "#dc8cc3" "#7f9f7f" "#f0dfaf" "#93e0e3" "#9fc59f"]
+    :console {:prompt "#8cd0d3" :result "#bfebbf" :system "#7f9f7f"}}
+   :monokai
+   {:name :monokai :dark? true
+    :background "#272822" :text "#f8f8f2" :caret "#f8f8f0"
+    :selection "#49483e" :find-highlight "#6b6a32" :red "#f92672"
+    :changed-mark "#66d9ef"
+    :tokens {:comment "#75715e" :string "#e6db74" :char "#e6db74"
+             :regex "#fd971f" :keyword "#ae81ff" :special-form "#f92672"
+             :number "#ae81ff" :builtin "#66d9ef" :constant "#ae81ff"
+             :metatag "#a6e22e"}
+    :rainbow ["#fd971f" "#66d9ef" "#ae81ff" "#a6e22e" "#e6db74" "#fd5ff0" "#a1efe4"]
+    :console {:prompt "#66d9ef" :result "#e6db74" :system "#75715e"}}})
 
 (def theme-names
   "The palettes, one per entry in themes."
-  [:light :dark :solarized :navy])
+  [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai])
 
 (def choice-names
   "The cycle order Cmd/Ctrl+Shift+M walks. :auto is a choice, not a
   palette: resolve-choice maps it to :light or :dark."
-  [:light :dark :solarized :navy :auto])
+  [:light :dark :solarized :navy :gruvbox-dark :gruvbox-light :dracula :nord :zenburn :monokai :auto])
+
+(def ^:private labels
+  {:light "Light" :dark "Dark" :solarized "Solarized" :navy "Navy"
+   :gruvbox-dark "Gruvbox Dark" :gruvbox-light "Gruvbox Light" :dracula "Dracula"
+   :nord "Nord" :zenburn "Zenburn" :monokai "Monokai" :auto "Auto"})
+
+(defn label
+  "The name a person reads for choice k: \"Gruvbox Dark\" for :gruvbox-dark."
+  [k]
+  (get labels k (name k)))
+
+(defn palette-entries
+  "The command palette's entries for picking a theme, one per choice in
+  cycle order: {:id [:theme/use k] :doc \"Use theme: Label\" :chords []
+  :source \"theme\"}. The window runs these itself, as it does a layout's."
+  []
+  (mapv (fn [k] {:id [:theme/use k] :doc (str "Use theme: " (label k)) :chords [] :source "theme"})
+        choice-names))
 
 (def default-theme :light)
 

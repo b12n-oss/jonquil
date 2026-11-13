@@ -155,7 +155,7 @@
                               :save-as-fn :close-fn :run-selection-fn :toggle-focus-fn :clear-console-fn :clear-last-fn
                               :zoom-fn :evaluating-fn :open-find-fn :open-replace-fn :cycle-theme-fn :close-popovers-fn
                               :inspect-last-fn :inspect-form-fn :close-inspector-fn :new-tab-fn :step-tab-fn
-                              :digit-tab-fn :parinfer-fn]]
+                              :digit-tab-fn :parinfer-fn :choose-theme-fn]]
                        [k (fn [] k)]))
         in (merge fns {:tabs ::tabs :recent-tabs recent :status-label ::sl :win ::win :active-tab ::active-tab
                        :pane ::pane :source-keys ::source-keys :part-contribution {:fns {:part-fn ::part-fn}}
@@ -170,10 +170,11 @@
              :digit-tab-fn :evaluating? :hints-toggle-fn :inspect-form-fn :inspect-last-fn :new-tab-fn :open-find-fn
              :open-fn :open-replace-fn :pane :panel-focus-fn :parinfer-fn :run-changed-fn :run-fn :run-selection-fn
              :save-as-fn :save-fn :source-keys :status-label :step-tab-fn :stop-fn :switch-tab-fn :tab-back-fn
-             :theme-cycle-fn :toggle-focus-fn :win :zoom-fn :part-fn}
+             :theme-cycle-fn :theme-use-fn :toggle-focus-fn :win :zoom-fn :part-fn}
            (set (keys a))))
+    (is (identical? (fns :choose-theme-fn) (a :theme-use-fn)))
     (is (every? (fn [k] (identical? (fns k) (a k)))
-                (remove #{:evaluating-fn :cycle-theme-fn} (keys fns))))
+                (remove #{:evaluating-fn :cycle-theme-fn :choose-theme-fn} (keys fns))))
     (is (and (identical? (:evaluating-fn fns) (:evaluating? a)) (identical? (:cycle-theme-fn fns) (:theme-cycle-fn a))))
     (is (= [::win ::active-tab ::pane ::sl ::source-keys ::part-fn]
            (map a [:win :active-tab :pane :status-label :source-keys :part-fn])))

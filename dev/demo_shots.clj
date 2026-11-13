@@ -434,7 +434,7 @@
   defn and three levels of nested brackets) Run to completion so the
   console shows both output and a result, then (:set-theme!* ui) k --
   the same fn Cmd/Ctrl+Shift+M's cycle calls, applied directly rather
-  than cycled to, so each of the four scenes lands on its own theme
+  than cycled to, so each theme scene lands on its own theme
   regardless of cycle order. settle! (2 more ticks) gives the retint's
   own queued repaint a moment to land before the screenshot reads the
   frame -- the same 'wait a later main-loop tick' every other capture
@@ -462,6 +462,12 @@
 (defn- scene-theme-dark [ui] (scene-theme :theme-dark :dark ui))
 (defn- scene-theme-solarized [ui] (scene-theme :theme-solarized :solarized ui))
 (defn- scene-theme-navy [ui] (scene-theme :theme-navy :navy ui))
+(defn- scene-theme-gruvbox-dark [ui] (scene-theme :theme-gruvbox-dark :gruvbox-dark ui))
+(defn- scene-theme-gruvbox-light [ui] (scene-theme :theme-gruvbox-light :gruvbox-light ui))
+(defn- scene-theme-dracula [ui] (scene-theme :theme-dracula :dracula ui))
+(defn- scene-theme-nord [ui] (scene-theme :theme-nord :nord ui))
+(defn- scene-theme-zenburn [ui] (scene-theme :theme-zenburn :zenburn ui))
+(defn- scene-theme-monokai [ui] (scene-theme :theme-monokai :monokai ui))
 
 (defn- scene-completion
   "\"(ma\" in the editor, :complete!* -- the exact fn Ctrl+Space
@@ -1479,6 +1485,12 @@
    [:theme-dark scene-theme-dark]
    [:theme-solarized scene-theme-solarized]
    [:theme-navy scene-theme-navy]
+   [:theme-gruvbox-dark scene-theme-gruvbox-dark]
+   [:theme-gruvbox-light scene-theme-gruvbox-light]
+   [:theme-dracula scene-theme-dracula]
+   [:theme-nord scene-theme-nord]
+   [:theme-zenburn scene-theme-zenburn]
+   [:theme-monokai scene-theme-monokai]
    [:completion scene-completion]
    [:quick-doc scene-quick-doc]
    [:rename scene-rename]
