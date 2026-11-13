@@ -65,7 +65,12 @@
                           (an/decode-b64! "test entry" "" out)))
     (an/decode-b64! "test entry" "aGVsbG8=" out)
     (is (= "hello" (slurp out)))
-    (is (= "-rw-------" (str/trim (:out (p/sh "stat" "-f" "%Sp" out)))) "0600, read only by you")))
+    ;; BSD stat (macOS) takes -f, GNU stat (Linux) takes -c; both print the
+    ;; mode as ls does.
+    (is (= "-rw-------" (str/trim (:out (if (= "Mac OS X" (System/getProperty "os.name"))
+                                          (p/sh "stat" "-f" "%Sp" out)
+                                          (p/sh "stat" "-c" "%A" out)))))
+        "0600, read only by you")))
 
 (deftest rekey-gives-a-p12-only-the-new-password-opens-test
   (let [dir (temp-dirs/temp-dir! "jonquil-notarize-test-")

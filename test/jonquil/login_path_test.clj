@@ -211,3 +211,40 @@
     (is (< dt 10000) (str "answered after " dt " ms, the timeout is 20000"))
     (Thread/sleep 200)
     (is (not (running? "jonquil-86494")))))
+
+(deftest limit-command-test
+  (is (= ["/bin/sh" "-c" "ulimit -f 2048 2>/dev/null; exec \"$@\"" "sh" "/bin/zsh" "-il" "-c" "x"]
+         (#'lp/limit-command ["/bin/zsh" "-il" "-c" "x"] 2048))))
+
+(deftest bounded-command-test
+  (testing "macOS runs the shell as before"
+    (is (= ["/bin/zsh" "-il" "-c" "x"] (#'lp/bounded-command ["/bin/zsh" "-il" "-c" "x"] "Mac OS X"))))
+  (testing "elsewhere the shell runs under the file size limit, 2097152 blocks"
+    (is (= (#'lp/limit-command ["/bin/bash" "-il" "-c" "x"] 2097152)
+           (#'lp/bounded-command ["/bin/bash" "-il" "-c" "x"] "Linux")))))
+
+(deftest limit-command-keeps-the-exit-status-test
+  ;; exec replaces /bin/sh, so the status (and the pid kill-tree! signals)
+  ;; are the wrapped command's own.
+  (is (= 7 (:exit @(apply p/process {} (#'lp/limit-command ["/bin/sh" "-c" "exit 7"] 2048))))))
+
+(deftest the-kernel-stops-endless-output-test
+  ;; The bound that doesn't depend on this process polling: with no polling
+  ;; at all, the writer is stopped by its file size limit. On a GitHub Linux
+  ;; runner (2026-11-14) the first size poll took 219 s while `yes` wrote
+  ;; 90 GB, so the poll in wait-for can't be the only stop.
+  (let [out (java.io.File/createTempFile "jonquil-login-path-test-" ".out")
+        proc (apply p/process {:in (io/file "/dev/null") :out out :err :discard}
+                    (#'lp/limit-command ["/bin/sh" "-c" "exec yes jonquil-86495"] 2048))
+        r (deref proc 15000 ::running)]
+    (try
+      (is (not= ::running r) "the writer was stopped without anyone polling")
+      (is (pos? (.length out)))
+      ;; 2048 blocks is 1 MiB where a block is 512 bytes (dash) and 2 MiB
+      ;; where it is 1024 (bash as /bin/sh on macOS).
+      (is (<= (.length out) (* 2 1024 1024)))
+      (Thread/sleep 200)
+      (is (not (running? "jonquil-86495")))
+      (finally
+        @(p/process {} "pkill" "-9" "-f" "jonquil-86495")
+        (.delete out)))))
