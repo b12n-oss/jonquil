@@ -11,7 +11,8 @@
             [jonquil.mcp.window :as mcp-window]
             [jonquil.plugin-loader :as plugin-loader]
             [jonquil.runtime-registry :as registry]
-            [jonquil.settings :as settings]))
+            [jonquil.settings :as settings]
+            [jonquil.version :as version]))
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
@@ -33,6 +34,11 @@
         (map (fn [a] (let [f (io/file a)]
                        (if (.isAbsolute f) a (.getAbsolutePath (io/file cwd a)))))
              args)))
+
+(defn version-arg?
+  "True when the first arg is \"--version\"."
+  [args]
+  (= "--version" (first args)))
 
 (defn mcp-args
   "{:dir abs-dir :window? bool} when the first arg is \"--mcp\", else nil. An
@@ -160,6 +166,9 @@
   ;; a release Jonquil.app's launcher set DYLD_LIBRARY_PATH for GTK, now
   ;; loaded: nothing Jonquil starts may inherit it
   (bundle-env/drop-bundle-dyld!)
+  (when (version-arg? args)
+    (println (version/version-line))
+    (System/exit 0))
   (when-let [m (attach-args args)]
     (System/exit (attach-mcp! m)))
   ;; Asks the login shell for PATH in the background when launched from

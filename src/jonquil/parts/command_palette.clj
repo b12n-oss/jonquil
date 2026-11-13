@@ -17,4 +17,5 @@
     :help/describe-key {:doc "Describe the next key you press." :scope :window
                         :call [:describe-key-fn]}
     :help/key-bindings {:doc "List every key binding." :scope :window :call [:key-bindings-fn]}
-    :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :call [:recent-keys-fn]}}})
+    :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :call [:recent-keys-fn]}
+    :help/version {:doc "Show Jonquil's version." :scope :window :call [:version-fn]}}})
