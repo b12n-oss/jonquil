@@ -261,7 +261,7 @@
     (io/make-parents (str licenses "/SOURCES.txt"))
     (spit (str licenses "/SOURCES.txt") (sources-txt formulae))
     (spit (str licenses "/NOTICE")
-          (str "Jonquil is under the Eclipse Public License 1.0. The libraries in\n"
+          (str "Jonquil is under the Eclipse Public License 2.0. The libraries in\n"
                "Contents/Frameworks are separate works under their own licences, listed\n"
                "with their sources in SOURCES.txt.\n"))))
 
