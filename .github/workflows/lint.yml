@@ -44,7 +44,7 @@ jobs:
       - name: clojure-lsp format check (jolt lsp:format-check)
         run: jolt lsp:format-check
 
-  # jolt metrics:gate: a critical jolt-metrics finding under src/ or test/, or
+  # jolt metrics:gate: a critical jolt-metrics finding under src/, test/, dev/ or ci/, or
   # unused code ci/metrics-allow.edn doesn't list, fails the run.
   metrics:
     runs-on: ubuntu-latest

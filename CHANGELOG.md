@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Changed
+
+- `jolt metrics:gate` now covers `dev/` and `ci/` as well as `src/` and `test/`, so the fake servers, the screenshot script and the self-test harness meet the same limits as the app's code. The fourteen findings there were split into named steps and smaller files, with the self-tests' rows, order and results unchanged.
+
 ## [0.2.0] - 2026-11-14
 
 ### Added

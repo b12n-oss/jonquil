@@ -348,9 +348,8 @@ port.
   metrics:html` one self-contained page (`target/metrics.html` unless a
   file comes first). Extra arguments go to its CLI (an output file, whose
   extension picks the format, `--top N`, `--no-git`, `--exclude GLOB`). Findings never fail it; only bad usage
-  does. `.jolt-metrics.edn` at the root counts `dev` as test code
-  (measured, never queued) and leaves out build output, clj-kondo's cache,
-  the smoke fixtures and `docs`. Upstream-lifted code (`src/jonquil/syntax.clj`,
+  does. `.jolt-metrics.edn` at the root leaves out build output,
+  clj-kondo's cache, the smoke fixtures and `docs`. Upstream-lifted code (`src/jonquil/syntax.clj`,
   `src/jonquil/parinfer.clj`, `src/jonquil/inspect/view.clj` and
   `test/jonquil/upstream/`) is left out too,
   since it follows DrClojure's source and is tracked in `UPSTREAM.md`. The
@@ -359,7 +358,7 @@ port.
 - `jolt metrics:gate` is the one metrics task that fails. It runs the
   report as EDN through `ci/metrics-gate.clj`, which checks
   `ci/metrics-allow.edn`, and fails on two things:
-  - **a critical finding under `src/` or `test/`:** a function past a
+  - **a critical finding under `src/`, `test/`, `dev/` or `ci/`:** a function past a
     complexity, length, nesting, parameter, coupling or maintainability
     limit, or a file past 1000 lines. Under `test/`, only helpers and the
     file itself are queued, not `deftest` bodies. A file jolt-metrics can't
@@ -372,9 +371,11 @@ port.
   The gate also refuses to run against an allowlist with no
   `:critical-free` paths, or a report missing its sections, rather than
   pass having checked nothing. `dev/` (the fake servers, demo shots and the
-  self-test harness) isn't in the gate yet. Bringing it in takes two edits:
-  add `"dev/"` to `:critical-free`, and take `dev` out of
-  `.jolt-metrics.edn`'s `:test-paths`. The `metrics` job in `.github/workflows/lint.yml` runs it
+  self-test harness) and `ci/` are held to the same limits as the app's own
+  code. A new top-level source folder joins with one edit to
+  `:critical-free`, and must not be listed in `.jolt-metrics.edn`'s
+  `:test-paths`, since a test path is measured but never queued. The
+  `metrics` job in `.github/workflows/lint.yml` runs it
   on every push to `main` and every pull request.
 - `jolt lsp:format` / `jolt lsp:format-check` and `jolt lsp:clean-ns` /
   `jolt lsp:clean-ns-check` reformat (or dry-run) code and `ns` forms with
