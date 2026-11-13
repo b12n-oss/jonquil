@@ -15,11 +15,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up the Clojure CLI and clj-kondo
+      # bb too: clojure-lsp sees bb.edn and runs `bb print-deps` to find the
+      # classpath, and the format check fails without it.
+      - name: Set up the Clojure CLI, clj-kondo and babashka
         uses: DeLaGuardo/setup-clojure@13.6.1
         with:
           cli: latest
           clj-kondo: latest
+          bb: latest
 
       # setup-clojure has no clojure-lsp input (it warns and installs
       # nothing), so clojure-lsp comes from its own action, pinned to the
