@@ -5,6 +5,7 @@
   ;; Project namespaces in dependency order. Add each one as it lands.
   '[jonquil.core
     jonquil.bundle-env
+    jonquil.cli-install
     jonquil.version.describe
     jonquil.version
     jonquil.dialect

@@ -28,7 +28,9 @@
      :icon (str share "/icons/hicolor/256x256/apps/" app-id ".png")
      :mime (str share "/mime/packages/" app-id ".xml")
      :mime-db (str share "/mime")
-     :apps-db (str share "/applications")}))
+     :apps-db (str share "/applications")
+     ;; the terminal command: a link to :binary
+     :command (str home "/.local/bin/jonquil")}))
 
 (defn- exec-arg
   "path as one Exec argument. The Desktop Entry spec quotes an argument that
@@ -137,6 +139,36 @@
        nil
        (catch Exception e (or (.getMessage e) (str e)))))
 
+(defn- link-target
+  "The target of the symlink at path, or nil when path isn't one."
+  [path]
+  (let [p (.toPath (io/file path))]
+    (when (java.nio.file.Files/isSymbolicLink p)
+      (str (java.nio.file.Files/readSymbolicLink p)))))
+
+(defn- link-command!
+  "Links :command to :binary and says so. A file there, or a link to
+  anything else, is left alone with a note. Never fails the install."
+  [{:keys [command binary]}]
+  (let [target (link-target command)]
+    (cond
+      (and (or target (.exists (io/file command))) (not= binary target))
+      (println (str "note: " command " exists and isn't a link to this install, left alone"))
+      :else
+      (do (io/make-parents command)
+          (let [r (p/sh "ln" "-sfn" binary command)]
+            (if (zero? (:exit r))
+              (println (str "linked " command " (the jonquil command; ~/.local/bin must be on PATH)"))
+              (println (str "note: could not link " command ": " (str/trim (str (:err r)))))))))))
+
+(defn- unlink-command!
+  "Removes :command when it is a link to :binary."
+  [{:keys [command binary]}]
+  (when (= binary (link-target command))
+    (try (java.nio.file.Files/deleteIfExists (.toPath (io/file command)))
+         (catch Exception e
+           (println (str "note: could not remove " command ": " (.getMessage e)))))))
+
 (defn install!
   "Installs the binary at :source under :home/.local/share. opts: :home,
   :source (the built ./jonquil), :version, and optionally :which (a fn from
@@ -175,6 +207,7 @@
               (fail (str "install failed: move " tmp " to " (:binary paths) ": " msg))
               (do (refresh-databases! paths which)
                   (println (str "installed " (:binary paths)))
+                  (link-command! paths)
                   0)))
           (catch Exception e
             (fail (str "install failed: " (.getMessage e)))))))))
@@ -193,7 +226,8 @@
       (not-any? present? (cons (:dir paths) files))
       (do (println "nothing to uninstall") 0)
       :else
-      (do (doseq [f files]
+      (do (unlink-command! paths)
+          (doseq [f files]
             (java.nio.file.Files/deleteIfExists (.toPath (io/file f))))
           (let [r (p/sh "rm" "-rf" (:dir paths))]
             (if-not (zero? (:exit r))

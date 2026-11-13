@@ -30,8 +30,41 @@ Edge cases sit in folded blocks: click a bold line to open one.
 
 To see which version you run, use **Show Jonquil's version** in the command
 palette, which prints it to the console, or run `jonquil --version` in a
-terminal, which prints it and exits without opening a window. For the
-downloaded app that is `/Applications/Jonquil.app/Contents/MacOS/Jonquil --version`.
+terminal, which prints it and exits without opening a window. Before the
+`jonquil` command is installed (below), the downloaded app's own launcher
+does the same: `/Applications/Jonquil.app/Contents/MacOS/Jonquil --version`.
+
+## The `jonquil` command
+
+On macOS, **Install the jonquil command for your terminal** in the command
+palette links a `jonquil` command to the app you are running. After that:
+
+```bash
+jonquil                # opens the current folder in a new window
+jonquil ~/dev/project  # opens that folder in a new window, the file tree rooted there
+jonquil src/core.clj   # opens a file as a tab in the Jonquil that is running
+jonquil --version      # prints the version and exits
+```
+
+The prompt comes back at once. Files alone go to a Jonquil that is already
+running, the way a double click in Finder does, and start one when none
+is. A folder always gets a window of its own, so the project you already
+have open stays as it is. An
+argument that starts with `-` runs Jonquil in the foreground with every
+argument, which `--version`, `--mcp` and `--attach` need.
+
+The link goes in `/usr/local/bin` when Jonquil can write there. Otherwise
+it goes in `~/.local/bin`, and the console shows the line that adds that
+folder to your `PATH`. Jonquil never asks for a password, and it only
+replaces or removes a link that points into a Jonquil app. **Remove the
+jonquil command from your terminal** takes the link out again, and says so
+if it can't. The command
+itself is a small script at `Contents/Resources/bin/jonquil` inside the
+app, so you can also link or alias it by hand.
+
+On Linux, `jolt app:install` links `~/.local/bin/jonquil` to the installed
+binary (see [Getting started](getting-started.md#build-and-install)). From
+a checkout, `./jonquil <path>` is the command.
 
 ## Running a program
 

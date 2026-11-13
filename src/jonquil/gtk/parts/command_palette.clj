@@ -6,6 +6,7 @@
   handler, and Describe Key's pending flag, the recent keys and the key
   lists that the window's key handler reads from its context."
   (:require [clojure.string :as str]
+            [jonquil.cli-install :as cli-install]
             [jonquil.describe :as describe]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
@@ -88,7 +89,9 @@
      :key-bindings-fn (fn [] (print! (describe/binding-lines
                                       (assoc (live-keys) :os (System/getProperty "os.name")))))
      :recent-keys-fn (fn [] (print! (describe/recent-lines @recent-keys)))
-     :version-fn (fn [] (print! [(str "; " (version/version-line))]))}))
+     :version-fn (fn [] (print! [(str "; " (version/version-line))]))
+     :install-cli-fn (fn [] (print! (cli-install/install!)))
+     :remove-cli-fn (fn [] (print! (cli-install/remove!)))}))
 
 (defn- install
   "The command palette part for one window: opens the palette, resets the

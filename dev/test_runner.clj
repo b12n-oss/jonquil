@@ -20,6 +20,8 @@
     jonquil.metrics-gate-test
     jonquil.app-cairo-script-test
     jonquil.app-notarize-test
+    jonquil.cli-install-test
+    jonquil.cli-script-test
     jonquil.bundle-env-test
     jonquil.app-linux-test
     jonquil.smoke-test
