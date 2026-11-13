@@ -95,6 +95,25 @@
                           "gschemas.compiled" "org.gtk.gtk4.Inspector.gschema.xml"]))
       "GTK's own schemas, sorted; never the demo's or a compiled file"))
 
+(deftest closure-plan-follows-a-substitute-test
+  (let [refs {"/c/gtk/libgtk.dylib" ["/c/cairo/libcairo-script-interpreter.2.dylib"]
+              "/c/cairo/libcairo-script-interpreter.2.dylib" ["/c/lzo/liblzo2.2.dylib" "@rpath/libcairo.2.dylib"]
+              "/cache/libcairo-script-interpreter.2.dylib" ["@rpath/libcairo.2.dylib"]
+              "/c/cairo/libcairo.2.dylib" []}
+        plan (ar/closure-plan ["/c/gtk/libgtk.dylib"] #(get refs % [])
+                              {"libcairo-script-interpreter.2.dylib" "/cache/libcairo-script-interpreter.2.dylib"})]
+    (is (= ["libgtk.dylib" "libcairo-script-interpreter.2.dylib" "libcairo.2.dylib"] (mapv :name plan)))
+    (is (= "/cache/libcairo-script-interpreter.2.dylib" (:src (second plan))))
+    (is (= "/c/cairo/libcairo.2.dylib" (:src (nth plan 2)))
+        "the substitute's @rpath refs resolve beside the library it replaces, not the cache")
+    (is (not-any? #(= "liblzo2.2.dylib" (:name %)) plan) "lzo was only the original's ref")))
+
+(deftest sources-txt-prints-a-note-test
+  (is (str/includes? (ar/sources-txt [{:name "cairo" :version "1.18.6" :license "LGPL-2.1-only OR MPL-1.1"
+                                       :url "https://cairographics.org/releases/cairo-1.18.6.tar.xz"
+                                       :license-files ["COPYING"] :note "libcairo-script-interpreter: built from X with -Dlzo=disabled"}])
+                     "  licence files: licenses/cairo/COPYING\n  libcairo-script-interpreter: built from X with -Dlzo=disabled\n")))
+
 (deftest lzo-test
   (is (true? (ar/lzo? ["libgtk-4.1.dylib" "liblzo2.2.dylib"])))
   (is (false? (ar/lzo? ["libgtk-4.1.dylib"]))))

@@ -66,18 +66,22 @@
   "The libraries to bundle, from roots, as [{:src :name :refs}] in
   discovery order, each base name once. refs-of answers a library's refs
   (otool-refs); an @ ref (@rpath, @loader_path) resolves next to the
-  library that names it."
-  [roots refs-of]
-  (loop [queue (vec roots) seen #{} plan []]
-    (if-let [src (first queue)]
-      (let [name (base-name src)]
-        (if (seen name)
-          (recur (subvec queue 1) seen plan)
-          (let [refs (vec (refs-of src))
-                deps (map #(if (str/starts-with? % "@") (str (parent src) "/" (base-name %)) %) refs)]
-            (recur (into (subvec queue 1) deps) (conj seen name)
-                   (conj plan {:src src :name name :refs refs})))))
-      plan)))
+  library that names it. substitutes (base name -> path) bundles that
+  path in place of the library of that name, following its refs, an @ ref
+  resolving next to the library it replaces."
+  ([roots refs-of] (closure-plan roots refs-of {}))
+  ([roots refs-of substitutes]
+   (loop [queue (vec roots) seen #{} plan []]
+     (if-let [found (first queue)]
+       (let [name (base-name found)]
+         (if (seen name)
+           (recur (subvec queue 1) seen plan)
+           (let [src (get substitutes name found)
+                 refs (vec (refs-of src))
+                 deps (map #(if (str/starts-with? % "@") (str (parent found) "/" (base-name %)) %) refs)]
+             (recur (into (subvec queue 1) deps) (conj seen name)
+                    (conj plan {:src src :name name :refs refs})))))
+       plan))))
 
 (defn gtk-schemas
   "GTK's own GSettings schema files among names (a keg's
@@ -139,7 +143,7 @@
        "libraries, with only their install names and rpaths changed (install_name_tool) and re-signed.\n"
        "Each keeps its own licence. The source of each is at the URL given, at the version given.\n\n"
        (str/join "\n"
-                 (for [{:keys [name version stable license url license-files]} formulae]
+                 (for [{:keys [name version stable license url license-files note]} formulae]
                    (str name " " version " (" license ")\n"
                         "  source: " url
                         (when (older? version stable)
@@ -150,7 +154,8 @@
                         (if (seq license-files)
                           (str/join ", " (map #(str "licenses/" name "/" %) license-files))
                           "none found in the Homebrew keg")
-                        "\n")))))
+                        "\n"
+                        (when note (str "  " note "\n")))))))
 
 ;; --- building it -------------------------------------------------------------------
 
