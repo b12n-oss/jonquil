@@ -23,7 +23,8 @@
   ;; jonquil.keymap, jonquil.palette or jonquil.command-registry, which the
   ;; order-* parts do through their rows: those namespaces build their tables
   ;; as they load, and the probe's spec has to be in them. Sorting this list
-  ;; by name puts order-a first and the :probe-part row then fails.
+  ;; by name puts order-a first and the :probe-part row then fails, which is
+  ;; what `jolt lsp:clean-ns` would do: keep this file out of it.
   (:require [selftest-keys]
             [clojure.core.async :as a :refer [<! go timeout]]
             [gtk-selftest-window.probe-part]
