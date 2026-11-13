@@ -15,12 +15,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up the Clojure CLI, clj-kondo and clojure-lsp
+      - name: Set up the Clojure CLI and clj-kondo
         uses: DeLaGuardo/setup-clojure@13.6.1
         with:
           cli: latest
           clj-kondo: latest
-          clojure-lsp: latest
+
+      # setup-clojure has no clojure-lsp input (it warns and installs
+      # nothing), so clojure-lsp comes from its own action, pinned to the
+      # version the format check was last run with locally.
+      - name: Set up clojure-lsp
+        uses: clojure-lsp/setup-clojure-lsp@v1.0.3
+        with:
+          clojure-lsp-version: 2026.10.15-11.42.38
 
       # jolt runs the tasks (it reads bb.edn). clj-kondo lints source text
       # with its own analysis, and clojure-lsp's format check reformats

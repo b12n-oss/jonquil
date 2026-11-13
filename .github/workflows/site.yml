@@ -32,7 +32,9 @@ env:
   # v0.4.x adds the nav search box (lunr, bundled under vendor/, with its
   # index in search-documents.json) and v0.4.3 escapes a bare < the way
   # GitHub does; v0.3.2 fixed `jolt run build`/`clean` (docs-engine#3).
-  DOCS_ENGINE_REF: v0.4.3
+  # v0.4.5 pins jolt-lang/time at a commit Jolt 0.8.25+ can read (the
+  # older pin's locale_data.clj docstring stops the build).
+  DOCS_ENGINE_REF: v0.4.5
   BASE_PATH: /jonquil
 
 jobs:
