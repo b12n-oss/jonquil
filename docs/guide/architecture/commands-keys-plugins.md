@@ -4,7 +4,7 @@ Part of the [architecture notes](index.md).
 
 The full design record, with the reasoning and what was ruled out, is kept in `docs/history/architecture/commands-keys-plugins.md`.
 
-Keys and commands are data, and plugins add to that data while Jonquil runs. The [ROADMAP's `## Plugins` section](../../../ROADMAP.md#plugins) has the step-by-step history.
+Keys and commands are data, and plugins add to that data while Jonquil runs.
 
 ## The keymap
 

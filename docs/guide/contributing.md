@@ -52,5 +52,4 @@ submit, so it meets the same review, tests and gates as any other change.
 The [Architecture](architecture/index.md) page maps the namespaces. The
 [Development](development.md) page describes every harness in detail,
 including how the self-test rows are written and what the binary smoke
-checks. `ROADMAP.md` in the repository root tracks phase status and the
-parked items a change might want to pick up.
+checks.

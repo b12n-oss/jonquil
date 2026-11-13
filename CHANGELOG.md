@@ -1,8 +1,8 @@
 # Changelog
 
 All notable changes to this project are documented here, starting from
-the open-source preparation work (2026-10-17). What shipped before that,
-phase by phase, is in [ROADMAP.md](ROADMAP.md).
+the open-source preparation work (2026-10-17). The guide describes
+everything that shipped before that.
 
 ## [Unreleased]
 
