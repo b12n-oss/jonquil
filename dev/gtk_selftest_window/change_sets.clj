@@ -44,6 +44,22 @@
   ((:select-tab! ui) (:id (first ((:tabs* ui)))))
   ed)
 
+(defn- change-set-details-ok?
+  "True when the draft, the kept file, the console lines, the footer and the
+  undo result of the make-apply-revert row all have the expected content."
+  [{:keys [draft-text draft-name read console console2 footer edited undone]}]
+  (and (str/includes? draft-text "- (def a 1)\n+ (def a 10)")
+       (str/includes? draft-text "cs.clj  def c (new)\n+ (def c 3)")
+       (= "cs-changes" draft-name)
+       (= ["def a" "def c"] (map :name (:entries (:set read))))
+       (str/includes? console "Applying 1 of 2: def a")
+       (str/includes? console "Applying 2 of 2: def c")
+       (= [10 3] [(some-> (resolve 'cs/a) deref) (some-> (resolve 'cs/c) deref)])
+       (nil? (resolve 'user/c))
+       (str/includes? footer "Reverted 1 form of the change set \"cs-idea\", skipped 1.")
+       (str/includes? console2 "Revert skipped def c: it is new since the last Run")
+       (= edited undone)))
+
 (defn row-change-set-make-apply-revert
   "Make a Change Set after a Run and two edits shows the draft as diffs,
   Save keeps it under the typed name, Apply to REPL sends both forms, Revert
@@ -86,17 +102,9 @@
           deleted? (await-until 3000 20 #(not (contains? (kept-files ui) "cs-idea")))]
       (on-gtk (support/check :change-set-make-apply-revert
                              (and not-run? recorded? drafted? saved? applied? reverted? deleted?
-                                  (str/includes? draft-text "- (def a 1)\n+ (def a 10)")
-                                  (str/includes? draft-text "cs.clj  def c (new)\n+ (def c 3)")
-                                  (= "cs-changes" draft-name)
-                                  (= ["def a" "def c"] (map :name (:entries (:set read))))
-                                  (str/includes? console "Applying 1 of 2: def a")
-                                  (str/includes? console "Applying 2 of 2: def c")
-                                  (= [10 3] [(some-> (resolve 'cs/a) deref) (some-> (resolve 'cs/c) deref)])
-                                  (nil? (resolve 'user/c))
-                                  (str/includes? footer "Reverted 1 form of the change set \"cs-idea\", skipped 1.")
-                                  (str/includes? console2 "Revert skipped def c: it is new since the last Run")
-                                  (= edited undone))
+                                  (change-set-details-ok? {:draft-text draft-text :draft-name draft-name :read read
+                                                           :console console :console2 console2 :footer footer
+                                                           :edited edited :undone undone}))
                              {:not-run not-run? :recorded recorded? :drafted drafted? :draft draft-text :name draft-name
                               :saved saved? :read read :applied applied? :console console :reverted reverted?
                               :footer footer :undone undone :deleted deleted? :status (status ui)})
