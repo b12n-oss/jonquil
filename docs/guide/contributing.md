@@ -46,6 +46,11 @@ test counts, self-test rows, and any timing that matters.
 Writing a change with an LLM's help is fine. Either way you own what you
 submit, so it meets the same review, tests and gates as any other change.
 [AI_POLICY.md](../../AI_POLICY.md) states the project's stance in full.
+Leave the assistant's own credit lines out of commit messages and the pull
+request description (a `Co-Authored-By` naming it, a "Generated with"
+footer): a change is described by what it does, and a check on every pull
+request fails on them (see
+[Development](development.md#the-attribution-workflow)).
 
 ## Where things are
 

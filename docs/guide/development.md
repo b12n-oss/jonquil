@@ -397,6 +397,22 @@ job (Jolt 0.8.27). It runs on
 every push to `main` and every pull request, and by hand from the Actions tab
 or with `gh workflow run lint.yml`.
 
+### The attribution workflow
+
+`.github/workflows/attribution.yml` runs `ci/attributioncheck.sh` over a
+push's or a pull request's commits, and over the pull request's
+description. It fails when one carries an AI assistant's attribution: a
+`Co-Authored-By` line naming Claude, the "Generated with Claude Code"
+footer, a session link or trailer, or an anthropic.com noreply address. A
+change is described by what it does. [AI_POLICY.md](../../AI_POLICY.md)
+says how the project stands on AI assistance. To check a branch before
+pushing, run `sh ci/attributioncheck.sh main..HEAD`.
+
+Four commits from September 2026 carry such lines. They were public before
+the rule, and removing the lines would rewrite history for everyone with a
+clone, so they stay. The script names them, and nothing is added to that
+list.
+
 ## Benchmark
 
 `jolt bench:edit [sizes...]` times what typing costs in a large file. For
