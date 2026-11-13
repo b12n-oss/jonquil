@@ -12,6 +12,7 @@
   jonquil: the filesystem ignores case, so it would be the launcher.
   app:bundle and app:install stay the Homebrew-linked local build."
   (:require [app-bundle]
+            [app-cairo-script]
             [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -249,6 +250,9 @@
                           (io/make-parents (str licenses "/" n "/" x))
                           (sh! "cp" (str dir "/" x) (str licenses "/" n "/" x)))
                         {:name n :version v :stable (get-in f ["versions" "stable"]) :license (str (get f "license"))
+                         :note (when (= "cairo" n)
+                                 (str "libcairo-script-interpreter: built from " (:url app-cairo-script/PIN)
+                                      " (sha256 " (:sha256 app-cairo-script/PIN) ") with -Dlzo=disabled"))
                          :url (str (get-in f ["urls" "stable" "url"])) :license-files files})))]
     (when-let [old (seq (outdated formulae))]
       (warn! (str "these formulae are older than Homebrew's source links: " (str/join ", " old))))
@@ -304,6 +308,7 @@
    ["plutil -lint" (zero? (:exit (p/sh "plutil" "-lint" (str contents "/Info.plist"))))]
    ["codesign --verify --deep --strict" (zero? (:exit (p/sh "codesign" "--verify" "--deep" "--strict" app)))]
    ["launcher executable" (.canExecute (io/file launcher))]
+   ["no GPL-only library" (not (lzo? (seq (.list (io/file frameworks)))))]
    ["GTK file chooser schema" (zero? (:exit (p/sh "/opt/homebrew/opt/glib/bin/gsettings" "--schemadir" schemas
                                                   "list-keys" "org.gtk.gtk4.Settings.FileChooser")))]])
 
@@ -317,12 +322,12 @@
   (sh! "rm" "-rf" (str bin ".build"))
   (spit launcher (launcher-text))
   (.setExecutable (io/file launcher) true)
-  (let [plan (closure-plan (roots) refs-of)]
+  (let [plan (closure-plan (roots) refs-of
+                            ;; Homebrew's imports lzo (GPL-2.0); ours is built without it
+                            {"libcairo-script-interpreter.2.dylib" (app-cairo-script/interpreter-path)})]
     (when (empty? plan) (fail! "no library to bundle"))
     (doseq [e plan] (bundle-lib! e))
     (println (str (count plan) " libraries in Frameworks"))
-    (when (lzo? (map :name plan))
-      (warn! "liblzo2 (GPL-2.0-or-later) is in the bundle (cairo's script interpreter needs it); don't publish this build"))
     (write-licences! plan)
     (write-schemas! plan))
   (sh! "cp" "resources/Jonquil.icns" (str contents "/Resources/Jonquil.icns"))
