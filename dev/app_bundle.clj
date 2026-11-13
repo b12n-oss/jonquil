@@ -73,9 +73,16 @@
   (binding [*out* *err*] (println (str "app-bundle: " msg)))
   (System/exit 1))
 
+(defn version-from-describe
+  "`git describe` output as the bundle's version: a release tag's leading v
+  goes (v0.1.0 -> 0.1.0), since CFBundleShortVersionString wants the bare
+  number. Anything else passes through."
+  [s]
+  (str/replace-first s #"^v(?=\d)" ""))
+
 (defn git-version []
   (let [r (p/sh "git" "describe" "--tags" "--always")]
-    (if (zero? (:exit r)) (str/trim (:out r)) "0.0.0")))
+    (if (zero? (:exit r)) (version-from-describe (str/trim (:out r))) "0.0.0")))
 
 (defn build-number
   "The commit count as CFBundleVersion (Apple wants period-separated integers)."

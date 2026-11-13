@@ -100,3 +100,9 @@
   ;; Pure, so it runs on every OS (the plist checks above need plutil).
   (is (= ["clj" "cljc" "cljd" "cljs" "jank" "edn" "bb"] ab/doc-extensions)
       "ClojureScript's .cljs is offered too, since Jonquil has a cljs dialect"))
+
+(deftest version-from-describe-test
+  (is (= "0.1.0" (ab/version-from-describe "v0.1.0")) "a release tag drops its v")
+  (is (= "0.1.0-3-gabc1234" (ab/version-from-describe "v0.1.0-3-gabc1234")))
+  (is (= "abc1234" (ab/version-from-describe "abc1234")) "no tag yet: the short SHA")
+  (is (= "vfoo" (ab/version-from-describe "vfoo")) "only a v before a digit goes"))

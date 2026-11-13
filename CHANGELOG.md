@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-13
+
+The first release: a notarized `Jonquil-0.1.0-macos-arm64.dmg` and `.zip` for Apple Silicon Macs on macOS 26 or later. Linux and Intel builds aren't available yet.
+
 ### Added
 
 <details>
