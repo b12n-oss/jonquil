@@ -1,0 +1,80 @@
+name: Bug report
+description: Something in Jonquil doesn't work the way the guide says it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The more exact the steps, the faster it gets fixed.
+        Please check [Known limits](https://jonquil.b12n.app/guide/known-limits.html) first, since some rough edges are already listed there.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest file or project and the keys or clicks that show it. A short `.clj` file pasted here is ideal.
+      placeholder: |
+        1. Open a new window
+        2. Paste the code below and press Run (F5)
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output or error
+      description: Anything the console printed, and the error with its frames if there is one.
+      render: text
+  - type: input
+    id: jonquil-version
+    attributes:
+      label: Jonquil version
+      description: "The downloaded app: Finder, Get Info on Jonquil.app (or `defaults read /Applications/Jonquil.app/Contents/Info CFBundleShortVersionString`). From source: `git rev-parse --short HEAD`."
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: jolt-version
+    attributes:
+      label: Jolt version
+      description: "`jolt --version`, if you have Jolt installed."
+      placeholder: jolt v0.8.27
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run Jonquil
+      options:
+        - The downloaded app (DMG or zip)
+        - Built from source on macOS
+        - Built from source on Linux
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 26.1 (Apple Silicon), or Ubuntu 26.04 (X11)
+    validations:
+      required: true
+  - type: dropdown
+    id: dialect
+    attributes:
+      label: Dialect
+      description: What the window was running, if it matters.
+      multiple: true
+      options:
+        - Jolt, a loose file (in process)
+        - Jolt, a project with deps.edn (out of process)
+        - JVM Clojure
+        - ClojureScript (shadow-cljs)
+        - ClojureScript (node or browser, launched by Jonquil)
+        - ClojureDart
+        - jank
+        - Another nREPL server (babashka, Basilisp, ...)
+        - Doesn't depend on the dialect
