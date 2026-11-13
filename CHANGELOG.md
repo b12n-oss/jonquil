@@ -13,6 +13,7 @@ everything that shipped before that.
 
 ### Fixed
 
+- Text put into an editor, the console or an entry could now and then reach GTK as freed memory. Jonquil passed it as a string argument, which is a buffer the garbage collector may move, and GTK calls Jonquil's own handlers before it has copied the text. A collection in that moment gave a crash ("invalid memory reference"), GTK's abort on text that wasn't valid UTF-8, or the wrong text in the buffer. It was rare, and likelier while another thread was busy, as when plugins load. The four calls that insert text now hand GTK a copy the collector can't move.
 - On Linux, closing a popover with Escape while one of its buttons had the focus left the focus on the editor's scroll container, so typing didn't reach the editor. GTK moves focus out of a closed popover later on X11 than on macOS, and Jonquil's step that hands focus back ran before that. It now takes the focus when it is still inside the popover that closed.
 - The Linux GUI self-tests run with a window manager, and four rows that failed there now pass: one was the focus fix above, one needed an active window, one checked for "Cmd" in a list of bindings that says "Ctrl" on Linux, and one read a selection that X11 drops when no real key press came with it.
 

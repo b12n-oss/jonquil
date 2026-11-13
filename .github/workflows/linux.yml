@@ -7,11 +7,11 @@ name: Linux
 # pinned Jolt release, with its layers cached between runs.
 #
 # Both jobs count toward the one required check, `ci ok` (ci.yml). The GUI
-# self-tests run with a window manager (dev/linux/selftest-session.sh). One
-# row crashes now and then on Linux (issue #9) and is listed in
-# ci/linux-known-failures.txt: the gui job passes while only those fail, and
-# fails when any other row does, so it catches a new Linux regression. It
-# reports the rows in its summary and uploads the full log.
+# self-tests run with a window manager (dev/linux/selftest-session.sh). A row
+# that fails only on Linux would be listed in ci/linux-known-failures.txt,
+# which is empty: the gui job passes while only listed rows fail, and fails
+# when any other row does. It reports the rows in its summary and uploads
+# the full log.
 
 # Called by ci.yml on every push to main and every pull request, and run by
 # hand from the Actions tab.

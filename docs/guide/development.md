@@ -289,11 +289,10 @@ same image: `.github/workflows/linux.yml` builds it for amd64 and runs
 `jolt linux:test` and `jolt linux:selftest` on every push to `main` and every
 pull request. The self-tests run under Xvfb with a window manager (openbox,
 started by `dev/linux/selftest-session.sh`), because without one no window
-is ever active and rows that depend on that fail. One row,
-`no-plugins-reload-refuses`, crashes now and then on Linux (issue #9) and is
-listed in `ci/linux-known-failures.txt`. The GUI job passes while only a
-listed row fails and fails when any other row does, and its summary names
-the rows.
+is ever active and rows that depend on that fail. Every row passes on
+Linux. `ci/linux-known-failures.txt` is where a row that fails only there
+would be listed, with its issue: the GUI job passes while only listed rows
+fail and fails when any other row does, and its summary names the rows.
 
 | Task | What it does |
 |---|---|
