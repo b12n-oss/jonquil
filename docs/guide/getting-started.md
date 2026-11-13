@@ -259,7 +259,8 @@ jolt app:uninstall   # takes it out again
 `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` and
 `./jonquil <folder>` behave as they do on macOS.
 
-`jolt app:install` writes four paths, all under `~/.local/share`:
+`jolt app:install` writes four paths under `~/.local/share`, and one link
+under `~/.local/bin`:
 
 | Path | What it is |
 |---|---|
@@ -267,17 +268,22 @@ jolt app:uninstall   # takes it out again
 | `~/.local/share/applications/net.b12n.jonquil.desktop` | the launcher |
 | `~/.local/share/icons/hicolor/256x256/apps/net.b12n.jonquil.png` | the icon |
 | `~/.local/share/mime/packages/net.b12n.jonquil.xml` | the MIME types |
+| `~/.local/bin/jonquil` | the `jonquil` command, a link to the binary |
 
 The MIME package defines `text/x-clojure`, `application/edn` and
 `text/x-jank`, so Jonquil appears in Open With but is never the default.
-Nothing outside `~/.local/share` is touched, and the installer runs
+Nothing else is touched, and the installer runs
 `update-mime-database` and `update-desktop-database` when they are on
 `PATH`. Running it again replaces the earlier install; `app:install` and
 `app:uninstall` refuse a launcher without its `X-Jonquil-Install=1` line.
-To start from a terminal afterwards, run
-`~/.local/share/jonquil/jonquil [file or folder...]`, or
-`gtk4-launch net.b12n.jonquil [file or folder...]` (Ubuntu's
-`libgtk-4-bin`; GTK 3's `gtk-launch` works too).
+A file already at `~/.local/bin/jonquil`, or a link there to something
+else, is left alone with a note, and `app:uninstall` removes the link only
+when it points at this install.
+To start from a terminal afterwards, run `jonquil [file or folder...]` if
+`~/.local/bin` is on your `PATH`. It runs in the foreground, so add `&` to
+keep your prompt. `gtk4-launch net.b12n.jonquil [file or folder...]`
+(Ubuntu's `libgtk-4-bin`; GTK 3's `gtk-launch` works too) starts it
+detached.
 
 ### Where tools come from in a launcher start
 

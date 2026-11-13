@@ -1,0 +1,64 @@
+#!/bin/sh
+# jonquil: open files and folders in Jonquil.app from a terminal.
+#
+#   jonquil                 open the current folder in a new window
+#   jonquil <folder>        open that folder in a new window
+#   jonquil <file>...       open the files in the running Jonquil, as tabs
+#   jonquil --version       any argument that starts with - runs Jonquil in
+#                           the foreground with every argument, as its own
+#                           flags (--version, --mcp, --attach) need the terminal
+#
+# Paths go to the app through open(1), so the prompt comes back at once.
+# Files alone go to a running Jonquil, as a double click in Finder does. A
+# folder among them starts another Jonquil, because a running one would
+# move its file tree to that folder and leave the project it had open. This
+# file lives at Jonquil.app/Contents/Resources/bin/jonquil and finds its app from
+# there, through any symlinks that lead to it.
+
+self="$0"
+while [ -L "$self" ]; do
+  target="$(readlink "$self")"
+  case "$target" in
+    /*) self="$target" ;;
+    *) self="$(dirname "$self")/$target" ;;
+  esac
+done
+app="$(cd "$(dirname "$self")/../../.." && pwd)"
+
+for arg in "$@"; do
+  case "$arg" in
+    -*)
+      launcher="$app/Contents/MacOS/Jonquil"
+      [ -x "$launcher" ] || launcher="$app/Contents/MacOS/jonquil"
+      exec "$launcher" "$@"
+      ;;
+  esac
+done
+
+[ "$#" -gt 0 ] || set -- .
+
+for arg in "$@"; do
+  if [ ! -e "$arg" ]; then
+    echo "jonquil: $arg: no such file or folder" >&2
+    exit 1
+  fi
+done
+
+# open(1) takes relative paths, but an absolute one reads the same wherever
+# the running Jonquil's own folder is
+new_window=
+n=$#
+while [ "$n" -gt 0 ]; do
+  arg="$1"
+  shift
+  if [ -d "$arg" ]; then
+    new_window=-n
+    arg="$(cd "$arg" && pwd)"
+  else
+    arg="$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")"
+  fi
+  set -- "$@" "$arg"
+  n=$((n - 1))
+done
+
+exec open $new_window -a "$app" "$@"

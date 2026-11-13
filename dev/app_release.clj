@@ -168,6 +168,7 @@
 (def ^:private licenses (str contents "/Resources/licenses"))
 (def ^:private bin (str contents "/MacOS/jonquil-bin"))
 (def ^:private launcher (str contents "/MacOS/Jonquil"))
+(def ^:private cli (str contents "/Resources/bin/jonquil"))
 
 (defn- fail! [msg]
   (binding [*out* *err*] (println (str "app-release: " msg)))
@@ -308,6 +309,7 @@
    ["plutil -lint" (zero? (:exit (p/sh "plutil" "-lint" (str contents "/Info.plist"))))]
    ["codesign --verify --deep --strict" (zero? (:exit (p/sh "codesign" "--verify" "--deep" "--strict" app)))]
    ["launcher executable" (.canExecute (io/file launcher))]
+   ["jonquil command executable" (.canExecute (io/file cli))]
    ["no GPL-only library" (not (lzo? (seq (.list (io/file frameworks)))))]
    ["GTK file chooser schema" (zero? (:exit (p/sh "/opt/homebrew/opt/glib/bin/gsettings" "--schemadir" schemas
                                                   "list-keys" "org.gtk.gtk4.Settings.FileChooser")))]])
@@ -333,6 +335,11 @@
     (write-licences! plan)
     (write-schemas! plan))
   (sh! "cp" "resources/Jonquil.icns" (str contents "/Resources/Jonquil.icns"))
+  ;; the terminal command (jonquil.cli-install links to it), before signing
+  ;; so the bundle's seal covers it
+  (.mkdirs (io/file (str contents "/Resources/bin")))
+  (sh! "cp" "resources/cli/jonquil" cli)
+  (.setExecutable (io/file cli) true)
   (spit (str contents "/Info.plist")
         (app-bundle/info-plist {:version (app-bundle/git-version) :build (app-bundle/build-number)
                                 :doc-extensions app-bundle/doc-extensions

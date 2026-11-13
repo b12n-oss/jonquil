@@ -117,6 +117,7 @@
         sign-text (str (:out sign) (:err sign))
         checks [["plutil -lint" (zero? (:exit lint))]
                 ["executable bit" (.canExecute (io/file exe))]
+                ["jonquil command" (.canExecute (io/file dir "Contents/Resources/bin/jonquil"))]
                 ["codesign adhoc" (and (zero? (:exit sign)) (str/includes? sign-text "adhoc"))]]]
     (doseq [[n ok] checks] (println (str "  check " n ": " (if ok "ok" "FAILED"))))
     (when-let [[n _] (first (remove second checks))]
@@ -129,6 +130,9 @@
   (copy! "jonquil" (str bundle-dir "/Contents/MacOS/jonquil"))
   (.setExecutable (io/file bundle-dir "Contents/MacOS/jonquil") true)
   (copy! "resources/Jonquil.icns" (str bundle-dir "/Contents/Resources/Jonquil.icns"))
+  ;; the terminal command (jonquil.cli-install links to it)
+  (copy! "resources/cli/jonquil" (str bundle-dir "/Contents/Resources/bin/jonquil"))
+  (.setExecutable (io/file bundle-dir "Contents/Resources/bin/jonquil") true)
   (spit (str bundle-dir "/Contents/Info.plist")
         (info-plist {:version (git-version) :build (build-number) :doc-extensions doc-extensions}))
   (println (str "built " bundle-dir))

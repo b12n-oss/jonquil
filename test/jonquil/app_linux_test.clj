@@ -18,7 +18,8 @@
           :icon "/home/dev/.local/share/icons/hicolor/256x256/apps/net.b12n.jonquil.png"
           :mime "/home/dev/.local/share/mime/packages/net.b12n.jonquil.xml"
           :mime-db "/home/dev/.local/share/mime"
-          :apps-db "/home/dev/.local/share/applications"}
+          :apps-db "/home/dev/.local/share/applications"
+          :command "/home/dev/.local/bin/jonquil"}
          (al/install-paths "/home/dev"))))
 
 (deftest desktop-entry-test
@@ -129,6 +130,9 @@
     (testing "missing database tools print a note and do not fail"
       (is (str/includes? (:out r) "note: update-mime-database not found, skipped"))
       (is (str/includes? (:out r) "note: update-desktop-database not found, skipped")))
+    (testing "the jonquil command links to the binary"
+      (is (str/includes? (:out r) (str "linked " (:command p))))
+      (is (= (:binary p) (str (java.nio.file.Files/readSymbolicLink (.toPath (io/file (:command p))))))))
     (testing "a second install over our own files succeeds"
       (is (= 0 (:status (run-install home {:version "v2"}))))
       (is (str/includes? (slurp (:desktop p)) "X-Jonquil-Version=v2")))))
@@ -167,6 +171,7 @@
         (is (str/includes? (:out r) "uninstalled"))
         (doseq [k [:dir :binary :desktop :icon :mime]]
           (is (not (.exists (io/file (get p k)))) (str k)))
+        (is (not (java.nio.file.Files/isSymbolicLink (.toPath (io/file (:command p))))) "the command's link too")
         (is (str/includes? (:out r) "note: update-mime-database not found, skipped")))
       (testing "a sibling under ~/.local/share survives"
         (is (= "mine" (slurp sibling))))
@@ -221,3 +226,14 @@
         (is (not (str/includes? (:out r) "uninstalled")))
         (is (str/includes? (:err r) (:dir p))))
       (finally (.setWritable share true)))))
+
+(deftest a-command-that-isnt-ours-stays-test
+  (let [home (temp-home)
+        p (al/install-paths home)]
+    (io/make-parents (:command p))
+    (spit (:command p) "mine")
+    (let [r (run-install home {})]
+      (is (= 0 (:status r)))
+      (is (str/includes? (:out r) (str "note: " (:command p) " exists and isn't a link to this install, left alone"))))
+    (is (= 0 (:status (run-uninstall home {}))))
+    (is (= "mine" (slurp (:command p))))))
