@@ -142,6 +142,50 @@ library from anywhere but the bundle and the system.
   it's there. It also warns when a Homebrew package is older than its
   source link, or when a package ships no licence file.
 
+### Notarized builds
+
+```bash
+jolt app:release    # build target/Jonquil.app first
+jolt app:notarize   # sign, notarize and staple it; write the zip and the dmg
+```
+
+`jolt app:notarize` turns the app `app:release` built into one that
+Gatekeeper opens without a warning. It uploads to Apple's notary service, so
+it needs a network and an Apple Developer account. It does this:
+
+1. **Signs with the Developer ID.** The identity is imported into a
+   throwaway keychain for the run, never the login keychain. Signing goes
+   inside-out: the bundled libraries, `jonquil-bin`, then the app. It uses
+   the hardened runtime and a secure timestamp.
+2. **Uses two entitlements** (`resources/Jonquil.entitlements`), which were
+   measured:
+   - `com.apple.security.cs.allow-jit`, because Chez Scheme writes machine
+     code at run time, and without it Jonquil crashes at launch;
+   - `com.apple.security.cs.allow-dyld-environment-variables`, because the
+     launcher's `DYLD_LIBRARY_PATH` is how the binary finds the bundled GTK.
+
+   Library validation stays on, so the app loads only libraries signed by
+   the same team.
+3. **Notarizes and staples the app** with `notarytool` and an App Store
+   Connect API key, then rebuilds `Jonquil-<version>-macos-arm64.zip` from
+   it.
+4. **Builds `Jonquil-<version>-macos-arm64.dmg`.** It holds the app and an
+   Applications shortcut, and is itself signed, notarized and stapled.
+5. **Checks both** with `spctl` ("Notarized Developer ID") and
+   `stapler validate`. It fails, keeping Apple's log in
+   `target/notarization-<id>.json`, if Apple doesn't accept a submission.
+
+Apple's Developer ID G2 intermediate certificate is committed at
+`resources/certs/DeveloperIDG2CA.cer`, checked against a pinned SHA-256, so
+signing works on a Mac that lacks it.
+
+The identity and the API key are read with `pass` from the store in
+`PASSWORD_STORE_DIR`. The entry names are in `dev/app_notarize.clj`: the
+Developer ID `.p12` and its password, and the App Store Connect key, its ID
+and its issuer. No secret is printed. Each is decoded into a 0600 file, or
+held in memory, and the throwaway keychain and every decoded file are
+deleted when the run ends, whether it succeeds or fails.
+
 ### Where tools come from in a Finder launch
 
 A Finder or Dock launch inherits a bare `PATH`, so `jolt`, `jank`,

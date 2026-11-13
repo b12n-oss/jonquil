@@ -281,6 +281,7 @@
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "app:bundle" "rebuild ./jonquil, then make ./Jonquil.app from it (macOS)")
      (row "app:release" "a self-contained target/Jonquil.app and its zip, GTK bundled (macOS, Apple Silicon)")
+     (row "app:notarize" "sign target/Jonquil.app with the Developer ID (from b12n-pass), notarize, staple; zip and dmg (macOS)")
      (row "app:release-check" "launch target/Jonquil.app with /opt/homebrew blocked; fails on a library from outside it")
      (row "app:install" "install Jonquil: ~/Applications on macOS, ~/.local/share on Linux (macOS and Linux)")
      (row "app:uninstall" "remove what app:install put in place (macOS and Linux)")
@@ -431,6 +432,9 @@
   app:release
   {:doc "Build a self-contained target/Jonquil.app and target/Jonquil-<version>-macos-arm64.zip: GTK and its libraries bundled, ad-hoc signed unless JONQUIL_SIGN_IDENTITY names an identity (macOS, Apple Silicon)"
    :task (shell "jolt" "-M:bundle" "-m" "app-release" "release")}
+  app:notarize
+  {:doc "Sign target/Jonquil.app (from app:release) with the Developer ID from b12n-pass in a throwaway keychain, notarize and staple it, then write the notarized zip and dmg (macOS; uploads to Apple's notary service)"
+   :task (shell "jolt" "-M:bundle" "-m" "app-notarize")}
   app:release-check
   {:doc "Launch target/Jonquil.app (or the app given) for 10 seconds with /opt/homebrew unreadable; fails when it exits early or loads a library from outside the bundle (macOS)"
    :task (apply shell "jolt" "-M:bundle" "-m" "app-release" "check" *command-line-args*)}

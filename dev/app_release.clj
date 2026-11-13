@@ -289,7 +289,7 @@
     (doseq [f (concat (rest (macho-files)) [bin app])]
       (sh! "codesign" "--force" "--timestamp=none" "-s" id f))))
 
-(defn- checks
+(defn checks
   "[name ok?] for each check of the built bundle."
   []
   [["no Homebrew paths" (not-any? #(re-find #"/opt/homebrew|/usr/local"

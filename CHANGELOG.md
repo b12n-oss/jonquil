@@ -9,8 +9,9 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 <details>
-<summary><strong>52 entries</strong></summary>
+<summary><strong>53 entries</strong></summary>
 
+- `jolt app:notarize` signs the `target/Jonquil.app` from `app:release` with a Developer ID, imported from `pass` into a throwaway keychain, with the hardened runtime and two entitlements (`allow-jit` for Chez Scheme, `allow-dyld-environment-variables` for the launcher). It then notarizes and staples the app and a new `Jonquil-<version>-macos-arm64.dmg`, rebuilds the zip, and checks both with `spctl` and `stapler validate`. Apple's Developer ID G2 intermediate is committed with a pinned SHA-256.
 - `jolt app:release` builds a self-contained `target/Jonquil.app` and `Jonquil-<version>-macos-arm64.zip` for Apple Silicon that runs without Homebrew. GTK and the 43 libraries it loads are bundled and relinked, a launcher finds them, their licences and source links go in `Contents/Resources/licenses/`, and the app is signed ad hoc (or with `JONQUIL_SIGN_IDENTITY`). `jolt app:release-check` launches it with `/opt/homebrew` unreadable. It needs macOS 26, and it isn't for publishing while cairo's script interpreter brings in lzo (GPL-2.0).
 - Instrument this tab for stepping (palette, Jolt, in process and in the Jolt child): every top-level form in the tab that only defines code is sent again with step points, so Step Into goes into functions that hold no breakpoint. Later Runs of the tab keep the step points in. Forms with edits that haven't run are never sent. Stop instrumenting this tab sends them again without, and Clear All Breakpoints and closing the tab end it too.
 - Step Over (F10) and Step Out (Shift+F7), in the palette and as buttons in the Frames panel beside Continue and Step Into: Step Over pauses at the next line in the same function or a caller, running a call on the line through, and Step Out pauses at the caller's next line once the function returned. Step Into moves from F10 to F7, since macOS keeps F11 for Show Desktop. Jolt, in process and in the Jolt child.
