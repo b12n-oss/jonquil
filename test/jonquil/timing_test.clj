@@ -36,24 +36,26 @@
   (is (not-any? timing/supported? [:cljs :cljd :jank])))
 
 (deftest slow-form-stays-near-the-budget-test
-  ;; a call slower than budget/20 used to run 10 batches of one: 50 ms x 11
+  ;; a call slower than budget/20 used to run 10 batches of one: 50 ms x 11.
+  ;; The bounds are in calls, not milliseconds: a loaded machine stretches a
+  ;; sleep (a 50 ms one took 100 to 120 ms on a GitHub macOS runner,
+  ;; 2026-11-14), and a call that takes the whole 100 ms budget is timed once.
   (let [t0 (System/nanoTime)
         [r out] (run "(Thread/sleep 50)")
-        ms (/ (- (System/nanoTime) t0) 1e6)]
-    (is (< ms 400) (str ms " ms for a 100 ms budget"))
-    ;; On a loaded machine the 50 ms sleep itself can take the whole 100 ms
-    ;; budget (120 ms on a GitHub macOS runner, 2026-11-14). The harness then
-    ;; rightly times it once, and this test has nothing to say about batches.
-    (if (>= (:ns-per-call r) 1e8)
-      (is (= 1 (:batches r)) (str "slower than the budget, so timed once: " r))
-      (do (is (<= 3 (:batches r) 5) (str r))
-          (is (str/includes? out (str "over " (:batches r) " batches")) out)))))
+        ms (/ (- (System/nanoTime) t0) 1e6)
+        call-ms (max 50.0 (/ (:ns-per-call r) 1e6))
+        batches (:batches r)]
+    (is (or (= 1 batches) (<= 3 batches 5)) (str r))
+    (is (< ms (* 8 call-ms)) (str ms " ms, at " call-ms " ms a call: more than eight calls' worth"))
+    (is (str/includes? out (if (= 1 batches) "timed once" (str "over " batches " batches"))) out)))
 
 (deftest form-slower-than-the-budget-runs-once-test
   (let [t0 (System/nanoTime)
         [r out] (run "(Thread/sleep 150)")
-        ms (/ (- (System/nanoTime) t0) 1e6)]
-    (is (< ms 400) (str ms " ms"))
+        ms (/ (- (System/nanoTime) t0) 1e6)
+        ;; in calls, as above: one call, with room for the harness around it
+        call-ms (max 150.0 (/ (:ns-per-call r) 1e6))]
+    (is (< ms (* 2.5 call-ms)) (str ms " ms, at " call-ms " ms a call"))
     (is (= 1 (:batches r)))
     (is (re-find #"; Time: [0-9.]+ ms for one call" out) out)))
 
