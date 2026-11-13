@@ -18,8 +18,10 @@ them, with its own code, under the Eclipse Public License 2.0, as section 7 of
 EPL-1.0 allows once a new version of the licence is published.
 
 Six of Jonquil's colour themes take their colours from popular editor themes.
-Jonquil uses only their published colour values, mapped to its own token kinds
-in src/jonquil/theme.clj, and includes none of their source:
+Jonquil uses their published colour values, mapped to its own token kinds in
+src/jonquil/theme.clj, and includes none of their source. Each theme's
+find-highlight tint is Jonquil's own, and any other colour that differs from
+the original is noted beside its theme:
 
 - Gruvbox Dark and Light: Gruvbox by morhetz, MIT/X11
   (https://github.com/morhetz/gruvbox, colors/gruvbox.vim).
@@ -31,6 +33,22 @@ in src/jonquil/theme.clj, and includes none of their source:
   as https://github.com/bbatsov/zenburn-emacs publishes it.
 - Monokai: the original Monokai by Wimer Hazenberg, with the palette as
   https://github.com/oneKelvinSmith/monokai-emacs publishes it.
+
+Six more themes take their colours the same way:
+
+- Tokyo Night: tokyonight.nvim by folke, Apache-2.0
+  (https://github.com/folke/tokyonight.nvim, lua/tokyonight/colors/night.lua
+  and storm.lua).
+- Catppuccin Mocha and Latte: Catppuccin, MIT, copyright 2021 Catppuccin
+  (https://github.com/catppuccin/palette, palette.json).
+- One Dark: onedark.vim by Joshua Dick, MIT
+  (https://github.com/joshdick/onedark.vim, autoload/onedark.vim). Its
+  comment grey is Jonquil's #666f7e, a little lighter than the original
+  #5c6370, so that it meets Jonquil's contrast floor.
+- Kanagawa: kanagawa.nvim by Tommaso Laurenzi, MIT
+  (https://github.com/rebelot/kanagawa.nvim, lua/kanagawa/colors.lua).
+- Rosé Pine: Rosé Pine, MIT
+  (https://github.com/rose-pine/neovim, lua/rose-pine/palette.lua).
 
 Jonquil's Parinfer engine (src/jonquil/parinfer.clj), lifted from DrClojure,
 implements Parinfer v3.13.1 after parinfer.js

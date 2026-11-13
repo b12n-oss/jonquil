@@ -312,7 +312,9 @@ when that variable is unset, blank, or not an absolute path:
 - `:theme`: the theme you last picked with Cmd/Ctrl+Shift+M or the
   palette's Use theme entries, one of `:light`, `:dark`, `:solarized`,
   `:navy`, `:gruvbox-dark`, `:gruvbox-light`, `:dracula`, `:nord`,
-  `:zenburn`, `:monokai` or `:auto` (follow macOS's light or dark setting).
+  `:zenburn`, `:monokai`, `:tokyo-night`, `:catppuccin-mocha`,
+  `:catppuccin-latte`, `:one-dark`, `:kanagawa`, `:rose-pine` or `:auto`
+  (follow macOS's light or dark setting).
 - `:file-tree`: whether the tree was showing and how wide, saved when you
   toggle it and when you quit.
 - `:dialect` (hand-written, optional): the dialect an untitled buffer or a

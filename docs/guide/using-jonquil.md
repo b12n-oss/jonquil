@@ -428,9 +428,10 @@ normal behavior.
 
 ## Themes
 
-Jonquil has ten themes: light (the default), dark, solarized and navy, and
-six popular ones from other editors, Gruvbox Dark, Gruvbox Light, Dracula,
-Nord, Zenburn and Monokai. To pick one by name, open the command palette
+Jonquil has sixteen themes: light (the default), dark, solarized and navy, and
+twelve popular ones from other editors, Gruvbox Dark, Gruvbox Light, Dracula,
+Nord, Zenburn, Monokai, Tokyo Night, Catppuccin Mocha, Catppuccin Latte, One
+Dark, Kanagawa and Rosé Pine. To pick one by name, open the command palette
 (Cmd/Ctrl+Shift+P) and type "theme": each has a Use theme entry, and so does
 auto. Cmd/Ctrl+Shift+M cycles through them all in that order, ending with
 auto. The status bar shows the current one, and your choice is saved.
@@ -445,6 +446,12 @@ auto. The status bar shows the current one, and your choice is saved.
 ![Jonquil's window in the Nord theme](../images/theme-nord.png)
 ![Jonquil's window in the Zenburn theme](../images/theme-zenburn.png)
 ![Jonquil's window in the Monokai theme](../images/theme-monokai.png)
+![Jonquil's window in the Tokyo Night theme](../images/theme-tokyo-night.png)
+![Jonquil's window in the Catppuccin Mocha theme](../images/theme-catppuccin-mocha.png)
+![Jonquil's window in the Catppuccin Latte theme](../images/theme-catppuccin-latte.png)
+![Jonquil's window in the One Dark theme](../images/theme-one-dark.png)
+![Jonquil's window in the Kanagawa theme](../images/theme-kanagawa.png)
+![Jonquil's window in the Rosé Pine theme](../images/theme-rose-pine.png)
 
 A theme recolours both panes and GTK's chrome. Auto follows the system's
 Light or Dark mode on macOS; elsewhere it shows light.

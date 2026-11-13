@@ -468,6 +468,12 @@
 (defn- scene-theme-nord [ui] (scene-theme :theme-nord :nord ui))
 (defn- scene-theme-zenburn [ui] (scene-theme :theme-zenburn :zenburn ui))
 (defn- scene-theme-monokai [ui] (scene-theme :theme-monokai :monokai ui))
+(defn- scene-theme-tokyo-night [ui] (scene-theme :theme-tokyo-night :tokyo-night ui))
+(defn- scene-theme-catppuccin-mocha [ui] (scene-theme :theme-catppuccin-mocha :catppuccin-mocha ui))
+(defn- scene-theme-catppuccin-latte [ui] (scene-theme :theme-catppuccin-latte :catppuccin-latte ui))
+(defn- scene-theme-one-dark [ui] (scene-theme :theme-one-dark :one-dark ui))
+(defn- scene-theme-kanagawa [ui] (scene-theme :theme-kanagawa :kanagawa ui))
+(defn- scene-theme-rose-pine [ui] (scene-theme :theme-rose-pine :rose-pine ui))
 
 (defn- scene-completion
   "\"(ma\" in the editor, :complete!* -- the exact fn Ctrl+Space
@@ -1491,6 +1497,12 @@
    [:theme-nord scene-theme-nord]
    [:theme-zenburn scene-theme-zenburn]
    [:theme-monokai scene-theme-monokai]
+   [:theme-tokyo-night scene-theme-tokyo-night]
+   [:theme-catppuccin-mocha scene-theme-catppuccin-mocha]
+   [:theme-catppuccin-latte scene-theme-catppuccin-latte]
+   [:theme-one-dark scene-theme-one-dark]
+   [:theme-kanagawa scene-theme-kanagawa]
+   [:theme-rose-pine scene-theme-rose-pine]
    [:completion scene-completion]
    [:quick-doc scene-quick-doc]
    [:rename scene-rename]
