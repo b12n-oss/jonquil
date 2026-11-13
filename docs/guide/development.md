@@ -290,7 +290,7 @@ manual. Docker is the only requirement beyond the usual tools.
 
 | Task | What it does |
 |---|---|
-| `jolt linux:image` | builds `jonquil-linux:<arch>` (Ubuntu 26.04, GTK 4, Xvfb, Jolt v0.8.24) |
+| `jolt linux:image` | builds `jonquil-linux:<arch>` (Ubuntu 26.04, GTK 4, Xvfb, Jolt v0.8.27) |
 | `jolt linux:test [ns...]` | `jolt test` on a copy of the checkout |
 | `jolt linux:selftest` | `jolt gtk:selftest` under Xvfb |
 | `jolt linux:build` | `jolt app:build`; the binary lands in `target/linux/<arch>/` |
