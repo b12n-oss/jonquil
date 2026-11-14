@@ -153,6 +153,14 @@ Every command left out is still under Edit > Structure and in the palette.
 On Linux, Ctrl+Alt+Right and Left often switch workspaces, so the set also
 puts slurp and barf on Ctrl+Alt+. and Ctrl+Alt+, there.
 
+On a Mac, macOS itself uses Ctrl+Up, Ctrl+Down, Ctrl+Left and Ctrl+Right
+for Mission Control and for switching desktops, and an app never sees a key
+macOS takes. Moving by a form still works on Option+Left and Option+Right.
+Ctrl+Up and Ctrl+Down, which move out of a list and into the next one, have
+no second key in the set, so they do nothing until you turn those four
+shortcuts off under System Settings > Keyboard > Keyboard Shortcuts >
+Mission Control, or give the two commands another key in Preferences.
+
 On a Mac, Option changes the character a key sends, so Jonquil matches a key
 held with Option by its position on a US keyboard. On another layout
 (Dvorak, Colemak, AZERTY, QWERTZ) a binding written as Ctrl+Alt+S fires on
