@@ -14,7 +14,7 @@ name: Site
 # Jonquil's site is https://jonquil.b12n.app, built elsewhere, so this
 # workflow only checks that the docs build.
 
-# Called by ci.yml on every push to main and every pull request, and run by
+# Called by ci.yml on every push to main or develop and every pull request, and run by
 # hand from the Actions tab.
 
 "on":
