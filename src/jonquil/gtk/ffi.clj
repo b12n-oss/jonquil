@@ -131,14 +131,16 @@
 ;; Text GTK is handed while it can still call back into Jolt goes over as a C
 ;; string in foreign memory, not as a :string argument. A :string argument is
 ;; a byte buffer the collector may move, and these functions emit a signal
-;; (insert-text, delete-text, changed) before they have copied the text: the
-;; editor's own insert-text handler runs in between. A collection during that
-;; handler moved the buffer and GTK read freed memory, which showed as
-;; "invalid memory reference" or as GTK's assertion that the text wasn't
-;; valid UTF-8, now and then, mostly while another thread was allocating
-;; (measured 2026-11-14 with a forced collection in an insert-text handler:
-;; a crash within 300 inserts as :string, none as a C string). The four
-;; wrappers below are the calls that take text and emit before copying it.
+;; before they have copied the text: insert-text on a text buffer, where the
+;; editor has a handler, and delete-text and changed on an entry. A collection
+;; during the handler moved the buffer and GTK read freed memory. Measured
+;; 2026-11-14 with a forced collection in an insert-text handler: the process
+;; died with "invalid memory reference" within 300 inserts as :string, and
+;; never with a C string. In the self-tests it showed now and then in the
+;; plugin rows, as that crash or as GTK's assertion that the text wasn't valid
+;; UTF-8. Four functions in this file are wrapped this way, the ones that
+;; take text and emit before copying it: this one, gtk-text-buffer-insert,
+;; gtk-text-buffer-insert-interactive-at-cursor and gtk-editable-set-text.
 (ffi/defcfn ^:private gtk-text-buffer-set-text* "gtk_text_buffer_set_text" [:pointer :pointer :int] :void)
 
 (defn gtk-text-buffer-set-text
