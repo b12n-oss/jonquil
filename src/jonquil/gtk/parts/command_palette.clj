@@ -7,9 +7,11 @@
   lists that the window's key handler reads from its context."
   (:require [clojure.string :as str]
             [jonquil.cli-install :as cli-install]
+            [jonquil.command-registry :as cmd-registry]
             [jonquil.describe :as describe]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
@@ -18,6 +20,7 @@
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]
+            [jonquil.user-keys :as user-keys]
             [jonquil.version :as version]))
 
 (defn- palette-entries
@@ -79,6 +82,71 @@
   [{:keys [cv]} lines]
   (doseq [l lines] (cview/append! cv :system (str l "\n"))))
 
+(defn- key-opts
+  "What jonquil.user-keys checks a binding against: the live commands,
+  plugins' included, and the conditions of each scope."
+  []
+  {:commands (plugin-registry/all-commands @plugin-registry/live)
+   :conditions {:window (set (keys cmd-registry/window-conditions))
+                :editor (set (keys cmd-registry/editor-conditions))}})
+
+(defn- load-user-keys!
+  "Reads keys.edn beside the window's settings file into
+  jonquil.user-keys/live and prints what loaded and what was skipped.
+  said holds the lines printed last: an unforced load prints only when they
+  changed, so the reload that follows a plugin load stays quiet unless a
+  binding to that plugin's command now loads. A forced load says when there
+  is no file."
+  [{:keys [settings-path*] :as ctx} said forced?]
+  (let [path (user-keys/keys-path @settings-path*)
+        r (user-keys/load-keys path (key-opts))
+        lines (user-keys/report-lines path r)]
+    (reset! user-keys/live (:keys r))
+    (when (or forced? (not= lines @said))
+      (reset! said lines)
+      (print-lines! ctx (if (and forced? (empty? lines))
+                          [(str "; " path " doesn't exist yet. \"Open your key bindings file\" makes one.")]
+                          lines)))
+    nil))
+
+(defn- open-user-keys!
+  "Opens keys.edn in a tab, writing the template first when there is no
+  file yet."
+  [{:keys [settings-path* open-file!] :as ctx}]
+  (let [path (user-keys/keys-path @settings-path*)
+        f (java.io.File. ^String path)]
+    (try
+      (when-not (.exists f)
+        (.mkdirs (.getParentFile f))
+        (spit f user-keys/template))
+      (when-let [e (:error (open-file! path))]
+        (print-lines! ctx [(str "; couldn't open " path ": " e)]))
+      (catch Exception e
+        (print-lines! ctx [(str "; couldn't make " path ": " (ex-message e))])))
+    nil))
+
+(defn- same-file? [a b]
+  (try (= (.getCanonicalPath (java.io.File. ^String a)) (.getCanonicalPath (java.io.File. ^String b)))
+       (catch Exception _ false)))
+
+(defn- start-user-keys!
+  "Loads keys.edn for this window and keeps it current: a save of the file
+  in Jonquil reloads it, and so does a change to the plugins, whose
+  commands a binding may name. Answers the two palette fns."
+  [{:keys [settings-path* saved-listeners] :as ctx}]
+  (let [said (atom [])]
+    (load-user-keys! ctx said false)
+    (swap! saved-listeners assoc :your-key-bindings
+           (fn [path _ed]
+             (when (same-file? path (user-keys/keys-path @settings-path*))
+               (load-user-keys! ctx said true))))
+    (add-watch plugin-registry/live ::user-keys
+               (fn [_ _ old new]
+                 (when (not= (plugin-registry/all-commands old) (plugin-registry/all-commands new))
+                   (on-gui! #(load-user-keys! ctx said false)))))
+    {:open-keys-file-fn (fn [] (open-user-keys! ctx))
+     :reload-keys-fn (fn [] (load-user-keys! ctx said true))}))
+
 (defn- describe-fns
   "The describe-keys fns over pending (Describe Key's flag) and recent-keys
   (jonquil.describe's ring), both read and written on the GTK thread only."
@@ -106,7 +174,8 @@
     {:fns (merge {:open-palette-fn open-palette-fn
                   :describe-pending pending :recent-keys recent-keys
                   :live-keys live-keys :print-lines! (partial print-lines! wctx)}
-                 (describe-fns wctx pending recent-keys))
+                 (describe-fns wctx pending recent-keys)
+                 (start-user-keys! wctx))
      :ui {:open-palette!* open-palette-fn}}))
 
 (def part

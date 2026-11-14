@@ -410,22 +410,25 @@
             :help/recent-keys [:recent-keys-fn]
             :help/version [:version-fn]
             :help/install-cli [:install-cli-fn]
-            :help/remove-cli [:remove-cli-fn]}
+            :help/remove-cli [:remove-cli-fn]
+            :help/open-keys-file [:open-keys-file-fn]
+            :help/reload-keys [:reload-keys-fn]}
            (update-vals (:commands spec) :call)))
     (is (false? (:palette? (:palette/open (:commands spec)))))
     (is (every? #(nil? (get @#'registry/core-window-commands %))
                 [:palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version
-                 :help/install-cli :help/remove-cli])
+                 :help/install-cli :help/remove-cli :help/open-keys-file :help/reload-keys])
         "the core table keeps none of them")
     (is (every? #(some? (get registry/window-commands %))
                 [:palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version
-                 :help/install-cli :help/remove-cli]))
+                 :help/install-cli :help/remove-cli :help/open-keys-file :help/reload-keys]))
     (is (some? (:help/key-hints registry/window-commands)))))
 
 (defn- palette-wctx [bang*]
   {:bang* bang* :cv :cv :ev* (atom nil) :active-tab (fn [] {:id 1})
    :tabs (atom []) :tab-by-id (fn [& _]) :recent-tabs (atom [])
-   :right {:recent-panels (atom [])} :showing-panel (fn [_]) :settings-path* (atom "x")})
+   :right {:recent-panels (atom [])} :showing-panel (fn [_]) :settings-path* (atom "/no/such/jonquil/settings.edn")
+   :saved-listeners (atom {})})
 
 (deftest command-palette-describe-key-arms-the-next-key
   (let [lines (atom [])

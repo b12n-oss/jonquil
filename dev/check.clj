@@ -97,6 +97,7 @@
     jonquil.results-rt
     jonquil.results
     jonquil.keymap
+    jonquil.user-keys
     jonquil.command-registry
     jonquil.palette
     jonquil.debugger

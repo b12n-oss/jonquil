@@ -5,7 +5,8 @@
             [jonquil.evaluator :as ev]
             [jonquil.keymap :as km]
             [jonquil.plugin :as p]
-            [jonquil.plugin-registry :as reg]))
+            [jonquil.plugin-registry :as reg]
+            [jonquil.user-keys :as user-keys]))
 
 (defn- plugin
   "A definition for id with one :edit command (edit) bound to Cmd+Alt+J."
@@ -149,6 +150,23 @@
   (let [r (with (plugin "p3-a" (fn [s] s)))]
     (is (= (inc (count (:editor km/shipped))) (count (reg/editor-bindings r))))
     (is (= :p3-a/wrap (:command (first (reg/editor-bindings r)))) "plugin bindings come first")))
+
+(deftest your-own-keys-come-first-test
+  ;; keys.edn's bindings (jonquil.user-keys/live) sit ahead of the plugins'
+  ;; and the shipped ones, and its :remove drops one of those
+  (let [r (with (plugin "p3-a" (fn [s] s)))
+        mine {:key "j" :mods #{:cmd :alt} :command :p3-a/wrap :args {:mine true}}
+        shipped (first (filter :command (:window km/shipped)))]
+    (try
+      (reset! user-keys/live (assoc user-keys/no-keys
+                                    :editor [mine]
+                                    :remove [(select-keys shipped [:key :keys :mods :exact :command])]))
+      (is (= mine (first (reg/editor-bindings r))))
+      (is (= mine (km/resolve-binding (reg/editor-bindings r) 0x6a ctrl-alt (constantly true))))
+      (is (not-any? #{shipped} (reg/window-bindings r)) "the removed shipped binding is gone")
+      (is (= (dec (count (:window km/shipped))) (count (reg/window-bindings r))))
+      (finally (reset! user-keys/live user-keys/no-keys)))
+    (is (= (:window km/shipped) (reg/window-bindings r)) "and back once your keys are cleared")))
 
 (deftest remove-plugin-test
   (let [r (reg/remove-plugin (with (plugin "p3-a" (fn [s] s))) :p3-a)]
