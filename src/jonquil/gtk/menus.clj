@@ -94,11 +94,10 @@
   (pos? (g/gtk-widget-activate-action-variant win (str PREFIX "." (menus/action-name id)) ffi/null)))
 
 (defn menu-button!
-  "A button that opens model as a popover menu, for a system with no menu
-  bar of its own."
-  [model]
+  "A button that opens a popover menu, for a system with no menu bar of its
+  own. gtk-menu-button-set-menu-model gives it its menus."
+  []
   (let [b (g/gtk-menu-button-new)]
     (g/gtk-menu-button-set-label b "☰")
     (g/gtk-widget-set-tooltip-text b "Menu")
-    (g/gtk-menu-button-set-menu-model b model)
     b))

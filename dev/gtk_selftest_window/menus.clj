@@ -8,7 +8,8 @@
             [jolt.ffi :as ffi]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.menus :as gm]
-            [jonquil.menus :as menus]))
+            [jonquil.menus :as menus]
+            [jonquil.user-keys :as user-keys]))
 
 (defn row-menu-item-runs-and-keys-yield
   "Activating Help > Jonquil's Version prints the version line. Yielding
@@ -45,3 +46,29 @@
                              {:ran ran? :gone gone? :flagged flagged? :back back? :offered-again offered-again?
                               :answer answer :flagged-by-key flagged-by-key? :settled settled?
                               :typed typed :button? (some? button) :mac mac?})))))
+
+(defn- shown-accel
+  "The key the menus show for command id, from the tree they were built from."
+  [ui id]
+  (some (fn [menu] (some #(when (= id (:command %)) (:accel %)) (menus/items menu)))
+        @(:shown (:menus ui))))
+
+(defn row-menus-follow-your-keys
+  "Help > Jonquil's Version has no key. A key of yours for it (keys.edn's
+  live value) shows in the menus a moment later, and goes again when your
+  keys are cleared."
+  [ui]
+  (go-row :menus-follow-your-keys support/check
+    (let [before (on-gtk (shown-accel ui :help/version))
+          _ (on-gtk (reset! user-keys/live
+                            (assoc user-keys/no-keys :window [{:key "j" :mods #{:cmd :shift} :command :help/version}])))
+          with-key? (await-until 3000 20 #(some? (shown-accel ui :help/version)))
+          shown (on-gtk (shown-accel ui :help/version))
+          _ (on-gtk (reset! user-keys/live user-keys/no-keys))
+          gone? (await-until 3000 20 #(nil? (shown-accel ui :help/version)))]
+      (on-gtk (try
+                (support/check :menus-follow-your-keys
+                               (and (nil? before) with-key? (str/ends-with? (or shown "") "j")
+                                    (str/includes? (or shown "") "<Shift>") gone?)
+                               {:before before :shown shown :gone gone?})
+                (finally (reset! user-keys/live user-keys/no-keys)))))))
