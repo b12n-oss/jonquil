@@ -4,6 +4,7 @@
             [gtk-selftest.support :refer [check parinfer-on! parinfer-off! type-str! delete-action! caret!]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]
             [jonquil.parinfer-edit :as pe]))
 
@@ -47,17 +48,20 @@
 (defn row-parinfer-with-structural-edits
   "A slurp or a barf across lines stays done under every Parinfer mode, and
   the indentation follows the moved bracket. Under Indent and Smart mode
-  Parinfer used to read the old indentation and move the bracket back."
+  Parinfer used to read the old indentation and move the bracket back. The
+  keys are the Calva paredit set's, on for the row."
   [ed]
   (go-row :parinfer-with-structural-edits check
     (on-gtk (let [ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
                   try! (fn [mode text caret key]
-                         (try (parinfer-on! ed mode)
+                         (try (reset! key-sets/live :calva)
+                              (parinfer-on! ed mode)
                               (editor/set-text! ed text)
                               (caret! ed caret)
                               (editor/handle-key! ed (km/key-value key) ctrl-alt)
                               (editor/editor-text ed)
-                              (finally (parinfer-off! ed))))
+                              (finally (parinfer-off! ed)
+                                       (reset! key-sets/live key-sets/default-id))))
                   seen (into {}
                              (for [mode [:indent :smart :paren]]
                                [mode {:barf (try! mode "(a\n b)" 2 "Left")

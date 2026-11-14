@@ -6,6 +6,7 @@
             [gtk-selftest.support :refer [check]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]))
 
 ;; --- handle-key! dispatch rows --------------------------------------
@@ -185,14 +186,16 @@
                        {:handled handled :text text :caret caret :sel sel}))))))
 
 (defn row-edit-structural-keys
-  "Structural editing on its shipped keys, through the editor's own key
-  handler: Ctrl+Alt+Right slurps twice, Ctrl+Alt+Left barfs, Ctrl+Shift+
+  "Structural editing on the Calva paredit key set's keys, through the
+  editor's own key handler, with that set on for the row: Ctrl+Alt+Right slurps twice, Ctrl+Alt+Left barfs, Ctrl+Shift+
   Delete kills the form at the caret, and one undo takes the kill back.
   Ctrl+Alt+S splices and Ctrl+Alt+Shift+P wraps, sent the way each system
   sends a letter held with Alt."
   [ed]
   (go-row :edit-structural-keys check
-    (on-gtk (let [buf (:buf ed)
+    (on-gtk (try
+             (reset! key-sets/live :calva)
+             (let [buf (:buf ed)
                   ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
                   press! (fn [key state]
                            [(editor/handle-key! ed (km/key-value key) state) (editor/editor-text ed)])
@@ -244,7 +247,8 @@
                             (= "(b a c)" dragged) (= "(a  c)" killed-back) (= "(a b)" joined))
                        {:slurp1 slurp1 :slurp2 slurp2 :barf barf :kill kill :caret caret
                         :undone undone :none none :spliced spliced :wrapped wrapped
-                        :dragged dragged :killed-back killed-back :joined joined}))))))
+                        :dragged dragged :killed-back killed-back :joined joined})))
+             (finally (reset! key-sets/live key-sets/default-id))))))
 
 (defn row-edit-format-all [ed]
   (go-row :edit-format-all check
