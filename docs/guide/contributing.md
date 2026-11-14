@@ -38,10 +38,7 @@ editor and fails a row without anything being wrong.
 
 ## Sending a change
 
-Open a pull request against `develop` with the gates green. Work collects
-on `develop`, and `develop` merges into `main` when it is ready. GitHub
-offers `main` as the base by default, so pick `develop` when you open the
-pull request.
+Open a pull request against `main` with the gates green.
 
 Keep the subject in the repo's conventional style (`feat(scope): ...`,
 `fix(scope): ...`, `docs: ...`). In the body, say what you measured: test

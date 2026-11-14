@@ -13,7 +13,7 @@ name: Linux
 # when any other row does. It reports the rows in its summary and uploads
 # the full log.
 
-# Called by ci.yml on every push to main or develop and every pull request, and run by
+# Called by ci.yml on every push to main and every pull request, and run by
 # hand from the Actions tab.
 
 "on":
