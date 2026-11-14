@@ -113,8 +113,10 @@
     (let [mark (on-gtk (support/out-end-offset ui))
           _ (on-gtk (submit! ui "!list every key binding"))
           ran? (await-until 3000 20 #(let [t (support/since ui mark)]
+                                       ;; the bindings name the platform's own modifier
                                        (and (str/includes? t "; ! List every key binding.")
-                                            (str/includes? t "Cmd") (str/ends-with? t "user=> "))))
+                                            (or (str/includes? t "Cmd") (str/includes? t "Ctrl"))
+                                            (str/ends-with? t "user=> "))))
           text (on-gtk (support/since ui mark))
           recalled (on-gtk (cview/handle-history! (:console ui) :prev) (cview/input-text (:console ui)))
           _ (on-gtk (cview/clear-input! (:console ui)))]

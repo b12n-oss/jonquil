@@ -106,6 +106,7 @@
    locations-rows/row-locations-survive-edit
    locations-rows/row-locations-gone
    locations-rows/row-locations-ends
+   locations-rows/row-locations-next-from-the-palette-keeps-its-selection
    locations-rows/row-locations-definitions
    locations-rows/row-locations-tab-close-clears
    locations-rows/row-locations-buffer-replaced

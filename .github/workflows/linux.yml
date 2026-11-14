@@ -6,11 +6,12 @@ name: Linux
 # Docker. The image is dev/linux/Dockerfile: Ubuntu 26.04, GTK 4, Xvfb and the
 # pinned Jolt release, with its layers cached between runs.
 #
-# Both jobs count toward the one required check, `ci ok` (ci.yml). Some GUI
-# rows fail on Linux today (issue #9) and are listed in
-# ci/linux-known-failures.txt: the gui job passes while only those fail, and
-# fails when any other row does, so it catches a new Linux regression. It
-# reports the rows in its summary and uploads the full log.
+# Both jobs count toward the one required check, `ci ok` (ci.yml). The GUI
+# self-tests run with a window manager (dev/linux/selftest-session.sh). A row
+# that fails only on Linux would be listed in ci/linux-known-failures.txt,
+# which is empty: the gui job passes while only listed rows fail, and fails
+# when any other row does. It reports the rows in its summary and uploads
+# the full log.
 
 # Called by ci.yml on every push to main and every pull request, and run by
 # hand from the Actions tab.
@@ -89,7 +90,9 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          grep -v '^#' ci/linux-known-failures.txt | sed '/^$/d' | sort -u > known.txt
+          # grep exits 1 when the file holds only comments, which is the
+          # usual state: no known failures.
+          { grep -v '^#' ci/linux-known-failures.txt || true; } | sed '/^$/d' | sort -u > known.txt
           { grep -E '^\[[^]]+\] [^ ]+ FAIL ' selftest.log || true; } | sed -E 's/^\[[^]]*\] //; s/ FAIL .*//' | sort -u > failed.txt
           comm -23 failed.txt known.txt > new.txt
           comm -13 failed.txt known.txt > fixed.txt
@@ -113,7 +116,7 @@ jobs:
           if [ -s new.txt ]; then echo "::error::new failing rows on Linux: $(tr '\n' ' ' < new.txt)"; exit 1; fi
           # A non-zero exit with no failed row at all (a crash between suites) fails too.
           if [ "${status:-1}" != "0" ] && [ ! -s failed.txt ]; then echo "::error::linux:selftest exited ${status:-?} without a failed row"; exit 1; fi
-          echo "only known rows failed: $(tr '\n' ' ' < failed.txt)"
+          if [ -s failed.txt ]; then echo "only known rows failed: $(tr '\n' ' ' < failed.txt)"; else echo "every row passed"; fi
 
       - name: Upload the self-test log
         if: always()

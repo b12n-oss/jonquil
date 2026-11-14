@@ -128,7 +128,27 @@
 (ffi/defcfn gtk-text-view-set-monospace "gtk_text_view_set_monospace" [:pointer :int] :void)
 (ffi/defcfn gtk-text-view-scroll-mark-onscreen "gtk_text_view_scroll_mark_onscreen" [:pointer :pointer] :void)
 
-(ffi/defcfn gtk-text-buffer-set-text "gtk_text_buffer_set_text" [:pointer :string :int] :void)
+;; Text GTK is handed while it can still call back into Jolt goes over as a C
+;; string in foreign memory, not as a :string argument. A :string argument is
+;; a byte buffer the collector may move, and these functions emit a signal
+;; before they have copied the text: insert-text on a text buffer, where the
+;; editor has a handler, and delete-text and changed on an entry. A collection
+;; during the handler moved the buffer and GTK read freed memory. Measured
+;; 2026-11-14 with a forced collection in an insert-text handler: the process
+;; died with "invalid memory reference" within 300 inserts as :string, and
+;; never with a C string. In the self-tests it showed now and then in the
+;; plugin rows, as that crash or as GTK's assertion that the text wasn't valid
+;; UTF-8. Four functions in this file are wrapped this way, the ones that
+;; take text and emit before copying it: this one, gtk-text-buffer-insert,
+;; gtk-text-buffer-insert-interactive-at-cursor and gtk-editable-set-text.
+(ffi/defcfn ^:private gtk-text-buffer-set-text* "gtk_text_buffer_set_text" [:pointer :pointer :int] :void)
+
+(defn gtk-text-buffer-set-text
+  "gtk_text_buffer_set_text with text as a C string (see above). len is in
+  bytes, or -1 for the whole of text."
+  [buf text len]
+  (ffi/with-c-string [p text] (gtk-text-buffer-set-text* buf p len)))
+
 (ffi/defcfn gtk-text-buffer-get-start-iter "gtk_text_buffer_get_start_iter" [:pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-end-iter "gtk_text_buffer_get_end_iter" [:pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-iter-at-offset "gtk_text_buffer_get_iter_at_offset" [:pointer :pointer :int] :void)
@@ -206,8 +226,21 @@
 (ffi/defcfn g-free "g_free" [:pointer] :void)
 (ffi/defcfn g-value-set-int "g_value_set_int" [:pointer :int] :void)
 (ffi/defcfn gtk-text-buffer-get-text* "gtk_text_buffer_get_text" [:pointer :pointer :pointer :int] :pointer)
-(ffi/defcfn gtk-text-buffer-insert "gtk_text_buffer_insert" [:pointer :pointer :string :int] :void)
-(ffi/defcfn gtk-text-buffer-insert-interactive-at-cursor "gtk_text_buffer_insert_interactive_at_cursor" [:pointer :string :int :int] :int)
+(ffi/defcfn ^:private gtk-text-buffer-insert* "gtk_text_buffer_insert" [:pointer :pointer :pointer :int] :void)
+(ffi/defcfn ^:private gtk-text-buffer-insert-interactive-at-cursor*
+  "gtk_text_buffer_insert_interactive_at_cursor" [:pointer :pointer :int :int] :int)
+
+(defn gtk-text-buffer-insert
+  "gtk_text_buffer_insert with text as a C string (see gtk-text-buffer-set-text)."
+  [buf iter text len]
+  (ffi/with-c-string [p text] (gtk-text-buffer-insert* buf iter p len)))
+
+(defn gtk-text-buffer-insert-interactive-at-cursor
+  "gtk_text_buffer_insert_interactive_at_cursor with text as a C string (see
+  gtk-text-buffer-set-text)."
+  [buf text len default-editable]
+  (ffi/with-c-string [p text] (gtk-text-buffer-insert-interactive-at-cursor* buf p len default-editable)))
+
 (ffi/defcfn gtk-text-buffer-delete "gtk_text_buffer_delete" [:pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-begin-user-action "gtk_text_buffer_begin_user_action" [:pointer] :void)
 (ffi/defcfn gtk-text-buffer-end-user-action "gtk_text_buffer_end_user_action" [:pointer] :void)
@@ -600,7 +633,14 @@
 ;; buffer-text already frees. Both GtkSearchEntry and GtkEntry
 ;; implement GtkEditable directly.
 (ffi/defcfn gtk-editable-get-text "gtk_editable_get_text" [:pointer] :pointer)
-(ffi/defcfn gtk-editable-set-text "gtk_editable_set_text" [:pointer :string] :void)
+(ffi/defcfn ^:private gtk-editable-set-text* "gtk_editable_set_text" [:pointer :pointer] :void)
+
+(defn gtk-editable-set-text
+  "gtk_editable_set_text with text as a C string: it deletes the old text
+  first, which emits to an entry's handlers (see gtk-text-buffer-set-text)."
+  [editable text]
+  (ffi/with-c-string [p text] (gtk-editable-set-text* editable p)))
+
 ;; gtk_widget_set_visible / gtk_widget_get_visible: gtkwidget.h:442-443, 445.
 ;; The find bar's whole box is hidden until opened; the replacement entry
 ;; and its two buttons are hidden outside :replace mode.

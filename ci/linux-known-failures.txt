@@ -1,8 +1,4 @@
-# GUI self-test rows known to fail on Linux (issue #9). The Linux workflow's
-# gui job passes while only these fail, and fails on any other row. Delete a
-# line when its row is fixed; when the file has no rows left, close issue #9.
-bang-runs-a-command
-clj-example-escape-refocuses-editor
-clj-full-doc-split-throws
-locations-ends
-no-plugins-reload-refuses
+# GUI self-test rows known to fail on Linux. The Linux workflow's gui job
+# passes while only the rows listed here fail, and fails on any other row.
+# None is listed: every row passes. A row goes here only with an issue that
+# says why, and comes off when it is fixed.
