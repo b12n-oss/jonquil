@@ -1,5 +1,6 @@
 (ns gtk-selftest-window.prefs
-  "The Preferences window's Keys tab: Cmd/Ctrl+comma opens it, a click on a
+  "The Preferences window's Keys tab: Cmd/Ctrl+comma opens it, the chooser
+  turns a key set on and saves the choice, a click on a
   row's key and a key press record a new key into keys.edn beside the
   window's settings file, the live key map follows, and Reset this key
   takes it back."
@@ -10,8 +11,10 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.prefs-window :as pw]
             [jonquil.key-prefs :as kp]
+            [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]
             [jonquil.plugin-registry :as plugin-registry]
+            [jonquil.settings :as settings]
             [jonquil.user-keys :as user-keys]))
 
 (defn- free-chord
@@ -127,3 +130,39 @@
                 (finally
                   (.delete (java.io.File. ^String path))
                   (reset! user-keys/live user-keys/no-keys)))))))
+
+(defn row-prefs-chooses-a-key-set
+  "The window starts on the default key set, which binds no structural
+  editing key. Choosing Calva paredit in the Keys tab turns its keys on at
+  once (Ctrl+Alt+S splices), lists them with the set's name as their
+  source, and saves :key-set in the settings file; choosing Jonquil default
+  takes them away again."
+  [ui]
+  (go-row :prefs-chooses-a-key-set support/check
+    (let [{w :window :as prefs} (:prefs ui)
+          spath ((:settings-path* ui))
+          s-key (km/key-value "s")
+          state (bit-or g/CONTROL-MASK g/ALT-MASK)
+          splice? (fn [] (= :paredit/splice
+                            (:command (km/resolve-binding (plugin-registry/editor-bindings @plugin-registry/live)
+                                                          s-key state (constantly true)))))
+          set-rows (fn [] (count (filter #(= "Calva paredit" (:source %)) (pw/rows w))))
+          _ (on-gtk ((:open! prefs)))
+          before (on-gtk {:live @key-sets/live :shown (pw/key-set-index w) :splice (splice?) :rows (set-rows)})
+          _ (on-gtk ((:key-set! prefs) 1))
+          on? (await-until 3000 20 #(= :calva @key-sets/live))
+          during (on-gtk {:splice (splice?) :rows (set-rows) :said (:text (pw/said w))
+                          :saved (:key-set (settings/load-settings spath))})
+          _ (on-gtk ((:key-set! prefs) 0))
+          off? (await-until 3000 20 #(= :default @key-sets/live))
+          after (on-gtk {:splice (splice?) :rows (set-rows) :saved (:key-set (settings/load-settings spath))})
+          _ (on-gtk (g/gtk-window-close (:win w)))]
+      (on-gtk (try
+                (support/check :prefs-chooses-a-key-set
+                               (and (= {:live :default :shown 0 :splice false :rows 0} before)
+                                    on? (:splice during) (pos? (:rows during))
+                                    (str/starts-with? (:said during) "Key set: Calva paredit.")
+                                    (= :calva (:saved during))
+                                    off? (= {:splice false :rows 0 :saved :default} after))
+                               {:before before :on on? :during during :off off? :after after})
+                (finally (reset! key-sets/live :default)))))))

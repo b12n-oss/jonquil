@@ -1,7 +1,7 @@
 (ns gtk-selftest.parinfer
   "Editor rows for Parinfer: modes, caret and selection, engine failures and a cursor hook that throws."
   (:require [gtk-async :refer [go-row on-gtk]]
-            [gtk-selftest.support :refer [check parinfer-on! parinfer-off! type-str! delete-action! caret!]]
+            [gtk-selftest.support :refer [check parinfer-on! parinfer-off! type-str! delete-action! caret! with-calva-keys]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.keymap :as km]
@@ -47,7 +47,8 @@
 (defn row-parinfer-with-structural-edits
   "A slurp or a barf across lines stays done under every Parinfer mode, and
   the indentation follows the moved bracket. Under Indent and Smart mode
-  Parinfer used to read the old indentation and move the bracket back."
+  Parinfer used to read the old indentation and move the bracket back. The
+  keys are the Calva paredit set's, on for the row."
   [ed]
   (go-row :parinfer-with-structural-edits check
     (on-gtk (let [ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
@@ -55,7 +56,7 @@
                          (try (parinfer-on! ed mode)
                               (editor/set-text! ed text)
                               (caret! ed caret)
-                              (editor/handle-key! ed (km/key-value key) ctrl-alt)
+                              (with-calva-keys #(editor/handle-key! ed (km/key-value key) ctrl-alt))
                               (editor/editor-text ed)
                               (finally (parinfer-off! ed))))
                   seen (into {}

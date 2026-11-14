@@ -4,7 +4,7 @@
   when XDG_CONFIG_HOME is unset or blank. It stores :theme, :dialect (the
   fallback dialect for a file no project decides) when the user set one by
   hand, :file-tree {:visible? :width}, the booleans :reopen-tabs?, :remember-session? and :mcp-listen?,
-  and :parinfer (:off unless set). A save
+  and :parinfer (:off unless set), and :key-set (the chosen key set, jonquil.key-sets). A save
   merges into what the file already holds, so each feature only writes its
   own keys. Loading never throws: a missing file gives the defaults with no
   warning, and an unreadable file, an unknown theme or an unknown dialect is the
@@ -18,6 +18,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.dialect :as dialect]
+            [jonquil.key-sets :as key-sets]
             [jonquil.theme :as theme]))
 
 (defn settings-path
@@ -116,6 +117,16 @@
       (contains? parinfer-modes v) {:parinfer v}
       :else {:warning (str path " has an unknown :parinfer " (pr-str v) ", using :off")})))
 
+(defn- key-set-part
+  "{:key-set id} when m holds a key set Jonquil has (jonquil.key-sets/ids),
+  {} when it holds none, and {:warning ..} otherwise."
+  [path m]
+  (let [v (when (map? m) (:key-set m))]
+    (cond
+      (nil? v) {}
+      (contains? key-sets/ids v) {:key-set v}
+      :else {:warning (str path " has an unknown :key-set " (pr-str v) ", using the default keys")})))
+
 (defn- plugins-part
   "{:plugins {:disabled #{id ...}}} when m's :plugins holds a set of
   keyword ids under :disabled, {} when there's none, and {:warning ..}
@@ -163,13 +174,14 @@
   [path m]
   (map #(% path m)
        [theme-part dialect-part file-tree-part reopen-tabs-part remember-session-part
-        mcp-listen-part plugins-part parinfer-part layouts-part doc-bookmarks-part]))
+        mcp-listen-part plugins-part parinfer-part key-set-part layouts-part doc-bookmarks-part]))
 
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
   :file-tree when it holds a usable one, :reopen-tabs?, :remember-session? and
   :mcp-listen? when they hold a boolean, :plugins when it holds a set of disabled ids,
-  :parinfer when it holds one of parinfer-modes, :layouts when it holds
+  :parinfer when it holds one of parinfer-modes, :key-set when it holds a
+  key set's id, :layouts when it holds
   named layouts, :doc-bookmarks when it holds doc pages, and
   :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."

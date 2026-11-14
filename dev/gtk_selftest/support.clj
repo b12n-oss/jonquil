@@ -9,7 +9,8 @@
             [gtk-async :refer [on-gtk]]
             [jolt.ffi :as ffi]
             [jonquil.gtk.editor :as editor]
-            [jonquil.gtk.ffi :as g]))
+            [jonquil.gtk.ffi :as g]
+            [jonquil.key-sets :as key-sets]))
 
 (defonce results (atom []))
 
@@ -19,6 +20,14 @@
   (swap! results conj [row (boolean ok) detail])
   (binding [*out* *err*]
     (println "[gtk-selftest]" (name row) (if ok "PASS" "FAIL") (pr-str detail))))
+
+(defn with-calva-keys
+  "Runs f with the Calva paredit key set on, which has the structural
+  editing keys, and puts the default set back after."
+  [f]
+  (try (reset! key-sets/live :calva)
+       (f)
+       (finally (reset! key-sets/live key-sets/default-id))))
 
 (defn mark-offset
   "mark's current character offset in buf -- console-view keeps its marks

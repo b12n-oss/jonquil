@@ -9,6 +9,7 @@
             [jonquil.gtk.menus :as gm]
             [jonquil.menus :as menus]
             [jonquil.plugin-registry :as plugin-registry]
+            [jonquil.key-sets :as key-sets]
             [jonquil.user-keys :as user-keys]))
 
 (defn- mac? [] (= "Mac OS X" (System/getProperty "os.name")))
@@ -113,7 +114,7 @@
         reset-toggle-fn (reset-on-run! wctx (get by-id :run/reset-on-run))]
     (gm/attach! win group)
     (refresh-fn)
-    (doseq [a [user-keys/live plugin-registry/live]]
+    (doseq [a [user-keys/live key-sets/live plugin-registry/live]]
       (add-watch a ::menus (fn [_ _ old new] (when (not= old new) (on-gui! refresh-fn)))))
     {:fns {:menu-yield-fn yield! :reset-toggle-fn reset-toggle-fn}
      :ui {:menus {:group group :button button :yield! yield! :yielded? yielded?

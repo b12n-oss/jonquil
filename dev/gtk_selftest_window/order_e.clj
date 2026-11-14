@@ -137,5 +137,6 @@
    menus-rows/row-header-title-follows-the-file
    prefs-rows/row-prefs-records-a-key
    prefs-rows/row-prefs-asks-before-taking-a-key
+   prefs-rows/row-prefs-chooses-a-key-set
    probe-rows/row-probe-part
    window-keys/row-command-chord-close])

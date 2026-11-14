@@ -1,6 +1,6 @@
 (ns jonquil.gtk.prefs-window
   "The Preferences window's widgets: a notebook whose Keys tab holds a
-  search box, a list with one row per binding (the command's description,
+  key set chooser, a search box, a list with one row per binding (the command's description,
   a button showing its key, where the key comes from), a message line with
   two answer buttons, and Open keys.edn and Reset this key. It shows what
   it is given and calls its handlers; jonquil.gtk.parts.prefs decides what
@@ -31,7 +31,8 @@
 
 (defn set-handlers!
   "Registers {:on-search (fn [text]) :on-record (fn [index]) :on-answer (fn
-  [yes?]) :on-open-file (fn []) :on-reset (fn [index-or-nil]) :on-key (fn
+  [yes?]) :on-open-file (fn []) :on-reset (fn [index-or-nil]) :on-key-set
+  (fn [index]), the chooser's new choice, :on-key (fn
   [keyval state physical]) -> 1 when the key is used up, else 0; physical
   is jonquil.gtk.editor/physical-key's answer, the key's name or nil}."
   [pw m]
@@ -42,6 +43,18 @@
   "What the search box holds."
   [pw]
   (or (ffi/ptr->string (g/gtk-editable-get-text (:search pw))) ""))
+
+(defn key-set-index
+  "The place of the key set the chooser shows."
+  [pw]
+  (g/gtk-drop-down-get-selected (:key-set pw)))
+
+(defn set-key-set-index!
+  "Makes the chooser show the key set at index. The chooser then calls
+  :on-key-set, as it does for a click."
+  [pw index]
+  (g/gtk-drop-down-set-selected (:key-set pw) index)
+  nil)
 
 (defn selected-index
   "The selected row's index, or nil."
@@ -139,12 +152,19 @@
                                              0))
                                        [:pointer :uint :uint :uint :pointer] :int :on-throw 0)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data (:key-set pw) "notify::selected"
+                             (callable (fn [_d _pspec _data] (call! pw :on-key-set (key-set-index pw)) nil)
+                                       [:pointer :pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller win keyctl)))
 
 (defn- keys-page
-  "Packs the Keys tab: search, list, message row, bottom buttons."
-  [{:keys [search scroll message yes-btn no-btn] lb :list :as pw}]
+  "Packs the Keys tab: the key set chooser, search, list, message row,
+  bottom buttons."
+  [{:keys [search scroll message yes-btn no-btn key-set] lb :list :as pw}]
   (let [page (g/gtk-box-new g/ORIENTATION-VERTICAL 6)
+        set-row (g/gtk-box-new g/ORIENTATION-HORIZONTAL 8)
+        set-label (g/gtk-label-new "Key set")
         answer-row (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         bottom (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)]
     (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
@@ -160,16 +180,23 @@
     (doseq [w [(button! "Open keys.edn" #(call! pw :on-open-file))
                (button! "Reset this key" #(call! pw :on-reset (selected-index pw)))]]
       (g/gtk-box-append bottom w))
-    (doseq [w [search scroll answer-row bottom]] (g/gtk-box-append page w))
+    (g/gtk-widget-set-tooltip-text key-set "A key set adds a group of keys. Your own keys still win over it.")
+    (doseq [w [set-label key-set]] (g/gtk-box-append set-row w))
+    (g/gtk-widget-set-margin-top set-row 8)
+    (doseq [w [set-row search scroll answer-row bottom]] (g/gtk-box-append page w))
     (doseq [f [g/gtk-widget-set-margin-start g/gtk-widget-set-margin-end]] (f page 8))
     page))
 
 (defn make-window
-  "Builds the Preferences window over parent, hidden: {:win :notebook
+  "Builds the Preferences window over parent, hidden, its chooser listing
+  key-set-labels: {:win :notebook :key-set
   :search :list :scroll :message :yes-btn :no-btn :rows :buttons :said
   :handlers}. Closing it hides it, so it opens again as it was left."
-  [parent]
-  (let [pw {:win (g/gtk-window-new) :notebook (g/gtk-notebook-new)
+  [parent key-set-labels]
+  (let [names (g/gtk-string-list-new ffi/null)
+        _ (doseq [l key-set-labels] (g/gtk-string-list-append names l))
+        pw {:win (g/gtk-window-new) :notebook (g/gtk-notebook-new)
+            :key-set (g/gtk-drop-down-new names ffi/null)
             :search (g/gtk-search-entry-new)
             :list (g/gtk-list-box-new) :scroll (g/gtk-scrolled-window-new)
             :message (g/gtk-label-new "")
