@@ -3,7 +3,7 @@ name: attribution
 # Commit messages and pull request descriptions carry no AI assistant
 # attribution (ci/attributioncheck.sh lists what counts; AI_POLICY.md says how
 # the project stands on AI assistance). Called by ci.yml on a push to main
-# and on every pull request, and run by hand.
+# or develop and on every pull request, and run by hand.
 
 on:
   workflow_call:

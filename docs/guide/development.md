@@ -436,6 +436,21 @@ the rule, and removing the lines would rewrite history for everyone with a
 clone, so they stay. The script names them, and nothing is added to that
 list.
 
+## Branches and releases
+
+- Work merges into `develop` through pull requests. CI runs on each pull
+  request and again on `develop` after the merge.
+- `main` only moves at a release, so it always matches the latest download,
+  and the guide at [jonquil.b12n.app](https://jonquil.b12n.app) is built
+  from it.
+- A release is one pull request from `develop` into `main`, which runs all
+  of CI again. The tag goes on `main`'s merge commit, and `main` is then
+  merged back into `develop`, so a build from `develop` reports a version
+  that counts from that tag.
+- Both branches have the same rule: no force-push, no deletion, and the
+  `ci ok` check must pass.
+- The changelog's Unreleased section lives on `develop`.
+
 ## Benchmark
 
 `jolt bench:edit [sizes...]` times what typing costs in a large file. For

@@ -12,6 +12,10 @@ everything that shipped before that.
 - A Preferences window, on Cmd/Ctrl+comma and as Open Preferences in the command palette. Its Keys tab lists every command with its key and where the key comes from, narrows the list as you type, and records a new key when you click a row's key and press one. It asks before taking a key another command has, refuses a key that types unless it holds a modifier other than Shift, so a binding can't replace typing, and has Reset this key and Open keys.edn. It writes `keys.edn`, and asks first when that file holds comments of yours. Closes #14.
 - Your own key bindings. `keys.edn`, next to `settings.edn`, holds `:window` and `:editor` bindings that are tried before a plugin's and before Jonquil's own, and a `:remove` list that drops a binding you don't want. Open your key bindings file in the command palette opens it, with a commented starter file the first time. Saving it in Jonquil reloads it, and so does Reload your key bindings. An entry Jonquil can't use is skipped and named in the console, and the rest load. That includes a binding on a key that types (a letter, a digit, Return, Space, punctuation) with no modifier but Shift, since it would run each time you typed the key. Until now the keys were fixed when Jonquil was built, so the downloaded app had no way to change one short of a plugin.
 
+### Changed
+
+- Work now merges into a `develop` branch, and `develop` merges into `main` at a release, so `main` always matches the latest download. CI runs on pushes to both, both have the same branch rule, and the contributing pages say to open pull requests against `develop`.
+
 ### Fixed
 
 - `gtk_text_buffer_insert_interactive` now gets its text as a copy the garbage collector can't move, like the four calls fixed in 0.2.1. Only two console rows of the GUI self-tests call it, so the app wasn't affected, but those rows could now and then insert other text than they meant to.
