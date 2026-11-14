@@ -438,15 +438,14 @@ list.
 
 ## Branches and releases
 
-- Work merges into `develop` through pull requests. CI runs on each pull
-  request and again on `develop` after the merge.
-- `main` only moves at a release, so it always matches the latest download,
-  and the guide at [jonquil.b12n.app](https://jonquil.b12n.app) is built
-  from it.
-- A release is one pull request from `develop` into `main`, which runs all
-  of CI again. The tag goes on `main`'s merge commit, and `main` is then
-  merged back into `develop`, so a build from `develop` reports a version
-  that counts from that tag.
+- Work and experiments merge into `develop` through pull requests. CI runs
+  on each pull request and again on `develop` after the merge.
+- `develop` merges into `main` when the work on it is ready, in one pull
+  request that runs all of CI again. `main` can be ahead of the latest
+  download: a build from it has work that isn't released yet. The guide at
+  [jonquil.b12n.app](https://jonquil.b12n.app) is built from `main`.
+- A release is tagged on `main`. `main` is then merged back into `develop`,
+  so a build from `develop` reports a version that counts from that tag.
 - Both branches have the same rule: no force-push, no deletion, and the
   `ci ok` check must pass.
 - The changelog's Unreleased section lives on `develop`.
