@@ -6,6 +6,8 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-14
+
 ### Changed
 
 - CI has one required check, `ci ok`. `.github/workflows/ci.yml` calls the lint, docs, attribution and Linux workflows as lanes, adds `jolt test` and `jolt test:nrepl` on an Apple Silicon macOS runner, and its last job fails unless every lane passed. The Linux GUI self-tests now count toward a merge.
