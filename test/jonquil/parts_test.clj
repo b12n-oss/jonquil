@@ -61,7 +61,7 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :prefs :trace :live-results :locations :debugger :breakpoints :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :prefs :menus :trace :live-results :locations :debugger :breakpoints :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
            :panel/processes :processes/show
            :change-set/make :change-set/browse

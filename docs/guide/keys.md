@@ -99,6 +99,46 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 </details>
 
 <details>
+<summary><strong>Structural editing</strong></summary>
+
+These move brackets and whole forms, so the code stays balanced. They add
+to what you have: the arrow keys, Backspace and Delete work as before, and
+Parinfer works with or without them. With Parinfer on, the indentation
+follows the bracket a command moved, in every mode.
+
+Most have the keys Calva uses. Raise, Copy form and the four moves have
+none. All of them are under Edit > Structure in the menus and in the
+command palette, and [Preferences](#your-own-keys) can give any of them a
+key.
+
+| Key | Command | Does |
+|---|---|---|
+| Ctrl+Alt+Right, or Ctrl+Alt+. | Slurp forward | The list around the caret takes in the next form: `(a\|) b` becomes `(a\| b)` |
+| Ctrl+Alt+Left, or Ctrl+Alt+, | Barf forward | The list gives up its last form: `(a\| b)` becomes `(a\|) b` |
+| Ctrl+Alt+Shift+Left | Slurp backward | The list takes in the form before it: `a (\|b)` becomes `(a \|b)` |
+| Ctrl+Alt+Shift+Right | Barf backward | The list gives up its first form: `(a \|b)` becomes `a (\|b)` |
+| Ctrl+Shift+Delete | Kill form | Removes the form at the caret and copies it to the clipboard |
+| Ctrl+Alt+S | Splice | The list around the caret loses its brackets |
+| Ctrl+Alt+Shift+P, S or C | Wrap in `()`, `[]` or `{}` | Wraps the form at the caret |
+| none | Raise | The form at the caret replaces the list around it: `(a \|b c)` becomes `\|b` |
+| none | Copy form | Copies the form at the caret |
+| none | Move forward, backward, up, down by a form | Moves the caret over whole forms, out of a list, or into the next one |
+
+In the examples `|` marks the caret. Each command is one undo step. The
+keys use Control on every system, a Mac included. On Linux, Ctrl+Alt+Right
+and Left often switch workspaces, so Ctrl+Alt+. and Ctrl+Alt+, do the same
+job. Inside a list that isn't closed yet, these commands do nothing.
+
+On a Mac, Option changes the character a key sends, so Jonquil matches a
+key held with Option by its position on a US keyboard. On another layout
+(Dvorak, Colemak, AZERTY, QWERTZ) a binding written as Ctrl+Alt+S fires on
+the key that sits where S does on a US keyboard. That is true of every
+binding with Alt, your own in `keys.edn` included. Linux matches the
+letter itself.
+
+</details>
+
+<details>
 <summary><strong>Find and replace</strong></summary>
 
 | Key | Where | Does |
@@ -173,9 +213,13 @@ from: `default`, a plugin's name, or `yours`.
 - **Reset this key** puts the selected command back on its own keys, and
   **Open keys.edn** opens the file the tab writes.
 
-The tab writes `keys.edn` for you, whole. If you have added comments to that
-file by hand, it says so and asks before the first change, since a rewrite
-drops them.
+A key you set shows in the menus at once. On a Mac, a key recorded with
+Option held is stored by its position on a US keyboard, as the Structural
+editing group above explains.
+
+The tab rewrites the whole of `keys.edn` each time. If you have added
+comments to that file by hand, it says so and asks before the first change,
+since a rewrite drops them.
 
 ### The file
 

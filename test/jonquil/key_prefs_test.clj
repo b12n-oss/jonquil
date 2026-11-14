@@ -78,6 +78,10 @@
     (is (= {:waiting true} (kp/press-chord 0xffeb 0 mac)) "Super_L"))
   (testing "a key Jonquil has no name for is refused"
     (is (str/includes? (:problem (kp/press-chord 0x03f shift mac)) "can't bind")))
+  (testing "the physical key names the key when the window knows it: Option+S arrives as sharp s"
+    (is (= {:chord {:key "s" :mods #{:ctrl :alt}}} (kp/press-chord 0xdf (bit-or ctrl alt) mac "s")))
+    (is (str/includes? (:problem (kp/press-chord 0xdf (bit-or ctrl alt) mac)) "can't bind")
+        "without it the character has no name"))
   (testing "a key that types would shadow typing, so it needs a modifier other than Shift"
     (is (str/includes? (:problem (kp/press-chord (int \e) 0 mac)) "modifier"))
     (is (str/includes? (:problem (kp/press-chord (int \e) shift mac)) "modifier"))

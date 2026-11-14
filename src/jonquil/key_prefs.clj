@@ -72,20 +72,27 @@
       (conj (disj held command) :cmd)
       held)))
 
+(defn- press-chord*
+  "press-chord's answer for a key named name (or nil), its keyval and the
+  modifiers held."
+  [name keyval mods]
+  (cond
+    (modifier-key? keyval) {:waiting true}
+    (nil? name) {:problem "Jonquil can't bind that key yet. Try another."}
+    (and (km/typing-key? name) (empty? (disj mods :shift)))
+    {:problem "A key that types needs a modifier other than Shift, or it would replace typing."}
+    :else {:chord (cond-> {:key name} (seq mods) (assoc :mods mods))}))
+
 (defn press-chord
   "What a key press stands for while the Keys tab records: {:chord {:key
   name :mods #{...}}} (no :mods when none is held), {:waiting true} for a
   modifier key alone, or {:problem sentence}. keyval is lower-cased, as the
-  window's key handler has it."
-  [keyval state os]
-  (let [name (km/key-name keyval)
-        mods (held-modifiers state os)]
-    (cond
-      (modifier-key? keyval) {:waiting true}
-      (nil? name) {:problem "Jonquil can't bind that key yet. Try another."}
-      (and (km/typing-key? name) (empty? (disj mods :shift)))
-      {:problem "A key that types needs a modifier other than Shift, or it would replace typing."}
-      :else {:chord (cond-> {:key name} (seq mods) (assoc :mods mods))})))
+  window's key handler has it. physical is the physical key's name when the
+  window knows it (macOS with Option held, where the keyval is another
+  character), and it names the key ahead of keyval."
+  ([keyval state os] (press-chord keyval state os nil))
+  ([keyval state os physical]
+   (press-chord* (or physical (km/key-name keyval)) keyval (held-modifiers state os))))
 
 (defn chord-text
   "chord as a person reads it, \"Cmd+Shift+E\"."

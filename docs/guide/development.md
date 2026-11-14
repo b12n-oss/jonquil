@@ -252,7 +252,7 @@ The design is in [Window parts](architecture/index.md#window-parts). In short:
 2. Add `src/jonquil/gtk/parts/<name>.clj` with `(part wctx)` tagged `^{:part/id :<name>}`, returning `{:fns :ui :hooks :exports}`, and list it in `jonquil.gtk.parts/installs`.
 3. Take everything the part needs from `wctx`, never by requiring `jonquil.gtk.window`.
 4. For a right-hand panel, declare it in the spec's `:panels` with a label, add a `:panel/<id>` command whose `:call` is `[:panel-focus-fn :<id>]`, and answer it under `:panels` from the install: `{:<id> {:root widget :focus! f :open! f}}`. Don't use `:review` or `:history`, which are core ids.
-5. For keys, a new feature's keys may go in the spec's `:bindings` (`{:window [...] :editor [...]}`, entries shaped like `keymap.edn`). Keys of existing features stay in `keymap.edn`. A binding with Alt needs `:physical? true` to fire on macOS. Spec bindings come after the shipped ones, so a shipped key wins, and the `unreachable-bindings` test fails if one is shadowed.
+5. For keys, a new feature's keys may go in the spec's `:bindings` (`{:window [...] :editor [...]}`, entries shaped like `keymap.edn`). Keys of existing features stay in `keymap.edn`. A binding that names `:alt` matches by the physical key on macOS, where Option changes the character (US key positions). Spec bindings come after the shipped ones, so a shipped key wins, and the `unreachable-bindings` test fails if one is shadowed.
 6. Test the spec in `jolt test`, and add a row to a window self-test for the install. `specs-and-installs-name-the-same-parts` fails if only one list has the part.
 7. For per-tab state, add `:on-tab-removed`, `:on-tab-wired` and `:on-switch` hooks to `:hooks`; each is called `(f ctx tab)`. Wire-time hooks run before the changed-form gutter's handler connects, and removal hooks run while the tab's buffer is still alive, and switch hooks run when a tab becomes the active one. A throwing hook is reported on the status line and the close or wiring goes on.
 8. Run `jolt verify`.
@@ -435,6 +435,21 @@ Four commits from September 2026 carry such lines. They were public before
 the rule, and removing the lines would rewrite history for everyone with a
 clone, so they stay. The script names them, and nothing is added to that
 list.
+
+## Branches and releases
+
+- Work and experiments merge into `develop` through pull requests. CI runs
+  on each pull request and again on `develop` after the merge.
+- `develop` merges into `main` when the work on it is ready, in one pull
+  request that runs all of CI again. `main` can be ahead of the latest
+  download, so a build from it may have work that isn't released yet. The
+  guide at [jonquil.b12n.app](https://jonquil.b12n.app) is built from
+  `main`.
+- A release is tagged on `main`. `main` is then merged back into `develop`,
+  so a build from `develop` reports a version that counts from that tag.
+- Both branches have the same rule: no force-push, no deletion, and the
+  `ci ok` check must pass.
+- The changelog's Unreleased section lives on `develop`.
 
 ## Benchmark
 

@@ -5,7 +5,8 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest.support :refer [check]]
             [jonquil.gtk.editor :as editor]
-            [jonquil.gtk.ffi :as g]))
+            [jonquil.gtk.ffi :as g]
+            [jonquil.keymap :as km]))
 
 ;; --- handle-key! dispatch rows --------------------------------------
 ;; Key values from gdkkeysyms.h -- editor.clj's own copy is private, same pattern
@@ -182,6 +183,55 @@
                 (check :edit-toggle-comment-forward
                        (and (= 1 handled) (= "; (+ 1 2)" text) (= 9 caret) (= [2 9] sel))
                        {:handled handled :text text :caret caret :sel sel}))))))
+
+(defn row-edit-structural-keys
+  "Structural editing on its shipped keys, through the editor's own key
+  handler: Ctrl+Alt+Right slurps twice, Ctrl+Alt+Left barfs, Ctrl+Shift+
+  Delete kills the form at the caret, and one undo takes the kill back.
+  Ctrl+Alt+S splices and Ctrl+Alt+Shift+P wraps, sent the way each system
+  sends a letter held with Alt."
+  [ed]
+  (go-row :edit-structural-keys check
+    (on-gtk (let [buf (:buf ed)
+                  ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
+                  press! (fn [key state]
+                           [(editor/handle-key! ed (km/key-value key) state) (editor/editor-text ed)])
+                  place! (fn [o] (g/with-iters* buf o o (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))]
+              (editor/set-text! ed "(a) b c")
+              (place! 2)
+              (let [slurp1 (press! "Right" ctrl-alt)
+                    slurp2 (press! "Right" ctrl-alt)
+                    barf (press! "Left" ctrl-alt)
+                    _ (place! 3)
+                    kill (press! "Delete" (bit-or g/CONTROL-MASK g/SHIFT-MASK))
+                    caret (g/cursor-offset buf)
+                    _ (g/gtk-text-buffer-undo buf)
+                    undone (editor/editor-text ed)
+                    ;; nothing to slurp: the chord is still used up, the text unchanged
+                    _ (editor/set-text! ed "(a)")
+                    _ (place! 2)
+                    none (press! "Right" ctrl-alt)
+                    ;; the letter keys hold Alt. On macOS Option+S arrives as
+                    ;; sharp s (0xdf) and Option+Shift+P as U+220F, so only the
+                    ;; keycode (1 and 35) names the key; elsewhere the letter does
+                    mac? (= "Mac OS X" (System/getProperty "os.name"))
+                    letter! (fn [mac-keyval mac-keycode ch state]
+                              (if mac?
+                                (editor/handle-key! ed mac-keyval mac-keycode state)
+                                (editor/handle-key! ed (int ch) state))
+                              (editor/editor-text ed))
+                    _ (editor/set-text! ed "(a [b c])")
+                    _ (place! 5)
+                    spliced (letter! 0xdf 1 \s ctrl-alt)
+                    _ (place! 3)
+                    wrapped (letter! 0x100220f 35 \p (bit-or ctrl-alt g/SHIFT-MASK))]
+                (check :edit-structural-keys
+                       (and (= [1 "(a b) c"] slurp1) (= [1 "(a b c)"] slurp2) (= [1 "(a b) c"] barf)
+                            (= [1 "(a) c"] kill) (= 2 caret) (= "(a b) c" undone)
+                            (= [1 "(a)"] none)
+                            (= "(a b c)" spliced) (= "(a (b) c)" wrapped))
+                       {:slurp1 slurp1 :slurp2 slurp2 :barf barf :kill kill :caret caret
+                        :undone undone :none none :spliced spliced :wrapped wrapped}))))))
 
 (defn row-edit-format-all [ed]
   (go-row :edit-format-all check

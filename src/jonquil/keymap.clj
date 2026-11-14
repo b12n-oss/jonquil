@@ -16,11 +16,13 @@
 
   :exact #{...} (instead of :mods and :not) requires exactly that set among
   :shift :alt :ctrl :meta, the other three up; :super is ignored, as the
-  editor's shift-only? and no-modifiers? ignored it. :physical? true lets
-  the binding also match when dispatch's :physical option, the key name of
-  the physical key pressed (or nil), is one of its keys: the macOS
-  Cmd+Option+F/L keycode fallback (jonquil.gtk.editor/physical-key), kept
-  per binding so no other chord picks it up."
+  editor's shift-only? and no-modifiers? ignored it. A binding that
+  names :alt among its modifiers (or says :physical? true) also matches
+  when dispatch's :physical option, the key name of the physical key
+  pressed (or nil), is one of its keys: on macOS Option turns a key's
+  character into another, so the keycode names the key
+  (jonquil.gtk.editor/physical-key). A binding that doesn't name :alt
+  never matches that way, so no other chord picks it up."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [jonquil.parts :as parts]))
@@ -41,7 +43,10 @@
    "braceright" 0x07d "braceleft" 0x07b
    "F3" 0xffc0 "F5" 0xffc2 "F6" 0xffc3 "F7" 0xffc4 "F8" 0xffc5 "F9" 0xffc6 "F10" 0xffc7 "Escape" 0xff1b "bracketleft" 0x05b
    "space" 0x020 "slash" 0x02f "semicolon" 0x03b "F1" 0xffbe "F2" 0xffbf "F12" 0xffc9
-   "Return" 0xff0d "KP_Enter" 0xff8d "period" 0x02e "greater" 0x03e "comma" 0x02c})
+   "Return" 0xff0d "KP_Enter" 0xff8d "period" 0x02e "greater" 0x03e "comma" 0x02c
+   ;; keys that move or delete: structural editing binds them with modifiers
+   "Left" 0xff51 "Up" 0xff52 "Right" 0xff53 "Down" 0xff54 "Home" 0xff50 "End" 0xff57
+   "BackSpace" 0xff08 "Delete" 0xffff})
 
 (defn key-value
   "The keyval a binding's key name stands for: a lower-case letter or a
@@ -67,9 +72,9 @@
           (when (re-matches #"[a-z0-9]" s) s)))))
 
 (defn typing-key?
-  "True when the key named name types something into text: every key but
-  the function keys and Escape. A binding on one needs a modifier other
-  than Shift, or it would run each time the key is typed."
+  "True when the key named name types into text or moves in it: every key
+  but the function keys and Escape. A binding on one needs a modifier other
+  than Shift, or it would run each time the key is pressed for its own job."
   [name]
   (not (or (= "Escape" name) (boolean (re-matches #"F\d+" (str name))))))
 
@@ -94,6 +99,15 @@
     (and (every? #(held? state %) (:mods binding))
          (not-any? #(held? state %) (:not binding)))))
 
+(defn- by-physical-key?
+  "True when binding may match by the physical key's name: it names :alt
+  among its modifiers, or says :physical? true. Option on macOS turns a
+  key's character into another, so such a binding could never match by
+  keyval there."
+  [binding]
+  (or (true? (:physical? binding))
+      (contains? (set (or (:exact binding) (:mods binding))) :alt)))
+
 (defn matches?
   "True when keyval is the binding's key (or one of its keys), every :mods
   modifier is held, no :not modifier is, and every :when condition holds.
@@ -107,7 +121,7 @@
   ([binding keyval state holds?] (matches? binding keyval state holds? nil))
   ([binding keyval state holds? physical]
    (and (or (contains? (set (map key-value (key-names binding))) keyval)
-            (and (true? (:physical? binding)) (some? physical)
+            (and (some? physical) (by-physical-key? binding)
                  (contains? (set (key-names binding)) physical)))
         (modifiers-match? binding state)
         (every? #(boolean (holds? %)) (:when binding)))))

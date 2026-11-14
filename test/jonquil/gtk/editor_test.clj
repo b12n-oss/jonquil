@@ -13,7 +13,8 @@
   (is (true? (editor/keycode-fallback? "Mac OS X" 37 cmd-alt)))
   (is (not (editor/keycode-fallback? "Linux" 37 ctrl-alt)))
   (is (not (editor/keycode-fallback? "Linux" 3 ctrl-alt)))
-  (is (not (editor/keycode-fallback? "Mac OS X" 38 cmd-alt)))
+  (is (true? (editor/keycode-fallback? "Mac OS X" 38 cmd-alt)) "J, like every letter")
+  (is (not (editor/keycode-fallback? "Mac OS X" 48 cmd-alt)) "Tab's keycode names no key")
   (is (not (editor/keycode-fallback? "Mac OS X" 37 g/META-MASK)))
   (is (not (editor/keycode-fallback? nil 37 cmd-alt))))
 
@@ -33,4 +34,9 @@
   (is (nil? (editor/physical-key "Linux" 0x39 25 ctrl-alt)) "Linux matches the plain 9 by keyval")
   (is (= "5" (editor/physical-key "Mac OS X" 0x100221e 23 cmd-alt)) "Option+5's infinity")
   (is (nil? (editor/physical-key "Mac OS X" 0xffe9 18 cmd-alt)) "a modifier keyval is never a digit")
-  (is (nil? (editor/physical-key "Linux" 0x31 18 ctrl-alt)) "Linux keeps the plain keyval"))
+  (is (nil? (editor/physical-key "Linux" 0x31 18 ctrl-alt)) "Linux keeps the plain keyval")
+  ;; every letter, 0 and the punctuation Jonquil has a name for
+  (is (= "s" (editor/physical-key "Mac OS X" 0xdf 1 ctrl-alt)) "Option+S arrives as sharp s")
+  (is (= ["a" "c" "j" "k" "r" "w" "0" "period" "comma" "slash"]
+         (map #(editor/physical-key "Mac OS X" 0xa1 % cmd-alt) [0 8 38 40 15 13 29 47 43 44])))
+  (is (nil? (editor/physical-key "Mac OS X" 0xa1 48 cmd-alt)) "a keycode the table doesn't name"))

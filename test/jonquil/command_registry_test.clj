@@ -197,6 +197,28 @@
 
 ;; --- the editor's commands -------- ---------------------------------------
 
+(deftest structural-commands-edit-copy-and-always-answer-handled-test
+  (let [applied (atom []) copied (atom [])
+        ctx (fn [text caret] {:snapshot (fn [] {:text text :caret caret :sel-start caret :sel-end caret})
+                              :apply-op! (fn [op] (swap! applied conj op))
+                              :copy! (fn [t] (swap! copied conj t))})
+        run (fn [id c] (registry/run-command! registry/editor-commands {:command id} c))]
+    (testing "an op's edits and caret go to the buffer"
+      (is (= :handled (run :paredit/slurp-forward (ctx "(a) b" 2))))
+      (is (= [{:edits [[2 3 ""] [5 5 ")"]] :caret 2}] @applied)))
+    (testing "Kill form copies, then edits; Copy form only copies"
+      (reset! applied [])
+      (is (= :handled (run :paredit/kill-form (ctx "(a b)" 3))))
+      (is (= ["b"] @copied))
+      (is (= 1 (count @applied)))
+      (is (= :handled (run :paredit/copy-form (ctx "(a b)" 1))))
+      (is (= ["b" "a"] @copied))
+      (is (= 1 (count @applied)) "nothing more was applied"))
+    (testing "with nothing to do the chord is still used up, and nothing is applied"
+      (reset! applied [])
+      (is (= :handled (run :paredit/slurp-forward (ctx "a b" 1))))
+      (is (= [] @applied)))))
+
 (deftest editor-commands-answer-outcomes-test
   (let [calls (atom [])
         rec (fn [k answer] (fn [] (swap! calls conj k) answer))
@@ -209,7 +231,11 @@
                           :indent! (rec :indent! answer) :unindent! (rec :unindent! answer)})
         run (fn [id c] (reset! calls []) [(registry/run-command! registry/editor-commands {:command id} c) @calls])]
     (is (= #{:completion/open :edit/toggle-comment :edit/format-all :edit/format-selection :edit/redo
-             :help/quick-doc :help/jump :edit/rename :run/form :edit/indent :edit/unindent}
+             :help/quick-doc :help/jump :edit/rename :run/form :edit/indent :edit/unindent
+             :paredit/slurp-forward :paredit/barf-forward :paredit/slurp-backward :paredit/barf-backward
+             :paredit/raise :paredit/splice :paredit/wrap-round :paredit/wrap-square :paredit/wrap-curly
+             :paredit/kill-form :paredit/copy-form :paredit/forward :paredit/backward :paredit/up
+             :paredit/down}
            (set (keys registry/editor-commands))))
     (doseq [[id k] [[:edit/toggle-comment :toggle-comment!] [:edit/format-all :format-all!]
                     [:edit/format-selection :format-selection!] [:edit/redo :redo!]]]

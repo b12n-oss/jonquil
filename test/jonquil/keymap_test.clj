@@ -222,7 +222,7 @@
 
 (deftest physical-test
   ;; the macOS Option-translated keyval matches through the physical key,
-  ;; only on a binding that opts in
+  ;; on a binding that names :alt or opts in with :physical?
   (let [b {:keys #{"f" "l"} :mods #{:cmd :alt} :physical? true}
         st (bit-or meta-m alt)]
     (is (km/matches? b 0x8f6 st (constantly false) "f"))
@@ -231,9 +231,13 @@
     (is (not (km/matches? b 0x8f6 st (constantly false) "q")) "another physical key")
     (is (not (km/matches? b 0x8f6 meta-m (constantly false) "f")) "the modifiers still count")
     (is (km/matches? b 0x66 st (constantly false) nil) "the plain keyval still matches"))
-  (is (not (km/matches? {:keys #{"f" "l"} :mods #{:cmd :alt}} 0x8f6 (bit-or meta-m alt)
-                        (constantly false) "f"))
-      "without :physical? the physical key never counts")
+  (is (km/matches? {:keys #{"f" "l"} :mods #{:cmd :alt}} 0x8f6 (bit-or meta-m alt)
+                   (constantly false) "f")
+      "a binding that names :alt matches by the physical key without :physical?")
+  (is (km/matches? {:key "s" :exact #{:ctrl :alt}} 0xdf (bit-or ctrl alt) (constantly false) "s")
+      "an :exact set that names :alt does too")
+  (is (not (km/matches? {:key "s" :mods #{:cmd}} 0xdf (bit-or meta-m alt) (constantly false) "s"))
+      "a binding that doesn't name :alt never matches by the physical key")
   (is (= :handled (km/dispatch [{:key "f" :mods #{:cmd} :physical? true :command :x}] 0x8f6 ctrl
                                {:holds? (constantly true) :run! (constantly :handled) :physical "f"}))
       "dispatch passes :physical through")
