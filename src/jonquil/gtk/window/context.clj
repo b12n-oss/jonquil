@@ -102,6 +102,7 @@
    :plugin-reviews-changed win-plugin-agent/plugin-reviews-changed
    :plugin-console win-plugin-agent/plugin-console
    :on-saved win-files/on-saved
+   :saved-listeners win-files/saved-listeners
    :inspect! (fn [start]
                (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
    :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to!

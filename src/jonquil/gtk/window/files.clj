@@ -164,6 +164,11 @@
   ;; :after-save hooks
   (atom nil))
 
+(defonce saved-listeners
+  ;; {key (fn [path ed])}, each run after a save succeeds, after on-saved.
+  ;; The command palette part adds one that reloads a saved keys.edn.
+  (atom {}))
+
 (defn- write-over!
   "Writes ed's text to the temp file tmp (created like target), copies
   target's permissions onto it, then atomically moves it over target.
@@ -180,13 +185,18 @@
                 java.nio.file.StandardCopyOption/ATOMIC_MOVE])))
 
 (defn- run-saved-hook!
-  "Calls the on-saved hook (when set) with path and ed. A throw from it is
-  reported on the console as an :error line, never raised. Returns nil."
+  "Calls the on-saved hook (when set) and then each of saved-listeners with
+  path and ed. A throw from one is reported on the console as an :error
+  line, never raised. Returns nil."
   [cv path ed]
   (when-let [f @on-saved]
     (try (f path ed)
          (catch :default e
-           (cview/append! cv :error (str "; reloading the saved plugin failed: " (ex-message e) "\n"))))))
+           (cview/append! cv :error (str "; reloading the saved plugin failed: " (ex-message e) "\n")))))
+  (doseq [[k f] @saved-listeners]
+    (try (f path ed)
+         (catch :default e
+           (cview/append! cv :error (str "; after saving, " (name k) " failed: " (ex-message e) "\n"))))))
 
 (defn save-to!
   "Writes the editor text to path without ever truncating it in place,

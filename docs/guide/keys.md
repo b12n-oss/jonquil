@@ -151,3 +151,35 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 | Click on a symbol | docs panel | Open that symbol's doc as the next page |
 
 </details>
+
+## Your own keys
+
+Your key bindings live in `keys.edn`, next to `settings.edn`
+(`~/.config/jonquil/keys.edn`, or `$XDG_CONFIG_HOME/jonquil/keys.edn`).
+**Open your key bindings file** in the command palette opens it in a tab,
+and writes a commented starter file the first time.
+
+```clojure
+{:window [{:key "e" :mods #{:cmd :shift} :command :run/run}]
+ :editor []
+ :remove [{:key "r" :mods #{:cmd} :command :run/run}]}
+```
+
+- `:window` keys work anywhere in the window, and `:editor` keys while the
+  editor has the focus. Yours are tried before a plugin's and before
+  Jonquil's own, so yours win.
+- `:remove` drops one of Jonquil's or a plugin's bindings. Name its key, its
+  modifiers and its command. The example frees Cmd/Ctrl+R.
+- A binding has the shape of the entries in `src/jonquil/keymap.edn`: `:key`
+  (a lower-case letter, a digit, or a name such as `"F9"` or `"Return"`),
+  `:mods` (`:cmd` is Cmd on a Mac and Ctrl elsewhere, then `:shift`, `:alt`,
+  `:ctrl`, `:meta`, `:super`) and `:command`. Unlike a plugin's binding,
+  yours needn't hold Cmd or Ctrl.
+- **List every key binding** in the palette prints each command's id with
+  its keys, yours included.
+
+Saving the file in Jonquil reloads it at once, and **Reload your key
+bindings** does the same after an edit made elsewhere. The console says how
+many bindings loaded. An entry Jonquil can't use is skipped and named there
+with its place in the file, and the rest still load. A file that doesn't
+read as EDN loads nothing, and Jonquil starts as usual.

@@ -29,6 +29,7 @@
     jonquil.upstream.parinfer-test
     jonquil.parinfer-edit-test
     jonquil.theme-test
+    jonquil.user-keys-test
     jonquil.settings-test
     jonquil.paint-test
     jonquil.syntax-test

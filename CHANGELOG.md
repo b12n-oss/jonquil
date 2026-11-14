@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- Your own key bindings. `keys.edn`, next to `settings.edn`, holds `:window` and `:editor` bindings that are tried before a plugin's and before Jonquil's own, and a `:remove` list that drops a binding you don't want. Open your key bindings file in the command palette opens it, with a commented starter file the first time. Saving it in Jonquil reloads it, and so does Reload your key bindings. An entry Jonquil can't use is skipped and named in the console, and the rest load. Until now the keys were fixed when Jonquil was built, so the downloaded app had no way to change one short of a plugin.
+
 ### Fixed
 
 - `gtk_text_buffer_insert_interactive` now gets its text as a copy the garbage collector can't move, like the four calls fixed in 0.2.1. Only two console rows of the GUI self-tests call it, so the app wasn't affected, but those rows could now and then insert other text than they meant to.

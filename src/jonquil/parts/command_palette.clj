@@ -23,4 +23,9 @@
     :help/install-cli {:doc "Install the jonquil command for your terminal." :scope :window
                        :call [:install-cli-fn]}
     :help/remove-cli {:doc "Remove the jonquil command from your terminal." :scope :window
-                      :call [:remove-cli-fn]}}})
+                      :call [:remove-cli-fn]}
+    ;; your own keys, keys.edn beside the settings file (jonquil.user-keys)
+    :help/open-keys-file {:doc "Open your key bindings file." :scope :window
+                          :call [:open-keys-file-fn]}
+    :help/reload-keys {:doc "Reload your key bindings." :scope :window
+                       :call [:reload-keys-fn]}}})
