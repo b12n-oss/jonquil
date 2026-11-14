@@ -138,9 +138,10 @@
 ;; died with "invalid memory reference" within 300 inserts as :string, and
 ;; never with a C string. In the self-tests it showed now and then in the
 ;; plugin rows, as that crash or as GTK's assertion that the text wasn't valid
-;; UTF-8. Four functions in this file are wrapped this way, the ones that
+;; UTF-8. Five functions in this file are wrapped this way, the ones that
 ;; take text and emit before copying it: this one, gtk-text-buffer-insert,
-;; gtk-text-buffer-insert-interactive-at-cursor and gtk-editable-set-text.
+;; gtk-text-buffer-insert-interactive, its -at-cursor form and
+;; gtk-editable-set-text.
 (ffi/defcfn ^:private gtk-text-buffer-set-text* "gtk_text_buffer_set_text" [:pointer :pointer :int] :void)
 
 (defn gtk-text-buffer-set-text
@@ -453,8 +454,14 @@
 ;; Unlike gtk-text-buffer-insert-interactive-at-cursor above, this one takes
 ;; an explicit iter, so a self-test row can target a specific offset instead
 ;; of wherever the cursor happens to be.
-(ffi/defcfn gtk-text-buffer-insert-interactive "gtk_text_buffer_insert_interactive"
-  [:pointer :pointer :string :int :int] :int)
+(ffi/defcfn ^:private gtk-text-buffer-insert-interactive* "gtk_text_buffer_insert_interactive"
+  [:pointer :pointer :pointer :int :int] :int)
+
+(defn gtk-text-buffer-insert-interactive
+  "gtk_text_buffer_insert_interactive with text as a C string (see
+  gtk-text-buffer-set-text)."
+  [buf iter text len default-editable]
+  (ffi/with-c-string [p text] (gtk-text-buffer-insert-interactive* buf iter p len default-editable)))
 
 ;; gtk_text_buffer_delete_interactive: gtk/gtktextbuffer.h:272-275 (same
 ;; header/version as above). Used to probe that Backspace/Delete at
