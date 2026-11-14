@@ -423,7 +423,8 @@
         never "binding 0 (Ctrl+Alt+J) never fires: plugin p-a's binding of :run/run takes that chord first, and p-a loads first"
         only-when "binding 0 (Ctrl+Alt+J) takes that chord only when plugin p-a's binding of :run/run doesn't"]
     (is (= {:problems [] :warnings ["binding 0 (Ctrl+Shift+P) doesn't fire on that chord: the window's :palette/open takes it first; the binding's other chords work"
-                                    "binding 0 (Ctrl+Alt+P) doesn't fire on that chord: the window's :parinfer/next-mode takes it first; the binding's other chords work"]}
+                                    "binding 0 (Ctrl+Alt+P) doesn't fire on that chord: the window's :parinfer/next-mode takes it first; the binding's other chords work"
+                                    "binding 0 (Ctrl+Alt+Shift+P) takes that chord from the built-in :paredit/wrap-round"]}
            (findings (bind {:key "p" :mods #{:cmd} :command :wrap-when/wrap}))) "partly")
     (is (= {:problems [] :warnings ["binding 0 (Ctrl+/) takes that chord from the built-in :edit/toggle-comment"]}
            (findings (bind {:key "slash" :mods #{:cmd} :command :wrap-when/say}))) "takes")

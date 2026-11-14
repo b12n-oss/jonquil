@@ -187,7 +187,9 @@
 (defn row-edit-structural-keys
   "Structural editing on its shipped keys, through the editor's own key
   handler: Ctrl+Alt+Right slurps twice, Ctrl+Alt+Left barfs, Ctrl+Shift+
-  Delete kills the form at the caret, and one undo takes the kill back."
+  Delete kills the form at the caret, and one undo takes the kill back.
+  Ctrl+Alt+S splices and Ctrl+Alt+Shift+P wraps, sent the way each system
+  sends a letter held with Alt."
   [ed]
   (go-row :edit-structural-keys check
     (on-gtk (let [buf (:buf ed)
@@ -208,13 +210,28 @@
                     ;; nothing to slurp: the chord is still used up, the text unchanged
                     _ (editor/set-text! ed "(a)")
                     _ (place! 2)
-                    none (press! "Right" ctrl-alt)]
+                    none (press! "Right" ctrl-alt)
+                    ;; the letter keys hold Alt. On macOS Option+S arrives as
+                    ;; sharp s (0xdf) and Option+Shift+P as U+220F, so only the
+                    ;; keycode (1 and 35) names the key; elsewhere the letter does
+                    mac? (= "Mac OS X" (System/getProperty "os.name"))
+                    letter! (fn [mac-keyval mac-keycode ch state]
+                              (if mac?
+                                (editor/handle-key! ed mac-keyval mac-keycode state)
+                                (editor/handle-key! ed (int ch) state))
+                              (editor/editor-text ed))
+                    _ (editor/set-text! ed "(a [b c])")
+                    _ (place! 5)
+                    spliced (letter! 0xdf 1 \s ctrl-alt)
+                    _ (place! 3)
+                    wrapped (letter! 0x100220f 35 \p (bit-or ctrl-alt g/SHIFT-MASK))]
                 (check :edit-structural-keys
                        (and (= [1 "(a b) c"] slurp1) (= [1 "(a b c)"] slurp2) (= [1 "(a b) c"] barf)
                             (= [1 "(a) c"] kill) (= 2 caret) (= "(a b) c" undone)
-                            (= [1 "(a)"] none))
+                            (= [1 "(a)"] none)
+                            (= "(a b c)" spliced) (= "(a (b) c)" wrapped))
                        {:slurp1 slurp1 :slurp2 slurp2 :barf barf :kill kill :caret caret
-                        :undone undone :none none}))))))
+                        :undone undone :none none :spliced spliced :wrapped wrapped}))))))
 
 (defn row-edit-format-all [ed]
   (go-row :edit-format-all check

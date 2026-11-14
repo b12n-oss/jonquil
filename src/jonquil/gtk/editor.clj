@@ -1019,20 +1019,17 @@
 (def ^:private KEY-TAB 0xff09)
 (def ^:private KEY-ISO-LEFT-TAB 0xfe20)
 
-;; macOS hardware keycodes for the physical F and L keys (measured live with
-;; pid-driven cgevent cmd+option+f/l against this build:
-;; keycode 3 and 37 respectively, state carrying both ALT-MASK and
-;; META-MASK correctly). These match Carbon/HIToolbox's own kVK_ANSI_F =
-;; 0x03 and kVK_ANSI_L = 0x25 (37) -- Events.h:200 and :232 in the macOS
-;; SDK's HIToolbox headers -- so they're the stable, well-known scan
-;; positions for those two physical keys, not something guessed. See
-;; physical-key's docstring for why keyval alone can't be used here.
-(def ^:private MAC-KEYCODE-F 3)
-(def ^:private MAC-KEYCODE-L 37)
-(def ^:private MAC-KEYCODE-P 35)
-;; the digit row's keycodes, the panel keys' Cmd+Option+1..9; Apple's
-;; kVK_ANSI_1..9 (9 is Show the documentation in a panel), the table F, L and P above were measured against
-(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7" 28 "8" 25 "9"})
+;; macOS hardware keycodes by the key they name, Apple's kVK_ANSI_* values
+;; (HIToolbox Events.h in the macOS SDK): stable scan positions on an ANSI
+;; layout, not characters. F (3), L (37) and P (35) were measured live with
+;; pid-driven cgevent cmd+option+f/l/p against this build, state carrying
+;; ALT-MASK and META-MASK; the rest are the same table. See physical-key's
+;; docstring for why the keyval alone can't name the key once Option is held.
+(def ^:private MAC-KEYCODES
+  {0 "a" 1 "s" 2 "d" 3 "f" 4 "h" 5 "g" 6 "z" 7 "x" 8 "c" 9 "v" 11 "b" 12 "q" 13 "w" 14 "e"
+   15 "r" 16 "y" 17 "t" 31 "o" 32 "u" 34 "i" 35 "p" 37 "l" 38 "j" 40 "k" 45 "n" 46 "m"
+   18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7" 28 "8" 25 "9" 29 "0"
+   24 "equal" 27 "minus" 33 "bracketleft" 41 "semicolon" 43 "comma" 44 "slash" 47 "period"})
 
 ;; os.name read once. The keycode fallback is macOS-only: on Linux X11
 ;; keycode 37 is Control_L.
@@ -1131,40 +1128,32 @@
   (apply-op! ed (edit/unindent (snapshot ed))))
 
 (defn keycode-fallback?
-  "True when os is \"Mac OS X\", keycode is the physical F or L key
-  (MAC-KEYCODE-F/MAC-KEYCODE-L) and Alt/Option is held in state. Pure, so a
-  test can pass any os. Off macOS it is always false: on Linux X11 keycode
-  37 is Control_L, and the keycode numbering means nothing there."
+  "True when os is \"Mac OS X\", keycode is a key MAC-KEYCODES names and
+  Alt/Option is held in state. Pure, so a test can pass any os. Off macOS
+  it is always false: on Linux X11 keycode 37 is Control_L, and the keycode
+  numbering means nothing there."
   [os keycode state]
   (and (= "Mac OS X" os)
-       (contains? #{MAC-KEYCODE-F MAC-KEYCODE-L MAC-KEYCODE-P} keycode)
+       (contains? MAC-KEYCODES keycode)
        (alt-held? state)))
 
 (defn physical-key
-  "The physical key's name, \"f\", \"l\", \"p\" or a digit 1 to 9, for
-  the :physical? bindings (the editor's Cmd/Ctrl+Alt+F and L format
-  chords, the window's Cmd/Ctrl+Alt+P Parinfer chord and its Cmd/Ctrl+Alt+1
-  to 9 panel and docs keys), or nil. Pure, so a test can
-  pass any os.
+  "The name of the physical key pressed (\"f\", \"5\", \"period\"), for a
+  binding that holds Alt, or nil. Pure, so a test can pass any os.
 
-  On Linux, Alt doesn't remap the keyval, and the binding's plain f and l
-  match. On macOS GDK reports the Option-translated character instead
+  On Linux, Alt doesn't remap the keyval, and a binding's plain key name
+  matches. On macOS GDK reports the Option-translated character instead
   (measured live with pid-driven cgevent: Cmd+Option+F arrives as 0x8f6,
-  GDK_KEY_function, and Cmd+Option+L as 0xac, GDK_KEY_notsign), and
-  gdk_keyval_to_lower doesn't help. The hardware keycode stays
-  MAC-KEYCODE-F/MAC-KEYCODE-L, so it names the key.
+  GDK_KEY_function, Cmd+Option+L as 0xac, GDK_KEY_notsign, and Option+5 as
+  U+221E), and gdk_keyval_to_lower doesn't help. The hardware keycode stays
+  the key's own, so it names the key.
 
-  The (< keyval 0x1000) guard keeps a modifier key's own press out:
-  Control_L is 0xffe3, and on Linux keycode 37 is Control_L."
+  A function or modifier key's own press is kept out (keyvals 0xfd00 to
+  0xffff): Control_L is 0xffe3, and its keycode means another key here."
   [os keyval keycode state]
-  (cond
-    (and (< keyval 0x1000) (keycode-fallback? os keycode state))
-    (condp = keycode MAC-KEYCODE-F "f" MAC-KEYCODE-L "l" "p")
-    ;; a digit: Option+5 types U+221E, whose keyval (0x100221e) is above
-    ;; the guard, so only the function and modifier keyvals are kept out
-    (and (= "Mac OS X" os) (alt-held? state) (contains? MAC-KEYCODE-DIGITS keycode)
-         (not (<= 0xfd00 keyval 0xffff)))
-    (MAC-KEYCODE-DIGITS keycode)))
+  (when (and (keycode-fallback? os keycode state)
+             (not (<= 0xfd00 keyval 0xffff)))
+    (MAC-KEYCODES keycode)))
 
 (defn- open-char-key!
   "An opening bracket or quote key. With Parinfer on, brackets are
@@ -1276,7 +1265,7 @@
 
   Two arities: the 3-arg form (no keycode) defaults keycode to 0, which is
   harmless since 0 never matches
-  MAC-KEYCODE-F/MAC-KEYCODE-L. on-key (below), the real GTK callback,
+  a MAC-KEYCODES key. on-key (below), the real GTK callback,
   always uses the 4-arg form so physical-key's macOS fallback has a real
   hardware keycode to check.
 

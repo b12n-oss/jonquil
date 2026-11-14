@@ -7,7 +7,10 @@
   a click or a key press means."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable]]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]))
+
+(def ^:private OS-NAME (System/getProperty "os.name"))
 
 (def WIDTH 720)
 (def HEIGHT 520)
@@ -29,7 +32,8 @@
 (defn set-handlers!
   "Registers {:on-search (fn [text]) :on-record (fn [index]) :on-answer (fn
   [yes?]) :on-open-file (fn []) :on-reset (fn [index-or-nil]) :on-key (fn
-  [keyval state]) -> 1 when the key is used up, else 0}."
+  [keyval state physical]) -> 1 when the key is used up, else 0; physical
+  is jonquil.gtk.editor/physical-key's answer, the key's name or nil}."
   [pw m]
   (reset! (:handlers pw) m)
   nil)
@@ -129,8 +133,10 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
     (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (fn [_ctl keyval _keycode state _data]
-                                         (or (call! pw :on-key (g/gdk-keyval-to-lower keyval) state) 0))
+                             (callable (fn [_ctl keyval keycode state _data]
+                                         (or (call! pw :on-key (g/gdk-keyval-to-lower keyval) state
+                                                    (editor/physical-key OS-NAME keyval keycode state))
+                                             0))
                                        [:pointer :uint :uint :uint :pointer] :int :on-throw 0)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller win keyctl)))

@@ -123,11 +123,11 @@
   "The window's key handler. While a key is being recorded every key is
   the tab's: Escape cancels, a modifier alone waits, a key Jonquil can't
   bind says so, and a chord is recorded. Otherwise the key is GTK's."
-  [{:keys [win state] :as ctx} keyval gdk-state]
+  [{:keys [win state] :as ctx} keyval gdk-state physical]
   (let [s @state]
     (if (not= :recording (:mode s))
       0
-      (let [{:keys [chord problem]} (kp/press-chord keyval gdk-state (os))]
+      (let [{:keys [chord problem]} (kp/press-chord keyval gdk-state (os) physical)]
         (cond
           (and (= KEY-ESCAPE keyval) (nil? (:mods chord))) (idle! ctx "Cancelled.")
           problem (pw/say! win problem nil)
@@ -163,7 +163,9 @@
   (let [w (pw/make-window win)
         ctx (assoc wctx :win w :state (atom nil))
         open! (fn [] (idle! ctx "") (pw/present! w))
-        on-key! (fn [keyval gdk-state] (on-key ctx keyval gdk-state))]
+        on-key! (fn
+                  ([keyval gdk-state] (on-key ctx keyval gdk-state nil))
+                  ([keyval gdk-state physical] (on-key ctx keyval gdk-state physical)))]
     (pw/set-handlers!
      w {:on-search (fn [_text] (when (nil? @(:state ctx)) (refresh! ctx)))
         :on-record (fn [i] (start-record! ctx i))
