@@ -27,6 +27,11 @@ Edge cases sit in folded blocks: click a bold line to open one.
   [Dialects and runtimes](dialects/index.md)).
 - The window title shows the open file (or `Untitled`) and a leading `* `
   for unsaved changes.
+- The **menus** list what Jonquil can do, each item with its key: File,
+  Edit, View, Search, Run, Debug, Tools and Help. On a Mac they are in the
+  menu bar at the top of the screen. On Linux a **☰** button at the end of
+  the toolbar opens them. Every item is also in the command palette
+  (Cmd/Ctrl+Shift+P), which finds a command by typing part of its name.
 
 To see which version you run, use **Show Jonquil's version** in the command
 palette, which prints it to the console, or run `jonquil --version` in a

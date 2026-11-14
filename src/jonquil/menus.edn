@@ -1,0 +1,138 @@
+;; The menus. Read by jonquil.menus/shipped when Jonquil is compiled.
+;;
+;; A vector of menus, each {:label s :sections [[item ...] ...]}; a line
+;; separates the sections. An item is {:command id :label s}, or a submenu,
+;; {:label s :sections [...]}. A label ending in "…" opens something that
+;; asks for more. Keys aren't written here: each item shows the first key
+;; the live key map gives its command.
+[{:label "File"
+  :sections [[{:command :tab/new :label "New Tab"}
+              {:command :file/open :label "Open…"}]
+             [{:command :file/save :label "Save"}
+              {:command :file/save-as :label "Save As…"}]
+             [{:command :tab/close :label "Close Tab"}]]}
+ {:label "Edit"
+  :sections [[{:command :edit/toggle-comment :label "Toggle Comment"}
+              {:command :edit/indent :label "Indent"}
+              {:command :edit/unindent :label "Unindent"}]
+             [{:command :edit/format-all :label "Format Buffer"}
+              {:command :edit/format-selection :label "Format Selection"}
+              {:command :edit/rename :label "Rename Symbol…"}]
+             [{:label "Structure"
+               :sections [[{:command :paredit/slurp-forward :label "Slurp Forward"}
+                           {:command :paredit/barf-forward :label "Barf Forward"}
+                           {:command :paredit/slurp-backward :label "Slurp Backward"}
+                           {:command :paredit/barf-backward :label "Barf Backward"}]
+                          [{:command :paredit/raise :label "Raise"}
+                           {:command :paredit/splice :label "Splice"}
+                           {:command :paredit/wrap-round :label "Wrap in ()"}
+                           {:command :paredit/wrap-square :label "Wrap in []"}
+                           {:command :paredit/wrap-curly :label "Wrap in {}"}]
+                          [{:command :paredit/kill-form :label "Kill Form"}
+                           {:command :paredit/copy-form :label "Copy Form"}]
+                          [{:command :paredit/forward :label "Forward by a Form"}
+                           {:command :paredit/backward :label "Backward by a Form"}
+                           {:command :paredit/up :label "Up to the List's Start"}
+                           {:command :paredit/down :label "Down into the Next List"}]]}
+              {:label "Parinfer"
+               :sections [[{:command :parinfer/smart :label "Smart Mode"}
+                           {:command :parinfer/indent :label "Indent Mode"}
+                           {:command :parinfer/paren :label "Paren Mode"}
+                           {:command :parinfer/off :label "Off"}]
+                          [{:command :parinfer/next-mode :label "Next Mode"}]]}]
+             [{:command :prefs/open :label "Preferences…"}]]}
+ {:label "View"
+  :sections [[{:command :tree/toggle :label "File Tree"}
+              {:label "Panels"
+               :sections [[{:command :panel/inspector :label "Inspector"}
+                           {:command :panel/source :label "Source"}
+                           {:command :panel/locations :label "Locations"}
+                           {:command :panel/frames :label "Frames"}
+                           {:command :panel/trace :label "Trace"}
+                           {:command :panel/plugins :label "Plugins"}
+                           {:command :panel/messages :label "Messages"}
+                           {:command :panel/processes :label "Processes"}
+                           {:command :pages/show :label "Documentation"}]]}]
+             [{:command :focus/toggle :label "Switch between Editor and Console"}
+              {:command :tab/next :label "Next Tab"}
+              {:command :tab/previous :label "Previous Tab"}
+              {:command :tab/back :label "Tab Used Before"}]
+             [{:command :view/zoom-in :label "Larger Text"}
+              {:command :view/zoom-out :label "Smaller Text"}
+              {:command :view/zoom-reset :label "Reset Text Size"}
+              {:command :view/cycle-theme :label "Next Theme"}]
+             [{:command :layout/save :label "Save Layout…"}
+              {:command :layout/forget :label "Forget Saved Layouts"}]]}
+ {:label "Search"
+  :sections [[{:command :find/open :label "Find…"}
+              {:command :find/open-replace :label "Find and Replace…"}
+              {:command :find/next :label "Find Next"}
+              {:command :find/previous :label "Find Previous"}]
+             [{:command :help/jump :label "Jump to Definition"}
+              {:command :locations/uses :label "Uses of the Symbol"}
+              {:command :locations/definitions :label "Definitions of the Symbol"}
+              {:command :locations/usages-in-project :label "Find Usages in Project"}
+              {:command :locations/matches :label "List Every Match"}]
+             [{:command :locations/next :label "Next Place"}
+              {:command :locations/previous :label "Previous Place"}]]}
+ {:label "Run"
+  :sections [[{:command :run/run :label "Run"}
+              {:command :run/selection :label "Run Selection or Form"}
+              {:command :run/form :label "Run Form"}
+              {:command :run/changed :label "Run Changed Forms"}
+              {:command :run/stop :label "Stop"}]
+             [{:command :inspect/form :label "Inspect Form"}
+              {:command :inspect/last :label "Inspect Last Result"}
+              {:command :run/time-form :label "Time Form"}]
+             [{:command :console/clear :label "Clear Console"}
+              {:command :console/clear-last-output :label "Clear Last Output"}]
+             [{:command :restart/retry :label "Retry the Failed Evaluation"}
+              {:command :restart/edit :label "Edit the Failed Evaluation"}]]}
+ {:label "Debug"
+  :sections [[{:command :debug/break-on-error :label "Break on Error"}
+              {:command :debug/toggle-breakpoint :label "Toggle Breakpoint"}
+              {:command :debug/clear-breakpoints :label "Clear Breakpoints in This Tab"}]
+             [{:command :debug/continue :label "Continue"}
+              {:command :debug/step :label "Step"}
+              {:command :debug/step-over :label "Step Over"}
+              {:command :debug/step-out :label "Step Out"}
+              {:command :debug/show-frames :label "Show Frames"}]
+             [{:command :debug/instrument-tab :label "Instrument This Tab"}
+              {:command :debug/uninstrument-tab :label "Stop Instrumenting This Tab"}]
+             [{:command :trace/toggle :label "Trace the Function"}
+              {:command :trace/show :label "Show Trace"}
+              {:command :trace/clear :label "Clear Trace"}
+              {:command :trace/untrace-all :label "Stop Tracing Everything"}]
+             [{:command :run/line-counts :label "Count Lines Run"}
+              {:command :run/clear-line-counts :label "Clear Line Counts"}]]}
+ {:label "Tools"
+  :sections [[{:command :plugins/list :label "Plugins"}
+              {:command :plugins/reload :label "Reload Changed Plugins"}
+              {:command :plugins/review :label "Review Plugin Proposals"}]
+             [{:command :change-set/make :label "Make a Change Set"}
+              {:command :change-set/browse :label "Browse Change Sets"}
+              {:label "Compare"
+               :sections [[{:command :compare/disk :label "With the File on Disk"}
+                           {:command :compare/head :label "With Git HEAD"}
+                           {:command :compare/last-run :label "With the Last Run"}]
+                          [{:command :compare-form/disk :label "This Form with the File on Disk"}
+                           {:command :compare-form/head :label "This Form with Git HEAD"}
+                           {:command :compare-form/last-run :label "This Form with the Last Run"}]]}]
+             [{:command :world/save :label "Save World"}
+              {:command :world/restore :label "Restore World"}
+              {:command :world/restore-earlier :label "Restore an Earlier World…"}
+              {:command :session/open-replay :label "Open Last Session's Replay"}]
+             [{:command :processes/show :label "Show Processes"}]
+             [{:command :help/install-cli :label "Install the jonquil Command"}
+              {:command :help/remove-cli :label "Remove the jonquil Command"}]]}
+ {:label "Help"
+  :sections [[{:command :help/quick-doc :label "Docs for the Symbol"}
+              {:command :pages/guide :label "Open a Guide Page…"}
+              {:command :pages/bookmarks :label "Open a Bookmarked Page…"}]
+             [{:command :help/describe-key :label "Describe the Next Key"}
+              {:command :help/key-bindings :label "List Every Key Binding"}
+              {:command :help/recent-keys :label "Keys Pressed Last"}
+              {:command :help/key-hints :label "Key Hints in the Status Bar"}]
+             [{:command :help/open-keys-file :label "Open Your Key Bindings File"}
+              {:command :help/reload-keys :label "Reload Your Key Bindings"}]
+             [{:command :help/version :label "Jonquil's Version"}]]}]
