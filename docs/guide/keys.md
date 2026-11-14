@@ -166,8 +166,8 @@ from: `default`, a plugin's name, or `yours`.
   key says **Add a key**.
 - If another command has that key, the tab names it and asks before taking
   the key from it.
-- A letter or a digit needs a modifier other than Shift, so a binding can't
-  replace typing.
+- A key that types needs a modifier other than Shift, so a binding can't
+  replace typing. Function keys and Esc can stand alone.
 - A greyed-out key belongs to a chain of keys, such as the steps Esc goes
   through, and can't be changed here.
 - **Reset this key** puts the selected command back on its own keys, and
@@ -199,7 +199,10 @@ and writes a commented starter file the first time.
   (a lower-case letter, a digit, or a name such as `"F9"` or `"Return"`),
   `:mods` (`:cmd` is Cmd on a Mac and Ctrl elsewhere, then `:shift`, `:alt`,
   `:ctrl`, `:meta`, `:super`) and `:command`. Unlike a plugin's binding,
-  yours needn't hold Cmd or Ctrl.
+  yours needn't hold Cmd or Ctrl, so `"F9"` alone works. A key that
+  types (a letter, a digit, Return, Space, punctuation) does need a modifier
+  other than Shift, or the binding would run every time you typed it, so
+  such an entry is skipped.
 - **List every key binding** in the palette prints each command's id with
   its keys, yours included.
 

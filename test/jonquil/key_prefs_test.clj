@@ -78,9 +78,13 @@
     (is (= {:waiting true} (kp/press-chord 0xffeb 0 mac)) "Super_L"))
   (testing "a key Jonquil has no name for is refused"
     (is (str/includes? (:problem (kp/press-chord 0x03f shift mac)) "can't bind")))
-  (testing "a plain letter or digit would shadow typing, so it needs a modifier"
+  (testing "a key that types would shadow typing, so it needs a modifier other than Shift"
     (is (str/includes? (:problem (kp/press-chord (int \e) 0 mac)) "modifier"))
-    (is (str/includes? (:problem (kp/press-chord (int \e) shift mac)) "modifier"))))
+    (is (str/includes? (:problem (kp/press-chord (int \e) shift mac)) "modifier"))
+    (is (str/includes? (:problem (kp/press-chord (km/key-value "Return") 0 mac)) "modifier"))
+    (is (str/includes? (:problem (kp/press-chord (km/key-value "space") shift mac)) "modifier"))
+    (is (= {:chord {:key "Return" :mods #{:cmd}}} (kp/press-chord (km/key-value "Return") meta-mask mac)))
+    (is (= {:chord {:key "Escape" :mods #{:shift}}} (kp/press-chord (km/key-value "Escape") shift mac)))))
 
 (deftest conflict-test
   (let [k (keymap uk/no-keys)]

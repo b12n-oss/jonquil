@@ -59,6 +59,16 @@
 
 (defn- scope-word [scope] (if (= :editor scope) "an editor" "a window"))
 
+(defn- replaces-typing?
+  "True when binding b fires on a key that types (jonquil.keymap/typing-key?)
+  with no modifier but Shift: the window sees a key before the editor does,
+  so such a binding would run its command each time the key is typed."
+  [b]
+  (let [names (if (:key b) [(:key b)] (:keys b))
+        mods (set (or (:exact b) (:mods b)))]
+    (boolean (and (some km/typing-key? names)
+                  (empty? (disj mods :shift))))))
+
 (defn- binding-problem
   "What's wrong with binding b of scope, or nil: jonquil.keymap's own checks,
   then that its command belongs to scope."
@@ -69,6 +79,8 @@
           other (:scope (get commands (:command b)))]
       (cond
         (seq found) (str/join ", " (map #(str/replace-first % "binding 0 " "") found))
+        (replaces-typing? b)
+        "binds a key that types with no modifier but Shift, which would replace typing"
         (and other (not= scope other))
         (str "names " (pr-str (:command b)) ", which is " (scope-word other) " command")))))
 
