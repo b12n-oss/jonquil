@@ -5,7 +5,7 @@ name: ci
 # lane before it passed. A lane is added, renamed or split in this file, and
 # the branch rule stays as it is.
 #
-# Work merges into develop, and develop merges into main at a release.
+# Work merges into develop, and develop merges into main when it is ready.
 #
 # Every lane runs on every push to main or develop and every pull request, docs-only
 # changes included: some unit tests read the guide pages (the in-app docs

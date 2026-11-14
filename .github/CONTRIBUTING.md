@@ -6,8 +6,8 @@ https://jonquil.b12n.app/guide/contributing.html). In short:
 
 1. Read [Getting started](../docs/guide/getting-started.md) to build and run
    from source.
-2. Branch from `develop`, and keep a change to one idea. `main` only moves
-   at a release.
+2. Branch from `develop`, and keep a change to one idea. `develop` merges
+   into `main` when the work on it is ready.
 3. Run `jolt verify` before you push. It runs lint, the unit suite and the
    live nREPL suite. CI runs lint, the format check and the metrics gate on
    every pull request.
