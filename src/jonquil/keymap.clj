@@ -16,11 +16,13 @@
 
   :exact #{...} (instead of :mods and :not) requires exactly that set among
   :shift :alt :ctrl :meta, the other three up; :super is ignored, as the
-  editor's shift-only? and no-modifiers? ignored it. :physical? true lets
-  the binding also match when dispatch's :physical option, the key name of
-  the physical key pressed (or nil), is one of its keys: the macOS
-  Cmd+Option+F/L keycode fallback (jonquil.gtk.editor/physical-key), kept
-  per binding so no other chord picks it up."
+  editor's shift-only? and no-modifiers? ignored it. A binding that
+  names :alt among its modifiers (or says :physical? true) also matches
+  when dispatch's :physical option, the key name of the physical key
+  pressed (or nil), is one of its keys: on macOS Option turns a key's
+  character into another, so the keycode names the key
+  (jonquil.gtk.editor/physical-key). A binding that doesn't name :alt
+  never matches that way, so no other chord picks it up."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [jonquil.parts :as parts]))
@@ -97,6 +99,15 @@
     (and (every? #(held? state %) (:mods binding))
          (not-any? #(held? state %) (:not binding)))))
 
+(defn- by-physical-key?
+  "True when binding may match by the physical key's name: it names :alt
+  among its modifiers, or says :physical? true. Option on macOS turns a
+  key's character into another, so such a binding could never match by
+  keyval there."
+  [binding]
+  (or (true? (:physical? binding))
+      (contains? (set (or (:exact binding) (:mods binding))) :alt)))
+
 (defn matches?
   "True when keyval is the binding's key (or one of its keys), every :mods
   modifier is held, no :not modifier is, and every :when condition holds.
@@ -110,7 +121,7 @@
   ([binding keyval state holds?] (matches? binding keyval state holds? nil))
   ([binding keyval state holds? physical]
    (and (or (contains? (set (map key-value (key-names binding))) keyval)
-            (and (true? (:physical? binding)) (some? physical)
+            (and (some? physical) (by-physical-key? binding)
                  (contains? (set (key-names binding)) physical)))
         (modifiers-match? binding state)
         (every? #(boolean (holds? %)) (:when binding)))))

@@ -115,9 +115,9 @@ the ones Calva uses. The rest are in the command palette, and
 | Ctrl+Alt+Shift+Left | Slurp backward | The list takes in the form before it: `a (\|b)` becomes `(a \|b)` |
 | Ctrl+Alt+Shift+Right | Barf backward | The list gives up its first form: `(a \|b)` becomes `a (\|b)` |
 | Ctrl+Shift+Delete | Kill form | Removes the form at the caret and copies it to the clipboard |
+| Ctrl+Alt+S | Splice | The list around the caret loses its brackets |
+| Ctrl+Alt+Shift+P, S or C | Wrap in `()`, `[]` or `{}` | Wraps the form at the caret |
 | none | Raise | The form at the caret replaces the list around it: `(a \|b c)` becomes `\|b` |
-| none | Splice | The list around the caret loses its brackets |
-| none | Wrap in `()`, `[]` or `{}` | Wraps the form at the caret |
 | none | Copy form | Copies the form at the caret |
 | none | Move forward, backward, up, down by a form | Moves the caret over whole forms, out of a list, or into the next one |
 
@@ -125,6 +125,13 @@ In the examples `|` marks the caret. Each is one undo step. The keys are Control
 system, never Cmd. On Linux, Ctrl+Alt+Right and Left often switch
 workspaces, so Ctrl+Alt+. and Ctrl+Alt+, do the same job. Inside a list that
 isn't closed yet, these commands do nothing.
+
+On a Mac, Option changes the character a key sends, so a key held with
+Option is matched by its position on a US keyboard. On another layout
+(Dvorak, Colemak, AZERTY, QWERTZ) a binding written as Ctrl+Alt+S fires on
+the key that sits where S does on a US keyboard. This holds for every
+binding with Alt, your own in `keys.edn` included. Linux matches the
+letter itself.
 
 </details>
 

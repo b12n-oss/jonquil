@@ -40,12 +40,12 @@
   ;; Parinfer: Cmd/Ctrl+Alt+P cycles the mode (upstream's Ctrl+Alt+P). On
   ;; macOS Option remaps P's keyval; :physical? matches the keycode, as the
   ;; editor's format-selection chord does.
-  {:key "p" :mods #{:cmd :alt} :physical? true :command :parinfer/next-mode}
+  {:key "p" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :parinfer/next-mode}
   ;; the plain command chords
   {:key "r" :mods #{:cmd} :command :run/run}
   {:key "o" :mods #{:cmd} :command :file/open}
-  {:key "s" :mods #{:cmd :shift} :command :file/save-as}
-  {:key "s" :mods #{:cmd} :command :file/save}
+  {:key "s" :mods #{:cmd :shift} :not #{:alt} :command :file/save-as}
+  {:key "s" :mods #{:cmd} :not #{:alt} :command :file/save}
   {:key "w" :mods #{:cmd} :command :tab/close}
   {:key "e" :mods #{:cmd :shift} :command :tree/toggle}
   {:key "e" :mods #{:cmd} :not #{:shift} :command :run/selection}
@@ -86,7 +86,7 @@
   {:key "i" :mods #{:cmd :shift} :command :inspect/form}
   {:key "i" :mods #{:cmd} :command :inspect/last}
   ;; the command palette
-  {:key "p" :mods #{:cmd :shift} :command :palette/open}
+  {:key "p" :mods #{:cmd :shift} :not #{:alt} :command :palette/open}
   {:key "braceright" :mods #{:cmd} :command :tab/next}
   {:key "braceleft" :mods #{:cmd} :command :tab/previous}
   ;; Cmd/Ctrl+[ steps the focused source panel back; anywhere
@@ -133,4 +133,10 @@
   {:keys #{"Left" "comma"} :exact #{:ctrl :alt} :command :paredit/barf-forward}
   {:key "Left" :exact #{:ctrl :alt :shift} :command :paredit/slurp-backward}
   {:key "Right" :exact #{:ctrl :alt :shift} :command :paredit/barf-backward}
-  {:key "Delete" :exact #{:ctrl :shift} :command :paredit/kill-form}]}
+  {:key "Delete" :exact #{:ctrl :shift} :command :paredit/kill-form}
+  ;; Calva's letter keys. They hold Alt, so on macOS they match by the
+  ;; physical key (Option+S types another character).
+  {:key "s" :exact #{:ctrl :alt} :command :paredit/splice}
+  {:key "p" :exact #{:ctrl :alt :shift} :command :paredit/wrap-round}
+  {:key "s" :exact #{:ctrl :alt :shift} :command :paredit/wrap-square}
+  {:key "c" :exact #{:ctrl :alt :shift} :command :paredit/wrap-curly}]}
