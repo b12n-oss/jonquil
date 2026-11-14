@@ -235,7 +235,8 @@
              :paredit/slurp-forward :paredit/barf-forward :paredit/slurp-backward :paredit/barf-backward
              :paredit/raise :paredit/splice :paredit/wrap-round :paredit/wrap-square :paredit/wrap-curly
              :paredit/kill-form :paredit/copy-form :paredit/forward :paredit/backward :paredit/up
-             :paredit/down}
+             :paredit/down
+             :paredit/expand-selection :paredit/shrink-selection :paredit/select-forward :paredit/select-backward :paredit/drag-forward :paredit/drag-backward :paredit/transpose :paredit/join :paredit/split :paredit/kill-list-forward :paredit/kill-list-backward :paredit/kill-right :paredit/kill-left :paredit/kill-form-backward :paredit/splice-killing-forward :paredit/splice-killing-backward :paredit/convolute :paredit/wrap-set :paredit/wrap-quote :paredit/rewrap-round :paredit/rewrap-square :paredit/rewrap-curly :paredit/rewrap-set :paredit/forward-up :paredit/backward-down :paredit/list-end :paredit/list-start}
            (set (keys registry/editor-commands))))
     (doseq [[id k] [[:edit/toggle-comment :toggle-comment!] [:edit/format-all :format-all!]
                     [:edit/format-selection :format-selection!] [:edit/redo :redo!]]]

@@ -17,6 +17,8 @@ works, the languages Jonquil runs, and how it's put together.
    - [Using Jonquil](using-jonquil.md): the window and its menus, Run
      versus the REPL prompt, stdin, Stop, Reset on Run, editing, find and
      replace, themes.
+   - [Structural editing](structural-editing.md): every command with a
+     before and an after, the way Calva's paredit page shows them.
    - [Files and tabs](files-and-tabs.md): Open and Save, tabs, Finder and
      the Dock, the file tree.
    - [Help and the inspector](help-and-inspector.md): completion, quick

@@ -28,12 +28,39 @@
                            {:command :paredit/wrap-round :label "Wrap in ()"}
                            {:command :paredit/wrap-square :label "Wrap in []"}
                            {:command :paredit/wrap-curly :label "Wrap in {}"}]
+                          [{:command :paredit/wrap-set :label "Wrap in #{}"}
+                           {:command :paredit/wrap-quote :label "Wrap in \"\""}
+                           {:command :paredit/rewrap-round :label "Rewrap in ()"}
+                           {:command :paredit/rewrap-square :label "Rewrap in []"}
+                           {:command :paredit/rewrap-curly :label "Rewrap in {}"}
+                           {:command :paredit/rewrap-set :label "Rewrap in #{}"}]
+                          [{:command :paredit/drag-backward :label "Drag Backward"}
+                           {:command :paredit/drag-forward :label "Drag Forward"}
+                           {:command :paredit/transpose :label "Transpose"}
+                           {:command :paredit/join :label "Join"}
+                           {:command :paredit/split :label "Split"}
+                           {:command :paredit/convolute :label "Convolute"}]
                           [{:command :paredit/kill-form :label "Kill Form"}
+                           {:command :paredit/kill-form-backward :label "Kill Form Backward"}
+                           {:command :paredit/kill-right :label "Kill to the Line's End"}
+                           {:command :paredit/kill-left :label "Kill to the Line's Start"}
+                           {:command :paredit/kill-list-forward :label "Kill to the List's End"}
+                           {:command :paredit/kill-list-backward :label "Kill to the List's Start"}
+                           {:command :paredit/splice-killing-forward :label "Splice, Killing Forward"}
+                           {:command :paredit/splice-killing-backward :label "Splice, Killing Backward"}
                            {:command :paredit/copy-form :label "Copy Form"}]
+                          [{:command :paredit/expand-selection :label "Expand Selection"}
+                           {:command :paredit/shrink-selection :label "Shrink Selection"}
+                           {:command :paredit/select-forward :label "Select Forward"}
+                           {:command :paredit/select-backward :label "Select Backward"}]
                           [{:command :paredit/forward :label "Forward by a Form"}
                            {:command :paredit/backward :label "Backward by a Form"}
                            {:command :paredit/up :label "Up to the List's Start"}
-                           {:command :paredit/down :label "Down into the Next List"}]]}
+                           {:command :paredit/down :label "Down into the Next List"}
+                           {:command :paredit/forward-up :label "Out past the List's End"}
+                           {:command :paredit/backward-down :label "Into the List Before"}
+                           {:command :paredit/list-start :label "To the List's Start"}
+                           {:command :paredit/list-end :label "To the List's End"}]]}
               {:label "Parinfer"
                :sections [[{:command :parinfer/smart :label "Smart Mode"}
                            {:command :parinfer/indent :label "Indent Mode"}
