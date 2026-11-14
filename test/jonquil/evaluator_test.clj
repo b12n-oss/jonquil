@@ -98,13 +98,18 @@
       (is (zero? @later))))
   (testing "nil is an answer too"
     (is (= [:now nil] (ev/ask-help! 1000 (fn [] nil) (fn [_] nil)))))
+  ;; A late answer waits on `go`, which the test delivers once ask-help! has
+  ;; given up. A sleep would race the grace wait on a machine that stretches
+  ;; both, and an answer that wins that race never reaches on-later.
   (testing "a late answer goes to on-later, with the long limit bound"
-    (let [got (promise)]
-      (is (= [:later] (ev/ask-help! 10 (fn [] (Thread/sleep 150) (ev/help-timeout 300)) (fn [r] (deliver got r)))))
+    (let [got (promise) go (promise)]
+      (is (= [:later] (ev/ask-help! 10 (fn [] @go (ev/help-timeout 300)) (fn [r] (deliver got r)))))
+      (deliver go true)
       (is (= ev/async-help-timeout-ms (deref got 2000 :timeout)))))
   (testing "a throw is an answer help-error reads, late and now"
-    (let [got (promise)]
-      (ev/ask-help! 10 (fn [] (Thread/sleep 50) (throw (ex-info "boom" {}))) (fn [r] (deliver got r)))
+    (let [got (promise) go (promise)]
+      (ev/ask-help! 10 (fn [] @go (throw (ex-info "boom" {}))) (fn [r] (deliver got r)))
+      (deliver go true)
       (is (= "boom" (ev/help-error (deref got 2000 :timeout)))))
     (is (= "bang" (ev/help-error (second (ev/ask-help! 1000 (fn [] (throw (ex-info "bang" {}))) (fn [_] nil))))))
     (is (nil? (ev/help-error [{:symbol "map"}])) "a candidate list isn't an error")
