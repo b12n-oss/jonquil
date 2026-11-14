@@ -390,9 +390,10 @@ purpose.
 - Cmd/Ctrl+= , - and 0 zoom in, out and reset.
 - Structural editing moves brackets and whole forms, following Calva's
   paredit: slurp, barf, raise, splice, wrap, drag, transpose, join, split,
-  kill, and select and move by form. Ctrl+Alt+Right slurps and Ctrl+Alt+Left
-  barfs; all of them are under Edit > Structure
-  ([Structural editing](structural-editing.md) shows each one).
+  kill, and select and move by form. All of them are under Edit > Structure
+  ([Structural editing](structural-editing.md) shows each one). They have
+  no keys until you choose the Calva paredit key set in Preferences
+  ([Key sets](keys.md#key-sets)).
 - Preferences (Cmd/Ctrl+comma) has a Keys tab where you click a command's
   key and press a new one ([Your own keys](keys.md#your-own-keys)).
 

@@ -101,30 +101,10 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 <details>
 <summary><strong>Structural editing</strong></summary>
 
-[Structural editing](structural-editing.md) shows every command with a
-before and an after. These are the ones with a key:
-
-| Key | Command |
-|---|---|
-| Ctrl+Alt+Right, or Ctrl+Alt+. | Slurp forward |
-| Ctrl+Alt+Left, or Ctrl+Alt+, | Barf forward |
-| Ctrl+Alt+Shift+Left | Slurp backward |
-| Ctrl+Alt+Shift+Right | Barf backward |
-| Ctrl+Alt+S | Splice |
-| Ctrl+Alt+Shift+P, S, C, E or Q | Wrap in `()`, `[]`, `{}`, `#{}` or `""` |
-| Alt+Up, Alt+Down | Drag the form backward, forward |
-| Ctrl+Alt+T | Transpose |
-| Ctrl+Shift+J | Join |
-| Ctrl+Shift+C | Convolute |
-| Ctrl+Shift+Delete | Kill form |
-| Ctrl+Alt+Backspace | Kill the form before the caret |
-| Ctrl+Alt+Shift+Delete, Backspace | Splice, killing forward or backward |
-| Ctrl+Alt+Down, Ctrl+Alt+Up | Out past the list's end, into the list before |
-
-The keys use Control on every system, a Mac included, where Alt is Option.
-The other commands have no key: they are under Edit > Structure and in the
-command palette, and [Preferences](#your-own-keys) can give any of them a
-key.
+The structural editing commands have no key until you choose the **Calva
+paredit** [key set](#key-sets). [Structural editing](structural-editing.md)
+shows every command with a before and an after, and the key that set gives
+it. All of them are under Edit > Structure and in the command palette.
 
 </details>
 
@@ -183,11 +163,27 @@ key.
 
 </details>
 
+## Key sets
+
+A key set is a group of keys that ships with Jonquil. The **Key set** list
+at the top of the Keys tab in Preferences chooses one, and the change
+applies at once:
+
+- **Jonquil default** adds nothing to the keys on this page.
+- **Calva paredit** adds Calva's structural editing keys, 37 on a Mac and
+  39 on Linux. Some of them replace a key that normally moves by a word or
+  deletes one ([Keys the Calva set changes](structural-editing.md#keys-the-calva-set-changes)).
+
+The choice is saved as `:key-set` in `settings.edn` (`:default` or
+`:calva`). A set's keys show in the Keys tab with the set's name as their
+source. Your own keys are tried before the set's, so recording a key over
+one of them works as it does for any other key.
+
 ## Your own keys
 
 **Preferences** (Cmd/Ctrl+comma, or Open Preferences in the command palette)
 has a Keys tab that lists every command with its key and where the key comes
-from: `default`, a plugin's name, or `yours`.
+from: `default`, a key set's name, a plugin's name, or `yours`.
 
 ![The Preferences window on its Keys tab, the list narrowed to "run" and the first row waiting for a key](../images/prefs-keys.png)
 
@@ -204,8 +200,8 @@ from: `default`, a plugin's name, or `yours`.
   **Open keys.edn** opens the file the tab writes.
 
 A key you set shows in the menus at once. On a Mac, a key recorded with
-Option held is stored by its position on a US keyboard, as the Structural
-editing group above explains.
+Option held is stored by its position on a US keyboard
+([Keys on other systems and layouts](structural-editing.md#keys-on-other-systems-and-layouts)).
 
 The tab rewrites the whole of `keys.edn` each time. If you have added
 comments to that file by hand, it says so and asks before the first change,

@@ -1,11 +1,13 @@
 (ns jonquil.structural-docs-test
   "docs/guide/structural-editing.md shows a before and an after for every
   structural editing command. This runs each row against the real command,
-  so the page can't say something the command doesn't do."
+  so the page can't say something the command doesn't do, and checks each
+  row's Key column against the Calva paredit key set."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [jonquil.command-registry :as registry]
             [jonquil.edit :as edit]
+            [jonquil.key-sets :as key-sets]
             [jonquil.structural :as se]))
 
 (def ^:private page "docs/guide/structural-editing.md")
@@ -17,12 +19,38 @@
              [(str/replace (:doc c) #"\.$" "") id])))
 
 (defn- rows
-  "[title before after] for each example row of the page."
+  "[title before after key] for each example row of the page."
   []
   (for [line (str/split-lines (slurp page))
-        :let [[_ title _key before after] (re-matches #"\| (.+?) \| (.+?) \| `(.+)` \| `(.+)` \|" line)]
+        :let [[_ title key before after] (re-matches #"\| (.+?) \| (.+?) \| `(.+)` \| `(.+)` \|" line)]
         :when title]
-    [title before after]))
+    [title before after key]))
+
+(defn- chord-text
+  "A set's binding the way the page writes it: Ctrl, Alt, Shift and Cmd in
+  that order, then the key."
+  [{:keys [key exact]}]
+  (str/join "+" (concat (keep (fn [[m word]] (when (contains? exact m) word))
+                              [[:ctrl "Ctrl"] [:alt "Alt"] [:shift "Shift"] [:meta "Cmd"]])
+                        [(get {"period" "." "comma" "," "BackSpace" "Backspace"} key
+                              (if (= 1 (count key)) (str/upper-case key) key))])))
+
+(defn- key-cell
+  "The page's Key column for command id: the Calva set's keys that are the
+  same on both systems, then the ones only a Mac or only Linux has, or
+  none."
+  [id]
+  (let [on (fn [os] (->> (key-sets/bindings :calva :editor os)
+                         (filter #(= id (:command %)))
+                         (map chord-text)))
+        mac (on "Mac OS X")
+        linux (on "Linux")
+        both (filter (set linux) mac)
+        only (fn [word ks] (when-let [ks (seq (remove (set both) ks))]
+                             (str word ": " (str/join ", " ks))))
+        parts (remove nil? [(when (seq both) (str/join ", " both))
+                            (only "Mac" mac) (only "Linux" linux)])]
+    (if (seq parts) (str/join "; " parts) "none")))
 
 (defn- snapshot
   "The snapshot an example describes: ‸ is the caret, «…» a selection."
@@ -57,7 +85,7 @@
       (shown (snapshot before) (f (snapshot before))))))
 
 (deftest every-example-on-the-page-is-what-the-command-does-test
-  (doseq [[title before after] (rows)]
+  (doseq [[title before after _key] (rows)]
     (let [id (get commands title)]
       (is (some? id) (str "the page names a command the registry doesn't have: " title))
       (when id
@@ -66,3 +94,8 @@
 (deftest the-page-covers-every-structural-command-test
   (is (= (set (vals commands)) (set (keep (comp commands first) (rows)))))
   (is (= (count commands) (count (rows))) "one example a command"))
+
+(deftest the-key-column-is-the-calva-set-test
+  (doseq [[title _before _after key] (rows)]
+    (when-let [id (get commands title)]
+      (is (= (key-cell id) key) title))))

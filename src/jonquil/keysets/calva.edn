@@ -1,0 +1,67 @@
+;; The "Calva paredit" key set: Calva's structural editing keys
+;; (https://calva.io/paredit/, its package.json read 2026-11-14), for the
+;; commands Jonquil has. Read by jonquil.key-sets when Jonquil is compiled.
+;;
+;; The file has keys.edn's shape. An entry may say :os :mac or :os :linux
+;; (Windows counts as :linux) where Calva's key differs by system; one
+;; without :os is on everywhere. Control is always :ctrl here, never :cmd:
+;; Calva's keys hold Control on a Mac too.
+;;
+;; Left out, since Jonquil has no key sequences yet: raise
+;; (Ctrl+Alt+P Ctrl+Alt+R), the rewraps (Ctrl+Alt+R then a key), and on
+;; Linux kill right and kill left (Ctrl+K then a key). Left out because the
+;; window has the key: split (Ctrl+Shift+S is Save As) and, on a Mac,
+;; expand and shrink selection (Ctrl+W and Ctrl+Shift+W close the tab).
+{:label "Calva paredit"
+ :window []
+ :editor
+ [;; moving
+  {:key "Right" :exact #{:ctrl} :command :paredit/forward}
+  {:key "Right" :exact #{:alt} :command :paredit/forward}
+  {:key "Left" :exact #{:ctrl} :command :paredit/backward}
+  {:key "Left" :exact #{:alt} :command :paredit/backward}
+  {:key "Down" :exact #{:ctrl} :command :paredit/down}
+  {:key "Up" :exact #{:ctrl} :command :paredit/up}
+  {:key "Up" :exact #{:ctrl :alt} :command :paredit/backward-down}
+  {:key "Down" :exact #{:ctrl :alt} :command :paredit/forward-up}
+  {:key "End" :exact #{:ctrl} :command :paredit/list-end}
+  {:key "Home" :exact #{:ctrl} :command :paredit/list-start}
+  ;; selecting
+  {:key "Right" :exact #{:shift :alt} :os :mac :command :paredit/select-forward}
+  {:key "Left" :exact #{:shift :alt} :os :mac :command :paredit/select-backward}
+  {:key "Right" :exact #{:shift :ctrl} :os :linux :command :paredit/select-forward}
+  {:key "Left" :exact #{:shift :ctrl} :os :linux :command :paredit/select-backward}
+  {:key "Right" :exact #{:shift :alt} :os :linux :command :paredit/expand-selection}
+  {:key "Left" :exact #{:shift :alt} :os :linux :command :paredit/shrink-selection}
+  ;; slurp and barf; Ctrl+Alt+period and comma are Calva's for Linux, where
+  ;; Ctrl+Alt+arrows often switch workspaces
+  {:key "Right" :exact #{:ctrl :alt} :command :paredit/slurp-forward}
+  {:key "period" :exact #{:ctrl :alt} :os :linux :command :paredit/slurp-forward}
+  {:key "Left" :exact #{:ctrl :alt} :command :paredit/barf-forward}
+  {:key "comma" :exact #{:ctrl :alt} :os :linux :command :paredit/barf-forward}
+  {:key "Left" :exact #{:ctrl :alt :shift} :command :paredit/slurp-backward}
+  {:key "Right" :exact #{:ctrl :alt :shift} :command :paredit/barf-backward}
+  ;; reshaping
+  {:key "s" :exact #{:ctrl :alt} :command :paredit/splice}
+  {:key "j" :exact #{:ctrl :shift} :command :paredit/join}
+  {:key "t" :exact #{:ctrl :alt} :command :paredit/transpose}
+  {:key "c" :exact #{:ctrl :shift} :command :paredit/convolute}
+  {:key "Up" :exact #{:alt} :command :paredit/drag-backward}
+  {:key "Down" :exact #{:alt} :command :paredit/drag-forward}
+  {:key "b" :exact #{:ctrl :shift :alt} :command :paredit/drag-backward}
+  {:key "f" :exact #{:ctrl :shift :alt} :command :paredit/drag-forward}
+  ;; wrapping
+  {:key "p" :exact #{:ctrl :alt :shift} :command :paredit/wrap-round}
+  {:key "s" :exact #{:ctrl :alt :shift} :command :paredit/wrap-square}
+  {:key "c" :exact #{:ctrl :alt :shift} :command :paredit/wrap-curly}
+  {:key "e" :exact #{:ctrl :alt :shift} :command :paredit/wrap-set}
+  {:key "q" :exact #{:ctrl :alt :shift} :command :paredit/wrap-quote}
+  ;; killing
+  {:key "k" :exact #{:ctrl} :os :mac :command :paredit/kill-right}
+  {:key "BackSpace" :exact #{:meta} :os :mac :command :paredit/kill-left}
+  {:key "Delete" :exact #{:ctrl :shift} :command :paredit/kill-form}
+  {:key "BackSpace" :exact #{:ctrl :alt} :command :paredit/kill-form-backward}
+  {:key "Delete" :exact #{:ctrl} :command :paredit/kill-list-forward}
+  {:key "BackSpace" :exact #{:ctrl} :command :paredit/kill-list-backward}
+  {:key "Delete" :exact #{:ctrl :alt :shift} :command :paredit/splice-killing-forward}
+  {:key "BackSpace" :exact #{:ctrl :alt :shift} :command :paredit/splice-killing-backward}]}

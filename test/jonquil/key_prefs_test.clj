@@ -48,6 +48,13 @@
   (testing "a command the palette hides gets no unbound row"
     (is (not-any? #(and (= :run/stop (:command %)) (= "" (:chord %))) (rows uk/no-keys)))))
 
+(deftest key-set-source-test
+  ;; a binding the chosen key set holds names the set as its source
+  (let [mine {:key "j" :mods #{:cmd :alt} :command :edit/wrap}
+        rs (kp/rows {:keymap (keymap uk/no-keys) :commands commands :user uk/no-keys :os mac
+                     :key-set {:label "Calva paredit" :window [] :editor [mine]}})]
+    (is (= ["Calva paredit"] (map :source (filter #(= :edit/wrap (:command %)) rs))))))
+
 (deftest filter-rows-test
   (let [rs (rows uk/no-keys)]
     (is (= rs (kp/filter-rows rs "")))

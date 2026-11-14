@@ -12,10 +12,12 @@
 
 (defn- source-of
   "Where binding b of scope comes from: \"yours\" when keys.edn holds it,
-  the plugin's name for a plugin's command, else \"default\"."
-  [b scope commands user]
+  the key set's name when the chosen set does, the plugin's name for a
+  plugin's command, else \"default\"."
+  [b scope commands user key-set]
   (cond
     (some #{b} (get user scope)) "yours"
+    (some #{b} (get key-set scope)) (:label key-set)
     (:plugin (get commands (:command b))) (name (:plugin (get commands (:command b))))
     :else "default"))
 
@@ -23,16 +25,17 @@
   "The Keys tab's rows: one per binding that runs a command, window keys
   then editor keys in keymap order, then one per command with no key that
   the palette lists, sorted by description. A row is {:scope :command :doc
-  :chord :source :binding :fixed?}. :chord is \"\" and :binding nil for a
+  :chord :source :binding :fixed?}. key-set is the chosen set, {:label
+  :window :editor}, or nil. :chord is \"\" and :binding nil for a
   command with no key. :fixed? marks a binding with a :when condition: it
   belongs to a chain of keys, so the tab shows it and won't record over it."
-  [{:keys [keymap commands user os]}]
+  [{:keys [keymap commands user os key-set]}]
   (let [bound (for [scope [:window :editor]
                     b (get keymap scope)
                     :let [id (:command b)]
                     :when (and id (contains? commands id))]
                 {:scope scope :command id :doc (:doc (get commands id))
-                 :chord (palette/chord-label b os) :source (source-of b scope commands user)
+                 :chord (palette/chord-label b os) :source (source-of b scope commands user key-set)
                  :binding b :fixed? (boolean (:when b))})
         has-key (set (map :command bound))
         unbound (for [[id c] (sort-by (comp :doc val) commands)

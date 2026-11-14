@@ -100,6 +100,7 @@
     jonquil.results-rt
     jonquil.results
     jonquil.keymap
+    jonquil.key-sets
     jonquil.user-keys
     jonquil.command-registry
     jonquil.palette

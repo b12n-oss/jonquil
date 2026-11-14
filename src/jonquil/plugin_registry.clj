@@ -9,6 +9,7 @@
   (:require [jonquil.command-registry :as cmd-registry]
             [jonquil.console :as console]
             [jonquil.evaluator :as ev]
+            [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]
             [jonquil.plugin :as p]
             [jonquil.plugin-check :as plugin-check]
@@ -348,13 +349,23 @@
   [reg scope]
   (mapv #(dissoc % :plugin/source) (bindings-with-source reg scope)))
 
+(defn- live-bindings
+  "The live bindings of scope: yours, the chosen key set's, reg's plugins',
+  the shipped ones."
+  [reg scope]
+  (user-keys/layer @user-keys/live scope
+                   (-> (key-sets/live-bindings scope)
+                       (into (bindings reg scope))
+                       (into (get km/shipped scope)))))
+
 (defn window-bindings
   "The live window bindings: your own (jonquil.user-keys/live) first, then
-  reg's plugins', then the shipped ones, less the ones yours remove."
+  the chosen key set's (jonquil.key-sets/live), then reg's plugins', then
+  the shipped ones, less the ones yours remove."
   [reg]
-  (user-keys/layer @user-keys/live :window (into (bindings reg :window) (:window km/shipped))))
+  (live-bindings reg :window))
 
 (defn editor-bindings
   "The live editor bindings, in window-bindings' order."
   [reg]
-  (user-keys/layer @user-keys/live :editor (into (bindings reg :editor) (:editor km/shipped))))
+  (live-bindings reg :editor))

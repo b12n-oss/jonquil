@@ -1,13 +1,16 @@
 (ns jonquil.gtk.parts.prefs
   "The Preferences window as a window part (the command and its key are
-  jonquil.parts.prefs/spec). Its Keys tab lists the live key bindings,
+  jonquil.parts.prefs/spec). Its Keys tab chooses the key set
+  (jonquil.key-sets), lists the live key bindings,
   records a new key for one, and writes your keys.edn (jonquil.user-keys),
   which the command palette part then reloads."
   (:require [clojure.string :as str]
             [jonquil.gtk.prefs-window :as pw]
             [jonquil.key-prefs :as kp]
+            [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]
             [jonquil.plugin-registry :as plugin-registry]
+            [jonquil.settings :as settings]
             [jonquil.user-keys :as user-keys]))
 
 (def ^:private KEY-ESCAPE (km/key-value "Escape"))
@@ -30,7 +33,11 @@
   []
   (kp/rows {:keymap (live-keymap)
             :commands (plugin-registry/all-commands @plugin-registry/live)
-            :user @user-keys/live :os (os)}))
+            :user @user-keys/live :os (os)
+            :key-set (let [id @key-sets/live]
+                       {:label (key-sets/label id)
+                        :window (key-sets/bindings id :window (os))
+                        :editor (key-sets/bindings id :editor (os))})}))
 
 (defn- refresh!
   "Shows the rows that match the search box."
@@ -154,13 +161,42 @@
         (apply-change! ctx {:user user :done (str (named (:doc row)) " is back to its own keys.")} false)))
     (pw/say! win "Select a row first." nil)))
 
+(defn- set-place
+  "Where key set id sits in the chooser."
+  [id]
+  (or (first (keep-indexed (fn [i s] (when (= id (:id s)) i)) key-sets/sets)) 0))
+
+(defn- on-key-set
+  "The chooser now shows the set at index: turns that set on, at once, and
+  saves the choice in the settings file. Nothing to do when it is the set
+  already on, which is how the chooser reports being set from code."
+  [{:keys [settings-path*] :as ctx} index]
+  (when-let [{:keys [id label]} (get key-sets/sets index)]
+    (when (not= id @key-sets/live)
+      (let [n (+ (count (key-sets/bindings id :window (os)))
+                 (count (key-sets/bindings id :editor (os))))
+            err (settings/save-settings! @settings-path* {:key-set id})]
+        (reset! key-sets/live id)
+        (idle! ctx (cond
+                     err (str "Key set: " label ", until Jonquil closes. " err)
+                     (zero? n) (str "Key set: " label ". Only Jonquil's own keys are on.")
+                     :else (str "Key set: " label ". Its " n " keys are on.")))))))
+
+(defn- start-key-set!
+  "Turns on the key set the settings file names, the default one when it
+  names none, and shows it in the chooser."
+  [{:keys [win settings-path*]}]
+  (reset! key-sets/live (or (:key-set (settings/load-settings @settings-path*)) key-sets/default-id))
+  (pw/set-key-set-index! win (set-place @key-sets/live)))
+
 (defn- install
   "The Preferences part for one window: builds the window, hidden, and
-  answers the fn that opens it. ui's :prefs is {:window :open! :on-key
-  :record! :answer! :reset! :state}, the same fns the widgets call, for the
-  self-tests."
+  answers the fn that opens it, and turns on the key set the settings file
+  names. ui's :prefs is {:window :open! :on-key :key-set! :record! :answer!
+  :reset! :state}, the same fns the widgets call, for the self-tests;
+  :key-set! shows the set at an index in the chooser, as a click does."
   [{:keys [win] :as wctx}]
-  (let [w (pw/make-window win)
+  (let [w (pw/make-window win (mapv :label key-sets/sets))
         ctx (assoc wctx :win w :state (atom nil))
         open! (fn [] (idle! ctx "") (pw/present! w))
         on-key! (fn
@@ -172,9 +208,12 @@
         :on-answer (fn [yes?] (on-answer ctx yes?))
         :on-open-file (fn [] (when-let [f (:open! @user-keys/window-fns)] (f)))
         :on-reset (fn [i] (on-reset ctx i))
+        :on-key-set (fn [i] (on-key-set ctx i))
         :on-key on-key!})
+    (start-key-set! ctx)
     {:fns {:prefs-open-fn open!}
      :ui {:prefs {:window w :open! open! :on-key on-key!
+                  :key-set! (fn [i] (pw/set-key-set-index! w i))
                   :record! (fn [i] (start-record! ctx i))
                   :answer! (fn [yes?] (on-answer ctx yes?))
                   :reset! (fn [i] (on-reset ctx i))

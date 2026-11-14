@@ -10,13 +10,15 @@ marks the caret and `«…»` a selection.
 
 - **Where to find them.** All of them are under Edit > Structure in the
   menus and in the command palette (Cmd/Ctrl+Shift+P).
-- **Keys.** A command has Calva's key where that key is a single chord that
-  isn't already a normal key. The keys use Control on every system, a Mac
-  included, where Alt is Option. The rest say `none`, and
-  [Preferences](keys.md#your-own-keys) can give any of them a key.
-- **Your other keys stay as they are.** The arrow keys, Backspace and Delete
-  work as before, and there is no strict mode that refuses an unbalanced
-  delete.
+- **Keys.** None of them has a key until you turn on the **Calva paredit**
+  key set in [Preferences](keys.md#key-sets). The Key column below shows
+  that set's keys. They use Control on every system, a Mac included, where
+  Alt is Option. A command that says `none` has no key in the set, and
+  Preferences can give it one.
+- **Your other keys stay as they are** on the default key set. The Calva
+  set takes a few keys that normally do something else, listed under
+  [Keys the Calva set changes](#keys-the-calva-set-changes). There is no
+  strict mode that refuses an unbalanced delete.
 - **Parinfer** works with or without these commands. With Parinfer on, the
   indentation follows the bracket a command moved, in every mode.
 - **Undo.** Each command is one undo step.
@@ -27,8 +29,8 @@ marks the caret and `«…»` a selection.
 
 | Command | Key | Before | After |
 |---|---|---|---|
-| Slurp forward: the list takes in the next form | Ctrl+Alt+Right, Ctrl+Alt+. | `(a‸) b c` | `(a‸ b) c` |
-| Barf forward: the list gives up its last form | Ctrl+Alt+Left, Ctrl+Alt+, | `(a‸ b)` | `(a‸) b` |
+| Slurp forward: the list takes in the next form | Ctrl+Alt+Right; Linux: Ctrl+Alt+. | `(a‸) b c` | `(a‸ b) c` |
+| Barf forward: the list gives up its last form | Ctrl+Alt+Left; Linux: Ctrl+Alt+, | `(a‸ b)` | `(a‸) b` |
 | Slurp backward: the list takes in the form before it | Ctrl+Alt+Shift+Left | `a (‸b)` | `(a ‸b)` |
 | Barf backward: the list gives up its first form | Ctrl+Alt+Shift+Right | `(a ‸b)` | `a (‸b)` |
 
@@ -52,8 +54,8 @@ marks the caret and `«…»` a selection.
 
 | Command | Key | Before | After |
 |---|---|---|---|
-| Drag the form forward, past the next one | Alt+Down | `(‸a b c)` | `(b ‸a c)` |
-| Drag the form backward, past the one before | Alt+Up | `(a ‸b c)` | `(‸b a c)` |
+| Drag the form forward, past the next one | Alt+Down, Ctrl+Alt+Shift+F | `(‸a b c)` | `(b ‸a c)` |
+| Drag the form backward, past the one before | Alt+Up, Ctrl+Alt+Shift+B | `(a ‸b c)` | `(‸b a c)` |
 | Transpose the two forms around the caret | Ctrl+Alt+T | `(a‸ b c)` | `(b a‸ c)` |
 | Join the two lists or strings around the caret | Ctrl+Shift+J | `(a)‸ (b)` | `(a‸ b)` |
 | Split the list or string at the caret | none | `(a ‸b)` | `(a)‸ (b)` |
@@ -65,10 +67,10 @@ marks the caret and `«…»` a selection.
 |---|---|---|---|
 | Kill the form at the caret, onto the clipboard | Ctrl+Shift+Delete | `(a ‸b c)` | `(a ‸c)` |
 | Kill the form before the caret | Ctrl+Alt+Backspace | `(a b‸ c)` | `(a ‸ c)` |
-| Kill to the end of the line, keeping the brackets balanced | none | `(a ‸b c)` | `(a ‸)` |
-| Kill to the start of the line, keeping the brackets balanced | none | `(a b ‸c)` | `(‸c)` |
-| Kill to the end of the list | none | `(a ‸b c)` | `(a ‸)` |
-| Kill to the start of the list | none | `(a b ‸c)` | `(‸c)` |
+| Kill to the end of the line, keeping the brackets balanced | Mac: Ctrl+K | `(a ‸b c)` | `(a ‸)` |
+| Kill to the start of the line, keeping the brackets balanced | Mac: Cmd+Backspace | `(a b ‸c)` | `(‸c)` |
+| Kill to the end of the list | Ctrl+Delete | `(a ‸b c)` | `(a ‸)` |
+| Kill to the start of the list | Ctrl+Backspace | `(a b ‸c)` | `(‸c)` |
 | Splice, killing what follows the caret in the list | Ctrl+Alt+Shift+Delete | `x (a ‸b c) y` | `x a ‸ y` |
 | Splice, killing what comes before the caret in the list | Ctrl+Alt+Shift+Backspace | `x (a b ‸c) y` | `x ‸c y` |
 | Copy the form at the caret | none | `(a ‸b c)` | `(a ‸b c)` |
@@ -77,23 +79,23 @@ marks the caret and `«…»` a selection.
 
 | Command | Key | Before | After |
 |---|---|---|---|
-| Expand the selection: the form at the caret, then each list around it | none | `(foo (b‸ar baz))` | `(foo («bar» baz))` |
-| Shrink the selection back a step | none | `(foo («bar» baz))` | `(foo (b‸ar baz))` |
-| Extend the selection over the next form | none | `(a ‸b c)` | `(a «b» c)` |
-| Extend the selection over the form before it | none | `(a b‸ c)` | `(a «b» c)` |
+| Expand the selection: the form at the caret, then each list around it | Linux: Alt+Shift+Right | `(foo (b‸ar baz))` | `(foo («bar» baz))` |
+| Shrink the selection back a step | Linux: Alt+Shift+Left | `(foo («bar» baz))` | `(foo (b‸ar baz))` |
+| Extend the selection over the next form | Mac: Alt+Shift+Right; Linux: Ctrl+Shift+Right | `(a ‸b c)` | `(a «b» c)` |
+| Extend the selection over the form before it | Mac: Alt+Shift+Left; Linux: Ctrl+Shift+Left | `(a b‸ c)` | `(a «b» c)` |
 
 ## Move
 
 | Command | Key | Before | After |
 |---|---|---|---|
-| Move forward by a form | none | `(a ‸b c)` | `(a b‸ c)` |
-| Move backward by a form | none | `(a b‸ c)` | `(a ‸b c)` |
-| Move up to the start of the list around the caret | none | `(a (b ‸c))` | `(a ‸(b c))` |
-| Move down into the next list | none | `(a‸ (b c))` | `(a (‸b c))` |
+| Move forward by a form | Ctrl+Right, Alt+Right | `(a ‸b c)` | `(a b‸ c)` |
+| Move backward by a form | Ctrl+Left, Alt+Left | `(a b‸ c)` | `(a ‸b c)` |
+| Move up to the start of the list around the caret | Ctrl+Up | `(a (b ‸c))` | `(a ‸(b c))` |
+| Move down into the next list | Ctrl+Down | `(a‸ (b c))` | `(a (‸b c))` |
 | Move out of the list, past its closer | Ctrl+Alt+Down | `(a (b ‸c) d)` | `(a (b c)‸ d)` |
 | Move into the list before the caret, from the back | Ctrl+Alt+Up | `(a (b c) ‸d)` | `(a (b c‸) d)` |
-| Move to the start of the list around the caret | none | `(a b ‸c)` | `(‸a b c)` |
-| Move to the end of the list around the caret | none | `(a ‸b c)` | `(a b c‸)` |
+| Move to the start of the list around the caret | Ctrl+Home | `(a b ‸c)` | `(‸a b c)` |
+| Move to the end of the list around the caret | Ctrl+End | `(a ‸b c)` | `(a b c‸)` |
 
 ## Notes on a few commands
 
@@ -112,19 +114,46 @@ marks the caret and `«…»` a selection.
 - **Rewrap** keeps a reader prefix such as a quote. A set's `#` goes with its
   brace.
 
-## Keys that need another modifier on some systems
+## Keys the Calva set changes
 
-On Linux, Ctrl+Alt+Right and Left often switch workspaces, so Ctrl+Alt+. and
-Ctrl+Alt+, slurp and barf as well.
+With the Calva paredit set on, these keys stop doing their usual job in the
+editor and run a structural command, as they do in Calva:
+
+- Ctrl+Left and Ctrl+Right, and Alt+Left and Alt+Right (Option on a Mac),
+  move by a form. They normally move by a word.
+- Ctrl+Up and Ctrl+Down move out of a list and into the next one.
+- Ctrl+Home and Ctrl+End go to the start and end of the list around the
+  caret. On Linux they normally go to the start and end of the file.
+- Ctrl+Backspace and Ctrl+Delete kill to the start and end of the list. On
+  Linux they normally delete a word.
+- On a Mac, Ctrl+K kills to the end of the line with the brackets kept
+  balanced, and Cmd+Backspace kills to its start.
+
+A key of your own in `keys.edn` still wins over the set, so you can take
+any of these back in Preferences.
+
+## Calva keys the set leaves out
+
+- **Raise and the rewraps.** Calva puts them on two-step keys (Ctrl+Alt+P
+  then Ctrl+Alt+R, and Ctrl+Alt+R then a second key). Jonquil has no
+  two-step keys yet.
+- **Kill to the end and start of the line on Linux.** Calva uses Ctrl+K
+  then a second key there.
+- **Split.** Calva's Ctrl+Shift+S is Jonquil's Save As.
+- **Expand and shrink the selection on a Mac.** Calva's Ctrl+W and
+  Ctrl+Shift+W close the tab in Jonquil. On Linux they are on
+  Alt+Shift+Right and Left.
+- Calva's strict mode, its drags up and down a level, and its selection
+  variants of the moves have no Jonquil command.
+
+Every command left out is still under Edit > Structure and in the palette.
+
+## Keys on other systems and layouts
+
+On Linux, Ctrl+Alt+Right and Left often switch workspaces, so the set also
+puts slurp and barf on Ctrl+Alt+. and Ctrl+Alt+, there.
 
 On a Mac, Option changes the character a key sends, so Jonquil matches a key
 held with Option by its position on a US keyboard. On another layout
 (Dvorak, Colemak, AZERTY, QWERTZ) a binding written as Ctrl+Alt+S fires on
 the key that sits where S does on a US keyboard.
-
-## Why some have no key
-
-Calva puts Raise and Rewrap on two-step keys, which Jonquil doesn't have
-yet. It puts the selection and move commands on keys that already do
-something else (Option+Right moves by a word on a Mac, Ctrl+Backspace
-deletes a word on Linux), so those stay out of Jonquil's defaults.

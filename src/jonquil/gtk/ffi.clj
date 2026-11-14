@@ -761,6 +761,7 @@
 ;; child's own hexpand is what it honours.
 (ffi/defcfn gtk-widget-set-hexpand "gtk_widget_set_hexpand" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-set-margin-start "gtk_widget_set_margin_start" [:pointer :int] :void)
+(ffi/defcfn gtk-widget-set-margin-top "gtk_widget_set_margin_top" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-set-margin-end "gtk_widget_set_margin_end" [:pointer :int] :void)
 
 ;; g_object_new_with_properties: gobject/gobject.h:436-439. The fixed-arity
@@ -1135,6 +1136,17 @@
 ;; (GDK_AVAILABLE_IN_4_12; this GTK is 4.22.4, so it's present),
 ;; get_row_at_index:189, select_row:195, set_selection_mode:225. All fixed
 ;; arity.
+;; GtkDropDown over a GtkStringList, for the Preferences key set chooser.
+;; gtkstringlist.h: gtk_string_list_new (const char * const *strings, NULL
+;; for none), gtk_string_list_append. gtkdropdown.h: gtk_drop_down_new
+;; (GListModel *model, GtkExpression *expression, both transfer full, NULL
+;; expression for a string list), get_selected and set_selected (guint
+;; position). All since GTK 4.0, fixed arity.
+(ffi/defcfn gtk-string-list-new "gtk_string_list_new" [:pointer] :pointer)
+(ffi/defcfn gtk-string-list-append "gtk_string_list_append" [:pointer :string] :void)
+(ffi/defcfn gtk-drop-down-new "gtk_drop_down_new" [:pointer :pointer] :pointer)
+(ffi/defcfn gtk-drop-down-get-selected "gtk_drop_down_get_selected" [:pointer] :uint)
+(ffi/defcfn gtk-drop-down-set-selected "gtk_drop_down_set_selected" [:pointer :uint] :void)
 (ffi/defcfn gtk-list-box-new "gtk_list_box_new" [] :pointer)
 (ffi/defcfn gtk-list-box-append "gtk_list_box_append" [:pointer :pointer] :void)
 (ffi/defcfn gtk-list-box-remove-all "gtk_list_box_remove_all" [:pointer] :void)
