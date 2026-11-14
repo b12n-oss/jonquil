@@ -14,23 +14,26 @@ Edge cases sit in folded blocks: click a bold line to open one.
 
 ## The window
 
-![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](../images/window.png)
+![Jonquil's window: a header bar, the Definitions editor above the Interactions console, and a status bar](../images/window.png)
 
-- The toolbar holds **☰ Files** (the [file tree](files-and-tabs.md#file-tree)),
-  **Run (F5)**, **Stop (Esc)**, **Open…**, **Save…** and a **Reset on Run**
-  checkbox.
+- The header bar holds **☰ Files** (the [file tree](files-and-tabs.md#file-tree)),
+  **Open…** and **+** (a new tab) on the left, the open file's name over
+  its folder in the middle, and **▶ Run** (F5), **Stop** (Esc) and
+  **Save…** on the right. Hover over a button to see what it does and its
+  key.
 - The **Definitions** editor is where you write a program. The
   **Interactions** console below it shows output and takes expressions at a
   `user=> ` prompt. Drag the divider to resize.
 - The status label reads `Ready`, `Running…`, `Waiting for input` or
   `Stopped`. The dialect label beside it names the runtime (see
   [Dialects and runtimes](dialects/index.md)).
-- The window title shows the open file (or `Untitled`) and a leading `* `
-  for unsaved changes.
+- The title shows the open file (or `Untitled`) with a leading `* ` for
+  unsaved changes, and under it the file's folder, with your home folder
+  written as `~`.
 - The menus (File, Edit, View, Search, Run, Debug, Tools and Help) list
   what Jonquil can do, each item with its key. On a Mac they are in the
   menu bar at the top of the screen, and on Linux a **☰** button at the end
-  of the toolbar opens them. Every item is also in the command palette
+  of the header bar opens them. Every item is also in the command palette
   (Cmd/Ctrl+Shift+P), where you find a command by typing part of its name.
 
 To see which version you run, use **Show Jonquil's version** in the command
@@ -351,14 +354,17 @@ demonstrates it.
 
 ## Reset on Run, versus accumulate
 
-Checked (the default), each Run first removes the namespaces earlier Runs and
+**Reset on Run** is in the Run menu, where a tick shows it is on, and in the
+command palette. While it is off the status bar says `Reset on Run: off`.
+
+On (the default), each Run first removes the namespaces earlier Runs and
 REPL entries created, then evaluates fresh. Required libraries stay loaded.
-Unchecked, Runs build on each other, as the REPL does.
+Off, Runs build on each other, as the REPL does.
 
 For runtimes you started yourself (ClojureDart, JVM Clojure, shadow-cljs, an
-nREPL server) the box is greyed out, because Jonquil can't clear a process
-it doesn't own. Launched ClojureScript starts unticked; ticking it restarts
-ClojureScript on each Run, which takes a few seconds.
+nREPL server) the menu item is greyed out, because Jonquil can't clear a
+process it doesn't own. Launched ClojureScript starts with it off; turning it
+on restarts ClojureScript on each Run, which takes a few seconds.
 `docs/demos/reset.clj` shows the difference.
 
 ## The friendly unclosed-bracket message

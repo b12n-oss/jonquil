@@ -111,6 +111,7 @@
 (ffi/defcfn gtk-widget-set-valign "gtk_widget_set_valign" [:pointer :int] :void)
 ;; GtkAlign: gtkenums.h (FILL=0, START=1, END=2, CENTER=3).
 (def ALIGN-START 1)
+(def ALIGN-CENTER 3)                ; GTK_ALIGN_CENTER
 
 ;; gtklabel.h:95 -- void gtk_label_set_ellipsize (GtkLabel*,
 ;; PangoEllipsizeMode). Fixed arity. The inspector pane's header label
@@ -1177,6 +1178,30 @@
 ;; gtk_menu_button_set_label (button, label).
 (ffi/defcfn gtk-application-set-menubar "gtk_application_set_menubar" [:pointer :pointer] :void)
 (ffi/defcfn gtk-window-get-application "gtk_window_get_application" [:pointer] :pointer)
+;; The window's header bar (jonquil.gtk.window.layout). gtkheaderbar.h:
+;; gtk_header_bar_new (void), gtk_header_bar_pack_start and _pack_end (bar,
+;; child), gtk_header_bar_set_title_widget (bar, widget),
+;; gtk_header_bar_set_use_native_controls (bar, gboolean), since GTK 4.18:
+;; the system's own window buttons, the traffic lights on macOS.
+;; gtkwindow.h: gtk_window_set_titlebar (window, widget).
+;; gobject.h: gpointer g_object_ref_sink (gpointer), which keeps a widget
+;; with no parent alive.
+;; A menu item with a tick (Run > Reset on Run). gio/gsimpleaction.h:
+;; g_simple_action_new_stateful (name, parameter type or NULL, GVariant
+;; *state), g_simple_action_set_state (action, GVariant*),
+;; g_simple_action_set_enabled (action, gboolean). glib/gvariant.h:
+;; g_variant_new_boolean (gboolean). A boolean state makes GTK draw the tick.
+(ffi/defcfn g-simple-action-new-stateful "g_simple_action_new_stateful" [:string :pointer :pointer] :pointer)
+(ffi/defcfn g-simple-action-set-state "g_simple_action_set_state" [:pointer :pointer] :void)
+(ffi/defcfn g-simple-action-set-enabled "g_simple_action_set_enabled" [:pointer :int] :void)
+(ffi/defcfn g-variant-new-boolean "g_variant_new_boolean" [:int] :pointer)
+(ffi/defcfn gtk-header-bar-new "gtk_header_bar_new" [] :pointer)
+(ffi/defcfn gtk-header-bar-pack-start "gtk_header_bar_pack_start" [:pointer :pointer] :void)
+(ffi/defcfn gtk-header-bar-pack-end "gtk_header_bar_pack_end" [:pointer :pointer] :void)
+(ffi/defcfn gtk-header-bar-set-title-widget "gtk_header_bar_set_title_widget" [:pointer :pointer] :void)
+(ffi/defcfn gtk-header-bar-set-use-native-controls "gtk_header_bar_set_use_native_controls" [:pointer :int] :void)
+(ffi/defcfn gtk-window-set-titlebar "gtk_window_set_titlebar" [:pointer :pointer] :void)
+(ffi/defcfn g-object-ref-sink "g_object_ref_sink" [:pointer] :pointer)
 (ffi/defcfn gtk-menu-button-new "gtk_menu_button_new" [] :pointer)
 (ffi/defcfn gtk-menu-button-set-menu-model "gtk_menu_button_set_menu_model" [:pointer :pointer] :void)
 (ffi/defcfn gtk-menu-button-set-label "gtk_menu_button_set_label" [:pointer :string] :void)

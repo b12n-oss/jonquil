@@ -8,6 +8,7 @@
             [jolt.ffi :as ffi]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.menus :as gm]
+            [jonquil.gtk.window.files :as win-files]
             [jonquil.menus :as menus]
             [jonquil.user-keys :as user-keys]))
 
@@ -72,3 +73,40 @@
                                     (str/includes? (or shown "") "<Shift>") gone?)
                                {:before before :shown shown :gone gone?})
                 (finally (reset! user-keys/live user-keys/no-keys)))))))
+
+(defn row-reset-on-run-from-the-menu
+  "Run > Reset on Run toggles the window's Reset on Run check: off shows the
+  note in the status bar and unticks the item, on hides it again."
+  [ui]
+  (go-row :reset-on-run-from-the-menu support/check
+    (let [{:keys [group]} (:menus ui)
+          check (:reset-check ui)
+          on? #(pos? (g/gtk-check-button-get-active check))
+          toggle! #(g/g-action-group-activate-action group (menus/action-name :run/reset-on-run) ffi/null)
+          before (on-gtk (on?))
+          _ (on-gtk (toggle!))
+          off? (await-until 3000 20 #(not (on?)))
+          said-off (on-gtk (str/includes? (g/label-text (:status-label ui)) "Reset on Run off"))
+          _ (on-gtk (toggle!))
+          back? (await-until 3000 20 on?)]
+      (on-gtk (try
+                (support/check :reset-on-run-from-the-menu
+                               (and before off? said-off back?)
+                               {:before before :off off? :said-off said-off :back back?})
+                (finally (g/gtk-check-button-set-active check 1)))))))
+
+(defn row-header-title-follows-the-file
+  "The header bar shows the open file's name over its folder, and only the
+  name for a buffer with no file."
+  [ui]
+  (go-row :header-title-follows-the-file support/check
+    (on-gtk (let [{:keys [title subtitle]} (get @win-files/title-labels (:window ui))
+                  name-now (g/label-text title)
+                  folder-shown? (pos? (g/gtk-widget-get-visible subtitle))
+                  folder (g/label-text subtitle)
+                  window-title (g/window-title (:window ui))]
+              (support/check :header-title-follows-the-file
+                             (and (some? title) (some? subtitle)
+                                  (= (str name-now " - Jonquil") window-title)
+                                  (= folder-shown? (not= "" folder)))
+                             {:name name-now :folder folder :folder-shown folder-shown? :window-title window-title})))))

@@ -19,7 +19,7 @@ start. The status bar reads `ClojureScript (node) (not running)` until then.
   JavaScript exception prints one error line and the session carries on.
   Input that ends inside a form is refused rather than sent.
 - **Stop and Reset on Run** restart the process, so earlier definitions are
-  gone. Reset on Run starts unticked here for that reason.
+  gone. Reset on Run starts off here for that reason.
 - **Completion** covers the buffer, Clojure core and the namespaces the
   session loaded. Quick docs work while the process is idle. F12 stays in
   the buffer. There is no inspector.

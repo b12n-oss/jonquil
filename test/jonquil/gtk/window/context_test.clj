@@ -87,7 +87,7 @@
     (is (= {:specs parts/specs} opts))
     (is (identical? (:part-error! w) err))
     (is (= #{:active-tab :alert-pending? :ask-lookup! :bang* :contain-click :cv :ev* :file-name :files-btn
-             :hide-right-panel! :inspect! :jump-to! :make-eval-opts :mcp-eval! :new-tab! :on-saved :saved-listeners :open-file! :open-file-line!
+             :hide-right-panel! :inspect! :jump-to! :make-eval-opts :mcp-eval! :new-tab! :on-saved :saved-listeners :open-file! :menu-btn :reset-chk :open-file-line!
              :open-in-tab! :paned :panel-focus-fn :pending-label :place-caret-and-scroll! :plugin-console
              :plugin-history-pane :plugin-history-shown :plugin-list-pane :plugin-reviews-changed :plugin-step! :run-example!
              :plugins-on* :recent-tabs :refresh-labels! :refuse-foreign! :register-status-log! :rerun-failure! :run-ranges!
