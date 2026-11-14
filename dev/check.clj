@@ -101,6 +101,7 @@
     jonquil.results
     jonquil.keymap
     jonquil.key-sets
+    jonquil.slow-events
     jonquil.user-keys
     jonquil.command-registry
     jonquil.palette

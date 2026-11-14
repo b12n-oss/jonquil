@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- A log of what held the window up. Jonquil times every GTK callback from the start, and one that takes 50 ms or longer is kept with the namespace and line that made it. List the slow events, in the Help menu and the command palette, prints the sites by cost and the newest events in the console. Save the slow events to a file writes the same report, with the Jonquil version and the system, beside `settings.edn` as `slow-events-<date>-<time>.txt`, to attach to a bug report. The log holds the newest 200 events. Timing a callback costs about 0.3 microseconds in a measurement on an Apple Silicon Mac. The bug report form now asks for this list when Jonquil was slow.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

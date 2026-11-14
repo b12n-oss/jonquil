@@ -19,6 +19,11 @@
     :help/key-bindings {:doc "List every key binding." :scope :window :call [:key-bindings-fn]}
     :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :call [:recent-keys-fn]}
     :help/version {:doc "Show Jonquil's version." :scope :window :call [:version-fn]}
+    ;; what held the window up (jonquil.slow-events)
+    :help/slow-events {:doc "List the slow events: what held the window up." :scope :window
+                       :call [:slow-events-fn]}
+    :help/save-slow-events {:doc "Save the slow events to a file, for a bug report." :scope :window
+                            :call [:save-slow-events-fn]}
     ;; the terminal command of a Jonquil.app (jonquil.cli-install)
     :help/install-cli {:doc "Install the jonquil command for your terminal." :scope :window
                        :call [:install-cli-fn]}
