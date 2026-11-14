@@ -103,7 +103,8 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 
 These move brackets and whole forms, so the code stays balanced. They are
 extra commands: nothing else changes, your arrow keys, Backspace and Delete
-work as before, and Parinfer works with or without them. A few have keys,
+work as before, and Parinfer works with or without them. With Parinfer on,
+the indentation follows the bracket a command moved, in every mode. A few have keys,
 the ones Calva uses. The rest are in the command palette, and
 [Preferences](#your-own-keys) can give any of them a key.
 

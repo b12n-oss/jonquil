@@ -129,13 +129,14 @@
 (defn- structural
   "An editor command running a structural edit op, (f snapshot): the op's
   :copy goes to the clipboard and its edits and caret to the buffer as one
-  undo step. Always :handled, so a chord that found nothing to do isn't
+  undo step, through the editor's :apply-structural-op! so Parinfer follows
+  the moved bracket. Always :handled, so a chord that found nothing to do isn't
   passed to GTK to move or delete by its own rules."
   [f]
   (fn [ctx _args]
     (when-let [op (f ((:snapshot ctx)))]
       (when-let [text (:copy op)] ((:copy! ctx) text))
-      (when (:edits op) ((:apply-op! ctx) op)))
+      (when (:edits op) ((or (:apply-structural-op! ctx) (:apply-op! ctx)) op)))
     :handled))
 
 (def ^:private core-editor-commands

@@ -81,6 +81,7 @@
    incremental/row-paint-async-drops-after-edit
    parinfer-rows/row-parinfer-open-paren
    parinfer-rows/row-parinfer-dedent-undo-redo
+   parinfer-rows/row-parinfer-with-structural-edits
    parinfer-rows/row-reload-text-undoable
    parinfer-rows/row-reload-text-caret-clamps
    parinfer-rows/row-reload-text-parinfer-held-off
