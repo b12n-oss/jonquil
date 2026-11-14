@@ -74,16 +74,17 @@
                     :conns (atom []) :futures (atom [])
                     :stopped? (atom false) :stop-latch (promise) :busy (atom 0)}
                    extra)]
-    (future
-      (try
-        (loop []
-          (let [sock (.accept ss)]
-            (if @(:stopped? srv)
-              (.close sock)
-              (do (swap! (:futures srv) conj (future (serve-connection! srv handle! sock)))
-                  (recur)))))
-        (catch Throwable _ nil)))
-    srv))
+    ;; :acceptor is the accept loop's own future, so stop! can wait for it
+    (assoc srv :acceptor
+           (future
+             (try
+               (loop []
+                 (let [sock (.accept ss)]
+                   (if @(:stopped? srv)
+                     (.close sock)
+                     (do (swap! (:futures srv) conj (future (serve-connection! srv handle! sock)))
+                         (recur)))))
+               (catch Throwable _ nil))))))
 
 (defn ops-seen
   "Every op the server has received, in order."
@@ -126,12 +127,17 @@
   only then wait for the connection threads themselves to end. Measured on
   Jolt v0.8.13: closing a ServerSocket doesn't wake a thread blocked in
   accept, so this connects once first to let the accept loop see the flag
-  and end."
+  and end, and waits for that loop to end before closing. While a thread is
+  still inside accept the listening socket stays alive whatever close said,
+  and the port went on taking connections after stop! had returned
+  (measured 2026-11-14 under CPU load: 25 of 600 stops; it failed
+  fake-drops-and-stops-test on about one macOS CI run in four)."
   [srv]
   (reset! (:stopped? srv) true)
   (deliver (:stop-latch srv) true)
   (await-bounded! 1000 (fn [] (zero? @(:busy srv))))
   (try (.close (java.net.Socket. "127.0.0.1" (int (:port srv)))) (catch Throwable _ nil))
+  (when-let [acceptor (:acceptor srv)] (deref acceptor 2000 nil))
   (try (.close ^java.net.ServerSocket (:server srv)) (catch Throwable _ nil))
   (drop-connections! srv)
   (let [deadline (+ (System/currentTimeMillis) 1000)]

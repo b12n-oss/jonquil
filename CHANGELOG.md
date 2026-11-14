@@ -18,6 +18,7 @@ everything that shipped before that.
 
 ### Fixed
 
+- The fake nREPL servers the tests use now stop for certain: `stop!` waits for the accept loop to end before it closes the listening socket. While that loop was still inside `accept` the port went on taking connections after `stop!` had returned, which failed `fake-drops-and-stops-test` on about one macOS CI run in four. Under CPU load the port took a connection after 25 of 600 stops before the change and after none of 600 with it.
 - `gtk_text_buffer_insert_interactive` now gets its text as a copy the garbage collector can't move, like the four calls fixed in 0.2.1. Only two console rows of the GUI self-tests call it, so the app wasn't affected, but those rows could now and then insert other text than they meant to.
 
 ## [0.2.1] - 2026-11-14
