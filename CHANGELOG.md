@@ -6,6 +6,8 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
 ### Added
 
 - Key sets. The Keys tab of Preferences has a Key set list with two choices. Jonquil default binds no structural editing key. Calva paredit adds Calva's keys for the structural editing commands, 37 on a Mac and 39 on Linux, including the ones that replace a normal key, such as Ctrl+Left and Right to move by a form. The choice applies at once and is saved as `:key-set` in `settings.edn`. A set sits under your own `keys.edn` and over plugins' keys and Jonquil's own, and its keys show in the Keys tab and the menus under the set's name. The guide's Structural editing page lists each command's key in the Calva set, which Calva keys the set leaves out (the two-step ones, and three that Jonquil already uses), and a test checks that column against the set.
