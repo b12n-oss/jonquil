@@ -22,6 +22,24 @@
       (is (= [{:key "r" :mods #{:cmd} :command :run/run}] (:remove r)))))
   (testing "a binding needs no Cmd or Ctrl"
     (is (= [] (:problems (uk/read-keys "{:window [{:key \"F9\" :command :run/run}]}" opts)))))
+  (testing "a key that types, alone or with only Shift, would replace typing, so it is refused"
+    (doseq [b ["{:key \"e\" :command :run/run}"
+               "{:key \"e\" :mods #{:shift} :command :run/run}"
+               "{:key \"7\" :command :run/run}"
+               "{:key \"e\" :exact #{} :command :run/run}"
+               "{:keys #{\"F9\" \"e\"} :command :run/run}"
+               "{:key \"Return\" :command :run/run}"
+               "{:key \"space\" :mods #{:shift} :command :run/run}"
+               "{:key \"period\" :command :run/run}"]]
+      (let [r (uk/read-keys (str "{:window [" b "]}") opts)]
+        (is (= [] (:window r)) b)
+        (is (str/includes? (str (first (:problems r))) "would replace typing") b)))
+    (doseq [b ["{:key \"e\" :mods #{:cmd} :command :run/run}"
+               "{:key \"e\" :mods #{:alt :shift} :command :run/run}"
+               "{:key \"e\" :exact #{:ctrl} :command :run/run}"
+               "{:key \"F9\" :mods #{:shift} :command :run/run}"
+               "{:key \"Escape\" :command :run/run}"]]
+      (is (= [] (:problems (uk/read-keys (str "{:window [" b "]}") opts))) b)))
   (testing "an empty file and an empty map load nothing, quietly"
     (is (= (assoc uk/no-keys :problems []) (uk/read-keys "" opts)))
     (is (= (assoc uk/no-keys :problems []) (uk/read-keys "{}" opts))))

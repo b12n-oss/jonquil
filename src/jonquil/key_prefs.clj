@@ -83,8 +83,8 @@
     (cond
       (modifier-key? keyval) {:waiting true}
       (nil? name) {:problem "Jonquil can't bind that key yet. Try another."}
-      (and (= 1 (count name)) (empty? (disj mods :shift)))
-      {:problem "A letter or digit needs a modifier other than Shift, or it would replace typing."}
+      (and (km/typing-key? name) (empty? (disj mods :shift)))
+      {:problem "A key that types needs a modifier other than Shift, or it would replace typing."}
       :else {:chord (cond-> {:key name} (seq mods) (assoc :mods mods))})))
 
 (defn chord-text

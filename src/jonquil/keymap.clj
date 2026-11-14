@@ -66,6 +66,13 @@
         (let [s (str (char keyval))]
           (when (re-matches #"[a-z0-9]" s) s)))))
 
+(defn typing-key?
+  "True when the key named name types something into text: every key but
+  the function keys and Escape. A binding on one needs a modifier other
+  than Shift, or it would run each time the key is typed."
+  [name]
+  (not (or (= "Escape" name) (boolean (re-matches #"F\d+" (str name))))))
+
 (def ^:private modifiers (conj (set (keys MODIFIER-MASKS)) :cmd))
 
 (defn- held?
