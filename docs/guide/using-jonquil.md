@@ -27,11 +27,11 @@ Edge cases sit in folded blocks: click a bold line to open one.
   [Dialects and runtimes](dialects/index.md)).
 - The window title shows the open file (or `Untitled`) and a leading `* `
   for unsaved changes.
-- The **menus** list what Jonquil can do, each item with its key: File,
-  Edit, View, Search, Run, Debug, Tools and Help. On a Mac they are in the
-  menu bar at the top of the screen. On Linux a **☰** button at the end of
-  the toolbar opens them. Every item is also in the command palette
-  (Cmd/Ctrl+Shift+P), which finds a command by typing part of its name.
+- The menus (File, Edit, View, Search, Run, Debug, Tools and Help) list
+  what Jonquil can do, each item with its key. On a Mac they are in the
+  menu bar at the top of the screen, and on Linux a **☰** button at the end
+  of the toolbar opens them. Every item is also in the command palette
+  (Cmd/Ctrl+Shift+P), where you find a command by typing part of its name.
 
 To see which version you run, use **Show Jonquil's version** in the command
 palette, which prints it to the console, or run `jonquil --version` in a
@@ -382,6 +382,12 @@ purpose.
 - F6 switches focus between editor and console. Cmd/Ctrl+L clears the
   console; Cmd/Ctrl+Shift+L clears only the last entry.
 - Cmd/Ctrl+= , - and 0 zoom in, out and reset.
+- Structural editing moves brackets and whole forms: slurp, barf, raise,
+  splice, wrap, kill and copy a form, and moves by form. Ctrl+Alt+Right
+  slurps and Ctrl+Alt+Left barfs; the rest are under Edit > Structure
+  ([Keys](keys.md) lists them all).
+- Preferences (Cmd/Ctrl+comma) has a Keys tab where you click a command's
+  key and press a new one ([Your own keys](keys.md#your-own-keys)).
 
 All keys are in [Keys](keys.md).
 

@@ -442,8 +442,9 @@ list.
   on each pull request and again on `develop` after the merge.
 - `develop` merges into `main` when the work on it is ready, in one pull
   request that runs all of CI again. `main` can be ahead of the latest
-  download: a build from it has work that isn't released yet. The guide at
-  [jonquil.b12n.app](https://jonquil.b12n.app) is built from `main`.
+  download, so a build from it may have work that isn't released yet. The
+  guide at [jonquil.b12n.app](https://jonquil.b12n.app) is built from
+  `main`.
 - A release is tagged on `main`. `main` is then merged back into `develop`,
   so a build from `develop` reports a version that counts from that tag.
 - Both branches have the same rule: no force-push, no deletion, and the

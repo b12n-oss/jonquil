@@ -14,8 +14,9 @@ works, the languages Jonquil runs, and how it's put together.
 1. **[Getting started](getting-started.md)**: install Jolt and GTK4,
    build and run Jonquil, and find where its saved settings live.
 2. **Using Jonquil**, in these pages:
-   - [Using Jonquil](using-jonquil.md): the window, Run versus the REPL
-     prompt, stdin, Stop, Reset on Run, editing, find and replace, themes.
+   - [Using Jonquil](using-jonquil.md): the window and its menus, Run
+     versus the REPL prompt, stdin, Stop, Reset on Run, editing, find and
+     replace, themes.
    - [Files and tabs](files-and-tabs.md): Open and Save, tabs, Finder and
      the Dock, the file tree.
    - [Help and the inspector](help-and-inspector.md): completion, quick
