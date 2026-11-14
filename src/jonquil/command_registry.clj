@@ -10,6 +10,7 @@
   menus read the same table (editor-menu, console-menu, menu-items), the
   command palette lists it (run-command-in), and plugins add their own."
   (:require [jonquil.keymap :as km]
+            [jonquil.structural :as se]
             [jonquil.parts :as parts]
             [jonquil.results :as results]))
 
@@ -125,6 +126,18 @@
 (defn- act [k]
   (fn [ctx _args] ((get ctx k)) :handled))
 
+(defn- structural
+  "An editor command running a structural edit op, (f snapshot): the op's
+  :copy goes to the clipboard and its edits and caret to the buffer as one
+  undo step. Always :handled, so a chord that found nothing to do isn't
+  passed to GTK to move or delete by its own rules."
+  [f]
+  (fn [ctx _args]
+    (when-let [op (f ((:snapshot ctx)))]
+      (when-let [text (:copy op)] ((:copy! ctx) text))
+      (when (:edits op) ((:apply-op! ctx) op)))
+    :handled))
+
 (def ^:private core-editor-commands
   "The editor's chords, plus the context menu's unbound
   Indent and Unindent. ctx is the per-key map
@@ -147,7 +160,31 @@
    ;; The context menu's, with no binding, since Tab is a typing
    ;; stage
    :edit/indent {:doc "Indent the lines." :scope :editor :run (act :indent!)}
-   :edit/unindent {:doc "Unindent the lines." :scope :editor :run (act :unindent!)}})
+   :edit/unindent {:doc "Unindent the lines." :scope :editor :run (act :unindent!)}
+   ;; structural editing (jonquil.structural): every one is in the palette,
+   ;; and the keymap gives a few of them Calva's keys
+   :paredit/slurp-forward {:doc "Slurp forward: the list takes in the next form." :scope :editor
+                           :run (structural se/slurp-forward)}
+   :paredit/barf-forward {:doc "Barf forward: the list gives up its last form." :scope :editor
+                          :run (structural se/barf-forward)}
+   :paredit/slurp-backward {:doc "Slurp backward: the list takes in the form before it." :scope :editor
+                            :run (structural se/slurp-backward)}
+   :paredit/barf-backward {:doc "Barf backward: the list gives up its first form." :scope :editor
+                           :run (structural se/barf-backward)}
+   :paredit/raise {:doc "Raise the form at the caret over the list around it." :scope :editor
+                   :run (structural se/raise)}
+   :paredit/splice {:doc "Splice: remove the brackets around the caret." :scope :editor
+                    :run (structural se/splice)}
+   :paredit/wrap-round {:doc "Wrap the form at the caret in ()." :scope :editor :run (structural se/wrap-round)}
+   :paredit/wrap-square {:doc "Wrap the form at the caret in []." :scope :editor :run (structural se/wrap-square)}
+   :paredit/wrap-curly {:doc "Wrap the form at the caret in {}." :scope :editor :run (structural se/wrap-curly)}
+   :paredit/kill-form {:doc "Kill the form at the caret, onto the clipboard." :scope :editor
+                       :run (structural se/kill-form)}
+   :paredit/copy-form {:doc "Copy the form at the caret." :scope :editor :run (structural se/copy-form)}
+   :paredit/forward {:doc "Move forward by a form." :scope :editor :run (structural se/forward)}
+   :paredit/backward {:doc "Move backward by a form." :scope :editor :run (structural se/backward)}
+   :paredit/up {:doc "Move up to the start of the list around the caret." :scope :editor :run (structural se/up)}
+   :paredit/down {:doc "Move down into the next list." :scope :editor :run (structural se/down)}})
 
 (def editor-conditions
   "Named conditions an editor binding's :when can ask for, over the same

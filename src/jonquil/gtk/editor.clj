@@ -1243,7 +1243,9 @@
      ;; a plugin's :edit command (jonquil.plugin-registry) reads the
      ;; buffer as a snapshot and has its op applied as one user action
      :snapshot #(snapshot ed)
-     :apply-op! #(apply-op! ed %)}))
+     :apply-op! #(apply-op! ed %)
+     ;; a structural command's :copy (Kill form, Copy form)
+     :copy! #(g/gdk-clipboard-set-text (g/gtk-widget-get-clipboard (:view ed)) %)}))
 
 (defn handle-key!
   "The editor's key dispatch. Returns 1 when it handled the key,

@@ -61,6 +61,7 @@
    edit-keys/row-edit-shift-tab-unindented
    edit-keys/row-edit-toggle-comment
    edit-keys/row-edit-toggle-comment-forward
+   edit-keys/row-edit-structural-keys
    edit-keys/row-edit-format-all
    edit-keys/row-edit-format-keeps-caret-in-view
    edit-keys/row-edit-format-selection
