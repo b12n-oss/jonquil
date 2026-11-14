@@ -60,6 +60,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
+            [jonquil.gtk.prefs-window :as prefs-window]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.login-path :as login-path]
             [jonquil.main :as main]
@@ -342,6 +343,9 @@
           after (await-windows pid 5000 100
                                (fn [ws] (some (fn [x] (not (before-ids (:window-id x)))) ws)))
           shown (some (fn [x] (when-not (before-ids (:window-id x)) x)) after)
+          ;; the search box tells its listeners a moment after the text changes
+          _ (await-until 3000 20 #(let [rs (prefs-window/rows w)]
+                                    (and (seq rs) (every? (fn [r] (str/includes? (str/lower-case (str (:doc r) (:chord r))) "run")) rs))))
           _ (on-gtk ((:record! prefs) 0))
           _ (ga/settle 2)
           {:keys [exit err]} (if shown

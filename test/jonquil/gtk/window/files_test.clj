@@ -52,5 +52,8 @@
   (is (= "/tmp/x" (win-files/folder-text "/tmp/x/a.clj" "/Users/me")))
   (is (= "/Users/meow" (win-files/folder-text "/Users/meow/a.clj" "/Users/me")) "another home with the same start")
   (is (= "/" (win-files/folder-text "/a.clj" "/Users/me")))
+  (is (= "/var/tmp/x" (win-files/folder-text "/var/tmp/x/a.clj" "/Users/me")) "three parts show whole")
+  (is (= "…/my-talk/src" (win-files/folder-text "/var/folders/0l/T/shots-1234/my-talk/src/a.clj" "/Users/me"))
+      "a long folder outside home shows its last two parts")
   (is (= "" (win-files/folder-text nil "/Users/me")) "an Untitled buffer has no folder")
   (is (= "" (win-files/folder-text "a.clj" "/Users/me")) "a bare name has none either"))

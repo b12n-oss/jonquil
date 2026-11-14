@@ -83,6 +83,10 @@
     (g/gtk-header-bar-pack-end toolbar menu-btn))
   (doseq [b [save-btn stop-btn run-btn]] (g/gtk-header-bar-pack-end toolbar b))
   (doseq [[k text] tooltips] (g/gtk-widget-set-tooltip-text (get m k) text))
+  ;; GTK 4.18 added this, and only macOS calls it. Declaring it costs nothing
+  ;; on an older GTK: Jolt looks a C function up when it is first called
+  ;; (measured: a binding to a name the library lacks loads, and throws only
+  ;; on the call).
   (when (mac?) (g/gtk-header-bar-set-use-native-controls toolbar 1))
   (g/g-object-ref-sink reset-chk)
   (g/gtk-check-button-set-active reset-chk 1))

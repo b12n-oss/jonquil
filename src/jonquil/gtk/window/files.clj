@@ -33,13 +33,17 @@
 
 (defn folder-text
   "The folder of path as the header bar shows it under the file's name:
-  home written as ~, and \"\" for a buffer with no file."
+  home written as ~, a long folder outside home cut to its last two parts
+  after an ellipsis, and \"\" for a buffer with no file."
   [path home]
   (if-let [i (when path (str/last-index-of path "/"))]
-    (let [dir (if (zero? i) "/" (subs path 0 i))]
-      (if (and (seq home) (or (= dir home) (str/starts-with? dir (str home "/"))))
+    (let [dir (if (zero? i) "/" (subs path 0 i))
+          parts (remove str/blank? (str/split dir #"/"))]
+      (cond
+        (and (seq home) (or (= dir home) (str/starts-with? dir (str home "/"))))
         (str "~" (subs dir (count home)))
-        dir))
+        (> (count parts) 3) (str "…/" (str/join "/" (take-last 2 parts)))
+        :else dir))
     ""))
 
 (defn update-title!
