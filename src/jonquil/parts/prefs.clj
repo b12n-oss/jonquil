@@ -7,4 +7,4 @@
   {:id :prefs
    :commands
    {:prefs/open {:doc "Open Preferences." :scope :window :call [:prefs-open-fn]}}
-   :bindings {:window [{:key "comma" :mods #{:cmd} :command :prefs/open}]}})
+   :bindings {:window [{:key "comma" :mods #{:cmd} :not #{:alt :shift} :command :prefs/open}]}})

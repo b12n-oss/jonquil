@@ -61,6 +61,7 @@
    edit-keys/row-edit-shift-tab-unindented
    edit-keys/row-edit-toggle-comment
    edit-keys/row-edit-toggle-comment-forward
+   edit-keys/row-edit-structural-keys
    edit-keys/row-edit-format-all
    edit-keys/row-edit-format-keeps-caret-in-view
    edit-keys/row-edit-format-selection
@@ -80,6 +81,7 @@
    incremental/row-paint-async-drops-after-edit
    parinfer-rows/row-parinfer-open-paren
    parinfer-rows/row-parinfer-dedent-undo-redo
+   parinfer-rows/row-parinfer-with-structural-edits
    parinfer-rows/row-reload-text-undoable
    parinfer-rows/row-reload-text-caret-clamps
    parinfer-rows/row-reload-text-parinfer-held-off

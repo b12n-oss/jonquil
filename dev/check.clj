@@ -90,6 +90,7 @@
     jonquil.nrepl.cljs-node
     jonquil.runtime-registry
     jonquil.commands
+    jonquil.structural
     jonquil.changed
     jonquil.breakpoints
     jonquil.trace-rt

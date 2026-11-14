@@ -123,4 +123,14 @@
   ;; rename: Shift+F6 reaches here because the window's F6 binding is
   ;; :not #{:shift}; exactly Shift, so Cmd+Shift+F6 doesn't rename
   {:key "F6" :exact #{:shift} :command :edit/rename}
-  {:key "F2" :exact #{} :command :edit/rename}]}
+  {:key "F2" :exact #{} :command :edit/rename}
+  ;; structural editing, on Calva's keys where those need no letter with
+  ;; Alt (macOS turns such a letter into another keyval). Control, never
+  ;; Cmd. Ctrl+Alt+period and comma are Calva's own for Linux, where
+  ;; Ctrl+Alt+arrows often switch workspaces. The rest have no key: the
+  ;; palette runs them and Preferences can give them one.
+  {:keys #{"Right" "period"} :exact #{:ctrl :alt} :command :paredit/slurp-forward}
+  {:keys #{"Left" "comma"} :exact #{:ctrl :alt} :command :paredit/barf-forward}
+  {:key "Left" :exact #{:ctrl :alt :shift} :command :paredit/slurp-backward}
+  {:key "Right" :exact #{:ctrl :alt :shift} :command :paredit/barf-backward}
+  {:key "Delete" :exact #{:ctrl :shift} :command :paredit/kill-form}]}

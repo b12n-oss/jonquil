@@ -41,7 +41,10 @@
    "braceright" 0x07d "braceleft" 0x07b
    "F3" 0xffc0 "F5" 0xffc2 "F6" 0xffc3 "F7" 0xffc4 "F8" 0xffc5 "F9" 0xffc6 "F10" 0xffc7 "Escape" 0xff1b "bracketleft" 0x05b
    "space" 0x020 "slash" 0x02f "semicolon" 0x03b "F1" 0xffbe "F2" 0xffbf "F12" 0xffc9
-   "Return" 0xff0d "KP_Enter" 0xff8d "period" 0x02e "greater" 0x03e "comma" 0x02c})
+   "Return" 0xff0d "KP_Enter" 0xff8d "period" 0x02e "greater" 0x03e "comma" 0x02c
+   ;; keys that move or delete: structural editing binds them with modifiers
+   "Left" 0xff51 "Up" 0xff52 "Right" 0xff53 "Down" 0xff54 "Home" 0xff50 "End" 0xff57
+   "BackSpace" 0xff08 "Delete" 0xffff})
 
 (defn key-value
   "The keyval a binding's key name stands for: a lower-case letter or a
@@ -67,9 +70,9 @@
           (when (re-matches #"[a-z0-9]" s) s)))))
 
 (defn typing-key?
-  "True when the key named name types something into text: every key but
-  the function keys and Escape. A binding on one needs a modifier other
-  than Shift, or it would run each time the key is typed."
+  "True when the key named name types into text or moves in it: every key
+  but the function keys and Escape. A binding on one needs a modifier other
+  than Shift, or it would run each time the key is pressed for its own job."
   [name]
   (not (or (= "Escape" name) (boolean (re-matches #"F\d+" (str name))))))
 

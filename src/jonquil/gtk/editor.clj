@@ -450,7 +450,9 @@
                (not @(:parinfer-skip? ed))
                (not @(:read-only? ed))
                (not @(:preedit-active? ed)))
-      m)))
+      ;; a structural command moved a bracket on purpose: the indentation
+      ;; follows the brackets for that one edit, whatever the mode
+      (if @(:parinfer-as-paren? ed) :paren m))))
 
 (defn- parinfer-asides?
   "Whether the typed-bracket and pair-Backspace step-asides are on: Smart
@@ -646,6 +648,18 @@
   mode, the default)."
   [ed style-fn]
   (reset! (:format-style-fn ed) style-fn))
+
+(defn apply-structural-op!
+  "apply-op! for a structural editing command (jonquil.structural). With
+  Parinfer on, the edit runs under Paren mode whatever the mode is: the
+  command moved a bracket on purpose, so the indentation follows the
+  brackets. Under Indent or Smart mode Parinfer would read the old
+  indentation and move the bracket straight back, which undid a slurp or a
+  barf across lines (measured 2026-11-14)."
+  [ed result]
+  (reset! (:parinfer-as-paren? ed) true)
+  (try (apply-op! ed result)
+       (finally (reset! (:parinfer-as-paren? ed) false))))
 
 (defn apply-op-plain!
   "apply-op! with the Parinfer hook skipped, so an MCP edit or another
@@ -1243,7 +1257,11 @@
      ;; a plugin's :edit command (jonquil.plugin-registry) reads the
      ;; buffer as a snapshot and has its op applied as one user action
      :snapshot #(snapshot ed)
-     :apply-op! #(apply-op! ed %)}))
+     :apply-op! #(apply-op! ed %)
+     ;; a structural command's edit, which Parinfer must follow, not undo
+     :apply-structural-op! #(apply-structural-op! ed %)
+     ;; a structural command's :copy (Kill form, Copy form)
+     :copy! #(g/gdk-clipboard-set-text (g/gtk-widget-get-clipboard (:view ed)) %)}))
 
 (defn handle-key!
   "The editor's key dispatch. Returns 1 when it handled the key,
@@ -1368,6 +1386,9 @@
    :parinfer-prev (atom nil)
    :parinfer-busy? (atom false)
    :parinfer-skip? (atom false)
+   ;; :parinfer-as-paren? runs one edit under Paren mode
+   ;; (apply-structural-op!, the structural editing commands)
+   :parinfer-as-paren? (atom false)
    ;; The speedup slots: :parinfer-prev-cache holds {:text s :gen n}, the buffer as
    ;; the hook last saw it with :edit-gen at that moment, so the
    ;; next action starts without a 262k copy when the gen hasn't

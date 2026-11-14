@@ -104,7 +104,7 @@
       (let [form (cond-> {:start (prefix-start ctx i s) :end e} (= t :metatag) (assoc :kind :metatag))]
         (conj (pop stack) (absorb-form text (peek stack) form))))))
 
-(defn- form-tree
+(defn form-tree
   "text's forms as a tree: a vector of top-level {:start :end :open :kids}.
   A bracketed form has :open (its opening bracket's offset) and :kids, an
   atom (symbol, keyword, number, string, character, regex) has neither.
