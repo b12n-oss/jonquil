@@ -1,10 +1,9 @@
 (ns gtk-selftest.parinfer
   "Editor rows for Parinfer: modes, caret and selection, engine failures and a cursor hook that throws."
   (:require [gtk-async :refer [go-row on-gtk]]
-            [gtk-selftest.support :refer [check parinfer-on! parinfer-off! type-str! delete-action! caret!]]
+            [gtk-selftest.support :refer [check parinfer-on! parinfer-off! type-str! delete-action! caret! with-calva-keys]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]
             [jonquil.parinfer-edit :as pe]))
 
@@ -54,14 +53,12 @@
   (go-row :parinfer-with-structural-edits check
     (on-gtk (let [ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
                   try! (fn [mode text caret key]
-                         (try (reset! key-sets/live :calva)
-                              (parinfer-on! ed mode)
+                         (try (parinfer-on! ed mode)
                               (editor/set-text! ed text)
                               (caret! ed caret)
-                              (editor/handle-key! ed (km/key-value key) ctrl-alt)
+                              (with-calva-keys #(editor/handle-key! ed (km/key-value key) ctrl-alt))
                               (editor/editor-text ed)
-                              (finally (parinfer-off! ed)
-                                       (reset! key-sets/live key-sets/default-id))))
+                              (finally (parinfer-off! ed))))
                   seen (into {}
                              (for [mode [:indent :smart :paren]]
                                [mode {:barf (try! mode "(a\n b)" 2 "Left")

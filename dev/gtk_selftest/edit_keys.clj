@@ -3,10 +3,9 @@
   (:require [clojure.core.async :refer [<! timeout]]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
-            [gtk-selftest.support :refer [check]]
+            [gtk-selftest.support :refer [check with-calva-keys]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]))
 
 ;; --- handle-key! dispatch rows --------------------------------------
@@ -186,69 +185,66 @@
                        {:handled handled :text text :caret caret :sel sel}))))))
 
 (defn row-edit-structural-keys
-  "Structural editing on the Calva paredit key set's keys, through the
-  editor's own key handler, with that set on for the row: Ctrl+Alt+Right slurps twice, Ctrl+Alt+Left barfs, Ctrl+Shift+
+  "Structural editing on the Calva paredit set's keys, through the editor's
+  key handler: Ctrl+Alt+Right slurps twice, Ctrl+Alt+Left barfs, Ctrl+Shift+
   Delete kills the form at the caret, and one undo takes the kill back.
   Ctrl+Alt+S splices and Ctrl+Alt+Shift+P wraps, sent the way each system
   sends a letter held with Alt."
   [ed]
   (go-row :edit-structural-keys check
-    (on-gtk (try
-             (reset! key-sets/live :calva)
-             (let [buf (:buf ed)
-                  ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
-                  press! (fn [key state]
-                           [(editor/handle-key! ed (km/key-value key) state) (editor/editor-text ed)])
-                  place! (fn [o] (g/with-iters* buf o o (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))]
-              (editor/set-text! ed "(a) b c")
-              (place! 2)
-              (let [slurp1 (press! "Right" ctrl-alt)
-                    slurp2 (press! "Right" ctrl-alt)
-                    barf (press! "Left" ctrl-alt)
-                    _ (place! 3)
-                    kill (press! "Delete" (bit-or g/CONTROL-MASK g/SHIFT-MASK))
-                    caret (g/cursor-offset buf)
-                    _ (g/gtk-text-buffer-undo buf)
-                    undone (editor/editor-text ed)
+    (on-gtk (with-calva-keys (fn [] (let [buf (:buf ed)
+                                          ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
+                                          press! (fn [key state]
+                                                   [(editor/handle-key! ed (km/key-value key) state) (editor/editor-text ed)])
+                                          place! (fn [o] (g/with-iters* buf o o (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))]
+                                      (editor/set-text! ed "(a) b c")
+                                      (place! 2)
+                                      (let [slurp1 (press! "Right" ctrl-alt)
+                                            slurp2 (press! "Right" ctrl-alt)
+                                            barf (press! "Left" ctrl-alt)
+                                            _ (place! 3)
+                                            kill (press! "Delete" (bit-or g/CONTROL-MASK g/SHIFT-MASK))
+                                            caret (g/cursor-offset buf)
+                                            _ (g/gtk-text-buffer-undo buf)
+                                            undone (editor/editor-text ed)
                     ;; nothing to slurp: the chord is still used up, the text unchanged
-                    _ (editor/set-text! ed "(a)")
-                    _ (place! 2)
-                    none (press! "Right" ctrl-alt)
+                                            _ (editor/set-text! ed "(a)")
+                                            _ (place! 2)
+                                            none (press! "Right" ctrl-alt)
                     ;; the letter keys hold Alt. On macOS Option+S arrives as
                     ;; sharp s (0xdf) and Option+Shift+P as U+220F, so only the
                     ;; keycode (1 and 35) names the key; elsewhere the letter does
-                    mac? (= "Mac OS X" (System/getProperty "os.name"))
-                    letter! (fn [mac-keyval mac-keycode ch state]
-                              (if mac?
-                                (editor/handle-key! ed mac-keyval mac-keycode state)
-                                (editor/handle-key! ed (int ch) state))
-                              (editor/editor-text ed))
-                    _ (editor/set-text! ed "(a [b c])")
-                    _ (place! 5)
-                    spliced (letter! 0xdf 1 \s ctrl-alt)
-                    _ (place! 3)
-                    wrapped (letter! 0x100220f 35 \p (bit-or ctrl-alt g/SHIFT-MASK))
+                                            mac? (= "Mac OS X" (System/getProperty "os.name"))
+                                            letter! (fn [mac-keyval mac-keycode ch state]
+                                                      (if mac?
+                                                        (editor/handle-key! ed mac-keyval mac-keycode state)
+                                                        (editor/handle-key! ed (int ch) state))
+                                                      (editor/editor-text ed))
+                                            _ (editor/set-text! ed "(a [b c])")
+                                            _ (place! 5)
+                                            spliced (letter! 0xdf 1 \s ctrl-alt)
+                                            _ (place! 3)
+                                            wrapped (letter! 0x100220f 35 \p (bit-or ctrl-alt g/SHIFT-MASK))
                     ;; the second batch: Alt+Down drags, Ctrl+Alt+Backspace kills
                     ;; the form before, Ctrl+Shift+J joins
-                    _ (editor/set-text! ed "(a b c)")
-                    _ (place! 1)
-                    dragged (second (press! "Down" g/ALT-MASK))
-                    _ (editor/set-text! ed "(a b c)")
-                    _ (place! 4)
-                    killed-back (second (press! "BackSpace" ctrl-alt))
-                    _ (editor/set-text! ed "(a) (b)")
-                    _ (place! 3)
-                    joined (second (press! "j" (bit-or g/CONTROL-MASK g/SHIFT-MASK)))]
-                (check :edit-structural-keys
-                       (and (= [1 "(a b) c"] slurp1) (= [1 "(a b c)"] slurp2) (= [1 "(a b) c"] barf)
-                            (= [1 "(a) c"] kill) (= 2 caret) (= "(a b) c" undone)
-                            (= [1 "(a)"] none)
-                            (= "(a b c)" spliced) (= "(a (b) c)" wrapped)
-                            (= "(b a c)" dragged) (= "(a  c)" killed-back) (= "(a b)" joined))
-                       {:slurp1 slurp1 :slurp2 slurp2 :barf barf :kill kill :caret caret
-                        :undone undone :none none :spliced spliced :wrapped wrapped
-                        :dragged dragged :killed-back killed-back :joined joined})))
-             (finally (reset! key-sets/live key-sets/default-id))))))
+                                            _ (editor/set-text! ed "(a b c)")
+                                            _ (place! 1)
+                                            dragged (second (press! "Down" g/ALT-MASK))
+                                            _ (editor/set-text! ed "(a b c)")
+                                            _ (place! 4)
+                                            killed-back (second (press! "BackSpace" ctrl-alt))
+                                            _ (editor/set-text! ed "(a) (b)")
+                                            _ (place! 3)
+                                            joined (second (press! "j" (bit-or g/CONTROL-MASK g/SHIFT-MASK)))]
+                                        (check :edit-structural-keys
+                                               (and (= [1 "(a b) c"] slurp1) (= [1 "(a b c)"] slurp2) (= [1 "(a b) c"] barf)
+                                                    (= [1 "(a) c"] kill) (= 2 caret) (= "(a b) c" undone)
+                                                    (= [1 "(a)"] none)
+                                                    (= "(a b c)" spliced) (= "(a (b) c)" wrapped)
+                                                    (= "(b a c)" dragged) (= "(a  c)" killed-back) (= "(a b)" joined))
+                                               {:slurp1 slurp1 :slurp2 slurp2 :barf barf :kill kill :caret caret
+                                                :undone undone :none none :spliced spliced :wrapped wrapped
+                                                :dragged dragged :killed-back killed-back :joined joined}))))))))
 
 (defn row-edit-format-all [ed]
   (go-row :edit-format-all check
