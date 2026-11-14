@@ -631,6 +631,10 @@
 ;; (gtk4 4.22.4). The query entry is a GtkSearchEntry, the replacement
 ;; entry a plain GtkEntry.
 (ffi/defcfn gtk-search-entry-new "gtk_search_entry_new" [] :pointer)
+;; gtksearchentry.h: void gtk_search_entry_set_placeholder_text (GtkSearchEntry*,
+;; const char*), since GTK 4.10. A search entry isn't a GtkEntry, so
+;; gtk-entry-set-placeholder-text doesn't apply to it.
+(ffi/defcfn gtk-search-entry-set-placeholder-text "gtk_search_entry_set_placeholder_text" [:pointer :string] :void)
 (ffi/defcfn gtk-entry-new "gtk_entry_new" [] :pointer)
 ;; gtk_entry_set_placeholder_text: gtkentry.h; the review panel's note.
 (ffi/defcfn gtk-entry-set-placeholder-text "gtk_entry_set_placeholder_text" [:pointer :string] :void)
@@ -1264,6 +1268,11 @@
 ;; top-level for measuring the inspector pane's real allocated size
 ;; outside the main Jonquil window.
 (ffi/defcfn gtk-window-new "gtk_window_new" [] :pointer)
+;; gtkwindow.h: void gtk_window_set_transient_for (GtkWindow*, GtkWindow *parent),
+;; void gtk_window_set_hide_on_close (GtkWindow*, gboolean). For the
+;; Preferences window, which sits over the main one and hides on close.
+(ffi/defcfn gtk-window-set-transient-for "gtk_window_set_transient_for" [:pointer :pointer] :void)
+(ffi/defcfn gtk-window-set-hide-on-close "gtk_window_set_hide_on_close" [:pointer :int] :void)
 
 ;; --- tabs --------------------------------------------------------------------
 ;; Header citations are under gtk-4.0/gtk (gtk4 4.22.4).

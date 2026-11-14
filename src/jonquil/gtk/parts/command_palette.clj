@@ -144,8 +144,10 @@
                (fn [_ _ old new]
                  (when (not= (plugin-registry/all-commands old) (plugin-registry/all-commands new))
                    (on-gui! #(load-user-keys! ctx said false)))))
-    {:open-keys-file-fn (fn [] (open-user-keys! ctx))
-     :reload-keys-fn (fn [] (load-user-keys! ctx said true))}))
+    (let [open! (fn [] (open-user-keys! ctx))
+          reload! (fn [] (load-user-keys! ctx said true))]
+      (reset! user-keys/window-fns {:reload! reload! :open! open!})
+      {:open-keys-file-fn open! :reload-keys-fn reload!})))
 
 (defn- describe-fns
   "The describe-keys fns over pending (Describe Key's flag) and recent-keys

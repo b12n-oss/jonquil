@@ -74,6 +74,7 @@ to the previous track, and F10 without fn mutes the sound.
 | Cmd/Ctrl+0 | anywhere in the window | Reset zoom |
 | Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme (light, dark, solarized, navy, the twelve popular themes, auto); the palette's Use theme entries pick one by name |
 | Cmd/Ctrl+Shift+P | anywhere in the window | Open the command palette |
+| Cmd/Ctrl+, | anywhere in the window | Open Preferences ([Your own keys](#your-own-keys)) |
 
 To check a key from inside Jonquil, plugins' keys included, run **Describe
 the next key you press** from the palette ([Describing keys](help-and-inspector.md#describing-keys)).
@@ -153,6 +154,30 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 </details>
 
 ## Your own keys
+
+**Preferences** (Cmd/Ctrl+comma, or Open Preferences in the command palette)
+has a Keys tab that lists every command with its key and where the key comes
+from: `default`, a plugin's name, or `yours`.
+
+![The Preferences window on its Keys tab, the list narrowed to "run" and the first row waiting for a key](../images/prefs-keys.png)
+
+- Type in the search box to narrow the list by command, key or source.
+- Click a row's key, then press the new one. Esc cancels. A command with no
+  key says **Add a key**.
+- If another command has that key, the tab names it and asks before taking
+  the key from it.
+- A letter or a digit needs a modifier other than Shift, so a binding can't
+  replace typing.
+- A greyed-out key belongs to a chain of keys, such as the steps Esc goes
+  through, and can't be changed here.
+- **Reset this key** puts the selected command back on its own keys, and
+  **Open keys.edn** opens the file the tab writes.
+
+The tab writes `keys.edn` for you, whole. If you have added comments to that
+file by hand, it says so and asks before the first change, since a rewrite
+drops them.
+
+### The file
 
 Your key bindings live in `keys.edn`, next to `settings.edn`
 (`~/.config/jonquil/keys.edn`, or `$XDG_CONFIG_HOME/jonquil/keys.edn`).
