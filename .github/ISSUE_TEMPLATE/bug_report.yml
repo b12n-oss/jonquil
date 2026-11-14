@@ -36,7 +36,7 @@ body:
     attributes:
       label: Jonquil version
       description: "Run `jonquil --version` (for the downloaded app, `/Applications/Jonquil.app/Contents/MacOS/Jonquil --version`), or use Show Jonquil's version in the command palette. Version 0.1.0 has neither: use Finder, Get Info on Jonquil.app, or `git rev-parse --short HEAD` if you build from source."
-      placeholder: 0.2.0
+      placeholder: 0.2.1
     validations:
       required: true
   - type: input

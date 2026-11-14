@@ -51,7 +51,7 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 
 ## Download
 
-On an Apple Silicon Mac with macOS 26 or later, download the notarized `Jonquil-0.2.0-macos-arm64.dmg` (or `.zip`) from the [0.2.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.2.0) and drag Jonquil to Applications. GTK is bundled, so it needs no Homebrew. Running a project's Jolt out of process still needs `jolt` and `git` (see Requirements). Intel Macs and Linux build from source, below.
+On an Apple Silicon Mac with macOS 26 or later, download the notarized `Jonquil-0.2.1-macos-arm64.dmg` (or `.zip`) from the [0.2.1 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.2.1) and drag Jonquil to Applications. GTK is bundled, so it needs no Homebrew. Running a project's Jolt out of process still needs `jolt` and `git` (see Requirements). Intel Macs and Linux build from source, below.
 
 ## Running
 
