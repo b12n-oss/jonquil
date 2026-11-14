@@ -185,7 +185,61 @@
    :paredit/forward {:doc "Move forward by a form." :scope :editor :run (structural se/forward)}
    :paredit/backward {:doc "Move backward by a form." :scope :editor :run (structural se/backward)}
    :paredit/up {:doc "Move up to the start of the list around the caret." :scope :editor :run (structural se/up)}
-   :paredit/down {:doc "Move down into the next list." :scope :editor :run (structural se/down)}})
+   :paredit/down {:doc "Move down into the next list." :scope :editor :run (structural se/down)}
+   :paredit/expand-selection {:doc "Expand the selection: the form at the caret, then each list around it." :scope :editor
+                              :run (structural se/expand-selection)}
+   :paredit/shrink-selection {:doc "Shrink the selection back a step." :scope :editor
+                              :run (structural se/shrink-selection)}
+   :paredit/select-forward {:doc "Extend the selection over the next form." :scope :editor
+                            :run (structural se/select-forward)}
+   :paredit/select-backward {:doc "Extend the selection over the form before it." :scope :editor
+                             :run (structural se/select-backward)}
+   :paredit/drag-forward {:doc "Drag the form forward, past the next one." :scope :editor
+                          :run (structural se/drag-forward)}
+   :paredit/drag-backward {:doc "Drag the form backward, past the one before." :scope :editor
+                           :run (structural se/drag-backward)}
+   :paredit/transpose {:doc "Transpose the two forms around the caret." :scope :editor
+                       :run (structural se/transpose)}
+   :paredit/join {:doc "Join the two lists or strings around the caret." :scope :editor
+                  :run (structural se/join)}
+   :paredit/split {:doc "Split the list or string at the caret." :scope :editor
+                   :run (structural se/split)}
+   :paredit/kill-list-forward {:doc "Kill to the end of the list." :scope :editor
+                               :run (structural se/kill-list-forward)}
+   :paredit/kill-list-backward {:doc "Kill to the start of the list." :scope :editor
+                                :run (structural se/kill-list-backward)}
+   :paredit/kill-right {:doc "Kill to the end of the line, keeping the brackets balanced." :scope :editor
+                        :run (structural se/kill-right)}
+   :paredit/kill-left {:doc "Kill to the start of the line, keeping the brackets balanced." :scope :editor
+                       :run (structural se/kill-left)}
+   :paredit/kill-form-backward {:doc "Kill the form before the caret." :scope :editor
+                                :run (structural se/kill-form-backward)}
+   :paredit/splice-killing-forward {:doc "Splice, killing what follows the caret in the list." :scope :editor
+                                    :run (structural se/splice-killing-forward)}
+   :paredit/splice-killing-backward {:doc "Splice, killing what comes before the caret in the list." :scope :editor
+                                     :run (structural se/splice-killing-backward)}
+   :paredit/convolute {:doc "Convolute: turn the two lists around the caret inside out." :scope :editor
+                       :run (structural se/convolute)}
+   :paredit/wrap-set {:doc "Wrap the form at the caret in #{}." :scope :editor
+                      :run (structural se/wrap-set)}
+   :paredit/wrap-quote {:doc "Wrap the form at the caret in \"\"." :scope :editor
+                        :run (structural se/wrap-quote)}
+   :paredit/rewrap-round {:doc "Change the brackets around the caret to ()." :scope :editor
+                          :run (structural se/rewrap-round)}
+   :paredit/rewrap-square {:doc "Change the brackets around the caret to []." :scope :editor
+                           :run (structural se/rewrap-square)}
+   :paredit/rewrap-curly {:doc "Change the brackets around the caret to {}." :scope :editor
+                          :run (structural se/rewrap-curly)}
+   :paredit/rewrap-set {:doc "Change the brackets around the caret to #{}." :scope :editor
+                        :run (structural se/rewrap-set)}
+   :paredit/forward-up {:doc "Move out of the list, past its closer." :scope :editor
+                        :run (structural se/forward-up)}
+   :paredit/backward-down {:doc "Move into the list before the caret, from the back." :scope :editor
+                           :run (structural se/backward-down)}
+   :paredit/list-end {:doc "Move to the end of the list around the caret." :scope :editor
+                      :run (structural se/list-end)}
+   :paredit/list-start {:doc "Move to the start of the list around the caret." :scope :editor
+                        :run (structural se/list-start)}})
 
 (def editor-conditions
   "Named conditions an editor binding's :when can ask for, over the same

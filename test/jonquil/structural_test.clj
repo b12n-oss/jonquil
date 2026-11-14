@@ -118,3 +118,130 @@
   (testing "a string's and a comment's brackets don't count"
     (is (= "(a| \"(\")" (after se/slurp-forward "(a|) \"(\"")))
     (is (= "(a| b) ; (x" (after se/slurp-forward "(a|) b ; (x")))))
+
+;; --- the rest of the paredit set ---------------------------------------------
+
+(defn- snap-sel
+  "A snapshot with the selection between [ and ] marks and the caret at ]."
+  [marked]
+  (let [a (str/index-of marked "<")
+        b (dec (str/index-of marked ">"))]
+    {:text (-> marked (str/replace "<" "") (str/replace ">" "")) :caret b :sel-start a :sel-end b}))
+
+(defn- selected
+  "The text an op selects in marked (| caret or <..> selection), or nil."
+  [op marked]
+  (let [s (if (str/includes? marked "<") (snap-sel marked) (snap marked))]
+    (when-let [{[a b] :sel} (op s)]
+      (when (and a b) (subs (:text s) a b)))))
+
+(deftest expand-and-shrink-selection-test
+  (se/forget-selection!)
+  (testing "expand: the form at the caret, then each list around it"
+    (is (= "bar" (selected se/expand-selection "(foo (b|ar baz))")))
+    (is (= "(bar baz)" (selected se/expand-selection "(foo (<bar> baz))")))
+    (is (= "(foo (bar baz))" (selected se/expand-selection "(foo <(bar baz)>)")))
+    (is (nil? (se/expand-selection (snap-sel "<(foo)>"))) "nothing larger to take"))
+  (testing "shrink goes back the way expand came"
+    (se/forget-selection!)
+    (let [text "(foo (bar baz))"
+          s0 {:text text :caret 7 :sel-start 7 :sel-end 7}
+          e1 (se/expand-selection s0)
+          s1 (assoc s0 :caret (:caret e1) :sel-start (first (:sel e1)) :sel-end (second (:sel e1)))
+          e2 (se/expand-selection s1)
+          s2 (assoc s0 :caret (:caret e2) :sel-start (first (:sel e2)) :sel-end (second (:sel e2)))]
+      (is (= [6 9] (:sel e1)))
+      (is (= [5 14] (:sel e2)))
+      (is (= [6 9] (:sel (se/shrink-selection s2))))
+      (is (= 7 (:caret (se/shrink-selection s1))) "back to the bare caret")
+      (is (nil? (:sel (se/shrink-selection s1))))))
+  (testing "shrink with nothing remembered does nothing"
+    (se/forget-selection!)
+    (is (nil? (se/shrink-selection (snap-sel "(<foo> bar)"))))))
+
+(deftest select-forward-and-backward-test
+  (is (= "b" (selected se/select-forward "(a |b c)")))
+  (is (= "b c" (selected se/select-forward "(a <b> c)")))
+  (is (nil? (se/select-forward (snap-sel "(a <b>)"))))
+  (is (= "a" (selected se/select-backward "(a| b)")))
+  (is (= "a b" (selected se/select-backward "(a <b> c)")))
+  (is (nil? (se/select-backward (snap "(|a)")))))
+
+(deftest drag-test
+  (is (= "(b |a c)" (after se/drag-forward "(|a b c)")))
+  (is (= "(a c |b)" (after se/drag-forward "(a |b c)")))
+  (is (= "(a c b|ar)" (after se/drag-forward "(a b|ar c)")) "the caret keeps its place in the form")
+  (is (nil? (after se/drag-forward "(a |b)")))
+  (is (= "(|b a c)" (after se/drag-backward "(a |b c)")))
+  (is (= "(|(x) a)" (after se/drag-backward "(a |(x))")) "the caret stays on the dragged form")
+  (is (nil? (after se/drag-backward "(|a b)"))))
+
+(deftest transpose-test
+  (is (= "(b a| c)" (after se/transpose "(a| b c)")))
+  (is (= "(b a| c)" (after se/transpose "(a |b c)")))
+  (is (= "((y) (x)|)" (after se/transpose "((x)| (y))")))
+  (is (nil? (after se/transpose "(|a b)")))
+  (is (nil? (after se/transpose "(a b|)"))))
+
+(deftest join-and-split-test
+  (testing "join two lists of one kind, or two strings"
+    (is (= "(a| b)" (after se/join "(a)| (b)")))
+    (is (= "[a| b]" (after se/join "[a] |[b]")))
+    (is (= "\"ab|cd\"" (after se/join "\"ab\"| \"cd\"")))
+    (is (nil? (after se/join "(a)| [b]")) "different brackets don't join")
+    (is (nil? (after se/join "a| b"))))
+  (testing "split the list at the caret, or the string"
+    (is (= "(a)| (b)" (after se/split "(a |b)")))
+    (is (= "[a b]| [c]" (after se/split "[a b| c]")))
+    (is (= "(f \"ab\"| \"cd\")" (after se/split "(f \"ab|cd\")")))
+    (is (nil? (after se/split "a |b")))))
+
+(deftest kill-more-test
+  (testing "to the end and the start of the list"
+    (is (= "(a |)" (after se/kill-list-forward "(a |b c)")))
+    (is (= "b c" (:copy (se/kill-list-forward (snap "(a |b c)")))))
+    (is (= "(|b c)" (after se/kill-list-backward "(a |b c)")))
+    (is (nil? (after se/kill-list-forward "a |b"))))
+  (testing "right: to the end of the line, taking whole any form that starts on it"
+    (is (= "(a |\n b)" (after se/kill-right "(a |x y\n b)")))
+    (is (= "(a |\n c)" (after se/kill-right "(a |(x\n y)\n c)")))
+    (is (= "(a |)" (after se/kill-right "(a |b c)")) "never past the list's closer")
+    (is (= "(f \"ab|\")" (after se/kill-right "(f \"ab|cd\")")) "inside a string, to its closing quote"))
+  (testing "left: to the start of the line, the same way"
+    (is (= "(a\n|y)" (after se/kill-left "(a\n x |y)")))
+    (is (= "(|c)" (after se/kill-left "(a b |c)")))
+    (is (= "(f \"|cd\")" (after se/kill-left "(f \"ab|cd\")"))))
+  (testing "the form before the caret"
+    (is (= "(a | c)" (after se/kill-form-backward "(a b| c)")))
+    (is (= "(a |c)" (after se/kill-form-backward "(a b |c)")))
+    (is (nil? (after se/kill-form-backward "(|a)")))))
+
+(deftest splice-killing-test
+  (is (= "x a | y" (after se/splice-killing-forward "x (a |b c) y")))
+  (is (= "x |c y" (after se/splice-killing-backward "x (a b |c) y")))
+  (is (nil? (after se/splice-killing-forward "a |b"))))
+
+(deftest convolute-test
+  (is (= "(frob (let [x 1] |a b))" (after se/convolute "(let [x 1] (frob |a b))")))
+  (is (= "(g (f |x y))" (after se/convolute "(f (g |x) y)")))
+  (is (nil? (after se/convolute "(f |x)")) "needs a list around the list"))
+
+(deftest wrap-and-rewrap-test
+  (is (= "#{|a} b" (after se/wrap-set "|a b")))
+  (is (= "\"|a\" b" (after se/wrap-quote "|a b")))
+  (is (= "[a |b]" (after se/rewrap-square "(a |b)")))
+  (is (= "(a |b)" (after se/rewrap-round "{a |b}")))
+  (is (= "{a |b}" (after se/rewrap-curly "[a |b]")))
+  (is (= "#{a |b}" (after se/rewrap-set "(a |b)")))
+  (is (= "(a |b)" (after se/rewrap-round "#{a |b}")) "a set's # goes with its brace")
+  (is (= "'[a |b]" (after se/rewrap-square "'(a |b)")) "a quote stays")
+  (is (nil? (after se/rewrap-round "a |b"))))
+
+(deftest more-moves-test
+  (is (= "(a (b c)| d)" (after se/forward-up "(a (b |c) d)")))
+  (is (= "(a (b c|) d)" (after se/backward-down "(a (b c) |d)")))
+  (is (= "(a b c|)" (after se/list-end "(a |b c)")))
+  (is (= "(|a b c)" (after se/list-start "(a b |c)")))
+  (is (nil? (after se/forward-up "a |b")))
+  (is (nil? (after se/backward-down "(|a b)")))
+  (is (nil? (after se/list-end "a |b"))))
