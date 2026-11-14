@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.order-e
-  "Rows 443 to 556 of the window self-test, in the order they run.
+  "Rows 443 to 557 of the window self-test, in the order they run.
   dev/gtk_selftest_window.clj joins the five parts order-a to order-e
   into its row list."
   (:require [gtk-selftest-window.app-open :as app-open]
@@ -132,6 +132,7 @@
    parinfer-rows/row-format-style-project-pin
    parinfer-rows/row-parinfer-mode-change-clears-skip-note
    menus-rows/row-menu-item-runs-and-keys-yield
+   menus-rows/row-menus-follow-your-keys
    prefs-rows/row-prefs-records-a-key
    prefs-rows/row-prefs-asks-before-taking-a-key
    probe-rows/row-probe-part
