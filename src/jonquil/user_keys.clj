@@ -24,6 +24,13 @@
   live
   (atom no-keys))
 
+(defonce ^{:doc "{:reload! (fn []) :open! (fn [])} for the window that owns
+  keys.edn: reload! reads the file again and reports in the console, open!
+  shows it in a tab. The command palette part sets it, and Preferences
+  calls it after it has written the file."}
+  window-fns
+  (atom {}))
+
 (defn keys-path
   "keys.edn's path: beside the settings file at settings-path."
   [settings-path]

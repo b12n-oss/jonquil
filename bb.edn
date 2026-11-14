@@ -399,7 +399,7 @@
    ;; dev/demo_shots.clj's own `scenes` list, the same way dev/check.clj
    ;; and dev/test_runner.clj's namespace lists are.
    :task (let [scene-ids ["window" "repl" "stdin" "stop" "unbalanced" "unicode" "run-while-running"
-                          "find" "run-selection" "close-prompt"
+                          "find" "run-selection" "close-prompt" "prefs-keys"
                           "theme-light" "theme-dark" "theme-solarized" "theme-navy"
                           "theme-gruvbox-dark" "theme-gruvbox-light" "theme-dracula" "theme-nord" "theme-zenburn" "theme-monokai"
                           "theme-tokyo-night" "theme-catppuccin-mocha" "theme-catppuccin-latte" "theme-one-dark" "theme-kanagawa" "theme-rose-pine"

@@ -328,6 +328,30 @@
                   (reset! (:alert-pending? ui) false)
                   (editor/mark-saved! ed)))))))
 
+(defn- scene-prefs-keys
+  "The Preferences window on its Keys tab, the list narrowed to \"run\"
+  and the first row waiting for a key. It is a second window of this
+  process, found and shot by window id like the close prompt's alert."
+  [ui]
+  (go-row :prefs-keys check!
+    (let [pid (own-pid)
+          {w :window :as prefs} (:prefs ui)
+          before-ids (set (map :window-id (await-windows pid 3000 100 seq)))
+          _ (on-gtk ((:open! prefs))
+                    (g/gtk-editable-set-text (:search w) "run"))
+          after (await-windows pid 5000 100
+                               (fn [ws] (some (fn [x] (not (before-ids (:window-id x)))) ws)))
+          shown (some (fn [x] (when-not (before-ids (:window-id x)) x)) after)
+          _ (on-gtk ((:record! prefs) 0))
+          _ (ga/settle 2)
+          {:keys [exit err]} (if shown
+                               (screenshot-by-id (image-path :prefs-keys "png") (:window-id shown))
+                               {:exit 1 :err "cgevent windows never listed the Preferences window"})]
+      (on-gtk ((:on-key prefs) 0xff1b 0)
+              (g/gtk-window-close (:win w))
+              (check! :prefs-keys (zero? exit)
+                      {:window shown :screenshot-exit exit :screenshot-err err})))))
+
 (defn- scene-theme
   "theme-sample.clj (a comment, a string, a keyword, a number, a
   defn and three levels of nested brackets) Run to completion so the
@@ -1072,6 +1096,7 @@
    [:find scene-find]
    [:run-selection scene-run-selection]
    [:close-prompt scene-close-prompt]
+   [:prefs-keys scene-prefs-keys]
    [:theme-light scene-theme-light]
    [:theme-dark scene-theme-dark]
    [:theme-solarized scene-theme-solarized]
