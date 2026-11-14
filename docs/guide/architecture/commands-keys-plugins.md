@@ -12,11 +12,13 @@ Keys and commands are data, and plugins add to that data while Jonquil runs.
 
 - `:key` or `:keys`, with `:mods` that must be held and `:not` that must be up. `:cmd` means Control or Meta on every platform.
 - `:exact #{...}` instead, for exactly that set among Shift, Alt, Control and Meta.
-- `:physical? true` to also match the key the hardware keycode names (macOS Cmd+Option+F/L, where Option changes the keyval). Opt-in per binding.
+- `:alt` among its modifiers, which also lets it match the key the hardware keycode names. On macOS Option changes the keyval (Option+S arrives as ß), so `jonquil.gtk.editor/physical-key` names the key from Apple's keycode table, which is a US layout's. A binding that doesn't name `:alt` never matches that way. `:physical? true` opts a binding in by hand and is no longer needed.
 - `:when`, named conditions that must all hold. They are asked only after key and modifiers match, in order.
 - A command id, or a fixed `:outcome`.
 
 A command answers `:handled` (key used up), `:to-gtk` (let GTK have it) or `:next` (try the next matching binding). `dispatch` returns `:unmatched` when it runs out. The Escape chain (find bar, popovers, inspector, source panel, tree menu, tree, Stop, bare `:to-gtk`) is ordinary bindings in that order.
+
+The live key map of a scope is three layers, first match winning: your own bindings from `keys.edn` (`jonquil.user-keys`), then the plugins', then the shipped ones. `keys.edn` also has a `:remove` list, which drops a plugin's or a shipped binding named by chord and command. A bad entry is skipped and named in the console, and a file that doesn't read loads nothing. `jonquil.keymap/typing-key?` is the one rule for a key that types or moves the caret (everything but the function keys and Escape): a binding on one needs a modifier other than Shift, in `keys.edn` and in the Keys tab alike.
 
 There are two scopes. `window-answer` is the whole of `on-window-key`: a fixed stage lets the focused rename or palette entry keep every key but Escape (`:entry-focused`), then the keymap runs. `editor-answer` runs the preedit yield, the completion popup, the `:editor` keymap, and only then the typing stages (smart enter, auto-pairs, Backspace, Tab). Invariant: no shipped binding may match a plain Return.
 
@@ -28,7 +30,16 @@ There are two scopes. `window-answer` is the whole of `on-window-key`: a fixed s
 - Context menus (`editor-menu`, `console-menu`, `menu-items`) list label, action and command, so an item and its chord run one command. The file tree's menu is a file-operations popover instead.
 - Shipped bindings live in `src/jonquil/keymap.edn`, read at compile time because the installed app has no source tree.
 - `jonquil.palette` (Cmd/Ctrl+Shift+P) is pure: it builds entries from the registry and keymap, filters, and moves the selection. `run-command-in` builds the same ctx the command's key would.
+- `jonquil.structural` holds the structural editing commands as pure functions from a snapshot to an edit op, over `jonquil.commands/form-tree`. The registry applies an op through the editor's `:apply-structural-op!`, which runs that one edit under Parinfer's Paren mode, so Parinfer follows the moved bracket and doesn't move it back.
 - `keymap_shipped_test` pins the shipped keymap: every binding names a registered command and condition, Shift forms sit ahead of plain ones, window and editor chords don't overlap, and the Escape chain keeps its order.
+
+## Preferences and the menus
+
+`jonquil.key-prefs` is the Keys tab as data: its rows from the live key map, the chord a key press stands for, the binding a chord would take a key from, and your `keys.edn` after a recording or a reset. `jonquil.gtk.prefs-window` builds the widgets and `jonquil.gtk.parts.prefs` is the part. The tab writes `keys.edn` whole and has the command palette part reload it, so the tab and a hand edit go through one loader.
+
+`src/jonquil/menus.edn` is the menu layout, read at compile time, and `jonquil.menus` checks it against the registry and gives each item an action name and the first key that runs its command under no condition. `jonquil.gtk.menus` builds a GMenu and one action per command, in a group the window holds under the prefix `menu`. macOS shows the model as the system menu bar and Linux behind a menu button. The part rebuilds the model when your keys or the plugins change.
+
+A menu item that shows a key also fires on that key on macOS, but only when the window's key handler passes the key on; a key the handler answers never reaches the menu (measured with a probe window). The handler passes keys on deliberately, to a focused entry or to the editor. So before it does, for any key a menu could show, it calls the part's `:menu-yield-fn`: the action group comes off the window, GTK finds no action and hands the key to the focused widget, and the group goes back on idle.
 
 ## Plugins
 
