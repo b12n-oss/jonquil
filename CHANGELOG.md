@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Fixed
+
+- `gtk_text_buffer_insert_interactive` now gets its text as a copy the garbage collector can't move, like the four calls fixed in 0.2.1. Only two console rows of the GUI self-tests call it, so the app wasn't affected, but those rows could now and then insert other text than they meant to.
+
 ## [0.2.1] - 2026-11-14
 
 ### Changed

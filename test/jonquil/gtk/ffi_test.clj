@@ -62,6 +62,16 @@
           (is (every? (fn [p] (pos? (g/gtk-text-buffer-insert-interactive-at-cursor buf p -1 1))) parts)
               "each insert is taken")
           (is (= (apply str parts) (g/buffer-text buf)))))
+      (testing "insert at a given place, as the console rows do"
+        (g/gtk-text-buffer-set-text buf "" -1)
+        (let [parts (mapv #(str "placed " % " abcdefghij\n") (range 60))]
+          (is (every? (fn [p]
+                        (let [n (g/gtk-text-buffer-get-char-count buf)]
+                          (g/with-iters* buf n n
+                            (fn [a _] (pos? (g/gtk-text-buffer-insert-interactive buf a p -1 1))))))
+                      parts)
+              "each insert is taken")
+          (is (= (apply str parts) (g/buffer-text buf)))))
       ;; gtk-editable-set-text is wrapped the same way. An entry needs a
       ;; display, so the window self-tests cover it, not this test.
       (finally (g/g-object-unref buf)))))
