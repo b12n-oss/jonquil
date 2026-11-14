@@ -1157,6 +1157,34 @@
 ;; *detailed_action). Both fixed arity.
 (ffi/defcfn g-menu-new "g_menu_new" [] :pointer)
 (ffi/defcfn g-menu-append "g_menu_append" [:pointer :string :string] :void)
+;; The window's menus (jonquil.gtk.menus). gio/gmenu.h: GMenuItem
+;; *g_menu_item_new (label, detailed_action), void
+;; g_menu_item_set_attribute_value (item, attribute, GVariant*), void
+;; g_menu_append_item (menu, item), void g_menu_append_submenu (menu, label,
+;; GMenuModel*), void g_menu_append_section (menu, label or NULL,
+;; GMenuModel*). glib/gvariant.h: GVariant *g_variant_new_string (string).
+;; Each copies the strings it is given before it returns.
+(ffi/defcfn g-menu-item-new "g_menu_item_new" [:string :string] :pointer)
+(ffi/defcfn g-menu-item-set-attribute-value "g_menu_item_set_attribute_value" [:pointer :string :pointer] :void)
+(ffi/defcfn g-menu-append-item "g_menu_append_item" [:pointer :pointer] :void)
+(ffi/defcfn g-menu-append-submenu "g_menu_append_submenu" [:pointer :string :pointer] :void)
+(ffi/defcfn g-menu-append-section "g_menu_append_section" [:pointer :pointer :pointer] :void)
+(ffi/defcfn g-variant-new-string "g_variant_new_string" [:string] :pointer)
+;; gtkapplication.h: void gtk_application_set_menubar (GtkApplication*,
+;; GMenuModel*); gtkwindow.h: GtkApplication *gtk_window_get_application
+;; (GtkWindow*). gtkmenubutton.h: gtk_menu_button_new (void),
+;; gtk_menu_button_set_menu_model (button, GMenuModel*),
+;; gtk_menu_button_set_label (button, label).
+(ffi/defcfn gtk-application-set-menubar "gtk_application_set_menubar" [:pointer :pointer] :void)
+(ffi/defcfn gtk-window-get-application "gtk_window_get_application" [:pointer] :pointer)
+(ffi/defcfn gtk-menu-button-new "gtk_menu_button_new" [] :pointer)
+(ffi/defcfn gtk-menu-button-set-menu-model "gtk_menu_button_set_menu_model" [:pointer :pointer] :void)
+(ffi/defcfn gtk-menu-button-set-label "gtk_menu_button_set_label" [:pointer :string] :void)
+;; gtkwidget.h: gboolean gtk_widget_activate_action_variant (widget, name,
+;; GVariant *args or NULL): TRUE when an action of that name was found from
+;; the widget up. The self-tests ask it whether the window still offers a
+;; menu action.
+(ffi/defcfn gtk-widget-activate-action-variant "gtk_widget_activate_action_variant" [:pointer :string :pointer] :int)
 ;; glib-2.0/gio/gsimpleactiongroup.h:70 GSimpleActionGroup *
 ;; g_simple_action_group_new (void). Fixed arity. GSimpleActionGroup
 ;; implements both GActionMap and GActionGroup, so the existing

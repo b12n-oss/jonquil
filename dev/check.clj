@@ -19,6 +19,7 @@
     jonquil.parts.layouts
     jonquil.parts.locations
     jonquil.parts.plugins
+    jonquil.parts.menus
     jonquil.parts.prefs
     jonquil.parts.processes
     jonquil.parts.breakpoints
@@ -103,6 +104,7 @@
     jonquil.command-registry
     jonquil.palette
     jonquil.key-prefs
+    jonquil.menus
     jonquil.debugger
     jonquil.describe
     jonquil.restarts
@@ -153,6 +155,7 @@
     jonquil.gtk.breakpoints
     jonquil.gtk.trace-pane
     jonquil.gtk.change-sets-pane
+    jonquil.gtk.menus
     jonquil.gtk.prefs-window
     jonquil.gtk.processes-pane
     jonquil.gtk.docs-pane
@@ -169,6 +172,7 @@
     jonquil.gtk.parts.layouts
     jonquil.gtk.parts.locations
     jonquil.gtk.parts.plugins
+    jonquil.gtk.parts.menus
     jonquil.gtk.parts.prefs
     jonquil.gtk.parts.processes
     jonquil.gtk.parts.breakpoints

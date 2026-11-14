@@ -15,6 +15,7 @@
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.window.status :as win-status]
+            [jonquil.keymap :as km]
             [jonquil.plugin-registry :as plugin-registry]))
 
 ;; --- window commands: F6 focus toggle, clear console, zoom -----------------
@@ -121,6 +122,14 @@
              :ran ran}))
     (catch :default _ nil)))
 
+(defn menu-could-take?
+  "Whether a menu item could show the key keyval under state as its own: a
+  key held with Control, Meta or Alt, or one that doesn't type (a function
+  key, Escape). Plain typing never is a menu's key, so it skips the yield."
+  [keyval state]
+  (or (pos? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK g/ALT-MASK)))
+      (if-let [n (km/key-name keyval)] (not (km/typing-key? n)) false)))
+
 (defn- answer-window-key!
   "Runs the window keymap for the key k (on-window-key's key map) through
   jonquil.command-registry/window-answer, the live plugins' :window
@@ -204,7 +213,11 @@
           (if (and (:key? k) (some-> (:describe-pending ctx) (compare-and-set! true false)))
             ;; it answers a pending Describe Key: described, never run
             (describe-key! ctx k)
-            (answer-window-key! ctx kctx k)))
+            (let [answer (answer-window-key! ctx kctx k)]
+              ;; a key passed on is the focused widget's, never the menus'
+              (when (and (zero? answer) (menu-could-take? keyval state))
+                (when-let [yield! (:menu-yield-fn ctx)] (yield!)))
+              answer)))
         (catch :default e
           (win-status/set-status! status-label (str "; key: " (ex-message e)))
           1)))))
