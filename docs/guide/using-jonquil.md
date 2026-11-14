@@ -382,10 +382,11 @@ purpose.
 - F6 switches focus between editor and console. Cmd/Ctrl+L clears the
   console; Cmd/Ctrl+Shift+L clears only the last entry.
 - Cmd/Ctrl+= , - and 0 zoom in, out and reset.
-- Structural editing moves brackets and whole forms: slurp, barf, raise,
-  splice, wrap, kill and copy a form, and moves by form. Ctrl+Alt+Right
-  slurps and Ctrl+Alt+Left barfs; the rest are under Edit > Structure
-  ([Keys](keys.md) lists them all).
+- Structural editing moves brackets and whole forms, following Calva's
+  paredit: slurp, barf, raise, splice, wrap, drag, transpose, join, split,
+  kill, and select and move by form. Ctrl+Alt+Right slurps and Ctrl+Alt+Left
+  barfs; all of them are under Edit > Structure
+  ([Structural editing](structural-editing.md) shows each one).
 - Preferences (Cmd/Ctrl+comma) has a Keys tab where you click a command's
   key and press a new one ([Your own keys](keys.md#your-own-keys)).
 

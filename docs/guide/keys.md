@@ -101,40 +101,30 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 <details>
 <summary><strong>Structural editing</strong></summary>
 
-These move brackets and whole forms, so the code stays balanced. They add
-to what you have: the arrow keys, Backspace and Delete work as before, and
-Parinfer works with or without them. With Parinfer on, the indentation
-follows the bracket a command moved, in every mode.
+[Structural editing](structural-editing.md) shows every command with a
+before and an after. These are the ones with a key:
 
-Most have the keys Calva uses. Raise, Copy form and the four moves have
-none. All of them are under Edit > Structure in the menus and in the
+| Key | Command |
+|---|---|
+| Ctrl+Alt+Right, or Ctrl+Alt+. | Slurp forward |
+| Ctrl+Alt+Left, or Ctrl+Alt+, | Barf forward |
+| Ctrl+Alt+Shift+Left | Slurp backward |
+| Ctrl+Alt+Shift+Right | Barf backward |
+| Ctrl+Alt+S | Splice |
+| Ctrl+Alt+Shift+P, S, C, E or Q | Wrap in `()`, `[]`, `{}`, `#{}` or `""` |
+| Alt+Up, Alt+Down | Drag the form backward, forward |
+| Ctrl+Alt+T | Transpose |
+| Ctrl+Shift+J | Join |
+| Ctrl+Shift+C | Convolute |
+| Ctrl+Shift+Delete | Kill form |
+| Ctrl+Alt+Backspace | Kill the form before the caret |
+| Ctrl+Alt+Shift+Delete, Backspace | Splice, killing forward or backward |
+| Ctrl+Alt+Down, Ctrl+Alt+Up | Out past the list's end, into the list before |
+
+The keys use Control on every system, a Mac included, where Alt is Option.
+The other commands have no key: they are under Edit > Structure and in the
 command palette, and [Preferences](#your-own-keys) can give any of them a
 key.
-
-| Key | Command | Does |
-|---|---|---|
-| Ctrl+Alt+Right, or Ctrl+Alt+. | Slurp forward | The list around the caret takes in the next form: `(a\|) b` becomes `(a\| b)` |
-| Ctrl+Alt+Left, or Ctrl+Alt+, | Barf forward | The list gives up its last form: `(a\| b)` becomes `(a\|) b` |
-| Ctrl+Alt+Shift+Left | Slurp backward | The list takes in the form before it: `a (\|b)` becomes `(a \|b)` |
-| Ctrl+Alt+Shift+Right | Barf backward | The list gives up its first form: `(a \|b)` becomes `a (\|b)` |
-| Ctrl+Shift+Delete | Kill form | Removes the form at the caret and copies it to the clipboard |
-| Ctrl+Alt+S | Splice | The list around the caret loses its brackets |
-| Ctrl+Alt+Shift+P, S or C | Wrap in `()`, `[]` or `{}` | Wraps the form at the caret |
-| none | Raise | The form at the caret replaces the list around it: `(a \|b c)` becomes `\|b` |
-| none | Copy form | Copies the form at the caret |
-| none | Move forward, backward, up, down by a form | Moves the caret over whole forms, out of a list, or into the next one |
-
-In the examples `|` marks the caret. Each command is one undo step. The
-keys use Control on every system, a Mac included. On Linux, Ctrl+Alt+Right
-and Left often switch workspaces, so Ctrl+Alt+. and Ctrl+Alt+, do the same
-job. Inside a list that isn't closed yet, these commands do nothing.
-
-On a Mac, Option changes the character a key sends, so Jonquil matches a
-key held with Option by its position on a US keyboard. On another layout
-(Dvorak, Colemak, AZERTY, QWERTZ) a binding written as Ctrl+Alt+S fires on
-the key that sits where S does on a US keyboard. That is true of every
-binding with Alt, your own in `keys.edn` included. Linux matches the
-letter itself.
 
 </details>
 

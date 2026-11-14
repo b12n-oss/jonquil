@@ -224,14 +224,27 @@
                     _ (place! 5)
                     spliced (letter! 0xdf 1 \s ctrl-alt)
                     _ (place! 3)
-                    wrapped (letter! 0x100220f 35 \p (bit-or ctrl-alt g/SHIFT-MASK))]
+                    wrapped (letter! 0x100220f 35 \p (bit-or ctrl-alt g/SHIFT-MASK))
+                    ;; the second batch: Alt+Down drags, Ctrl+Alt+Backspace kills
+                    ;; the form before, Ctrl+Shift+J joins
+                    _ (editor/set-text! ed "(a b c)")
+                    _ (place! 1)
+                    dragged (second (press! "Down" g/ALT-MASK))
+                    _ (editor/set-text! ed "(a b c)")
+                    _ (place! 4)
+                    killed-back (second (press! "BackSpace" ctrl-alt))
+                    _ (editor/set-text! ed "(a) (b)")
+                    _ (place! 3)
+                    joined (second (press! "j" (bit-or g/CONTROL-MASK g/SHIFT-MASK)))]
                 (check :edit-structural-keys
                        (and (= [1 "(a b) c"] slurp1) (= [1 "(a b c)"] slurp2) (= [1 "(a b) c"] barf)
                             (= [1 "(a) c"] kill) (= 2 caret) (= "(a b) c" undone)
                             (= [1 "(a)"] none)
-                            (= "(a b c)" spliced) (= "(a (b) c)" wrapped))
+                            (= "(a b c)" spliced) (= "(a (b) c)" wrapped)
+                            (= "(b a c)" dragged) (= "(a  c)" killed-back) (= "(a b)" joined))
                        {:slurp1 slurp1 :slurp2 slurp2 :barf barf :kill kill :caret caret
-                        :undone undone :none none :spliced spliced :wrapped wrapped}))))))
+                        :undone undone :none none :spliced spliced :wrapped wrapped
+                        :dragged dragged :killed-back killed-back :joined joined}))))))
 
 (defn row-edit-format-all [ed]
   (go-row :edit-format-all check

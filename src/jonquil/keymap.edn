@@ -47,7 +47,7 @@
   {:key "s" :mods #{:cmd :shift} :not #{:alt} :command :file/save-as}
   {:key "s" :mods #{:cmd} :not #{:alt} :command :file/save}
   {:key "w" :mods #{:cmd} :command :tab/close}
-  {:key "e" :mods #{:cmd :shift} :command :tree/toggle}
+  {:key "e" :mods #{:cmd :shift} :not #{:alt} :command :tree/toggle}
   {:key "e" :mods #{:cmd} :not #{:shift} :command :run/selection}
   ;; :not #{:alt}: Cmd+Alt+L and Cmd+Alt+F are the editor's format chords,
   ;; and Cmd+Shift+F (format all) is the editor's too
@@ -81,7 +81,7 @@
   {:key "8" :mods #{:cmd} :command :tab/select :args {:n 8}}
   ;; 9 is the last tab, whatever the count
   {:key "9" :mods #{:cmd} :command :tab/select :args {:n 9}}
-  {:key "t" :mods #{:cmd} :command :tab/new}
+  {:key "t" :mods #{:cmd} :not #{:alt} :command :tab/new}
   {:key "m" :mods #{:cmd :shift} :command :view/cycle-theme}
   {:key "i" :mods #{:cmd :shift} :command :inspect/form}
   {:key "i" :mods #{:cmd} :command :inspect/last}
@@ -139,4 +139,17 @@
   {:key "s" :exact #{:ctrl :alt} :command :paredit/splice}
   {:key "p" :exact #{:ctrl :alt :shift} :command :paredit/wrap-round}
   {:key "s" :exact #{:ctrl :alt :shift} :command :paredit/wrap-square}
-  {:key "c" :exact #{:ctrl :alt :shift} :command :paredit/wrap-curly}]}
+  {:key "c" :exact #{:ctrl :alt :shift} :command :paredit/wrap-curly}
+  {:key "e" :exact #{:ctrl :alt :shift} :command :paredit/wrap-set}
+  {:key "q" :exact #{:ctrl :alt :shift} :command :paredit/wrap-quote}
+  {:key "t" :exact #{:ctrl :alt} :command :paredit/transpose}
+  ;; Alt+Up and Alt+Down drag a form, where VS Code drags a line
+  {:key "Up" :exact #{:alt} :command :paredit/drag-backward}
+  {:key "Down" :exact #{:alt} :command :paredit/drag-forward}
+  {:key "Up" :exact #{:ctrl :alt} :command :paredit/backward-down}
+  {:key "Down" :exact #{:ctrl :alt} :command :paredit/forward-up}
+  {:key "BackSpace" :exact #{:ctrl :alt} :command :paredit/kill-form-backward}
+  {:key "Delete" :exact #{:ctrl :alt :shift} :command :paredit/splice-killing-forward}
+  {:key "BackSpace" :exact #{:ctrl :alt :shift} :command :paredit/splice-killing-backward}
+  {:key "j" :exact #{:ctrl :shift} :command :paredit/join}
+  {:key "c" :exact #{:ctrl :shift} :command :paredit/convolute}]}

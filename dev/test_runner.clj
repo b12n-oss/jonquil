@@ -33,6 +33,7 @@
     jonquil.key-prefs-test
     jonquil.menus-test
     jonquil.structural-test
+    jonquil.structural-docs-test
     jonquil.settings-test
     jonquil.paint-test
     jonquil.syntax-test
