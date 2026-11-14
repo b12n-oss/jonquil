@@ -90,7 +90,9 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          grep -v '^#' ci/linux-known-failures.txt | sed '/^$/d' | sort -u > known.txt
+          # grep exits 1 when the file holds only comments, which is the
+          # usual state: no known failures.
+          { grep -v '^#' ci/linux-known-failures.txt || true; } | sed '/^$/d' | sort -u > known.txt
           { grep -E '^\[[^]]+\] [^ ]+ FAIL ' selftest.log || true; } | sed -E 's/^\[[^]]*\] //; s/ FAIL .*//' | sort -u > failed.txt
           comm -23 failed.txt known.txt > new.txt
           comm -13 failed.txt known.txt > fixed.txt
@@ -114,7 +116,7 @@ jobs:
           if [ -s new.txt ]; then echo "::error::new failing rows on Linux: $(tr '\n' ' ' < new.txt)"; exit 1; fi
           # A non-zero exit with no failed row at all (a crash between suites) fails too.
           if [ "${status:-1}" != "0" ] && [ ! -s failed.txt ]; then echo "::error::linux:selftest exited ${status:-?} without a failed row"; exit 1; fi
-          echo "only known rows failed: $(tr '\n' ' ' < failed.txt)"
+          if [ -s failed.txt ]; then echo "only known rows failed: $(tr '\n' ' ' < failed.txt)"; else echo "every row passed"; fi
 
       - name: Upload the self-test log
         if: always()
