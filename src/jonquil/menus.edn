@@ -108,6 +108,7 @@
               {:command :run/form :label "Run Form"}
               {:command :run/changed :label "Run Changed Forms"}
               {:command :run/stop :label "Stop"}]
+             [{:command :run/reset-on-run :label "Reset on Run"}]
              [{:command :inspect/form :label "Inspect Form"}
               {:command :inspect/last :label "Inspect Last Result"}
               {:command :run/time-form :label "Time Form"}]

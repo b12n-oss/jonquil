@@ -150,7 +150,9 @@
     (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
     (g/gtk-scrolled-window-set-child scroll lb)
     (g/gtk-widget-set-vexpand scroll 1)
-    (g/gtk-search-entry-set-placeholder-text search "Search commands and keys")
+    ;; GTK 4.10 added the placeholder; an older GTK goes without it
+    (try (g/gtk-search-entry-set-placeholder-text search "Search commands and keys")
+         (catch Throwable _ nil))
     (g/gtk-label-set-xalign message 0.0)
     (g/gtk-label-set-wrap message 1)
     (g/gtk-widget-set-hexpand message 1)

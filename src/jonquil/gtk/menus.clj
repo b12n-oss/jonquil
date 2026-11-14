@@ -51,14 +51,20 @@
     bar))
 
 (defn actions!
-  "A GSimpleActionGroup with one action per command of tree. Activating
-  one calls (run! command-id); a throw goes to (on-error message), never
-  into GTK, where it would end the process."
-  [tree run! on-error]
-  (let [group (g/g-simple-action-group-new)]
+  "{:group :by-id}: a GSimpleActionGroup with one action per command of
+  tree, and each action by its command id. Activating one calls (run!
+  command-id); a throw goes to (on-error message), never into GTK, where it
+  would end the process. A command in ticked, a set of ids, gets a boolean
+  state, which the menus draw as a tick (check! sets it)."
+  [tree run! on-error ticked]
+  (let [group (g/g-simple-action-group-new)
+        by-id (volatile! {})]
     (doseq [menu tree
             {:keys [command action]} (menus/items menu)]
-      (let [a (g/g-simple-action-new action ffi/null)]
+      (let [a (if (contains? ticked command)
+                (g/g-simple-action-new-stateful action ffi/null (g/g-variant-new-boolean 0))
+                (g/g-simple-action-new action ffi/null))]
+        (vswap! by-id assoc command a)
         (g/g-signal-connect-data a "activate"
                                  (callable (fn [_action _param _data]
                                              (try (run! command)
@@ -68,7 +74,15 @@
                                            [:pointer :pointer :pointer] :void)
                                  ffi/null ffi/null g/CONNECT-DEFAULT)
         (g/g-action-map-add-action group a)))
-    group))
+    {:group group :by-id @by-id}))
+
+(defn check!
+  "Ticks or unticks a stateful action, and greys it out when it can't be
+  changed now."
+  [action on? enabled?]
+  (g/g-simple-action-set-state action (g/g-variant-new-boolean (if on? 1 0)))
+  (g/g-simple-action-set-enabled action (if enabled? 1 0))
+  nil)
 
 (defn attach!
   "Puts group on win under PREFIX, so the menus find their actions."
@@ -92,12 +106,3 @@
   activates the action when it does, so only a test asks."
   [win id]
   (pos? (g/gtk-widget-activate-action-variant win (str PREFIX "." (menus/action-name id)) ffi/null)))
-
-(defn menu-button!
-  "A button that opens a popover menu, for a system with no menu bar of its
-  own. gtk-menu-button-set-menu-model gives it its menus."
-  []
-  (let [b (g/gtk-menu-button-new)]
-    (g/gtk-menu-button-set-label b "☰")
-    (g/gtk-widget-set-tooltip-text b "Menu")
-    b))

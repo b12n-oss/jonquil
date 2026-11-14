@@ -292,14 +292,21 @@
   (go-row :nrepl-completion-from-child support/check
     ;; waits for greet's var: an idle check alone could pass before the
     ;; Run started, and then the child had no greet to offer (one gate run)
-    (let [[ran? _] (run-and-await ui fixture-core 5000 #(str/includes? % "#'demo.core/greet"))]
-      (on-gtk (let [ed (:editor ui)]
-                (editor/set-text! ed "(gre")
-                (support/place-cursor! (:buf ed) 4)
-                ((:complete!* ui))
-                (support/check :nrepl-completion-from-child
-                               (and ran? (= "(greet" (editor/editor-text ed)))
-                               {:ran ran? :text (editor/editor-text ed)}))))))
+    (let [[ran? _] (run-and-await ui fixture-core 5000 #(str/includes? % "#'demo.core/greet"))
+          ed (:editor ui)
+          _ (on-gtk (editor/set-text! ed "(gre")
+                    (support/place-cursor! (:buf ed) 4))
+          ;; Completion waits about 25 ms for the child, then opens the popup
+          ;; without it and merges the child's names in when they land. A
+          ;; single press commits only when the child answered inside that
+          ;; wait, which a slow machine misses (it failed one Linux CI run).
+          ;; So press until the candidate commits: a press with the popup
+          ;; open and one candidate in it commits that one.
+          done? (await-until 5000 100 #(or (= "(greet" (editor/editor-text ed))
+                                           (do ((:complete!* ui)) (= "(greet" (editor/editor-text ed)))))]
+      (on-gtk (support/check :nrepl-completion-from-child
+                             (and ran? done?)
+                             {:ran ran? :text (editor/editor-text ed)})))))
 
 (defn row-nrepl-jump-to-another-file
   "F12 on demo.util/helper after the child has required demo.util: the

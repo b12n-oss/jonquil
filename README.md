@@ -6,7 +6,7 @@ Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, a
 
 **Status: alpha.** The window and its menus, editing, structural editing, Parinfer (off by default), key bindings you can change in Preferences, themes (including one that follows macOS light and dark), help, plugins and an MCP server for agents all work. So do these dialects: Jolt in or out of process; JVM Clojure; ClojureDart (experimental); ClojureScript (experimental), attached to a shadow-cljs server you started or launched on node or in a browser tab; any other nREPL server you started, such as babashka or Basilisp; and jank (experimental), which Jonquil launches itself.
 
-![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
+![Jonquil's window: a header bar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
 See the [guide](docs/guide/index.md), starting with [Using Jonquil](docs/guide/using-jonquil.md), for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, structural editing, Parinfer, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys and how to change them.
 
@@ -81,7 +81,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-14, 2239 tests pass (14666 assertions, on macOS).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-14, 2240 tests pass (14688 assertions, on macOS).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>

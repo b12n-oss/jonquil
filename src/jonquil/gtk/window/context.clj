@@ -81,9 +81,9 @@
 (defn- panel-wctx
   "The part of the parts' wctx about the panes: the tree, the right-hand
   slot and its panels, alerts, and the run fns. w is build-parts's."
-  [{:keys [right tree-pane tree-paned paned files-btn panel-focus-fn unread-label pending-label]}]
+  [{:keys [right tree-pane tree-paned paned files-btn menu-btn reset-chk panel-focus-fn unread-label pending-label]}]
   {:right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
-   :files-btn files-btn :panel-focus-fn panel-focus-fn
+   :files-btn files-btn :menu-btn menu-btn :reset-chk reset-chk :panel-focus-fn panel-focus-fn
    :showing-panel win-right-slot/showing-panel :show-right-panel! win-right-slot/show-right-panel!
    :hide-right-panel! win-right-slot/hide-right-panel!
    :alert-pending? win-alerts/alert-pending? :show-alert! win-alerts/show-alert!

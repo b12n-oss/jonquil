@@ -16,6 +16,7 @@ everything that shipped before that.
 
 ### Changed
 
+- The window's toolbar is now a header bar, as in gedit: Files, Open and a new-tab button on the left, the open file's name over its folder in the middle, and Run, Stop and Save on the right, each with a tooltip that names its key. On a Mac the window buttons are the system's own. On Linux the menu button sits at the end of the bar. Reset on Run moved from a checkbox in the toolbar to the Run menu, where a tick shows it is on, and to the command palette; the status bar says when it is off.
 - A key binding that holds Alt now works on a Mac for every letter, digit and named punctuation key, in the shipped keys, in `keys.edn` and when the Keys tab records one. Option changes the character a key sends, so the key is matched by its position, which until now was done only for F, L, P and the digits and needed `:physical? true` on the binding. The positions are a US keyboard's, so on another layout such a binding fires on the key that sits where the letter does on a US one. Save, Save As, the palette and the Parinfer key no longer fire when Alt (or, for Parinfer, Shift) is also held, which on Linux had taken Ctrl+Alt+S and its neighbours.
 - Work now merges into a `develop` branch, and `develop` merges into `main` when the work on it is ready. CI runs on pushes to both, both have the same branch rule, and the contributing pages say to open pull requests against `develop`.
 

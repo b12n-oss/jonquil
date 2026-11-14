@@ -8,7 +8,7 @@
    :digit-tab-fn :new-tab-fn :theme-cycle-fn :inspect-form-fn :inspect-last-fn :step-tab-fn
    :open-palette-fn :reload-plugins-fn :review-proposals-fn :plugins-list-fn :parinfer-fn
    :describe-key-fn :key-bindings-fn :recent-keys-fn :version-fn :install-cli-fn :remove-cli-fn
-   :open-keys-file-fn :reload-keys-fn :prefs-open-fn
+   :open-keys-file-fn :reload-keys-fn :prefs-open-fn :reset-toggle-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
    :replay-open-fn :replay-forget-fn :change-set-make-fn :change-set-list-fn
@@ -41,7 +41,7 @@
    :help/recent-keys [:recent-keys-fn] :help/version [:version-fn]
    :help/install-cli [:install-cli-fn] :help/remove-cli [:remove-cli-fn]
    :help/open-keys-file [:open-keys-file-fn] :help/reload-keys [:reload-keys-fn]
-   :prefs/open [:prefs-open-fn]
+   :prefs/open [:prefs-open-fn] :run/reset-on-run [:reset-toggle-fn]
    :locations/uses [:locations-uses-fn] :locations/definitions [:locations-definitions-fn]
    :locations/matches [:locations-matches-fn]
    :locations/usages-in-project [:locations-project-usages-fn]

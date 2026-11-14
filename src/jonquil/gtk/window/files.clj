@@ -19,17 +19,49 @@
   (let [i (str/last-index-of path "/")]
     (if i (subs path (inc i)) path)))
 
+(defonce ^{:doc "window -> {:title label :subtitle label}, the header bar's
+  two title labels, which update-title! fills beside the window's own
+  title. jonquil.gtk.window.layout registers a window's when it places them."}
+  title-labels
+  (atom {}))
+
+(defn register-title-labels!
+  "Has update-title! fill win's header bar labels from now on."
+  [win title-label subtitle-label]
+  (swap! title-labels assoc win {:title title-label :subtitle subtitle-label})
+  nil)
+
+(defn folder-text
+  "The folder of path as the header bar shows it under the file's name:
+  home written as ~, a long folder outside home cut to its last two parts
+  after an ellipsis, and \"\" for a buffer with no file."
+  [path home]
+  (if-let [i (when path (str/last-index-of path "/"))]
+    (let [dir (if (zero? i) "/" (subs path 0 i))
+          parts (remove str/blank? (str/split dir #"/"))]
+      (cond
+        (and (seq home) (or (= dir home) (str/starts-with? dir (str home "/"))))
+        (str "~" (subs dir (count home)))
+        (> (count parts) 3) (str "…/" (str/join "/" (take-last 2 parts)))
+        :else dir))
+    ""))
+
 (defn update-title!
   "\"<name> - Jonquil\", name the file's basename or Untitled, prefixed with
-  \"* \" while dirty. GTK-thread only -- every caller already is one:
-  button/key handlers, the dialog callbacks, the dirty-changed callback, and
-  self-test rows (all invoked from g_timeout_add ticks)."
+  \"* \" while dirty, as the window's title, and the same name over the
+  file's folder in the header bar. GTK-thread only -- every caller already
+  is one: button/key handlers, the dialog callbacks, the dirty-changed
+  callback, and self-test rows (all invoked from g_timeout_add ticks)."
   [ed win path-atom]
-  (g/gtk-window-set-title
-   win
-   (str (when (editor/dirty? ed) "* ")
-        (if-let [p @path-atom] (file-name p) "Untitled")
-        " - Jonquil")))
+  (let [path @path-atom
+        shown (str (when (editor/dirty? ed) "* ") (if path (file-name path) "Untitled"))]
+    (g/gtk-window-set-title win (str shown " - Jonquil"))
+    (when-let [{:keys [title subtitle]} (get @title-labels win)]
+      (let [folder (folder-text path (System/getProperty "user.home"))]
+        (g/gtk-label-set-text title shown)
+        (g/gtk-label-set-text subtitle folder)
+        ;; with no folder the line goes, so the name sits in the middle
+        (g/gtk-widget-set-visible subtitle (if (= "" folder) 0 1))))))
 
 ;; --- file dialogs ---------------------------------------------------------
 
