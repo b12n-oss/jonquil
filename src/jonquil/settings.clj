@@ -35,7 +35,9 @@
      (str base "/jonquil/settings.edn"))))
 
 (defn- theme-part
-  "{:theme k} from the file's map m, plus :warning when m can't give one."
+  "{:theme k} from the file's map m, plus :warning when m names a theme
+  Jonquil doesn't have or isn't a map. A map with no :theme is the default
+  theme without a warning: the file may set only other keys."
   [path m]
   (cond
     (= ::unreadable m)
@@ -44,6 +46,9 @@
 
     (and (map? m) (theme/choice? (:theme m)))
     {:theme (:theme m)}
+
+    (and (map? m) (not (contains? m :theme)))
+    {:theme theme/default-theme}
 
     :else
     {:theme theme/default-theme

@@ -32,6 +32,7 @@
     jonquil.user-keys-test
     jonquil.key-sets-test
     jonquil.slow-events-test
+    jonquil.guide-examples-test
     jonquil.key-prefs-test
     jonquil.menus-test
     jonquil.structural-test

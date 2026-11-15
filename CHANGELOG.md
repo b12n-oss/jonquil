@@ -10,6 +10,14 @@ everything that shipped before that.
 
 - A log of what held the window up. Jonquil times every GTK callback from the start, and one that takes 50 ms or longer is kept with the namespace and line that made it. List the slow events, in the Help menu and the command palette, prints the sites by cost and the newest events in the console. Save the slow events to a file writes the same report, with the Jonquil version and the system, beside `settings.edn` as `slow-events-<date>-<time>.txt`, to attach to a bug report. The log holds the newest 200 events. Timing a callback costs about 0.3 microseconds in a measurement on an Apple Silicon Mac. The bug report form now asks for this list when Jonquil was slow.
 
+### Changed
+
+- The guide's examples are checked by the tests. Each Clojure and EDN block in the README and the guide is read by the code that reads the real file: a `settings.edn` example by the settings loader, a `keys.edn` example by the key reader, a `.jonquil.edn` example by the project reader, and each plugin by the plugin check. A new block fails the suite until `guide_examples_test` says what kind it is.
+
+### Fixed
+
+- A `settings.edn` with no `:theme` no longer warns "has no known :theme" at every start. A file that sets only other keys, such as the guide's own `{:mcp-listen? true}`, gets the default theme without a warning. A theme Jonquil doesn't have still warns. The new guide test found this.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added
