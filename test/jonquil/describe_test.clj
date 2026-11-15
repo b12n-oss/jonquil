@@ -49,6 +49,14 @@
       (is (= [:find/bar-key [:find-bar-focused]] ((juxt :command :when) (first ms))))
       (is (= :to-gtk (:outcome (last ms)))))))
 
+(deftest key-sequence-test
+  (let [raise {:key "p" :exact #{:ctrl :alt} :then [{:key "r" :exact #{:ctrl :alt}}] :command :file/save}
+        ms (d/key-matches {:keymap {:window [raise] :editor []} :commands registry/commands
+                           :keyval (km/key-value "p") :state (bit-or (:ctrl M) (:alt M)) :os "Linux"})]
+    (is (= ["Ctrl+Alt+P Ctrl+Alt+R"] (map :sequence ms)))
+    (is (= ["; Ctrl+Alt+P starts Ctrl+Alt+P Ctrl+Alt+R, which runs Save the buffer. (:file/save, built-in, window)"]
+           (d/describe-lines "Ctrl+Alt+P" ms)))))
+
 (deftest describe-lines-test
   (is (some #(str/includes? % "runs Save the buffer. (:file/save, built-in, window)")
             (d/describe-lines "Cmd+S" (mac-matches "s" (:meta M)))))

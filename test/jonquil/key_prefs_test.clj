@@ -196,3 +196,62 @@
   (is (true? (kp/hand-comments? "{:window []} ; my note")))
   (is (true? (kp/hand-comments? (str uk/template "\n;; mine\n"))))
   (is (false? (kp/hand-comments? "{:window [{:key \"x\" :command :x :args {:s \"a;b\"}}]}")) "a ; in a string is no comment"))
+
+(deftest press-step-test
+  (let [ctrl (get km/MODIFIER-MASKS :ctrl)]
+    (testing "a later step may be a key that types"
+      (is (= {:chord {:key "k"}} (kp/press-step (km/key-value "k") 0 mac nil))))
+    (is (= {:chord {:key "k" :mods #{:ctrl}}} (kp/press-step (km/key-value "k") ctrl mac nil)))
+    (is (= {:waiting true} (kp/press-step 0xffe3 ctrl mac nil)) "Control alone waits")))
+
+(deftest add-step-test
+  (let [chord {:key "e" :mods #{:cmd}}
+        step {:key "k" :mods #{:ctrl}}
+        row (fn [user i] (nth (rows user) i))
+        opts {:commands commands :conditions {:window #{:evaluating} :editor #{}}}]
+    (testing "a step added to one of your keys changes it in place"
+      (let [u0 (kp/record uk/no-keys (row uk/no-keys 1) chord nil)
+            u (kp/add-step u0 (first (rows u0)) step nil)]
+        (is (= [{:key "e" :mods #{:cmd} :then [step] :command :run/run}] (:window u)))
+        (testing "and another goes after it"
+          (is (= [step {:key "j"}]
+                 (:then (first (:window (kp/add-step u (first (rows u)) {:key "j"} nil)))))))
+        (testing "the file keeps the steps"
+          (is (= (assoc u :problems []) (uk/read-keys (kp/file-text u) opts))))
+        (testing "recording one chord over it drops the steps"
+          (is (= [{:key "F9" :command :run/run}]
+                 (:window (kp/record u (first (rows u)) {:key "F9"} nil)))))))
+    (testing "a step added to Jonquil's key makes it yours and removes the old one"
+      (let [u (kp/add-step uk/no-keys (row uk/no-keys 1) step nil)]
+        (is (= [(assoc run-r :then [step])] (:window u)))
+        (is (= [(select-keys run-r [:key :mods :command])] (:remove u)))))))
+
+(deftest sequences-on-test
+  (let [a {:key "r" :mods #{:ctrl :alt}}
+        p1 (assoc a :then [{:key "p"}] :command :view/zoom)
+        p2 (assoc a :then [{:key "s"}] :command :file/save)
+        km {:window [p1 save p2] :editor []}
+        on (fn [command chord] (kp/sequences-on {:keymap km :command command :os mac} chord))]
+    (is (= [{:scope :window :binding p1} {:scope :window :binding p2}] (on :run/run a)))
+    (is (= [{:scope :window :binding p2}] (on :view/zoom a)) "its own don't count")
+    (is (= [] (on :run/run {:key "s" :mods #{:cmd}})) "a single key isn't a sequence")
+    (testing "Replace takes the chord from each of them"
+      (let [u (kp/record uk/no-keys {:scope :window :command :run/run :binding nil} a (on :run/run a))]
+        (is (= [(assoc a :command :run/run)] (:window u)))
+        (is (= 2 (count (:remove u))))))))
+
+(deftest step-conflicts-test
+  (let [a {:key "r" :mods #{:ctrl :alt}}
+        seq-p (assoc a :then [{:key "p" :mods #{:ctrl :alt}}] :command :view/zoom)
+        km {:window [seq-p save] :editor []}
+        ask (fn [mine] (kp/step-conflicts {:keymap km :command :run/run :os mac} mine))]
+    (is (= [] (ask (assoc a :then [{:key "s" :mods #{:ctrl :alt}}]))) "two sequences share a first chord")
+    (is (= [{:scope :window :binding seq-p}] (ask (assoc a :then [{:key "p" :mods #{:ctrl :alt}}])))
+        "the same chords")
+    (is (= [{:scope :window :binding seq-p}]
+           (ask (assoc a :then [{:key "p" :mods #{:ctrl :alt}} {:key "x"}])))
+        "another sequence would finish first")
+    (is (= [{:scope :window :binding save}]
+           (ask {:key "s" :mods #{:cmd} :then [{:key "x"}]}))
+        "a single key would run first")
+    (is (= [] (kp/step-conflicts {:keymap km :command :view/zoom :os mac} seq-p)) "its own don't count")))

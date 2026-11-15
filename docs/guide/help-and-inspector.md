@@ -198,7 +198,8 @@ the newest 1,000 entries, and the footer says how many older ones it dropped.
 Three palette commands explain the keys, from the live keymap, plugins
 included. **Describe the next key you press** prints what the next key
 does: the command it runs, its source, and any condition it needs, or that
-it goes to GTK. That key is only described, never run. **List every key
+it goes to GTK. For a key that starts a key sequence it names the whole
+sequence and its command. That key is only described, never run. **List every key
 binding** prints the window's keys, then the editor's, each with its
 command's description. **Show the keys you pressed last** lists the last
 50 chords with the command that ran for each, or that the window passed it

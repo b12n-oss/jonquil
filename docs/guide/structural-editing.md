@@ -148,6 +148,8 @@ Ctrl+K then Ctrl+H to its start.
 - Esc cancels. Any other key that doesn't continue ends the sequence, does
   nothing else, and the status bar says it isn't a key sequence.
 - A sequence waits for as long as you like.
+- A menu's key column holds one chord, so a command with only a two-step
+  key shows it after its name, as in `Raise  (⌃⌥P ⌃⌥R)`.
 
 While the set is on it takes two keys from Jonquil so these can start.
 Ctrl+Alt+P no longer cycles the Parinfer mode (on a Mac, Cmd+Option+P still

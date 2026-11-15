@@ -8,7 +8,8 @@
   :label s}, or a submenu of the same shape as a menu."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [jonquil.palette :as palette]))
 
 (defmacro ^:private embedded-text
   "The text of classpath file path, read when this form is compiled (the
@@ -107,8 +108,32 @@
                :when (and (= id (:command b)) (not (:when b)) (not (:then b)))]
            b)))
 
+(defn- sequence-binding
+  "The key sequence the menu names for command id when no single key runs
+  it: the first binding with a :then and no condition."
+  [keymap id]
+  (first (for [scope [:window :editor]
+               b (get keymap scope)
+               :when (and (= id (:command b)) (:then b) (not (:when b)))]
+           b)))
+
+(def ^:private mac-symbols
+  ;; the signs a Mac's menus draw for the modifiers
+  [["Cmd+" "⌘"] ["Ctrl+" "⌃"] ["Option+" "⌥"] ["Shift+" "⇧"]])
+
+(defn keys-text
+  "binding's chords for the end of a menu item's label: as the palette
+  shows them, with a Mac's signs for the modifiers on macOS."
+  [binding os]
+  (let [text (palette/chord-label binding os)]
+    (if (= "Mac OS X" os)
+      (reduce (fn [t [word sign]] (str/replace t word sign)) text mac-symbols)
+      text)))
+
 (defn- with-keys
-  "menu with each command item given :action and :accel (nil with no key)."
+  "menu with each command item given :action and :accel (nil with no key).
+  An item whose command has only a key sequence gets :keys-text, the
+  sequence as text, since an accelerator is one chord."
   [menu keymap os]
   (update menu :sections
           (fn [sections]
@@ -116,10 +141,12 @@
                     (mapv (fn [item]
                             (if (submenu? item)
                               (with-keys item keymap os)
-                              (let [b (shown-binding keymap (:command item))]
-                                (assoc item
-                                       :action (action-name (:command item))
-                                       :accel (when b (accel b os))))))
+                              (let [b (shown-binding keymap (:command item))
+                                    s (when-not b (sequence-binding keymap (:command item)))]
+                                (cond-> (assoc item
+                                               :action (action-name (:command item))
+                                               :accel (when b (accel b os)))
+                                  s (assoc :keys-text (keys-text s os))))))
                           section))
                   sections))))
 
