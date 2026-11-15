@@ -672,6 +672,10 @@
                emulated? (not= arch (linux-arch []))]
            (linux-docker {:arch arch
                           :command (str (when emulated? "JONQUIL_SELFTEST_EMULATED=1 ")
+                                        ;; the image has VTE, so the terminal
+                                        ;; row must start a shell: without
+                                        ;; this it passes on a missing VTE
+                                        "JONQUIL_SELFTEST_NEEDS_VTE=1 "
                                         "GDK_BACKEND=x11 xvfb-run -a -s "
                                         (sh-quote "-screen 0 1600x1200x24")
                                         ;; openbox first: without a window

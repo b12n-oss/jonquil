@@ -17,7 +17,9 @@
   then makes the two tabs. With VTE a shell starts and echoes what it is
   fed, Ctrl+R is passed on, F6 and Ctrl+` leave the terminal, and a
   background job makes it busy. Without
-  VTE the Terminal tab holds the sentence saying why."
+  VTE the Terminal tab holds the sentence saying why, which passes unless
+  JONQUIL_SELFTEST_NEEDS_VTE is set: jolt linux:selftest sets it, since its
+  image has VTE, so a terminal that stops loading there fails the row."
   [ui]
   (go-row :terminal-in-the-bottom-area support/check
     (let [{:keys [state show! busy? focused? showing?]} (:terminal ui)
@@ -32,8 +34,10 @@
         (let [why (on-gtk (:why @state))
               _ (on-gtk (g/gtk-notebook-set-current-page (:notebook @state) 0))]
           (on-gtk (support/check :terminal-in-the-bottom-area
-                                 (and unbuilt? (= {:showing true :pages 2} shown) (string? why))
-                                 {:no-vte true :unbuilt unbuilt? :shown shown :why why})))
+                                 (and unbuilt? (= {:showing true :pages 2} shown) (string? why)
+                                      (nil? (System/getenv "JONQUIL_SELFTEST_NEEDS_VTE")))
+                                 {:no-vte true :unbuilt unbuilt? :shown shown :why why
+                                  :vte-needed (some? (System/getenv "JONQUIL_SELFTEST_NEEDS_VTE"))})))
         (let [started? (await-until 8000 50 #(anchan/running? term))
               focus (on-gtk (focused?))
               _ (on-gtk (anchan/feed! term "echo jonquil-$((6*7))\n"))
