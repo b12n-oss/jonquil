@@ -12,6 +12,7 @@
   (:require [anchan.core :as anchan]
             [anchan.vte :as vte]
             [jolt.ffi :as ffi]
+            [jolt.process :as p]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -112,6 +113,20 @@
                            :on-exit (fn [_]
                                       (set-status! "; The terminal's shell ended. Show the terminal starts a new one."))}))))
 
+(defn- has-children?
+  "True when the process pid has a child process: pgrep -P answers 0."
+  [pid]
+  (try (zero? (:exit (p/sh "pgrep" "-P" (str pid))))
+       (catch Exception _ false)))
+
+(defn- running-something?
+  "True when closing the terminal would end something: its shell is
+  running a command in the foreground (anchan/busy?), or has any child
+  process, which is what a command started with & leaves behind."
+  [term]
+  (or (anchan/busy? term)
+      (boolean (when-let [pid (anchan/pid term)] (has-children? pid)))))
+
 (defn- focused? [{:keys [win]} state]
   (boolean (when-let [{:keys [term widget]} @state]
              (and term (= (g/gtk-root-get-focus win) widget)))))
@@ -145,17 +160,21 @@
 
 (defn- install
   "The terminal part for one window. Nothing is built until the terminal is
-  first shown. ui's :terminal is {:state :show! :focused? :showing?}, for
+  first shown. ui's :terminal is {:state :show! :busy? :focused? :showing?}, for
   the self-tests; :state holds nil, then build!'s map."
   [{:keys [bottom-focus* theme-name] :as wctx}]
   (let [state (atom nil)
-        show-fn (fn [] (show! wctx state))]
+        show-fn (fn [] (show! wctx state))
+        busy-fn (fn [] (boolean (when-let [t (:term @state)] (running-something? t))))]
     (when bottom-focus* (reset! bottom-focus* (fn [] (focus-terminal! state))))
     (when theme-name
       (add-watch theme-name ::terminal (fn [_ _ _ _] (when-let [t (:term @state)] (apply-theme! wctx t)))))
     {:fns {:terminal-show-fn show-fn
-           :terminal-focused? (fn [] (focused? wctx state))}
-     :ui {:terminal {:state state :show! show-fn
+           :terminal-focused? (fn [] (focused? wctx state))
+           ;; the window's close flow asks these (jonquil.gtk.window.quit)
+           :terminal-busy? busy-fn
+           :terminal-end! (fn [] (when-let [t (:term @state)] (anchan/dispose! t)))}
+     :ui {:terminal {:state state :show! show-fn :busy? busy-fn
                      :focused? (fn [] (focused? wctx state))
                      :showing? (fn [] (showing? state))}}}))
 

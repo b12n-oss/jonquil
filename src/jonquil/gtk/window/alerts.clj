@@ -102,3 +102,5 @@
 
 (def CLOSE-ALERT {:cancel 2 :default 0})
 (def TRASH-ALERT {:cancel 1 :default 1})
+;; Close Anyway is 0 and Cancel 1; Cancel is both the cancel and the default
+(def TERMINAL-ALERT {:cancel 1 :default 1})
