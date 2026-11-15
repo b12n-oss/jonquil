@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Fixed
+
+- A shell in the downloaded app's terminal no longer inherits `JONQUIL_BUNDLE_FRAMEWORKS`, the app's own marker for "I am the release app". A Jonquil started from source in that terminal would have read it, looked for the terminal's library inside the app, and mixed it with Homebrew's GTK. The marker is now dropped from the environment once Jonquil has read it, as `DYLD_LIBRARY_PATH` already was.
+
 ### Added
 
 - A Homebrew install: `brew install b12n-oss/tap/jonquil` puts the notarized Jonquil.app in Applications and a `jonquil` command on your `PATH`. The cask is in the public tap b12n-oss/homebrew-tap.

@@ -13,6 +13,7 @@
             [anchan.vte :as vte]
             [jolt.ffi :as ffi]
             [jolt.process :as p]
+            [jonquil.bundle-env :as bundle-env]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -92,7 +93,7 @@
   once. Answers the part's state: {:notebook :term (nil without one)
   :widget (the Terminal tab's child)}."
   [{:keys [paned cv] :as ctx}]
-  (let [bundled (bundled-vte (System/getenv "JONQUIL_BUNDLE_FRAMEWORKS"))
+  (let [bundled (bundled-vte (bundle-env/frameworks))
         ;; a release app loads the VTE beside its own GTK and no other: a
         ;; VTE from Homebrew would bring a second GTK into the process
         _ (when bundled (swap! vte/library-paths assoc :darwin [bundled] :linux [bundled]))
