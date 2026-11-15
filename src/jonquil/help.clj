@@ -536,3 +536,14 @@
       (= nn old) "That's the current name."
       (nil? (edit/rename snapshot nn)) (str "Can't rename '" old "' to '" nn "'.")
       :else nil)))
+
+(defn jump-click?
+  "True when a mouse click asks for jump to definition: a single click
+  with the command modifier alone (Cmd on macOS, Ctrl elsewhere), released
+  with nothing selected, so a drag that selects text isn't one. click is
+  {:os :n-press :mods :selection?}, :mods the set of :ctrl :meta :alt and
+  :shift held at the release."
+  [{:keys [os n-press mods selection?]}]
+  (and (= 1 n-press)
+       (not selection?)
+       (= mods #{(if (= "Mac OS X" os) :meta :ctrl)})))

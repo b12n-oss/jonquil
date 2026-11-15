@@ -3,6 +3,7 @@
   and jump to definition."
   (:require [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
+            [jolt.ffi :as ffi]
             [gtk-selftest-window.support :as support]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
@@ -393,6 +394,40 @@
                 (support/check :jump-top-level
                                (and (= 1 handled) (= 6 caret))
                                {:handled handled :caret caret}))))))
+
+(defn- editor-xy
+  "The editor view's widget coordinates of offset's character."
+  [{:keys [view buf]} offset]
+  (let [loc (ffi/alloc 16) out (ffi/alloc 8)]
+    (try
+      (g/with-iters* buf offset offset (fn [it _] (g/gtk-text-view-get-iter-location view it loc)))
+      (g/gtk-text-view-buffer-to-window-coords view g/TEXT-WINDOW-WIDGET
+                                               (ffi/read loc :int 0) (ffi/read loc :int 4) out (+ out 4))
+      [(+ 2.0 (ffi/read out :int 0)) (+ 2.0 (ffi/read out :int 4))]
+      (finally (ffi/free loc) (ffi/free out)))))
+
+(defn row-jump-click
+  "Cmd+click on macOS, Ctrl+click elsewhere, on the usage of greet at
+  offset 22 lands the caret on the defn's own greet, offset 6, as F12 does
+  from there. A plain click at the same point is left to the view, and so
+  is the modifier-click that ends a drag with text selected."
+  [ui]
+  (go-row :jump-click support/check
+    (on-gtk (let [ed (:editor ui)
+                  buf (:buf ed)
+                  mask (if (= "Mac OS X" (System/getProperty "os.name")) g/META-MASK g/CONTROL-MASK)]
+              (editor/set-text! ed "(defn greet [n] n)\n(greet 1)")
+              (support/place-cursor! buf 0)
+              (let [[x y] (editor-xy ed 22)
+                    plain [(editor/jump-click! ed {:n-press 1 :state 0 :x x :y y}) (g/cursor-offset buf)]
+                    _ (g/with-iters* buf 20 24 (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+                    dragged (editor/jump-click! ed {:n-press 1 :state mask :x x :y y})
+                    _ (support/place-cursor! buf 0)
+                    jumped [(editor/jump-click! ed {:n-press 1 :state mask :x x :y y}) (g/cursor-offset buf)]
+                    got {:plain plain :dragged dragged :jumped jumped}]
+                (support/check :jump-click
+                               (= {:plain [false 0] :dragged false :jumped [true 6]} got)
+                               got))))))
 
 (defn row-jump-local-binding
   "\"(defn f [x] (let [y x] y))\", caret 23 (the LAST y, the usage inside

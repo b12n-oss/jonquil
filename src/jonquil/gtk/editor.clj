@@ -32,6 +32,7 @@
             [jonquil.edit :as edit]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]
+            [jonquil.help :as help]
             [jonquil.paint :as paint]
             [jonquil.parinfer-edit :as pe]
             [jonquil.plugin-registry :as plugin-registry]
@@ -1670,6 +1671,53 @@
                            ffi/null ffi/null g/CONNECT-DEFAULT)
   (g/gtk-widget-add-controller view focusctl))
 
+(defn- click-offset
+  "The character offset under widget coordinates wx, wy of the view."
+  [view wx wy]
+  (let [coords (ffi/alloc 8)
+        it (ffi/alloc g/ITER-BYTES)]
+    (try
+      (g/gtk-text-view-window-to-buffer-coords view g/TEXT-WINDOW-WIDGET (int wx) (int wy) coords (+ coords 4))
+      (g/gtk-text-view-get-iter-at-location view it (ffi/read coords :int 0) (ffi/read coords :int 4))
+      (g/gtk-text-iter-get-offset it)
+      (finally (ffi/free coords) (ffi/free it)))))
+
+(defn- click-mods
+  "The set of :ctrl :meta :alt :shift in a GdkModifierType state."
+  [state]
+  (set (keep (fn [[k mask]] (when (pos? (bit-and state mask)) k))
+             {:ctrl g/CONTROL-MASK :meta g/META-MASK :alt g/ALT-MASK :shift g/SHIFT-MASK})))
+
+(defn jump-click!
+  "A click released on the view: {:n-press :state :x :y}, x and y in the
+  view's widget coordinates. When help/jump-click? takes it (Cmd+click on
+  macOS, Ctrl+click elsewhere), the caret goes to the character under it
+  and the jump fn runs, as F12 would there. Returns true when it jumped."
+  [{:keys [view buf] :as ed} {:keys [n-press state x y]}]
+  (let [[a b] (g/selection-offsets buf)]
+    (if (help/jump-click? {:os OS-NAME :n-press n-press :mods (click-mods state) :selection? (not= a b)})
+      (let [offset (click-offset view x y)]
+        (g/with-iters* buf offset offset (fn [it _] (g/gtk-text-buffer-place-cursor buf it)))
+        (when-let [f @(:jump-fn ed)] (f))
+        true)
+      false)))
+
+(defn- add-jump-click!
+  "Connects a click gesture for jump-click! and adds it to view. It acts
+  on the release: the view's own press has placed the caret by then, and a
+  drag that selected text is told apart by the selection."
+  [ed view]
+  (let [click (g/gtk-gesture-click-new)]
+    (g/g-signal-connect-data click "released"
+                             (callable (fn [gesture n-press x y _data]
+                                         (try (jump-click! ed {:n-press n-press :x x :y y
+                                                               :state (g/gtk-event-controller-get-current-event-state gesture)})
+                                              (catch :default e (binding [*out* *err*] (println "jump click:" (ex-message e)))))
+                                         nil)
+                                       [:pointer :int :double :double :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-widget-add-controller view click)))
+
 (defn- add-key-controller!
   "Connects the key handler in the capture phase and adds the controller to view."
   [ed view keyctl]
@@ -1712,5 +1760,6 @@
     (connect-view-signals! ed)
     (connect-focus-leave! ed view focusctl)
     (add-key-controller! ed view keyctl)
+    (add-jump-click! ed view)
     (start-tick! ed)
     ed))

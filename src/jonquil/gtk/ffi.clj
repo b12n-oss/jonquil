@@ -1298,6 +1298,11 @@
 ;; gdouble x, gdouble y, gpointer) -> void) is wired directly by
 ;; jonquil.gtk.inspector-pane, no binding needed for a signal.
 (ffi/defcfn gtk-gesture-click-new "gtk_gesture_click_new" [] :pointer)
+;; gtk_event_controller_get_current_event_state (GtkEventController*) ->
+;; GdkModifierType: the modifiers of the event the controller is handling
+;; (gtkeventcontroller.h). The click gesture's signals carry no state.
+(ffi/defcfn gtk-event-controller-get-current-event-state "gtk_event_controller_get_current_event_state"
+  [:pointer] :uint)
 ;; gtk_widget_get_clipboard (GtkWidget*) -> GdkClipboard*, and
 ;; gdk_clipboard_set_text (GdkClipboard*, const char*): gtkwidget.h,
 ;; gdkclipboard.h, both fixed arity.

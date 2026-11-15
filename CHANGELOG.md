@@ -8,6 +8,7 @@ everything that shipped before that.
 
 ### Added
 
+- Cmd+click on a symbol (Ctrl+click on Linux) jumps to its definition, as F12 does. The source panel takes the same click. (#30)
 - More than one terminal. The **+** at the end of the bottom tab strip, or New Terminal in the View menu and the palette, opens another terminal in its own tab, named Terminal 2, Terminal 3 and so on. Each tab has a × that closes it, and asks first when a program is still running in that terminal. Ctrl+` goes to the terminal you used last. The first terminal's tab is now named Terminal 1.
 
 ### Changed
