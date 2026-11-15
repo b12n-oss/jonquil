@@ -12,6 +12,7 @@ everything that shipped before that.
 
 ### Added
 
+- The terminal runs on Linux. With your system's VTE for GTK 4 installed (`libvte-2.91-gtk4-0` on Ubuntu), Show the terminal starts a login shell below the editor as it does on a Mac. The Linux check image now has VTE, and its self-tests start a shell, read what it prints, try the keys that leave the terminal and stop it, on Ubuntu 26.04 under X11. 0.4.0 said the terminal hadn't been run on Linux. Nobody has used it on a Linux desktop by hand yet, and Wayland is untested as it is for the rest of Jonquil.
 - Preferences can record a key sequence. On the Keys tab, **Add a step** takes the selected row's key and puts the next key you press after it, so Cmd+E becomes Cmd+E K. A later step can be a plain letter. If the new sequence would clash with another command's key the tab asks first. Recording a chord that already starts sequences asks too: Replace takes it from them, and Add a second key starts one more sequence on it.
 - A menu item whose command has only a key sequence now shows it after its name, such as `Raise  (⌃⌥P ⌃⌥R)` with the Calva paredit key set. It used to show no key.
 - Describe the next key you press names the whole sequence for a key that starts one: "starts Ctrl+Alt+R Ctrl+Alt+P, which runs…".

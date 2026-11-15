@@ -1,6 +1,7 @@
 # A Linux box for checking Jonquil: `jolt linux:image` builds it locally, and
 # .github/workflows/linux.yml builds the amd64 image in CI.
 # Jolt runs the tasks too (it reads bb.edn), so there is no babashka here.
+# libvte-2.91-gtk4-0 is the terminal's VTE (jonquil.gtk.parts.terminal).
 #
 #   arm64  Jolt publishes no Linux arm64 binary, so it is built from its release
 #          tag here (it provisions its own pinned Chez Scheme).
@@ -11,7 +12,7 @@ ARG TARGETARCH
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      libgtk-4-1 libpango-1.0-0 adwaita-icon-theme fonts-dejavu-core \
+      libgtk-4-1 libpango-1.0-0 libvte-2.91-gtk4-0 adwaita-icon-theme fonts-dejavu-core \
       shared-mime-info desktop-file-utils \
       xvfb xauth x11-utils \
       x11vnc openbox novnc websockify pcmanfm xdg-utils \

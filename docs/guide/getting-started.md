@@ -259,6 +259,9 @@ Docker on arm64 and amd64, see
 - **GTK 4 and pango from your distribution.** On Ubuntu that is
   `libgtk-4-1` and `libpango-1.0-0`, plus
   `adwaita-icon-theme`. Nothing is linked at build time.
+- **VTE for GTK 4**, for the terminal below the editor (optional). On
+  Ubuntu that is `libvte-2.91-gtk4-0`. Without it the Terminal tab says
+  what is missing and the rest of Jonquil works.
 - **Jolt** v0.8.23 or later. On x86_64 take the binary from Jolt's release
   page. There is no Linux arm64 binary, so build it from source (`make`
   provisions its own Chez Scheme).
