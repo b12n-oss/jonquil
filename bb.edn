@@ -672,6 +672,9 @@
                emulated? (not= arch (linux-arch []))]
            (linux-docker {:arch arch
                           :command (str (when emulated? "JONQUIL_SELFTEST_EMULATED=1 ")
+                                        ;; a shared CI runner stalls now and
+                                        ;; then; the same rows read CI
+                                        (when (System/getenv "CI") "CI=1 ")
                                         ;; the image has VTE, so the terminal
                                         ;; row must start a shell: without
                                         ;; this it passes on a missing VTE
