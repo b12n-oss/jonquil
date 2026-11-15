@@ -6,6 +6,11 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Changed
+
+- The terminal's colours are readable on every theme. It used the terminal engine's own 16 ANSI colours, which are made for a black or a white background: directory names in dark blue were close to invisible on a dark theme, and bright yellow on a light one. There are now two sets, one for light themes and one for dark, and a test checks each colour's contrast against all 16 themes' backgrounds. Black on a dark theme and bright white on a light one stay as they are, since programs paint backgrounds with them.
+- The terminal's text size follows the editor's. Larger Text, Smaller Text and Reset Text Size change it with the code views.
+
 ## [0.4.2] - 2026-11-16
 
 ### Fixed

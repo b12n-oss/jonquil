@@ -15,7 +15,7 @@
 (defn row-terminal-in-the-bottom-area
   "Nothing is built until the terminal is first shown. Show the terminal
   then makes the two tabs. With VTE a shell starts and echoes what it is
-  fed, Ctrl+R is passed on, F6 and Ctrl+` leave the terminal, and a
+  fed, Larger Text gives it fewer columns, Ctrl+R is passed on, F6 and Ctrl+` leave the terminal, and a
   background job makes it busy. Without
   VTE the Terminal tab holds the sentence saying why, which passes unless
   JONQUIL_SELFTEST_NEEDS_VTE is set: jolt linux:selftest sets it, since its
@@ -42,6 +42,14 @@
               focus (on-gtk (focused?))
               _ (on-gtk (anchan/feed! term "echo jonquil-$((6*7))\n"))
               echoed? (await-until 8000 50 #(str/includes? (anchan/text term) "jonquil-42"))
+              ;; Larger Text reaches the terminal: the same widget then holds
+              ;; fewer columns, and Reset Text Size brings them back
+              cols (fn [] (:columns (anchan/size term)))
+              cols-before (on-gtk (cols))
+              _ (on-gtk (dotimes [_ 4] ((:zoom!* ui) :in)))
+              larger? (await-until 8000 50 #(< (cols) cols-before))
+              _ (on-gtk ((:zoom!* ui) :reset))
+              reset? (await-until 8000 50 #(= (cols) cols-before))
               ;; Ctrl+R is Run in the window; with the terminal focused it is the shell's
               ctrl-r (on-gtk (key! "r" g/CONTROL-MASK))
               ;; F6 goes back to the editor, and from there to the terminal again
@@ -58,9 +66,10 @@
               stopped? (await-until 8000 50 #(not (anchan/running? term)))]
           (on-gtk (support/check :terminal-in-the-bottom-area
                                  (and unbuilt? started? (= {:showing true :pages 2} shown) focus
-                                      echoed? (= 0 ctrl-r)
+                                      echoed? larger? reset? (= 0 ctrl-r)
                                       (= [1 false true] f6-out) (= [1 true] f6-back)
                                       (= [1 false false] left) (false? idle) job? stopped?)
                                  {:unbuilt unbuilt? :started started? :shown shown :focus focus :echoed echoed?
+                                  :columns cols-before :larger larger? :reset reset?
                                   :ctrl-r ctrl-r :f6-out f6-out :f6-back f6-back :left left
                                   :idle-busy idle :job-busy job? :stopped stopped?})))))))

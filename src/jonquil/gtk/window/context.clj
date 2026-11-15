@@ -66,11 +66,13 @@
   "The part of the parts' wctx about the window itself: its widgets, the
   evaluator and selection, the tabs and their operations, and the status
   line fns. w is build-parts's."
-  [{:keys [win status-label cv ev* sel* tabs active-tab settings-path* bang* recent-tabs bottom-focus* theme-name]
+  [{:keys [win status-label cv ev* sel* tabs active-tab settings-path* bang* recent-tabs bottom-focus* theme-name
+           theme-ctx]
     *tab-ctx :tab-ctx*}]
   {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
-   ;; the terminal part's: the F6 slot, and the active theme's name
-   :bottom-focus* bottom-focus* :theme-name theme-name
+   ;; the terminal part's: the F6 slot, the active theme's name, and the
+   ;; code views' text size in pixels
+   :bottom-focus* bottom-focus* :theme-name theme-name :zoom-px (:zoom-px theme-ctx)
    :tabs tabs :active-tab active-tab :settings-path* settings-path*
    :tab-ctx* *tab-ctx
    :tab-by-id win-tabs/tab-by-id :select-tab! win-tabs/select-tab! :new-tab! win-tabs/new-tab!

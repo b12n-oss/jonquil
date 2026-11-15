@@ -371,7 +371,13 @@ the Interactions tab, and until you close the window.
   with both Control and Shift stay Jonquil's, such as Ctrl+Shift+P for the
   palette.
 - **F6** moves between the editor and whichever of the two tabs is showing.
-- **Colours** follow the theme.
+- **Colours** follow the theme: its text on its background, and one of
+  two sets of the 16 ANSI colours, for a light theme or a dark one. Each
+  colour is picked to be readable on every theme of its kind, except
+  black on a dark theme and bright white on a light one, which programs
+  use to paint backgrounds.
+- **Text size** follows the editor's. Larger Text, Smaller Text and Reset
+  Text Size in the View menu change the terminal with it.
 - **If the shell ends** (you typed `exit`), Show the terminal starts a new
   one.
 - **Closing the window** ends the shell. If something is still running in

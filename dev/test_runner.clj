@@ -31,6 +31,7 @@
     jonquil.theme-test
     jonquil.user-keys-test
     jonquil.key-sets-test
+    jonquil.terminal-colors-test
     jonquil.terminal-keys-test
     jonquil.terminal-open-test
     jonquil.key-seq-test

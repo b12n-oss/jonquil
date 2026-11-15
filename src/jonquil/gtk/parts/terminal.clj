@@ -3,7 +3,8 @@
   jonquil.parts.terminal/spec). The first time it is shown, the console's
   place below the editor becomes a notebook of two tabs, Interactions and
   Terminal, and a login shell starts in the active file's project folder.
-  Until then the window is as it was.
+  Until then the window is as it was. Its colours follow the theme and its
+  text size the editor's (jonquil.terminal-colors).
 
   The terminal is Anchan's (anchan.core), on its VTE backend. Where VTE
   can't be used the Terminal tab says why. A release Jonquil.app carries
@@ -17,6 +18,7 @@
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.terminal-colors :as terminal-colors]
             [jonquil.terminal-keys :as terminal-keys]
             [jonquil.terminal-open :as terminal-open]
             [jonquil.theme :as theme]))
@@ -47,16 +49,19 @@
          "\"Open a terminal in the project folder\", in the Tools menu, starts your system's terminal.")
     backend-problem backend-problem))
 
-(defn- colors-for
-  "The terminal's colours for the theme named k: the editor's text on its
-  background."
-  [k]
-  (let [{:keys [text background]} (theme/theme k)]
-    {:foreground text :background background}))
-
-(defn- apply-theme! [{:keys [theme-name]} term]
+(defn- apply-theme!
+  "Gives the terminal the active theme's colours: its text and background,
+  and the 16 ANSI colours for a light or a dark theme."
+  [{:keys [theme-name]} term]
   (when (and term theme-name)
-    (anchan/set-colors! term (colors-for @theme-name))))
+    (anchan/set-colors! term (terminal-colors/colors (theme/theme @theme-name)))))
+
+(defn- apply-font!
+  "Gives the terminal the code views' text size, so Larger Text and
+  Smaller Text change it with the editor."
+  [{:keys [zoom-px]} term]
+  (when (and term zoom-px)
+    (anchan/set-font! term (terminal-colors/font @zoom-px))))
 
 (defn- message-widget
   "A label saying text, for the Terminal tab of a Jonquil with no terminal."
@@ -113,6 +118,7 @@
     (g/g-object-unref scroll)
     (when term
       (apply-theme! ctx term)
+      (apply-font! ctx term)
       (connect-clipboard-keys! term))
     {:notebook nb :term term :widget widget :why why}))
 
@@ -178,13 +184,15 @@
   "The terminal part for one window. Nothing is built until the terminal is
   first shown. ui's :terminal is {:state :show! :busy? :focused? :showing?}, for
   the self-tests; :state holds nil, then build!'s map."
-  [{:keys [bottom-focus* theme-name] :as wctx}]
+  [{:keys [bottom-focus* theme-name zoom-px] :as wctx}]
   (let [state (atom nil)
         show-fn (fn [] (show! wctx state))
         busy-fn (fn [] (boolean (when-let [t (:term @state)] (running-something? t))))]
     (when bottom-focus* (reset! bottom-focus* (fn [] (focus-terminal! state))))
     (when theme-name
       (add-watch theme-name ::terminal (fn [_ _ _ _] (when-let [t (:term @state)] (apply-theme! wctx t)))))
+    (when zoom-px
+      (add-watch zoom-px ::terminal (fn [_ _ _ _] (when-let [t (:term @state)] (apply-font! wctx t)))))
     {:fns {:terminal-show-fn show-fn
            :terminal-focused? (fn [] (focused? wctx state))
            ;; the window's close flow asks these (jonquil.gtk.window.quit)
