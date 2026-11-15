@@ -88,6 +88,10 @@
                       :confirmed-close? confirmed-close?
                       :suppress-close? suppress-close? :closing? closing?
                       :popovers popovers :ev* ev*
+                      ;; the terminal part's: whether a program is running in
+                      ;; it, and ending its shell at the real quit
+                      :terminal-busy? (get-in part-contribution [:fns :terminal-busy?])
+                      :terminal-end! (get-in part-contribution [:fns :terminal-end!])
                       ;; Live saving stops first: nothing after the
                       ;; quit's own save may write a shorter list.
                       ;; A quit before startup's reopen is done

@@ -9,7 +9,7 @@
   activate!'s own statements in their order."
   (:require [jolt.ffi :as ffi]
             [jonquil.evaluator :as ev]
-            [jonquil.gtk.callbacks :refer [callable]]
+            [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -138,6 +138,54 @@
         (reset! win-alerts/alert-pending? false)
         (cview/append! cv :error (str "; close: " (ex-message e) "\n"))))))
 
+(defn- show-terminal-alert!
+  "Shows the terminal alert. Close Anyway sets :confirmed? and closes the
+  window again; Cancel, or the alert dismissed, also takes back a confirmed
+  close of unsaved text, so the next close asks about that again."
+  [{:keys [cv win confirmed-close?]} {:keys [confirmed? open?]}]
+  (reset! win-alerts/alert-pending? true)
+  (reset! open? true)
+  (try
+    (win-alerts/show-alert!
+     win tabs/terminal-alert win-alerts/TERMINAL-ALERT
+     (fn [{:keys [index]}]
+       (reset! open? false)
+       (if (= 0 index)
+         (do (reset! confirmed? true)
+             (g/gtk-window-close win))
+         (reset! confirmed-close? false))))
+    (catch :default e
+      (reset! open? false)
+      (reset! win-alerts/alert-pending? false)
+      (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
+
+(defn- ask-about-terminal!
+  "close-request-fn's branch for a terminal that is still running a
+  program. ts is the terminal's close state, {:confirmed? :open? :retried?}
+  atoms. With its own alert already open it does nothing. With another
+  alert pending it tries once more after that alert's handler has
+  returned: Don't Save closes the window from inside the unsaved-text
+  alert's own handler, while that alert still counts as pending. If an
+  alert is still pending then, it gives up and takes the confirmed close
+  back. ctx is close-request-fn's."
+  [{:keys [win confirmed-close?] :as ctx} {:keys [open? retried?] :as ts}]
+  (cond
+    @open? nil
+    (not @win-alerts/alert-pending?) (do (reset! retried? false) (show-terminal-alert! ctx ts))
+    @retried? (do (reset! retried? false) (reset! confirmed-close? false))
+    :else (do (reset! retried? true)
+              (on-gui! (fn [] (g/gtk-window-close win))))))
+
+(defn- end-terminal-at-quit!
+  "The real quit's terminal stop: hangs up the terminal's shell, when the
+  window has a terminal. A throw is said on stderr."
+  [terminal-end!]
+  (when terminal-end!
+    (try (terminal-end!)
+         (catch :default e
+           (binding [*out* *err*]
+             (println "jonquil: ending the terminal failed:" (ex-message e)))))))
+
 (defn- save-session-at-quit!
   "The real quit's session save: calls save-session! (nil, or a fn that
   answers nil or an error string) and says a failure or a throw on stderr."
@@ -169,11 +217,12 @@
   "close-request-fn's real-quit branch: unparents the popovers, saves the
   session, stops the runtime, quits the application and answers 0, so GTK
   proceeds. ctx is close-request-fn's."
-  [{:keys [app popovers ev* save-session!]}]
+  [{:keys [app popovers ev* save-session! terminal-end!]}]
   ;; Unparents every registered popover BEFORE the real quit
   ;; (see unparent-registered-popovers!), never in the
   ;; suppress-close? branch (proceed-close!, below).
   (unparent-registered-popovers! popovers)
+  (end-terminal-at-quit! terminal-end!)
   (save-session-at-quit! save-session!)
   (stop-runtime-at-quit! ev*)
   (g/g-application-quit app)
@@ -221,19 +270,38 @@
   branch, which doesn't actually quit anything.
 
   save-session! (the open tabs, for the next launch) runs in the
-  real-quit branch only."
+  real-quit branch only.
+
+  terminal-busy? (a fn, or nil in a window with no terminal part) says a
+  program is still running in the terminal. Once unsaved text is settled,
+  a busy terminal gets its own alert (ask-about-terminal!), and the real
+  quit ends the shell (terminal-end!)."
   {:arglists '([{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!
-                        save-session!]}])}
-  [{:keys [tabs confirmed-close?] :as ctx}]
-  (fn [_win _data]
-    ;; One alert naming every dirty tab, in tab order.
-    (let [ts @tabs
-          names (tabs/labels (map (fn [t] {:path @(:path t)}) ts))
-          dirty (filterv (fn [t] (editor/dirty? (:ed t))) ts)
-          dirty-names (keep-indexed (fn [i t] (when (editor/dirty? (:ed t)) (nth names i))) ts)]
-      (if (and (seq dirty) (not @confirmed-close?))
-        (do (ask-before-close! ctx dirty dirty-names) 1)
-        (proceed-close! ctx)))))
+                        save-session! terminal-busy? terminal-end!]}])}
+  [{:keys [tabs confirmed-close? terminal-busy?] :as ctx}]
+  (let [;; the terminal alert's state: Close Anyway was chosen (the close
+        ;; that follows doesn't ask again), the alert is open, and one
+        ;; deferred try has been made (ask-about-terminal!)
+        terminal {:confirmed? (atom false) :open? (atom false) :retried? (atom false)}
+        terminal-confirmed? (:confirmed? terminal)]
+    (fn [_win _data]
+      ;; One alert naming every dirty tab, in tab order.
+      (let [ts @tabs
+            names (tabs/labels (map (fn [t] {:path @(:path t)}) ts))
+            dirty (filterv (fn [t] (editor/dirty? (:ed t))) ts)
+            dirty-names (keep-indexed (fn [i t] (when (editor/dirty? (:ed t)) (nth names i))) ts)]
+        (cond
+          (and (seq dirty) (not @confirmed-close?))
+          (do (ask-before-close! ctx dirty dirty-names) 1)
+
+          ;; unsaved text is settled; a program still running in the
+          ;; terminal is asked about next
+          (and terminal-busy? (not @terminal-confirmed?) (terminal-busy?))
+          (do (ask-about-terminal! ctx terminal) 1)
+
+          :else
+          (do (reset! terminal-confirmed? false)
+              (proceed-close! ctx)))))))
 
 (defn connect!
   "activate!'s close-request connect and its application \"quit\" action, in

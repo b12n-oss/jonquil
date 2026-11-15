@@ -15,11 +15,12 @@
 (defn row-terminal-in-the-bottom-area
   "Nothing is built until the terminal is first shown. Show the terminal
   then makes the two tabs. With VTE a shell starts and echoes what it is
-  fed, Ctrl+R is passed on, and F6 and Ctrl+` leave the terminal. Without
+  fed, Ctrl+R is passed on, F6 and Ctrl+` leave the terminal, and a
+  background job makes it busy. Without
   VTE the Terminal tab holds the sentence saying why."
   [ui]
   (go-row :terminal-in-the-bottom-area support/check
-    (let [{:keys [state show! focused? showing?]} (:terminal ui)
+    (let [{:keys [state show! busy? focused? showing?]} (:terminal ui)
           key! (fn [n mods] ((:handle-window-key! ui) ffi/null (km/key-value n) 0 mods ffi/null))
           ed (:editor ui)
           unbuilt? (on-gtk (nil? @state))
@@ -44,13 +45,18 @@
               f6-back (on-gtk [(key! "F6" 0) (focused?)])
               ;; Ctrl+` from the terminal: the Interactions tab and the editor
               left (on-gtk [(key! "grave" g/CONTROL-MASK) (showing?) (focused?)])
+              ;; an idle shell isn't busy; one with a background job is, which
+              ;; is what the close question asks about
+              idle (on-gtk (busy?))
+              _ (on-gtk (anchan/feed! term "sleep 20 &\n"))
+              job? (await-until 8000 50 busy?)
               _ (on-gtk (anchan/stop! term))
               stopped? (await-until 8000 50 #(not (anchan/running? term)))]
           (on-gtk (support/check :terminal-in-the-bottom-area
                                  (and unbuilt? started? (= {:showing true :pages 2} shown) focus
                                       echoed? (= 0 ctrl-r)
                                       (= [1 false true] f6-out) (= [1 true] f6-back)
-                                      (= [1 false false] left) stopped?)
+                                      (= [1 false false] left) (false? idle) job? stopped?)
                                  {:unbuilt unbuilt? :started started? :shown shown :focus focus :echoed echoed?
                                   :ctrl-r ctrl-r :f6-out f6-out :f6-back f6-back :left left
-                                  :stopped stopped?})))))))
+                                  :idle-busy idle :job-busy job? :stopped stopped?})))))))

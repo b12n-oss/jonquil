@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [jolt.ffi :as ffi]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.callbacks :as callbacks]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -85,7 +86,7 @@
 (defn- close-ctx
   "close-request-fn's map over tabs ts with the given flags; ev* holds an
   evaluator whose stop! logs, and throws \"dead\" when stop-throws?."
-  [log ts {:keys [confirmed? suppress? save-session! stop-throws?]}]
+  [log ts {:keys [confirmed? suppress? save-session! stop-throws? terminal-busy?]}]
   {:tabs (atom ts) :cv ::cv :win ::win :app ::app
    :confirmed-close? (atom (boolean confirmed?)) :suppress-close? (atom (boolean suppress?))
    :closing? (atom false) :popovers (atom [])
@@ -93,7 +94,9 @@
          (reify ev/Evaluator
            (stop! [_] (swap! log conj [:stop]) (when stop-throws? (throw (ex-info "dead" {}))))))
    :select! (fn [t] (swap! log conj [:select @(:path t)]))
-   :save-session! save-session!})
+   :save-session! save-session!
+   :terminal-busy? (when (some? terminal-busy?) (fn [] @terminal-busy?))
+   :terminal-end! (fn [] (swap! log conj [:terminal-end]))})
 
 (defn- with-quit-stubs
   "run-stubbed, plus show-alert! (logged as [:alert win spec opts on-choice],
@@ -172,7 +175,7 @@
     (with-popover-stubs log
       (fn [] (with-quit-stubs log {}
                (fn [] (binding [*err* err] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil))))))))
-    (is (= [[:hide 1] [:unparent :pop-widget] [:save-session] [:stop] [:unregister] [:quit ::app]] @log))
+    (is (= [[:hide 1] [:unparent :pop-widget] [:terminal-end] [:save-session] [:stop] [:unregister] [:quit ::app]] @log))
     (is (true? @(:closing? ctx)))
     (is (= "jonquil: saving the session failed: disk full\n" (str err)))))
 
@@ -186,7 +189,7 @@
       (with-popover-stubs log
         (fn [] (with-quit-stubs log {}
                  (fn [] (binding [*err* err] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil))))))))
-      (is (= [[:hide 1] [:unparent :pop-widget] [:stop] [:unregister] [:quit ::app]] @log))
+      (is (= [[:hide 1] [:unparent :pop-widget] [:terminal-end] [:stop] [:unregister] [:quit ::app]] @log))
       (is (= (str said "jonquil: stopping the runtime failed: dead\n") (str err))))))
 
 (deftest close-request-confirmed-dirty-tab-takes-the-real-quit-test
@@ -197,7 +200,7 @@
     (with-popover-stubs log
       (fn [] (with-quit-stubs log {}
                (fn [] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil)))))))
-    (is (= [[:hide 1] [:unparent :pop-widget] [:save-session] [:stop] [:unregister] [:quit ::app]] @log))
+    (is (= [[:hide 1] [:unparent :pop-widget] [:terminal-end] [:save-session] [:stop] [:unregister] [:quit ::app]] @log))
     (is (true? @(:closing? ctx)))))
 
 (deftest close-request-alert-save-choice-reaches-close-choice-test
@@ -222,3 +225,81 @@
     (is (not (identical? (:suppress-close? w) (:closing? w))))
     (is (not (identical? (:confirmed-close? w) (:suppress-close? w))))
     (is (not (identical? (:confirmed-close? w) (:closing? w))))))
+
+(deftest close-request-asks-about-a-busy-terminal-test
+  ;; a clean window whose terminal is running something: one alert, Cancel
+  ;; keeps the window, Close Anyway closes it and the next request goes on
+  (let [log (atom []) busy (atom true)
+        ctx (close-ctx log [(tab "/r/a.clj" false)] {:suppress? true :terminal-busy? busy})
+        handler (#'win-quit/close-request-fn ctx)
+        alerts #(filter (fn [e] (= :alert (first e))) @log)]
+    (with-quit-stubs log {}
+      (fn []
+        (reset! win-alerts/alert-pending? false)
+        (is (= 1 (handler ::win nil)))
+        (is (false? @(:closing? ctx)) "nothing closes while the question is open")
+        (is (= 1 (handler ::win nil)) "a second request shows no second alert")
+        (let [[_ win spec opts on-choice] (first (alerts))]
+          (is (= 1 (count (alerts))))
+          (is (= [::win tabs/terminal-alert win-alerts/TERMINAL-ALERT] [win spec opts]))
+          ;; Cancel: the alert machinery clears the guard after the handler
+          (on-choice {:index 1})
+          (reset! win-alerts/alert-pending? false)
+          (is (not-any? #(= [:close ::win] %) @log))
+          (is (= 1 (handler ::win nil)) "the next request asks again")
+          (is (= 2 (count (alerts))))
+          ;; Close Anyway closes the window again, and that request goes on
+          ((nth (second (alerts)) 4) {:index 0})
+          (reset! win-alerts/alert-pending? false)
+          (is (= [:close ::win] (last @log)))
+          (is (= 1 (handler ::win nil)))
+          (is (true? @(:closing? ctx)) "the confirmed request proceeds")
+          (is (= 2 (count (alerts))) "without a third alert"))))))
+
+(deftest close-request-skips-an-idle-terminal-test
+  (doseq [busy [false nil]]
+    (let [log (atom [])
+          ctx (close-ctx log [(tab "/r/a.clj" false)] {:suppress? true :terminal-busy? (when (some? busy) (atom busy))})]
+      (with-quit-stubs log {}
+        (fn [] (is (= 1 ((#'win-quit/close-request-fn ctx) ::win nil)))))
+      (is (true? @(:closing? ctx)) (str "terminal busy? " (pr-str busy)))
+      (is (= [] (filter #(= :alert (first %)) @log))))))
+
+(deftest close-request-unsaved-text-is-asked-before-the-terminal-test
+  ;; Don't Save closes the window from inside the first alert's handler,
+  ;; while that alert still counts as pending: the terminal question is
+  ;; tried again once the handler has returned
+  (let [log (atom []) busy (atom true) queued (atom [])
+        ctx (close-ctx log [(tab "/r/a.clj" true)] {:suppress? true :terminal-busy? busy})
+        handler (#'win-quit/close-request-fn ctx)
+        alerts #(filter (fn [e] (= :alert (first e))) @log)]
+    (with-redefs [callbacks/on-gui! (fn [f] (swap! queued conj f))]
+      (with-quit-stubs log {}
+        (fn []
+          (reset! win-alerts/alert-pending? false)
+          (is (= 1 (handler ::win nil)))
+          (is (= (tabs/close-alert ["a.clj"]) (nth (first (alerts)) 2)) "unsaved text first")
+          ;; Don't Save, as the alert's handler: confirmed, and the window is
+          ;; closed again while alert-pending? is still true
+          (reset! (:confirmed-close? ctx) true)
+          (is (= 1 (handler ::win nil)))
+          (is (= 1 (count (alerts))) "no terminal alert yet")
+          (is (= 1 (count @queued)) "one deferred try is queued")
+          ;; the first alert's handler returns and clears the guard
+          (reset! win-alerts/alert-pending? false)
+          ((first @queued))
+          (is (= [:close ::win] (last @log)) "the deferred try closes the window again")
+          (is (= 1 (handler ::win nil)))
+          (is (= tabs/terminal-alert (nth (second (alerts)) 2)) "and now the terminal is asked about")
+          ;; Cancel there takes the confirmed close of unsaved text back
+          ((nth (second (alerts)) 4) {:index 1})
+          (is (false? @(:confirmed-close? ctx))))))))
+
+(deftest real-quit-ends-the-terminal-test
+  (let [log (atom [])
+        ctx (close-ctx log [(tab "/r/a.clj" false)] {})]
+    (with-quit-stubs log {}
+      (fn [] (is (= 0 ((#'win-quit/close-request-fn ctx) ::win nil)))))
+    (is (some #{[:terminal-end]} @log))
+    (is (< (.indexOf ^java.util.List @log [:terminal-end]) (.indexOf ^java.util.List @log [:quit ::app]))
+        "before the application quits")))

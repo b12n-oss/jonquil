@@ -104,6 +104,14 @@
     {:message (str (count names) " files have unsaved changes: " (str/join ", " names))
      :buttons ["Save All" "Don't Save" "Cancel"]}))
 
+(def terminal-alert
+  "The alert for closing the window while a program is still running in
+  the terminal. Cancel is the default, since the other answer ends the
+  program."
+  {:message "A program is still running in the terminal."
+   :detail "Closing the window ends it."
+   :buttons ["Close Anyway" "Cancel"]})
+
 (defn run-banner
   "Run's console banner: an Untitled tab keeps the Definitions wording."
   [path]

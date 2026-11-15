@@ -374,6 +374,10 @@ the Interactions tab, and until you close the window.
 - **Colours** follow the theme.
 - **If the shell ends** (you typed `exit`), Show the terminal starts a new
   one.
+- **Closing the window** ends the shell. If something is still running in
+  it, in the foreground or as a background job started with `&`, Jonquil
+  asks first: Close Anyway, or Cancel. An idle shell is closed without a
+  question. Unsaved files are asked about before the terminal.
 
 The terminal is [Anchan](https://github.com/b12n-oss/anchan), which uses
 VTE, the widget GNOME Terminal is built on. It needs VTE's GTK 4 build on
