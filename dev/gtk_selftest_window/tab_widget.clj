@@ -1,7 +1,7 @@
 (ns gtk-selftest-window.tab-widget
   "jonquil.gtk.tab in isolation: a tab's widgets build
   with the window's theme and profile, and dispose-popovers! leaves none of
-  its four popovers parented (measured: removing a page with a popover still
+  its popovers parented (measured: removing a page with a popover still
   parented on its view spun GTK in a warning loop).
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
@@ -31,7 +31,8 @@
 
 (defn row-tab-widget-builds
   "A tab's editor holds its text, carries the jonquil-code class, takes a
-  label, and owns exactly five popovers (the palette is the fifth)."
+  label, and owns exactly six popovers (the palette is the fifth, the key sequence
+  list the sixth)."
   [_ui]
   (go-row :tab-widget-builds support/check
     (on-gtk (let [t (make)
@@ -42,12 +43,12 @@
                      :popovers (count (tab/popovers t))
                      :id (:id t)}]
               (support/check :tab-widget-builds
-                             (= {:text "(ns x.y)\n(+ 1 2)\n" :label "x.clj" :class 1 :popovers 5 :id 99} v)
+                             (= {:text "(ns x.y)\n(+ 1 2)\n" :label "x.clj" :class 1 :popovers 6 :id 99} v)
                              v)))))
 
 (defn row-tab-widget-dispose-unparents
   "In a throwaway window, with the help popover open, dispose-popovers!
-  closes it and leaves all four popovers without a parent."
+  closes it and leaves every popover without a parent."
   [_ui]
   (go-row :tab-widget-dispose-unparents support/check
     (let [{:keys [win t]} (on-gtk (let [win (g/gtk-window-new)

@@ -101,6 +101,7 @@
     jonquil.results
     jonquil.keymap
     jonquil.key-sets
+    jonquil.key-seq
     jonquil.slow-events
     jonquil.user-keys
     jonquil.command-registry
@@ -159,6 +160,7 @@
     jonquil.gtk.change-sets-pane
     jonquil.gtk.menus
     jonquil.gtk.prefs-window
+    jonquil.gtk.key-seq-hint
     jonquil.gtk.processes-pane
     jonquil.gtk.docs-pane
     jonquil.gtk.messages-pane

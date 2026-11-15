@@ -7,15 +7,34 @@
 ;; without :os is on everywhere. Control is always :ctrl here, never :cmd:
 ;; Calva's keys hold Control on a Mac too.
 ;;
-;; Left out, since Jonquil has no key sequences yet: raise
-;; (Ctrl+Alt+P Ctrl+Alt+R), the rewraps (Ctrl+Alt+R then a key), and on
-;; Linux kill right and kill left (Ctrl+K then a key). Left out because the
-;; window has the key: split (Ctrl+Shift+S is Save As) and, on a Mac,
-;; expand and shrink selection (Ctrl+W and Ctrl+Shift+W close the tab).
+;; A :then holds the chords that follow the first: Calva's two-step keys
+;; (raise, the rewraps, and on Linux kill right and kill left).
+;;
+;; :remove drops a shipped binding while the set is on, as keys.edn's does.
+;; Calva's raise starts on Ctrl+Alt+P, which is Jonquil's key for the next
+;; Parinfer mode, so that binding goes and comes back on Cmd+Option+P alone
+;; for a Mac. Its rewraps start on Ctrl+Alt+R, which the shipped Cmd/Ctrl+R
+;; (Run) also answers, so Run comes back without Alt.
+;;
+;; Left out because the window has the key: split (Ctrl+Shift+S is Save As)
+;; and, on a Mac, expand and shrink selection (Ctrl+W and Ctrl+Shift+W
+;; close the tab). Left out because Jonquil has no such command: rewrap in
+;; quotes, the mode toggle and the rich comment.
 {:label "Calva paredit"
- :window []
+ :remove [{:key "p" :mods #{:cmd :alt} :command :parinfer/next-mode}
+          {:key "r" :mods #{:cmd} :command :run/run}]
+ :window [{:key "p" :exact #{:meta :alt} :os :mac :command :parinfer/next-mode}
+          {:key "r" :mods #{:cmd} :not #{:alt} :command :run/run}]
  :editor
- [;; moving
+ [;; two-step keys
+  {:key "p" :exact #{:ctrl :alt} :then [{:key "r" :exact #{:ctrl :alt}}] :command :paredit/raise}
+  {:key "r" :exact #{:ctrl :alt} :then [{:key "p" :exact #{:ctrl :alt}}] :command :paredit/rewrap-round}
+  {:key "r" :exact #{:ctrl :alt} :then [{:key "s" :exact #{:ctrl :alt}}] :command :paredit/rewrap-square}
+  {:key "r" :exact #{:ctrl :alt} :then [{:key "c" :exact #{:ctrl :alt}}] :command :paredit/rewrap-curly}
+  {:key "r" :exact #{:ctrl :alt} :then [{:key "h" :exact #{:ctrl :alt}}] :command :paredit/rewrap-set}
+  {:key "k" :exact #{:ctrl} :os :linux :then [{:key "k" :exact #{:ctrl}}] :command :paredit/kill-right}
+  {:key "k" :exact #{:ctrl} :os :linux :then [{:key "h" :exact #{:ctrl}}] :command :paredit/kill-left}
+  ;; moving
   {:key "Right" :exact #{:ctrl} :command :paredit/forward}
   {:key "Right" :exact #{:alt} :command :paredit/forward}
   {:key "Left" :exact #{:ctrl} :command :paredit/backward}

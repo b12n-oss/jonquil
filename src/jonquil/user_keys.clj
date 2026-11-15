@@ -142,12 +142,13 @@
                                 wp ep rp))}))))
 
 (defn- chord
-  "What identifies a binding for :remove: its key names, its modifiers and
-  its command."
+  "What identifies a binding for :remove: its key names, its modifiers, its
+  command, and for a key sequence the chords that follow."
   [b]
   [(set (if (:key b) [(:key b)] (:keys b)))
    (set (or (:exact b) (:mods b)))
-   (:command b)])
+   (:command b)
+   (:then b)])
 
 (defn layer
   "base, the plugins' and the shipped bindings of scope, with user's laid

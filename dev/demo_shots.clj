@@ -62,6 +62,8 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.prefs-window :as prefs-window]
             [jonquil.gtk.source-pane :as source-pane]
+            [jonquil.key-seq :as key-seq]
+            [jonquil.key-sets :as key-sets]
             [jonquil.login-path :as login-path]
             [jonquil.main :as main]
             [jonquil.nrepl.cljs-child :as cljs-child]
@@ -242,6 +244,27 @@
       (on-gtk (check! :find (and ok (zero? exit))
                       {:match-count (count @(:matches fb))
                        :screenshot-exit exit :screenshot-err err})))))
+
+(defn- scene-key-sequence
+  "The Calva paredit key set on, a small form in the editor, and Ctrl+Alt+R
+  pressed through the editor's own key handler: the status bar names the
+  prefix and, after the pause, the list of what can follow is open over
+  the last lines of the editor."
+  [ui]
+  (go-row :key-sequence check!
+    (let [ed (:editor ui)
+          shown? (:shown? (:key-seq-hint ui))
+          _ (on-gtk (reset! key-sets/live :calva)
+                    (editor/set-text! ed "(defn area [w h]\n  [* w h])\n")
+                    (g/with-iters* (:buf ed) 21 21 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
+                    (editor/handle-key! ed (int \r) (bit-or g/CONTROL-MASK g/ALT-MASK)))
+          ok (await-until 3000 20 shown?)
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :key-sequence "png") (own-pid))]
+      (on-gtk (key-seq/cancel!)
+              (reset! key-sets/live :default)
+              (check! :key-sequence (and ok (zero? exit))
+                      {:shown ok :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-run-selection
   "run-selection.clj's last line, with the caret already there
@@ -1101,6 +1124,7 @@
    [:run-selection scene-run-selection]
    [:close-prompt scene-close-prompt]
    [:prefs-keys scene-prefs-keys]
+   [:key-sequence scene-key-sequence]
    [:theme-light scene-theme-light]
    [:theme-dark scene-theme-dark]
    [:theme-solarized scene-theme-solarized]

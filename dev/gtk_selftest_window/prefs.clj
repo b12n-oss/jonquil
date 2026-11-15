@@ -8,9 +8,11 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.prefs-window :as pw]
             [jonquil.key-prefs :as kp]
+            [jonquil.key-seq :as key-seq]
             [jonquil.key-sets :as key-sets]
             [jonquil.keymap :as km]
             [jonquil.plugin-registry :as plugin-registry]
@@ -166,3 +168,48 @@
                                     off? (= {:splice false :rows 0 :saved :default} after))
                                {:before before :on on? :during during :off off? :after after})
                 (finally (reset! key-sets/live :default)))))))
+
+(defn row-key-sequence-with-its-hint
+  "With the Calva paredit set on, Ctrl+Alt+R starts a key sequence: the
+  window passes the key to the editor, which starts it, and the status bar
+  shows the prefix. After a pause the list of what can follow opens. The
+  window's handler then takes Ctrl+Alt+S as the second chord and the
+  brackets become square, with the list gone. A second chord that leads
+  nowhere ends the sequence, changes nothing, and the status bar says so."
+  [ui]
+  (go-row :key-sequence-with-its-hint support/check
+    (let [ed (:editor ui)
+          ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK)
+          window-key! (fn [ch] ((:handle-window-key! ui) ffi/null (int ch) 0 ctrl-alt ffi/null))
+          status #(g/label-text (:status-label ui))
+          shown? (:shown? (:key-seq-hint ui))
+          _ (on-gtk (reset! key-sets/live :calva)
+                    (key-seq/cancel!)
+                    (editor/set-text! ed "(a b)")
+                    (g/with-iters* (:buf ed) 2 2 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
+          ;; the prefix: not the window's, so it reaches the editor
+          start (on-gtk [(window-key! \r) (editor/handle-key! ed (int \r) ctrl-alt)])
+          named? (await-until 3000 20 #(str/ends-with? (status) "R …"))
+          early (on-gtk {:pending (count (:candidates (key-seq/pending))) :shown (shown?)})
+          listed? (await-until 3000 20 shown?)
+          second (on-gtk (window-key! \s))
+          done (on-gtk {:text (editor/editor-text ed) :pending (key-seq/pending)})
+          closed? (await-until 3000 20 #(not (shown?)))
+          ;; a chord that leads nowhere
+          _ (on-gtk (window-key! \r) (editor/handle-key! ed (int \r) ctrl-alt))
+          wrong (on-gtk (window-key! \j))
+          said? (await-until 3000 20 #(str/includes? (status) "isn't a key sequence"))
+          after (on-gtk {:text (editor/editor-text ed) :pending (key-seq/pending)})]
+      (on-gtk (try
+                (support/check :key-sequence-with-its-hint
+                               (and (= [0 1] start) named?
+                                    (= {:pending 4 :shown false} early)
+                                    listed? (= 1 second)
+                                    (= {:text "[a b]" :pending nil} done)
+                                    closed? (= 1 wrong) said?
+                                    (= {:text "[a b]" :pending nil} after))
+                               {:start start :named named? :status (status) :early early :listed listed?
+                                :second second :done done :closed closed? :wrong wrong :said said? :after after})
+                (finally
+                  (key-seq/cancel!)
+                  (reset! key-sets/live :default)))))))

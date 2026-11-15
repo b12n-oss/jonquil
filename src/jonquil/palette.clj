@@ -29,14 +29,18 @@
   :mods or :exact in the order Cmd, Ctrl, Alt, Shift, with :cmd shown as
   Cmd on macOS and Ctrl elsewhere and :alt as Option on macOS. A :keys
   binding gives one chord per key, sorted by key name and joined with
-  \", \"; two keys that read the same (Return, KP_Enter) show once."
+  \", \"; two keys that read the same (Return, KP_Enter) show once. A key
+  sequence shows its :then chords after the first, a space between."
   [binding os]
   (let [mac? (= "Mac OS X" os)
         mods (or (:exact binding) (:mods binding) #{})
         prefix (apply str (for [m [:cmd :ctrl :meta :super :alt :shift] :when (contains? mods m)]
                             (str (modifier-label m mac?) "+")))
-        ks (if (:key binding) [(:key binding)] (sort (:keys binding)))]
-    (str/join ", " (distinct (map #(str prefix (key-label %)) ks)))))
+        ks (if (:key binding) [(:key binding)] (sort (:keys binding)))
+        first-chord (str/join ", " (distinct (map #(str prefix (key-label %)) ks)))]
+    (if-let [then (seq (:then binding))]
+      (str/join " " (cons first-chord (map #(chord-label % os) then)))
+      first-chord)))
 
 (defn entries
   "Every command in commands without :palette? false, sorted by doc, as

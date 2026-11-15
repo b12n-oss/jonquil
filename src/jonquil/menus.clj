@@ -103,7 +103,8 @@
   [keymap id]
   (first (for [scope [:window :editor]
                b (get keymap scope)
-               :when (and (= id (:command b)) (not (:when b)))]
+               ;; nor a key sequence: a menu item can show one chord only
+               :when (and (= id (:command b)) (not (:when b)) (not (:then b)))]
            b)))
 
 (defn- with-keys

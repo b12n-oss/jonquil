@@ -353,10 +353,11 @@
   "The live bindings of scope: yours, the chosen key set's, reg's plugins',
   the shipped ones."
   [reg scope]
-  (user-keys/layer @user-keys/live scope
-                   (-> (key-sets/live-bindings scope)
-                       (into (bindings reg scope))
-                       (into (get km/shipped scope)))))
+  (let [base (into (bindings reg scope) (get km/shipped scope))
+        ;; the set laid over the plugins' and the shipped keys, as keys.edn
+        ;; is laid over the set
+        the-set {scope (key-sets/live-bindings scope) :remove (key-sets/live-bindings :remove)}]
+    (user-keys/layer @user-keys/live scope (user-keys/layer the-set scope base))))
 
 (defn window-bindings
   "The live window bindings: your own (jonquil.user-keys/live) first, then

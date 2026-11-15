@@ -365,7 +365,7 @@
   [changed]
   {:id 7
    :ed {:buf ::buf :view ::view :destroyed? (atom false) :changed changed}
-   :fb ::fb :help-pop ::hp :full-doc-pop ::fdp :rename-pop {:entry ::entry}
+   :fb ::fb :help-pop ::hp :full-doc-pop ::fdp :key-seq-pop ::ksp :rename-pop {:entry ::entry}
    :completion ::c :palette ::pal :last-shown (atom nil) :path (atom "/a.clj")
    :discard-warned? (atom true) :close-btn ::close :project (atom nil)})
 
@@ -410,6 +410,7 @@
 (def ^:private wired-in-order
   [[:hooks :on-tab-wired 7] [:menu ::view] :error-fn :parinfer-fns :format-style-fn [:fb-error-fn ::fb]
    :on-dirty [:connect ::close "clicked"] :on-dirty :on-moved [:register ::hp] [:register ::fdp]
+   [:register ::ksp]
    [:connect ::vadj "value-changed"] [:connect ::hadj "value-changed"] :quick-doc-fn :jump-fn
    :on-moved :on-moved :on-focus-lost :on-moved :on-focus-lost [:register {:entry ::entry}]
    [:register ::pal] [:palette-handlers ::pal] :rename-fn :run-form-fn [:flash-cancel ::cancel]
@@ -425,7 +426,7 @@
 (deftest wire-tab-wires-in-order-test
   (is (= wired-in-order (wire-log nil {})))
   (testing "no hint label: LM6's cursor handler is gone"
-    (is (= (let [[a b] (split-at 17 wired-in-order)] (vec (concat a (rest b))))
+    (is (= (let [[a b] (split-at 18 wired-in-order)] (vec (concat a (rest b))))
            (wire-log nil {:hint-label nil}))))
   (testing "no parinfer-mode-read: no :parinfer-fns"
     (is (= (vec (remove #{:parinfer-fns} wired-in-order))
