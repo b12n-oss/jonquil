@@ -139,6 +139,7 @@
    menus-rows/row-slow-events-listed-and-saved
    prefs-rows/row-prefs-records-a-key
    prefs-rows/row-prefs-asks-before-taking-a-key
+   prefs-rows/row-prefs-adds-a-step
    prefs-rows/row-prefs-chooses-a-key-set
    prefs-rows/row-key-sequence-with-its-hint
    probe-rows/row-probe-part

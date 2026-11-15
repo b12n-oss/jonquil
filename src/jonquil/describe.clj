@@ -38,17 +38,20 @@
 (defn key-matches
   "Every :window then :editor binding in keymap that matches keyval and
   state with each :when condition taken as holding, in dispatch order, as
-  {:scope :command :outcome :when :doc :source}."
-  [{:keys [keymap commands keyval state physical]}]
+  {:scope :command :outcome :when :doc :source :sequence}. :sequence is
+  the whole key sequence as text, on os, for a binding the key only starts,
+  else nil."
+  [{:keys [keymap commands keyval state physical os]}]
   (vec (for [scope [:window :editor]
              b (get keymap scope)
              :when (km/matches? b keyval state (constantly true) physical)]
          {:scope scope :command (:command b) :outcome (:outcome b) :when (:when b)
+          :sequence (when (:then b) (palette/chord-label b os))
           :doc (get-in commands [(:command b) :doc]) :source (source commands (:command b))})))
 
-(defn- match-text [{:keys [scope command outcome doc source] guards :when}]
+(defn- match-text [{:keys [scope command outcome doc source sequence] guards :when}]
   (if command
-    (str "runs " (or doc (str command)) " (" command ", " source ", " (name scope) ")"
+    (str (if sequence (str "starts " sequence ", which runs ") "runs ") (or doc (str command)) " (" command ", " source ", " (name scope) ")"
          (when (seq guards) (str ", only when " (str/join ", " (map name guards)))))
     (if (= :to-gtk outcome)
       (str "goes to GTK here (" (name scope) ")")

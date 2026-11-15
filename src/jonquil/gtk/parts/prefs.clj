@@ -100,6 +100,64 @@
                       :done (str (kp/chord-text chord (os)) " now runs " (named (:doc row)) ".")}
                  false))
 
+(defn- step-row
+  "The row a step is added to. first-chord, when there is one, is a chord
+  recorded just before and not written yet: the row then has it as its
+  whole key, in user as well. Answers [user row]."
+  [row first-chord]
+  (if first-chord
+    [(kp/record @user-keys/live row first-chord nil)
+     (assoc row :binding (kp/chord-binding row first-chord))]
+    [@user-keys/live row]))
+
+(defn- commit-step!
+  "Adds chord to the row's key as one more step, taking the keys of taken's
+  bindings."
+  [ctx {:keys [row first-chord]} chord taken]
+  (let [[user row] (step-row row first-chord)]
+    (apply-change! ctx {:user (kp/add-step user row chord taken)
+                        :done (str (kp/chord-text (kp/with-step row chord) (os))
+                                   " now runs " (named (:doc row)) ".")}
+                   false)))
+
+(defn- wait-for-step!
+  "Makes the next key press one more step of row index's key. first-chord
+  is a chord just recorded for the row and not written yet, or nil. why
+  opens the message."
+  [{:keys [win state]} {:keys [row index first-chord]} why]
+  (let [so-far (if first-chord (kp/chord-text first-chord (os)) (:chord row))]
+    (reset! state {:mode :step :row row :index index :first-chord first-chord})
+    (pw/set-key-label! win index (str so-far " …"))
+    (pw/say! win (str why "Press the next key for " (named (:doc row)) ", after " so-far ". Esc cancels.") nil)))
+
+(defn- start-step!
+  "Add a step: the next key press goes after the selected row's key."
+  [{:keys [win state] :as ctx} index]
+  (let [row (when index (get (pw/rows win) index))]
+    (cond
+      (nil? row) (pw/say! win "Select a row first." nil)
+      (:fixed? row) (pw/say! win "That key is part of a chain of keys and can't be changed here." nil)
+      (nil? (:binding row)) (pw/say! win (str (named (:doc row)) " has no key yet. Click Add a key first.") nil)
+      :else (do (when @state (refresh! ctx))
+                (wait-for-step! ctx {:row row :index index} "")))))
+
+(defn- step-recorded!
+  "A chord arrived as the next step: asks before taking keys from other
+  commands, else adds it."
+  [{:keys [win state] :as ctx} {:keys [row first-chord] :as s} chord]
+  (let [mine (kp/with-step (second (step-row row first-chord)) chord)
+        taken (kp/step-conflicts {:keymap (live-keymap) :command (:command row) :os (os)} mine)
+        commands (plugin-registry/all-commands @plugin-registry/live)]
+    (if (seq taken)
+      (let [b (:binding (first taken))]
+        (reset! state (assoc s :mode :conflict :chord chord :taken taken :step? true))
+        (pw/say! win (str (kp/chord-text mine (os)) " can't work beside " (kp/chord-text b (os))
+                          ", which runs " (named (get-in commands [(:command b) :doc]))
+                          (when (next taken) (str ", and " (dec (count taken)) " more"))
+                          ". Replace?")
+                 ["Replace" "Cancel"]))
+      (commit-step! ctx s chord nil))))
+
 (defn- start-record!
   "A click on row index's key: the next key press is its new key."
   [{:keys [win state] :as ctx} index]
@@ -117,38 +175,66 @@
   [{:keys [win state] :as ctx} {:keys [row]} chord]
   (let [taken (kp/conflict {:keymap (live-keymap) :command (:command row) :os (os)} chord)
         commands (plugin-registry/all-commands @plugin-registry/live)]
-    (if taken
+    (cond
+      ;; a chord that starts key sequences can't also be a key by itself:
+      ;; it replaces them, or becomes the first chord of one more
+      (:then (:binding taken))
+      (let [all (kp/sequences-on {:keymap (live-keymap) :command (:command row) :os (os)} chord)
+            n (count all)]
+        (reset! state {:mode :shared :row row :index (:index @state) :chord chord :taken all})
+        (pw/say! win (str (kp/chord-text chord (os)) " starts "
+                          (if (= 1 n) "the key sequence for " (str n " key sequences, such as the one for "))
+                          (named (get-in commands [(:command (:binding (first all))) :doc]))
+                          ". As a single key it would replace " (if (= 1 n) "it" "them") ".")
+                 ["Replace" "Add a second key" "Cancel"]))
+
+      taken
       (let [b (:binding taken)
             what (if-let [id (:command b)]
                    (str "runs " (named (get-in commands [id :doc])))
                    "is one Jonquil keeps for itself")]
         (reset! state {:mode :conflict :row row :chord chord :taken taken})
         (pw/say! win (str (kp/chord-text chord (os)) " " what ". Replace it?") ["Replace" "Cancel"]))
-      (commit! ctx row chord nil))))
+
+      :else (commit! ctx row chord nil))))
 
 (defn- on-key
-  "The window's key handler. While a key is being recorded every key is
-  the tab's: Escape cancels, a modifier alone waits, a key Jonquil can't
-  bind says so, and a chord is recorded. Otherwise the key is GTK's."
+  "The window's key handler. While a key or a step is being recorded every
+  key is the tab's: Escape cancels, a modifier alone waits, a key Jonquil
+  can't bind says so, and a chord is recorded. Otherwise the key is GTK's."
   [{:keys [win state] :as ctx} keyval gdk-state physical]
-  (let [s @state]
-    (if (not= :recording (:mode s))
+  (let [s @state
+        step? (= :step (:mode s))]
+    (if-not (or step? (= :recording (:mode s)))
       0
-      (let [{:keys [chord problem]} (kp/press-chord keyval gdk-state (os) physical)]
+      (let [{:keys [chord problem]} (if step?
+                                      (kp/press-step keyval gdk-state (os) physical)
+                                      (kp/press-chord keyval gdk-state (os) physical))]
         (cond
           (and (= KEY-ESCAPE keyval) (nil? (:mods chord))) (idle! ctx "Cancelled.")
           problem (pw/say! win problem nil)
+          (and chord step?) (step-recorded! ctx s chord)
           chord (recorded! ctx s chord))
         1))))
 
 (defn- on-answer
   "Replace or Change anyway (yes? true), or Cancel."
   [{:keys [state] :as ctx} yes?]
-  (let [{:keys [mode row chord taken change]} @state]
+  (let [{:keys [mode row chord taken change step?] :as s} @state]
     (cond
       (not yes?) (idle! ctx "Cancelled.")
+      (and (= :conflict mode) step?) (commit-step! ctx s chord taken)
+      (= :shared mode) (commit! ctx row chord taken)
       (= :conflict mode) (commit! ctx row chord taken)
       (= :comments mode) (apply-change! ctx change true))))
+
+(defn- on-other
+  "Add a second key, the third answer about a chord that starts key
+  sequences: the chord becomes the first of one more."
+  [{:keys [state] :as ctx}]
+  (let [{:keys [mode row index chord]} @state]
+    (when (= :shared mode)
+      (wait-for-step! ctx {:row row :index index :first-chord chord} ""))))
 
 (defn- on-reset
   "Reset this key: the selected row's command goes back to its plugin's or
@@ -193,7 +279,7 @@
   "The Preferences part for one window: builds the window, hidden, and
   answers the fn that opens it, and turns on the key set the settings file
   names. ui's :prefs is {:window :open! :on-key :key-set! :record! :answer!
-  :reset! :state}, the same fns the widgets call, for the self-tests;
+  :reset! :add-step! :other! :state}, the same fns the widgets call, for the self-tests;
   :key-set! shows the set at an index in the chooser, as a click does."
   [{:keys [win] :as wctx}]
   (let [w (pw/make-window win (mapv :label key-sets/sets))
@@ -206,8 +292,10 @@
      w {:on-search (fn [_text] (when (nil? @(:state ctx)) (refresh! ctx)))
         :on-record (fn [i] (start-record! ctx i))
         :on-answer (fn [yes?] (on-answer ctx yes?))
+        :on-other (fn [] (on-other ctx))
         :on-open-file (fn [] (when-let [f (:open! @user-keys/window-fns)] (f)))
         :on-reset (fn [i] (on-reset ctx i))
+        :on-add-step (fn [i] (start-step! ctx i))
         :on-key-set (fn [i] (on-key-set ctx i))
         :on-key on-key!})
     (start-key-set! ctx)
@@ -216,7 +304,9 @@
                   :key-set! (fn [i] (pw/set-key-set-index! w i))
                   :record! (fn [i] (start-record! ctx i))
                   :answer! (fn [yes?] (on-answer ctx yes?))
+                  :other! (fn [] (on-other ctx))
                   :reset! (fn [i] (on-reset ctx i))
+                  :add-step! (fn [i] (start-step! ctx i))
                   :state (:state ctx)}}}))
 
 (def part

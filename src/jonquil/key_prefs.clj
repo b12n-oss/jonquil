@@ -86,6 +86,18 @@
     {:problem "A key that types needs a modifier other than Shift, or it would replace typing."}
     :else {:chord (cond-> {:key name} (seq mods) (assoc :mods mods))}))
 
+(defn press-step
+  "What a key press stands for while the Keys tab records a later step of
+  a key sequence: press-chord's answers, but a key that types counts too,
+  since a sequence under way takes every key."
+  [keyval state os physical]
+  (let [name (or physical (km/key-name keyval))
+        mods (held-modifiers state os)]
+    (cond
+      (modifier-key? keyval) {:waiting true}
+      (nil? name) {:problem "Jonquil can't bind that key yet. Try another."}
+      :else {:chord (cond-> {:key name} (seq mods) (assoc :mods mods))})))
+
 (defn press-chord
   "What a key press stands for while the Keys tab records: {:chord {:key
   name :mods #{...}}} (no :mods when none is held), {:waiting true} for a
@@ -142,21 +154,73 @@
     (update user scope (fn [v] (vec (remove #{b} v))))
     (update user :remove (fn [v] (vec (distinct (conj (vec v) (removal b))))))))
 
-(defn record
-  "user, your keys.edn as jonquil.user-keys reads it, after chord is
-  recorded for row. The row's old binding goes: changed in place when it is
-  yours, removed when it is a plugin's or Jonquil's. The new binding keeps
-  the old one's :args. taken is conflict's answer, or nil: the binding it
-  names gives the chord up the same way."
-  [user {:keys [scope command binding]} chord taken]
-  (let [mine (merge (apply dissoc (or binding {}) :when chord-keys) chord {:command command})
-        yours? (some #{binding} (get user scope))
-        cleared (cond-> user
-                  taken (without (:scope taken) (:binding taken))
+(defn- put
+  "user with mine in place of row's binding: changed in place when the old
+  one is yours, else added to yours with the old one, a plugin's or
+  Jonquil's, removed. Each of taken, conflict's answers, gives its key up
+  the same way."
+  [user {:keys [scope binding]} mine taken]
+  (let [yours? (some #{binding} (get user scope))
+        cleared (cond-> (reduce (fn [u t] (without u (:scope t) (:binding t))) user taken)
                   (and binding (not yours?)) (without scope binding))]
     (if yours?
       (update cleared scope (fn [v] (vec (distinct (map #(if (= binding %) mine %) v)))))
       (update cleared scope (fn [v] (vec (distinct (cons mine v))))))))
+
+(defn chord-binding
+  "The binding record gives row for chord: the old one's :args with chord
+  as its whole key."
+  [{:keys [command binding]} chord]
+  (merge (apply dissoc (or binding {}) :when :then chord-keys) chord {:command command}))
+
+(defn sequences-on
+  "The key sequences of other commands that start on chord, as [{:scope
+  :binding}]. A single key on chord would run ahead of each of them."
+  [{:keys [keymap command os]} chord]
+  (let [keyval (km/key-value (:key chord))
+        state (chord-state chord os)]
+    (vec (for [scope [:window :editor]
+               b (get keymap scope)
+               :when (and (:then b) (not= command (:command b))
+                          (km/matches? b keyval state (constantly true)))]
+           {:scope scope :binding b}))))
+
+(defn record
+  "user, your keys.edn as jonquil.user-keys reads it, after chord is
+  recorded for row as its whole key. The row's old binding goes: changed in
+  place when it is yours, removed when it is a plugin's or Jonquil's. The
+  new binding keeps the old one's :args, and none of its later steps.
+  taken is conflict's answer, sequences-on's, or nil: each binding it names
+  gives the chord up the same way."
+  [user row chord taken]
+  (put user row (chord-binding row chord) (if (map? taken) [taken] taken)))
+
+(defn with-step
+  "row's binding with chord as one more step after the ones it has."
+  [{:keys [binding]} chord]
+  (update (dissoc binding :when) :then (fn [v] (conj (vec v) chord))))
+
+(defn step-conflicts
+  "The bindings of other commands that the key sequence mine can't live
+  with, as [{:scope :binding}]: one with the same chords, one whose chords
+  are the start of mine (it would run first), and one that mine is the
+  start of (it could never finish). Chords are compared as the tab shows
+  them. command's own bindings don't count."
+  [{:keys [keymap command os]} mine]
+  (let [label #(palette/chord-label % os)
+        mine-label (label mine)
+        starts? (fn [a b] (or (= a b) (str/starts-with? b (str a " "))))]
+    (vec (for [scope [:window :editor]
+               b (get keymap scope)
+               :when (and (:command b) (not= command (:command b))
+                          (or (starts? (label b) mine-label) (starts? mine-label (label b))))]
+           {:scope scope :binding b}))))
+
+(defn add-step
+  "user after chord is added to row's key as one more step. taken is
+  step-conflicts' answer: each binding it names gives its key up."
+  [user row chord taken]
+  (put user row (with-step row chord) taken))
 
 (defn reset-command
   "user with command back to its plugin's or Jonquil's keys: your bindings
@@ -171,7 +235,7 @@
   "The first line of a keys.edn that Preferences wrote."
   ";; Your own key bindings for Jonquil, written by Preferences.")
 
-(def ^:private key-order [:key :keys :mods :exact :not :physical? :when :command :args :outcome])
+(def ^:private key-order [:key :keys :mods :exact :not :physical? :then :when :command :args :outcome])
 
 (defn- binding-text
   "b as EDN on one line, its keys in key-order."

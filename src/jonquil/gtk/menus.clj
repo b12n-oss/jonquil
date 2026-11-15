@@ -20,9 +20,11 @@
 (def PREFIX "The action group's prefix on the window." "menu")
 
 (defn- item!
-  "A GMenuItem for item, showing its key when it has one."
-  [{:keys [label action accel]}]
-  (let [mi (g/g-menu-item-new label (str PREFIX "." action))]
+  "A GMenuItem for item, showing its key when it has one. A key sequence
+  goes after the label, in brackets: the key column holds one chord."
+  [{:keys [label action accel keys-text]}]
+  (let [mi (g/g-menu-item-new (if keys-text (str label "  (" keys-text ")") label)
+                              (str PREFIX "." action))]
     (when accel
       (g/g-menu-item-set-attribute-value mi "accel" (g/g-variant-new-string accel)))
     mi))

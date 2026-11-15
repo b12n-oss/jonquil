@@ -65,6 +65,23 @@
       (is (= "More" (:label more)))
       (is (= [[{:command :run/changed :label "Changed" :action "run.changed" :accel nil}]] (:sections more))))))
 
+(deftest key-sequence-in-a-menu-test
+  (let [raise {:key "p" :exact #{:ctrl :alt} :then [{:key "r" :exact #{:ctrl :alt}}] :command :edit/raise}
+        ms [{:label "Edit" :sections [[{:command :edit/raise :label "Raise"}
+                                       {:command :edit/slurp :label "Slurp"}]]}]
+        item (fn [keymap os] (ffirst (:sections (first (menus/tree {:menus ms :keymap keymap :os os})))))]
+    (testing "a command with only a key sequence shows it as text, and no accelerator"
+      (is (= {:command :edit/raise :label "Raise" :action "edit.raise" :accel nil
+              :keys-text "Ctrl+Alt+P Ctrl+Alt+R"}
+             (item {:window [] :editor [raise]} "Linux")))
+      (is (= "⌃⌥P ⌃⌥R" (:keys-text (item {:window [] :editor [raise]} "Mac OS X")))))
+    (testing "a single key wins over the sequence"
+      (let [i (item {:window [] :editor [raise {:key "F9" :command :edit/raise}]} "Linux")]
+        (is (= "F9" (:accel i)))
+        (is (not (contains? i :keys-text)))))
+    (testing "a sequence under a condition isn't shown"
+      (is (not (contains? (item {:window [] :editor [(assoc raise :when [:x])]} "Linux") :keys-text))))))
+
 (deftest every-shipped-key-is-one-gtk-can-show-test
   (doseq [menu (menus/tree {:menus menus/shipped :keymap km/shipped :os "Mac OS X"})
           item (menus/items menu)

@@ -110,7 +110,7 @@
   :physical :key?}). Returns 1, the key used."
   [ctx {:keys [keyval state os kname physical]}]
   (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
-                                             :state state :physical physical))]
+                                             :state state :physical physical :os os))]
     ((:print-lines! ctx) (describe/describe-lines (describe/chord-text kname state os) matches))
     1))
 

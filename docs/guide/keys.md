@@ -198,6 +198,19 @@ from: `default`, a key set's name, a plugin's name, or `yours`.
   replace typing. Function keys and Esc can stand alone.
 - A greyed-out key belongs to a chain of keys, such as the steps Esc goes
   through, and can't be changed here.
+- **Add a step** turns the selected row's key into a
+  [key sequence](structural-editing.md#two-step-keys). Select a row that
+  has a key, click the button, and press the key that should follow. Here
+  a plain letter is fine, because the first key has already been pressed
+  by then. Click it again to add a third. Recording a key over the row the
+  usual way makes it a single key again.
+- A key that starts sequences can't also run a command by itself. If you
+  record one for another command, the tab asks. **Replace** makes it a
+  single key and takes it from the sequences that start with it. **Add a
+  second key** waits for one more key and makes a new sequence beside
+  them.
+- If a new sequence would clash with an existing key, the tab asks before
+  replacing that key.
 - **Reset this key** puts the selected command back on its own keys, and
   **Open keys.edn** opens the file the tab writes.
 
@@ -242,8 +255,8 @@ and writes a commented starter file the first time.
   The first chord follows the rules above. A later chord may be a plain
   key, since the sequence is already under way. The status bar shows the
   chords so far, and a list of what can follow opens after half a second
-  ([Two-step keys](structural-editing.md#two-step-keys)). The Keys tab
-  lists a sequence and records single chords only.
+  ([Two-step keys](structural-editing.md#two-step-keys)). In the Keys tab,
+  **Add a step** records one.
 - **List every key binding** in the palette prints each command's id with
   its keys, yours included.
 

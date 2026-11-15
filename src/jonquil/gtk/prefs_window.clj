@@ -31,7 +31,8 @@
 
 (defn set-handlers!
   "Registers {:on-search (fn [text]) :on-record (fn [index]) :on-answer (fn
-  [yes?]) :on-open-file (fn []) :on-reset (fn [index-or-nil]) :on-key-set
+  [yes?]) :on-other (fn []), the third answer button, :on-open-file (fn []) :on-reset (fn [index-or-nil]) :on-add-step (fn [index-or-nil]),
+  for the selected row, :on-key-set
   (fn [index]), the chooser's new choice, :on-key (fn
   [keyval state physical]) -> 1 when the key is used up, else 0; physical
   is jonquil.gtk.editor/physical-key's answer, the key's name or nil}."
@@ -119,14 +120,19 @@
 
 (defn say!
   "Puts text on the message line. answers is nil, or [yes no], the labels
-  of the two answer buttons, which show only then."
+  of the two answer buttons, or [yes other no] with a third between them.
+  The buttons show only then."
   [pw text answers]
   (g/gtk-label-set-text (:message pw) text)
   (reset! (:said pw) {:text text :answers answers})
-  (let [[yes no] answers]
+  (let [yes (first answers)
+        no (last answers)
+        other (when (= 3 (count answers)) (second answers))]
     (when yes (g/gtk-button-set-label (:yes-btn pw) yes))
+    (when other (g/gtk-button-set-label (:other-btn pw) other))
     (when no (g/gtk-button-set-label (:no-btn pw) no))
     (g/gtk-widget-set-visible (:yes-btn pw) (if answers 1 0))
+    (g/gtk-widget-set-visible (:other-btn pw) (if other 1 0))
     (g/gtk-widget-set-visible (:no-btn pw) (if answers 1 0)))
   nil)
 
@@ -161,7 +167,7 @@
 (defn- keys-page
   "Packs the Keys tab: the key set chooser, search, list, message row,
   bottom buttons."
-  [{:keys [search scroll message yes-btn no-btn key-set] lb :list :as pw}]
+  [{:keys [search scroll message yes-btn other-btn no-btn key-set] lb :list :as pw}]
   (let [page (g/gtk-box-new g/ORIENTATION-VERTICAL 6)
         set-row (g/gtk-box-new g/ORIENTATION-HORIZONTAL 8)
         set-label (g/gtk-label-new "Key set")
@@ -176,10 +182,14 @@
     (g/gtk-label-set-xalign message 0.0)
     (g/gtk-label-set-wrap message 1)
     (g/gtk-widget-set-hexpand message 1)
-    (doseq [w [message yes-btn no-btn]] (g/gtk-box-append answer-row w))
-    (doseq [w [(button! "Open keys.edn" #(call! pw :on-open-file))
-               (button! "Reset this key" #(call! pw :on-reset (selected-index pw)))]]
-      (g/gtk-box-append bottom w))
+    (doseq [w [message yes-btn other-btn no-btn]] (g/gtk-box-append answer-row w))
+    (doseq [[label tip f] [["Open keys.edn" nil #(call! pw :on-open-file)]
+                           ["Add a step" "Makes the selected key a key sequence: the next key you press goes after it."
+                            #(call! pw :on-add-step (selected-index pw))]
+                           ["Reset this key" nil #(call! pw :on-reset (selected-index pw))]]]
+      (let [b (button! label f)]
+        (when tip (g/gtk-widget-set-tooltip-text b tip))
+        (g/gtk-box-append bottom b)))
     (g/gtk-widget-set-tooltip-text key-set "A key set adds a group of keys. Your own keys still win over it.")
     (doseq [w [set-label key-set]] (g/gtk-box-append set-row w))
     (g/gtk-widget-set-margin-top set-row 8)
@@ -190,7 +200,7 @@
 (defn make-window
   "Builds the Preferences window over parent, hidden, its chooser listing
   key-set-labels: {:win :notebook :key-set
-  :search :list :scroll :message :yes-btn :no-btn :rows :buttons :said
+  :search :list :scroll :message :yes-btn :other-btn :no-btn :rows :buttons :said
   :handlers}. Closing it hides it, so it opens again as it was left."
   [parent key-set-labels]
   (let [names (g/gtk-string-list-new ffi/null)
@@ -204,6 +214,7 @@
             :handlers (atom {})}
         pw (assoc pw
                   :yes-btn (button! "Replace" #(call! pw :on-answer true))
+                  :other-btn (button! "Add a second key" #(call! pw :on-other))
                   :no-btn (button! "Cancel" #(call! pw :on-answer false)))]
     (g/gtk-window-set-title (:win pw) "Preferences")
     (g/gtk-window-set-default-size (:win pw) WIDTH HEIGHT)

@@ -87,6 +87,57 @@
                   (.delete (java.io.File. ^String path))
                   (reset! user-keys/live user-keys/no-keys)))))))
 
+(defn row-prefs-adds-a-step
+  "Add a step makes a key a key sequence: with a key of yours recorded for
+  Run, Add a step and a plain K write the binding with a :then, the row
+  shows both chords, and the first chord in the window now starts a
+  sequence instead of running Run. Recording that chord for Save then asks,
+  and Add a second key gives Save a sequence on the same first chord."
+  [ui]
+  (go-row :prefs-adds-a-step support/check
+    (let [{w :window :as prefs} (:prefs ui)
+          path (user-keys/keys-path ((:settings-path* ui)))
+          {:keys [chord keyval state]} (free-chord)
+          _ (on-gtk ((:open! prefs)))
+          no-key (on-gtk ((:add-step! prefs) nil) (:text (pw/said w)))
+          _ (on-gtk ((:record! prefs) (run-row w "default"))
+                    ((:on-key prefs) keyval state))
+          wrote? (await-until 3000 20 #(some (fn [b] (= :run/run (:command b))) (:window @user-keys/live)))
+          asked (on-gtk ((:add-step! prefs) (run-row w "yours")) (:text (pw/said w)))
+          _ (on-gtk ((:on-key prefs) (km/key-value "k") 0))
+          stepped? (await-until 3000 20 #(some :then (:window @user-keys/live)))
+          mine (on-gtk (first (:window @user-keys/live)))
+          label (on-gtk (:chord (get (pw/rows w) (run-row w "yours"))))
+          _ (on-gtk (key-seq/cancel!)
+                    ((:handle-window-key! ui) ffi/null keyval 0 state ffi/null))
+          pending? (on-gtk (some? (key-seq/pending)))
+          ;; the same chord for Save: it starts a sequence now, so the tab
+          ;; asks, and Add a second key makes one more sequence beside it
+          save-row (fn [] (first (keep-indexed (fn [i r] (when (= :file/save (:command r)) i)) (pw/rows w))))
+          shared (on-gtk (key-seq/cancel!)
+                         ((:record! prefs) (save-row))
+                         ((:on-key prefs) keyval state)
+                         (pw/said w))
+          _ (on-gtk ((:other! prefs))
+                    ((:on-key prefs) (km/key-value "x") 0))
+          two? (await-until 3000 20 #(= 2 (count (filter :then (:window @user-keys/live)))))
+          saves (on-gtk (first (filter #(= :file/save (:command %)) (:window @user-keys/live))))
+          _ (on-gtk (g/gtk-window-close (:win w)))]
+      (on-gtk (try
+                (support/check :prefs-adds-a-step
+                               (and (str/includes? no-key "Select a row first") wrote?
+                                    (str/includes? asked "Press the next key") stepped?
+                                    (= (assoc chord :then [{:key "k"}] :command :run/run) mine)
+                                    (str/ends-with? (or label "") " K") pending?
+                                    (= ["Replace" "Add a second key" "Cancel"] (:answers shared))
+                                    two? (= (assoc chord :then [{:key "x"}] :command :file/save) saves))
+                               {:no-key no-key :wrote wrote? :asked asked :stepped stepped?
+                                :mine mine :label label :pending pending? :shared shared
+                                :two two? :saves saves})
+                (finally
+                  (.delete (java.io.File. ^String path))
+                  (reset! user-keys/live user-keys/no-keys)))))))
+
 (defn row-prefs-asks-before-taking-a-key
   "Recording Save's Cmd/Ctrl+S for Run asks first: Cancel changes nothing,
   Replace gives Run the chord and takes it from Save. A keys.edn holding a
