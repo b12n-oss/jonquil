@@ -13,6 +13,12 @@ harness drives and the traps that catch first-time runners.
   and `plutil`). Nothing outside the process runs; the attach evaluators
   use in-process fake servers. Pass namespaces for a subset:
   `jolt test jonquil.edit-test`.
+- The guide's examples are part of that suite. `guide_examples_test` reads
+  each Clojure and EDN block in the README and the guide with the code that
+  reads the real file (settings, keys, a project's `.jonquil.edn`, a plugin),
+  and `structural_docs_test` runs every row of the Structural editing page.
+  A new block needs a kind in `guide_examples_test`'s table, or the suite
+  fails.
 - `jolt verify` is the pre-commit gate: clj-kondo in report mode, then
   `jolt test` and `jolt test:nrepl`, both of which must pass.
 

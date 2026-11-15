@@ -6,6 +6,14 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Changed
+
+- The guide's examples are checked by the tests. Each Clojure and EDN block in the README and the guide is read by the code that reads the real file: a `settings.edn` example by the settings loader, a `keys.edn` example by the key reader, a `.jonquil.edn` example by the project reader, and each plugin by the plugin check. A new block fails the suite until `guide_examples_test` says what kind it is.
+
+### Fixed
+
+- A `settings.edn` with no `:theme` no longer warns "has no known :theme" at every start. A file that sets only other keys, such as the guide's own `{:mcp-listen? true}`, gets the default theme without a warning. A theme Jonquil doesn't have still warns. The new guide test found this.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

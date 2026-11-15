@@ -43,12 +43,22 @@
       (is (str/includes? (:warning r) "couldn't read")))))
 
 (deftest unknown-theme-test
-  (doseq [content ["{:theme :purple}" "[:not :a :map]" "{}"]]
+  (doseq [content ["{:theme :purple}" "[:not :a :map]" "{:theme nil}"]]
     (let [path (str (temp-dir) "/settings.edn")]
       (spit path content)
       (let [r (settings/load-settings path)]
         (is (= :light (:theme r)) content)
         (is (str/includes? (:warning r) "no known :theme") content)))))
+
+(deftest no-theme-is-the-default-without-a-warning-test
+  ;; a file that sets only other keys, as the guide's {:mcp-listen? true}
+  ;; does, isn't warned about
+  (doseq [content ["{}" "{:mcp-listen? true}"]]
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path content)
+      (let [r (settings/load-settings path)]
+        (is (= :light (:theme r)) content)
+        (is (nil? (:warning r)) content)))))
 
 (deftest save-preserves-symlink-test
   ;; saving through a symlinked settings.edn must rewrite

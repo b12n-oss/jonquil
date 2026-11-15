@@ -31,6 +31,7 @@
     jonquil.theme-test
     jonquil.user-keys-test
     jonquil.key-sets-test
+    jonquil.guide-examples-test
     jonquil.key-prefs-test
     jonquil.menus-test
     jonquil.structural-test
