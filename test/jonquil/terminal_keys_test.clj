@@ -64,6 +64,11 @@
 (deftest unavailable-test
   (is (nil? (terminal/unavailable false nil)))
   (is (= "no VTE" (terminal/unavailable false "no VTE")))
-  (is (re-find #"doesn't include the terminal yet" (terminal/unavailable true nil)))
-  (is (re-find #"doesn't include the terminal yet" (terminal/unavailable true "no VTE"))
-      "a release app says so whatever the system has"))
+  (is (nil? (terminal/unavailable true nil)) "a release app that carries VTE has a terminal")
+  (is (re-find #"doesn't include the terminal" (terminal/unavailable true "no VTE"))
+      "one that doesn't says so in its own words"))
+
+(deftest bundled-vte-test
+  (is (nil? (terminal/bundled-vte nil)) "not a release app")
+  (is (= "/Apps/Jonquil.app/Contents/Frameworks/libvte-2.91-gtk4.0.dylib"
+         (terminal/bundled-vte "/Apps/Jonquil.app/Contents/Frameworks"))))

@@ -6,9 +6,9 @@
   Until then the window is as it was.
 
   The terminal is Anchan's (anchan.core), on its VTE backend. Where VTE
-  can't be used the Terminal tab says why: a release Jonquil.app carries
-  its own GTK and may load only its own libraries, so it never tries the
-  system's VTE."
+  can't be used the Terminal tab says why. A release Jonquil.app carries
+  its own GTK and may load only its own libraries, so it uses the VTE in
+  its Frameworks folder and never the system's."
   (:require [anchan.core :as anchan]
             [anchan.vte :as vte]
             [jolt.ffi :as ffi]
@@ -25,13 +25,25 @@
 
 (defn- os [] (System/getProperty "os.name"))
 
+(def VTE-FILE
+  "VTE's library as a release Jonquil.app carries it in its Frameworks."
+  "libvte-2.91-gtk4.0.dylib")
+
+(defn bundled-vte
+  "The path of the VTE library inside a release Jonquil.app whose
+  Frameworks folder is frameworks, or nil outside one (frameworks nil)."
+  [frameworks]
+  (when frameworks (str frameworks "/" VTE-FILE)))
+
 (defn unavailable
   "Why this Jonquil has no terminal, as a sentence, or nil when it has
-  one. bundle? is true in a release Jonquil.app."
+  one. bundle? is true in a release Jonquil.app, which uses only the VTE
+  it carries: without one it says so, whatever the system has."
   [bundle? backend-problem]
   (cond
-    bundle? (str "This download of Jonquil doesn't include the terminal yet. "
-                 "\"Open a terminal in the project folder\", in the Tools menu, starts your system's terminal.")
+    (and bundle? backend-problem)
+    (str "This download of Jonquil doesn't include the terminal. "
+         "\"Open a terminal in the project folder\", in the Tools menu, starts your system's terminal.")
     backend-problem backend-problem))
 
 (defn- colors-for
@@ -80,8 +92,11 @@
   once. Answers the part's state: {:notebook :term (nil without one)
   :widget (the Terminal tab's child)}."
   [{:keys [paned cv] :as ctx}]
-  (let [why (unavailable (some? (System/getenv "JONQUIL_BUNDLE_FRAMEWORKS"))
-                         (anchan/problem vte/backend))
+  (let [bundled (bundled-vte (System/getenv "JONQUIL_BUNDLE_FRAMEWORKS"))
+        ;; a release app loads the VTE beside its own GTK and no other: a
+        ;; VTE from Homebrew would bring a second GTK into the process
+        _ (when bundled (swap! vte/library-paths assoc :darwin [bundled] :linux [bundled]))
+        why (unavailable (some? bundled) (anchan/problem vte/backend))
         term (when-not why (anchan/terminal vte/backend))
         widget (if term (anchan/widget term) (message-widget why))
         scroll (:scroll cv)

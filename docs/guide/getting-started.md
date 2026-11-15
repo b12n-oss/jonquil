@@ -113,12 +113,14 @@ jolt app:release-check  # launch it with /opt/homebrew unreadable
 
 `jolt app:release` makes an app that runs on a Mac without Homebrew. The
 build Mac still needs Homebrew's GTK, because that is what gets bundled,
-`meson` and `pkgconf` (`brew install meson pkgconf`) for the one library built
-from source (below), and the Xcode Command Line Tools (`xcode-select
---install`) for `otool`, `codesign` and, when notarizing, `xcrun notarytool`.
-`deps.edn`'s GTK libraries, and every library they load (42 today, about
-27 MB), are copied into `Contents/Frameworks` and relinked to find each
-other.
+VTE for the terminal (`brew install vte3`), `meson` and `pkgconf` (`brew
+install meson pkgconf`) for the one library built from source (below), and
+the Xcode Command Line Tools (`xcode-select --install`) for `otool`,
+`codesign` and, when notarizing, `xcrun notarytool`. `deps.edn`'s GTK
+libraries, VTE's library, and every library they load (55 today, about
+70 MB) are copied into `Contents/Frameworks` and relinked to find each
+other. Without VTE on the build Mac the build warns and makes an app with
+no terminal.
 
 `Contents/MacOS/Jonquil` is a small launcher. It puts that folder on
 `DYLD_LIBRARY_PATH` and runs `Contents/MacOS/jonquil-bin`. A launcher is
