@@ -133,16 +133,17 @@
               ;; still starting looks busy, and would take the line too early
               _ (on-gtk (anchan/feed! term "echo ready-$((6*6))\n"))
               ready? (await-until 8000 50 #(str/includes? (anchan/text term) "ready-36"))
-              _ (on-gtk (anchan/feed! term "sleep 20 &\n"))
-              job? (and (await-until 8000 50 #(re-find #"\[1\] \d+" (anchan/text term)))
-                        (await-until 8000 50 busy?))
+              ;; in the foreground and ended with Ctrl+C: what a shell prints
+              ;; for a job started with & differs from one shell to the next
+              _ (on-gtk (anchan/feed! term "sleep 20\n"))
+              job? (await-until 8000 50 busy?)
               alerts-before (on-gtk @(:alert-dialog-count ui))
               _ (on-gtk (close! n))
               asked (on-gtk (- @(:alert-dialog-count ui) alerts-before))
               _ (on-gtk (win-alerts/dismiss-pending-alerts!))
               settled? (await-until 3000 20 #(zero? ((:pending-alerts* ui))))
               kept (on-gtk (numbers))
-              _ (on-gtk (anchan/feed! term "kill %1\n"))
+              _ (on-gtk (anchan/feed! term "\u0003"))
               idle? (await-until 8000 50 #(not (busy?)))
               _ (on-gtk (doseq [m (numbers)] (close! m)))
               none (on-gtk {:numbers (numbers) :pages (pages) :showing (showing?)})
