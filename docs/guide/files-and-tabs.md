@@ -133,6 +133,32 @@ its project folder, or its own folder outside a project; with no argument
 it's the current directory. From Finder or the Dock it starts empty and
 offers **Open Folder…**.
 
+### A project's REPL
+
+The REPL belongs to the project of the file you're running, so there is
+nothing to start by hand.
+
+- A folder with a `deps.edn` gets its own Jolt process, started in that
+  folder with the project's `deps.edn` as its classpath. The console prints
+  its pid, port and folder when it starts. This needs `jolt` on your login
+  shell's `PATH`.
+- A JVM Clojure project also has a `deps.edn`, and Jonquil runs it as Jolt
+  unless told otherwise. Put `{:dialect :clj}` in a `.jonquil.edn` at the
+  project root to run it on the JVM (see [JVM Clojure](dialects/jvm-clojure.md)).
+- Opening a file from another project stops the current REPL and starts one
+  for that project, and the console says so.
+- **Open Folder…** moves the REPL to the new folder only while the window's
+  one tab is an untouched Untitled tab. With files open it changes the tree
+  alone, and the REPL moves when you open a file from the new folder.
+- A file outside any project runs inside Jonquil itself.
+
+To keep a `deps.edn` project inside Jonquil's own process, with no separate
+one, put `{:dialect :jolt :runtime :in-process}` in its `.jonquil.edn`.
+[Dialects and runtimes](dialects/index.md#choosing-a-dialect) has the order
+Jonquil chooses in, and
+[Running Jolt out of process](dialects/index.md#running-jolt-out-of-process)
+has the details.
+
 **☰ Files** or Cmd/Ctrl+Shift+E shows and hides it, and Jonquil remembers
 your choice and the tree's width (drag its edge).
 
