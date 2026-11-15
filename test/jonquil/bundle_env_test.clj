@@ -27,6 +27,9 @@
       (be/drop-bundle-dyld!)
       (is (nil? (System/getenv "DYLD_LIBRARY_PATH")))
       (is (nil? (child-dyld)) "a child Jonquil starts (git, node, jank) loads its own libraries")
+      (is (nil? (System/getenv "JONQUIL_BUNDLE_FRAMEWORKS")) "the marker is gone too, so no child takes itself for the release app")
+      (is (= "/tmp/jonquil-test-fw" (be/frameworks)) "and Jonquil still knows its own Frameworks folder")
       (finally
+        (reset! @#'be/kept nil)
         (unsetenv* "JONQUIL_BUNDLE_FRAMEWORKS")
         (if old (setenv* "DYLD_LIBRARY_PATH" old 1) (unsetenv* "DYLD_LIBRARY_PATH"))))))
