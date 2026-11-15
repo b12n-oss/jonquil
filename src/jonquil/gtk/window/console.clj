@@ -23,6 +23,10 @@
         ;; LM1's ! commands at the prompt, installed once the palette's
         ;; pieces exist (the command-palette part resets it at install)
         bang* (atom (fn [_text]))
+        ;; what F6 focuses below the editor in place of the console, when
+        ;; something else is showing there: a fn that answers true once it
+        ;; took the focus (the terminal part sets it)
+        bottom-focus* (atom nil)
         ;; :failure*, the last failed evaluation, for the restarts
         cv (assoc
             (cview/make-console-view {:on-submit (win-run/make-on-submit {:tab-fn active-tab :*cv *cv :ev* ev* :status-label status-label :bang* bang*})
@@ -43,7 +47,7 @@
             :replay-root* (atom nil)
             :replay-tab* (atom nil))
         _ (reset! *cv cv)]
-    (assoc w :bang* bang* :cv cv)))
+    (assoc w :bang* bang* :bottom-focus* bottom-focus* :cv cv)))
 
 (defn- follow-scroll!
   "Connects value-changed on the console view's two adjustments so

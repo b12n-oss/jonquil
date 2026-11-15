@@ -21,6 +21,7 @@
     jonquil.parts.plugins
     jonquil.parts.menus
     jonquil.parts.prefs
+    jonquil.parts.terminal
     jonquil.parts.processes
     jonquil.parts.breakpoints
     jonquil.parts.replay
@@ -101,6 +102,7 @@
     jonquil.results
     jonquil.keymap
     jonquil.key-sets
+    jonquil.terminal-keys
     jonquil.terminal-open
     jonquil.key-seq
     jonquil.slow-events
@@ -179,6 +181,7 @@
     jonquil.gtk.parts.plugins
     jonquil.gtk.parts.menus
     jonquil.gtk.parts.prefs
+    jonquil.gtk.parts.terminal
     jonquil.gtk.parts.processes
     jonquil.gtk.parts.breakpoints
     jonquil.gtk.parts.replay

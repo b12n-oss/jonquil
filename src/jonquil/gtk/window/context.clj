@@ -52,7 +52,7 @@
   (let [open-fn (fn [] (win-files/do-open! cv win (fn [p] (win-tabs/open-file! @*tab-ctx p))))
         save-fn (fn [] (let [t (active-tab)] (win-files/do-save! (:ed t) cv win (:path t))))
         save-as-fn (fn [] (let [t (active-tab)] (win-files/do-save-as! (:ed t) cv win (:path t))))
-        toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv))
+        toggle-focus-fn (fn [] (win-keys/do-toggle-focus! win (:ed (active-tab)) cv (:bottom-focus* w)))
         clear-console-fn (fn [] (win-keys/do-clear-console! cv))
         clear-last-fn (fn [] (win-keys/do-clear-last-output! cv))
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
@@ -66,8 +66,11 @@
   "The part of the parts' wctx about the window itself: its widgets, the
   evaluator and selection, the tabs and their operations, and the status
   line fns. w is build-parts's."
-  [{:keys [win status-label cv ev* sel* tabs active-tab settings-path* bang* recent-tabs] *tab-ctx :tab-ctx*}]
+  [{:keys [win status-label cv ev* sel* tabs active-tab settings-path* bang* recent-tabs bottom-focus* theme-name]
+    *tab-ctx :tab-ctx*}]
   {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
+   ;; the terminal part's: the F6 slot, and the active theme's name
+   :bottom-focus* bottom-focus* :theme-name theme-name
    :tabs tabs :active-tab active-tab :settings-path* settings-path*
    :tab-ctx* *tab-ctx
    :tab-by-id win-tabs/tab-by-id :select-tab! win-tabs/select-tab! :new-tab! win-tabs/new-tab!

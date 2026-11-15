@@ -70,6 +70,7 @@
              [{:command :prefs/open :label "Preferences…"}]]}
  {:label "View"
   :sections [[{:command :tree/toggle :label "File Tree"}
+              {:command :terminal/show :label "Terminal"}
               {:label "Panels"
                :sections [[{:command :panel/inspector :label "Inspector"}
                            {:command :panel/source :label "Source"}

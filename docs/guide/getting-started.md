@@ -20,7 +20,8 @@ describes.
   threaded Chez Scheme 10.x on `PATH`; Jolt's own `make` provisions one if
   missing.
 - **GTK4 and pango**, to build or run from source. On macOS,
-  `brew install gtk4` pulls in `pango` and `glib`. Jonquil loads them at
+  `brew install gtk4` pulls in `pango` and `glib`. For the terminal below
+  the editor, also `brew install vte3` (optional). Jonquil loads them at
   startup rather than linking against them. On Linux they come from your
   distribution; see [Linux](#linux). The release download bundles them.
 

@@ -9,7 +9,8 @@
   The window's and the editor's chords are registered here; the context
   menus read the same table (editor-menu, console-menu, menu-items), the
   command palette lists it (run-command-in), and plugins add their own."
-  (:require [jonquil.key-seq :as key-seq]
+  (:require [jonquil.terminal-keys :as terminal-keys]
+            [jonquil.key-seq :as key-seq]
             [jonquil.keymap :as km]
             [jonquil.structural :as se]
             [jonquil.parts :as parts]
@@ -119,7 +120,9 @@
    ;; LM5: paused at a breakpoint or step (the debugger part's read)
    :breakpoint-paused (fn [ctx] (boolean (some-> (:breakpoint-paused? ctx) (#(%)))))
    ;; a text entry popover has focus: the rename box or the command palette
-   :entry-focused (fn [ctx] ((:entry-focused? ctx)))})
+   :entry-focused (fn [ctx] ((:entry-focused? ctx)))
+   ;; the terminal in the bottom area has focus (the terminal part's read)
+   :terminal-focused (fn [ctx] (boolean (some-> (:terminal-focused? ctx) (#(%)))))})
 
 (defn- edit [k]
   (fn [ctx _args] (if (= 1 ((get ctx k))) :handled :to-gtk)))
@@ -378,12 +381,20 @@
   is 1, :to-gtk and :unmatched are 0.
 
   Ahead of both, a key sequence under way (jonquil.key-seq) takes the key,
-  whichever handler started it: the window sees every key first."
+  whichever handler started it: the window sees every key first. Between
+  the entry stage and the keymap, a focused terminal takes every key but
+  the ones jonquil.terminal-keys keeps for Jonquil."
   [bindings keyval state {:keys [holds?] :as opts}]
   (if-some [answer (seq-step! keyval state opts)]
     answer
     (cond
       (and (not= keyval KEY-ESCAPE) (holds? :entry-focused)) 0
+      ;; the terminal has the focus: every key is its own but the few
+      ;; jonquil.terminal-keys keeps
+      (and (holds? :terminal-focused)
+           (not (terminal-keys/jonquils? {:keyval keyval :state state :physical (:physical opts)}
+                                         (System/getProperty "os.name"))))
+      0
       (= :handled (km/dispatch bindings keyval state (with-seq-start bindings keyval state opts))) 1
       :else 0)))
 

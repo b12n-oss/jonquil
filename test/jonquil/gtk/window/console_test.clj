@@ -32,7 +32,7 @@
             (win-console/build in))
         cv (:cv w)
         [a cv* e sl bang*] @submit]
-    (is (= (into (set (keys in)) #{:bang* :cv}) (set (keys w))))
+    (is (= (into (set (keys in)) #{:bang* :bottom-focus* :cv}) (set (keys w))))
     (is (= #{:view :scroll :failure* :after-eval* :recorder* :replay-root* :replay-tab*} (set (keys cv))))
     (is (every? #(nil? @(% cv)) [:failure* :after-eval* :recorder* :replay-root* :replay-tab*]))
     (is (= 5 (count (set (map #(System/identityHashCode (% cv)) [:failure* :after-eval* :recorder* :replay-root* :replay-tab*])))))

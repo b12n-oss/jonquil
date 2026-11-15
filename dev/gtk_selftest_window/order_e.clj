@@ -14,6 +14,7 @@
             [gtk-selftest-window.source-pane :as source-pane]
             [gtk-selftest-window.tab-widget :as tab-widget]
             [gtk-selftest-window.tabs :as tabs]
+            [gtk-selftest-window.terminal :as terminal-rows]
             [gtk-selftest-window.window-keys :as window-keys]))
 
 (def rows
@@ -141,4 +142,6 @@
    prefs-rows/row-prefs-chooses-a-key-set
    prefs-rows/row-key-sequence-with-its-hint
    probe-rows/row-probe-part
+   ;; near the end: it changes the bottom area into two tabs for good
+   terminal-rows/row-terminal-in-the-bottom-area
    window-keys/row-command-chord-close])
