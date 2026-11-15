@@ -51,12 +51,16 @@
   (the row missed on most runs). Measured after that settle,
   the paint's own worst gap was 86-94 ms. Under CPU emulation (JONQUIL_SELFTEST_EMULATED, set by jolt linux:selftest
   for another arch than the host's) the budget is 5x: x86_64 emulated on
-  arm64 measured 194 ms and 481 ms worst cases, which time the emulator."
+  arm64 measured 194 ms and 481 ms worst cases, which time the emulator.
+  On a CI runner (CI is set) the budget is 300 ms: a shared GitHub runner
+  measured one 169 ms gap on a run where nothing in the editor had changed."
   [_ed]
   (go-row :paint-async-keeps-gtk-responsive check
     (with-fresh-editor
       (fn [ed]
-        (let [budget-ms (if (System/getenv "JONQUIL_SELFTEST_EMULATED") 750.0 150.0)
+        (let [budget-ms (cond (System/getenv "JONQUIL_SELFTEST_EMULATED") 750.0
+                              (System/getenv "CI") 300.0
+                              :else 150.0)
               text (big-text 8000)
               last-line-start (inc (str/last-index-of text "\n" (- (count text) 2)))
               first-str (inc (str/index-of text "\""))
