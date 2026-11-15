@@ -146,4 +146,6 @@
    probe-rows/row-probe-part
    ;; near the end: it changes the bottom area into two tabs for good
    terminal-rows/row-terminal-in-the-bottom-area
+   terminal-rows/row-terminal-tabs
+   terminal-rows/row-terminal-tab-close-asks
    window-keys/row-command-chord-close])
