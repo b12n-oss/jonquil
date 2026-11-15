@@ -6,6 +6,8 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-16
+
 ### Added
 
 - Cmd+click on a symbol (Ctrl+click on Linux) jumps to its definition, as F12 does. The source panel takes the same click. (#30)
