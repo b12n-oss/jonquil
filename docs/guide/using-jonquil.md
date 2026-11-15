@@ -384,7 +384,9 @@ VTE, the widget GNOME Terminal is built on. The downloaded Jonquil.app
 carries VTE with its other libraries, so the terminal works there with
 nothing to install. Run from source, Jonquil needs VTE's GTK 4 build on
 your machine: `brew install vte3` on a Mac, or your system's
-`libvte-2.91-gtk4` package on Linux. Without it the Terminal tab says so,
+`libvte-2.91-gtk4` package on Linux. The terminal is for macOS first: it
+was built and tried there, and it hasn't been run on Linux yet. Without
+VTE the Terminal tab says so,
 and **Open a terminal in the project folder**, in the Tools menu, still
 starts your system's terminal
 ([Open and Save](files-and-tabs.md#open-and-save)).
