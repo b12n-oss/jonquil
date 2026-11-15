@@ -42,6 +42,7 @@
    "jonquil/parts/plugins.clj" (embedded-text "jonquil/parts/plugins.clj")
    "jonquil/parts/menus.clj" (embedded-text "jonquil/parts/menus.clj")
    "jonquil/parts/prefs.clj" (embedded-text "jonquil/parts/prefs.clj")
+   "jonquil/parts/terminal.clj" (embedded-text "jonquil/parts/terminal.clj")
    "jonquil/parts/processes.clj" (embedded-text "jonquil/parts/processes.clj")
    "jonquil/parts/replay.clj" (embedded-text "jonquil/parts/replay.clj")
    "jonquil/parts/trace.clj" (embedded-text "jonquil/parts/trace.clj")

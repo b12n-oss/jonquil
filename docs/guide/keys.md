@@ -60,7 +60,8 @@ to the previous track, and F10 without fn mutes the sound.
 | Cmd/Ctrl+Z | anywhere in the window | Undo |
 | Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
 | Cmd/Ctrl+Y | Definitions editor | Redo |
-| F6 | anywhere in the window | Move focus between the editor and the console |
+| F6 | anywhere in the window | Move focus between the editor and the console, or the terminal when its tab is showing |
+| Ctrl+` | anywhere in the window | Show the terminal, or go back to the editor from it ([The terminal](using-jonquil.md#the-terminal)) |
 | F8 | anywhere in the window | Go to the next place in the locations list |
 | Shift+F8 | anywhere in the window | Go to the previous place in the locations list |
 | F9 | anywhere in the window | Toggle a breakpoint on the caret's line ([Breakpoints](help-and-inspector.md#breakpoints)) |

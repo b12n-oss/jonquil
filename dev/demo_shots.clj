@@ -37,7 +37,8 @@
   synthesized -- console input is inserted the same way dev/gtk_selftest_
   window.clj's stdin/REPL rows do it, via gtk_text_buffer_insert_
   interactive_at_cursor + handle-return!."
-  (:require [clj-server]
+  (:require [anchan.core :as anchan]
+            [clj-server]
             [demo-shots.panels :as panels]
             [demo-shots.support :refer [await-windows check! console-text demo-path idle? image-path log
                                         out-end-offset own-pid place-cursor! record-gif results
@@ -265,6 +266,31 @@
               (reset! key-sets/live :default)
               (check! :key-sequence (and ok (zero? exit))
                       {:shown ok :screenshot-exit exit :screenshot-err err})))))
+
+(defn- scene-terminal
+  "Show the terminal with a small file open: the bottom area has its two
+  tabs, the Terminal one showing a shell with a plain prompt and two
+  lines of output."
+  [ui]
+  (go-row :terminal check!
+    (let [{:keys [state show!]} (:terminal ui)
+          _ (on-gtk (editor/set-text! (:editor ui) "(ns app.core)\n\n(defn area [w h]\n  (* w h))\n")
+                    (show!))
+          term (on-gtk (:term @state))
+          started? (and term (await-until 8000 50 #(anchan/running? term)))
+          ;; a plain prompt in /tmp: the person's own prompt names their machine and
+          ;; their home folder, which don't belong in a picture for the guide. Each
+          ;; step waits for the shell: fed too early, a line is only echoed.
+          ready? (and started? (await-until 8000 50 #(not (str/blank? (anchan/text term)))))
+          _ (when ready? (on-gtk (anchan/feed! term "cd /tmp; PROMPT='%~ %# '; clear\n")))
+          plain? (and ready? (await-until 8000 50 #(str/starts-with? (str/triml (anchan/text term)) "/tmp %")))
+          _ (when plain? (on-gtk (anchan/feed! term "echo 'Ran 12 tests. 40 assertions passed.'\n")))
+          ok (and plain? (await-until 8000 50 #(re-find #"(?m)^Ran 12 tests\. 40 assertions passed\." (anchan/text term))))
+          _ (ga/settle 4)
+          {:keys [exit err]} (ga/screenshot (image-path :terminal "png") (own-pid))]
+      (on-gtk (when term (anchan/stop! term))
+              (check! :terminal (and ok (zero? exit))
+                      {:terminal (some? term) :echoed ok :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-run-selection
   "run-selection.clj's last line, with the caret already there
@@ -1125,6 +1151,7 @@
    [:close-prompt scene-close-prompt]
    [:prefs-keys scene-prefs-keys]
    [:key-sequence scene-key-sequence]
+   [:terminal scene-terminal]
    [:theme-light scene-theme-light]
    [:theme-dark scene-theme-dark]
    [:theme-solarized scene-theme-solarized]

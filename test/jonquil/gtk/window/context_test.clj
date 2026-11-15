@@ -37,7 +37,7 @@
                   win-inspector/inspect-form! (fn [m] (l [:inspect-form (dissoc m :inspect-last-fn)
                                                           (identical? (:inspect-last-fn m) (:inspect-last-fn w))]))
                   win-inspector/close-inspector-panel! (fn [r ed] (l [:close-inspector r ed]))
-                  win-keys/do-toggle-focus! (fn [win ed cv] (l [:toggle-focus win ed cv]))
+                  win-keys/do-toggle-focus! (fn [win ed cv _bottom-focus*] (l [:toggle-focus win ed cv]))
                   win-keys/do-clear-console! (fn [cv] (l [:clear-console cv]))
                   win-keys/do-clear-last-output! (fn [cv] (l [:clear-last cv]))
                   find-bar/open! (fn [fb mode] (l [:find fb mode]))]
@@ -93,7 +93,7 @@
              :plugins-on* :recent-tabs :refresh-labels! :refuse-foreign! :register-status-log! :rerun-failure! :run-ranges!
              :review-pane :right :sel* :select-tab! :set-status! :settings-path* :show-alert! :show-right-panel!
              :show-source! :showing-panel :source-ctx :status-label :tab-by-id :tab-ctx* :tabs :tree-pane
-             :tree-paned :unread-label :win}
+             :tree-paned :unread-label :win :bottom-focus* :theme-name}
            (set (keys wctx))))
     (is (= [::win ::sl ::cv ::ev* ::sel* ::tabs ::active-tab ::settings ::bang ::recent ::right ::tree-pane
             ::tree-paned ::paned ::files-btn ::panel-focus ::unread ::plugins-on ::rp ::lp ::hp ::pending

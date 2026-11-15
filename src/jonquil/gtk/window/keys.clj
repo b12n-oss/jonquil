@@ -26,11 +26,15 @@
   gtk_widget_has_focus -- measured: has_focus reads false on a window that isn't the OS key window, which a
   self-test window (and jolt gtk:selftest's own window) usually isn't. When
   the console gets focus, cview/focus! also places its cursor at the end
-  of the input."
-  [win ed cv]
-  (if (= (g/gtk-root-get-focus win) (:view ed))
-    (cview/focus! cv)
-    (editor/focus! ed)))
+  of the input. bottom-focus* (an atom, or nil) may hold a fn that takes
+  the focus in the console's place and answers true: the terminal, while
+  it is what shows below the editor."
+  ([win ed cv] (do-toggle-focus! win ed cv nil))
+  ([win ed cv bottom-focus*]
+   (if (= (g/gtk-root-get-focus win) (:view ed))
+     (when-not (when-let [f (some-> bottom-focus* deref)] (f))
+       (cview/focus! cv))
+     (editor/focus! ed))))
 
 (defn do-clear-console! [cv]
   (cview/clear-output! cv))

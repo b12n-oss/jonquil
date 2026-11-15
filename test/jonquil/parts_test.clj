@@ -61,7 +61,7 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :prefs :menus :trace :live-results :locations :debugger :breakpoints :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :prefs :terminal :menus :trace :live-results :locations :debugger :breakpoints :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
            :panel/processes :processes/show
            :change-set/make :change-set/browse
@@ -75,7 +75,7 @@
            :debug/break-on-error :debug/continue :debug/step :debug/step-over :debug/step-out :restart/retry :restart/edit :restart/define
            :palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version
            :tools/open-terminal :help/slow-events :help/save-slow-events
-           :help/install-cli :help/remove-cli :help/open-keys-file :help/reload-keys :prefs/open :run/reset-on-run
+           :help/install-cli :help/remove-cli :help/open-keys-file :help/reload-keys :prefs/open :terminal/show :run/reset-on-run
            :debug/toggle-breakpoint :debug/clear-breakpoints :debug/instrument-tab :debug/uninstrument-tab
            :pages/show :pages/bookmark :pages/bookmarks :pages/guide}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))

@@ -352,6 +352,40 @@ demonstrates it.
 
 ![The same demo, animated: Run, a few ticks, then Stop](../images/stop.gif)
 
+## The terminal
+
+Ctrl+` (Control and the backquote key, on every system), or **Terminal** in
+the View menu, shows a terminal below the editor. The first time, the bottom
+area gets two tabs, Interactions and Terminal, and a login shell starts in
+the active file's project folder. The shell keeps running while you look at
+the Interactions tab, and until you close the window.
+
+![The Jonquil window with the bottom area on its Terminal tab, a shell prompt in /tmp below one line of output](../images/terminal.png)
+
+- **Keys.** With the terminal focused its keys are its own, so Ctrl+C,
+  Ctrl+R, Ctrl+W and the arrow keys go to the shell or to whatever runs in
+  it. Jonquil keeps a few: F6 and Ctrl+` go back to the editor, and the
+  panel keys (Cmd/Ctrl+Alt+digit) still work. On a Mac every key held with
+  Cmd stays Jonquil's, so Cmd+C and Cmd+V copy and paste. On Linux,
+  Ctrl+Shift+C and Ctrl+Shift+V copy and paste, and the other keys held
+  with both Control and Shift stay Jonquil's, such as Ctrl+Shift+P for the
+  palette.
+- **F6** moves between the editor and whichever of the two tabs is showing.
+- **Colours** follow the theme.
+- **If the shell ends** (you typed `exit`), Show the terminal starts a new
+  one.
+
+The terminal is [Anchan](https://github.com/b12n-oss/anchan), which uses
+VTE, the widget GNOME Terminal is built on. It needs VTE's GTK 4 build on
+your machine: `brew install vte3` on a Mac, or your system's
+`libvte-2.91-gtk4` package on Linux. Without it the Terminal tab says so.
+
+The downloaded Jonquil.app doesn't include the terminal yet: the app
+carries its own GTK and can't use a VTE from Homebrew. There the Terminal
+tab says so, and **Open a terminal in the project folder**, in the Tools
+menu, starts your system's terminal
+([Open and Save](files-and-tabs.md#open-and-save)).
+
 ## Reset on Run, versus accumulate
 
 **Reset on Run** is in the Run menu, where a tick shows it is on, and in the
