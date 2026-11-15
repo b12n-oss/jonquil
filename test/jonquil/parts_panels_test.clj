@@ -410,6 +410,7 @@
             :help/recent-keys [:recent-keys-fn]
             :help/version [:version-fn]
             :help/slow-events [:slow-events-fn] :help/save-slow-events [:save-slow-events-fn]
+            :tools/open-terminal [:open-terminal-fn]
             :help/install-cli [:install-cli-fn]
             :help/remove-cli [:remove-cli-fn]
             :help/open-keys-file [:open-keys-file-fn]
@@ -418,12 +419,12 @@
     (is (false? (:palette? (:palette/open (:commands spec)))))
     (is (every? #(nil? (get @#'registry/core-window-commands %))
                 [:palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version
-                 :help/slow-events :help/save-slow-events
+                 :tools/open-terminal :help/slow-events :help/save-slow-events
                  :help/install-cli :help/remove-cli :help/open-keys-file :help/reload-keys])
         "the core table keeps none of them")
     (is (every? #(some? (get registry/window-commands %))
                 [:palette/open :help/describe-key :help/key-bindings :help/recent-keys :help/version
-                 :help/slow-events :help/save-slow-events
+                 :tools/open-terminal :help/slow-events :help/save-slow-events
                  :help/install-cli :help/remove-cli :help/open-keys-file :help/reload-keys]))
     (is (some? (:help/key-hints registry/window-commands)))))
 

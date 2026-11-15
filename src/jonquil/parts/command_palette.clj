@@ -19,6 +19,9 @@
     :help/key-bindings {:doc "List every key binding." :scope :window :call [:key-bindings-fn]}
     :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :call [:recent-keys-fn]}
     :help/version {:doc "Show Jonquil's version." :scope :window :call [:version-fn]}
+    ;; the system's terminal, in the active file's project folder
+    :tools/open-terminal {:doc "Open a terminal in the project folder." :scope :window
+                          :call [:open-terminal-fn]}
     ;; what held the window up (jonquil.slow-events)
     :help/slow-events {:doc "List the slow events: what held the window up." :scope :window
                        :call [:slow-events-fn]}

@@ -134,7 +134,8 @@
              [{:command :run/line-counts :label "Count Lines Run"}
               {:command :run/clear-line-counts :label "Clear Line Counts"}]]}
  {:label "Tools"
-  :sections [[{:command :plugins/list :label "Plugins"}
+  :sections [[{:command :tools/open-terminal :label "Open a Terminal in the Project Folder"}]
+             [{:command :plugins/list :label "Plugins"}
               {:command :plugins/reload :label "Reload Changed Plugins"}
               {:command :plugins/review :label "Review Plugin Proposals"}]
              [{:command :change-set/make :label "Make a Change Set"}

@@ -132,6 +132,17 @@
       (contains? key-sets/ids v) {:key-set v}
       :else {:warning (str path " has an unknown :key-set " (pr-str v) ", using the default keys")})))
 
+(defn- terminal-part
+  "{:terminal s} when m names the terminal to open (an app's name on macOS,
+  a program elsewhere), {} when it names none, and {:warning ..} when
+  :terminal isn't a non-blank string."
+  [path m]
+  (let [v (when (map? m) (:terminal m))]
+    (cond
+      (nil? v) {}
+      (and (string? v) (not (str/blank? v))) {:terminal v}
+      :else {:warning (str path " has an unusable :terminal " (pr-str v) ", using the system's")})))
+
 (defn- plugins-part
   "{:plugins {:disabled #{id ...}}} when m's :plugins holds a set of
   keyword ids under :disabled, {} when there's none, and {:warning ..}
@@ -179,14 +190,14 @@
   [path m]
   (map #(% path m)
        [theme-part dialect-part file-tree-part reopen-tabs-part remember-session-part
-        mcp-listen-part plugins-part parinfer-part key-set-part layouts-part doc-bookmarks-part]))
+        mcp-listen-part plugins-part parinfer-part key-set-part terminal-part layouts-part doc-bookmarks-part]))
 
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
   :file-tree when it holds a usable one, :reopen-tabs?, :remember-session? and
   :mcp-listen? when they hold a boolean, :plugins when it holds a set of disabled ids,
   :parinfer when it holds one of parinfer-modes, :key-set when it holds a
-  key set's id, :layouts when it holds
+  key set's id, :terminal when it names a terminal, :layouts when it holds
   named layouts, :doc-bookmarks when it holds doc pages, and
   :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."

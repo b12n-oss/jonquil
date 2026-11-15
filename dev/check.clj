@@ -101,6 +101,7 @@
     jonquil.results
     jonquil.keymap
     jonquil.key-sets
+    jonquil.terminal-open
     jonquil.key-seq
     jonquil.slow-events
     jonquil.user-keys

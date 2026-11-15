@@ -18,6 +18,14 @@ Opening and saving files, tabs, opening from Finder and the Dock, and the file t
 Saves are atomic (a temporary file, then a rename), so a crash can't leave
 half a file. Saving through a symlink updates the file it points to.
 
+**Open a terminal in the project folder**, in the Tools menu and the
+command palette, starts your system's terminal there. The folder is the
+file's project (the nearest folder above it with a `deps.edn` or another
+project file), the file's own folder when it has no project, and your home
+folder for a tab with no file. The console says which folder it opened.
+The [`:terminal` setting](getting-started.md#settings) chooses which
+terminal.
+
 ### When the file changes on disk
 
 Jonquil checks each open file about every two seconds, so an agent editing
