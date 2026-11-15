@@ -1,5 +1,5 @@
 (ns jonquil.gtk.window.alerts-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [jonquil.gtk.window.alerts :as win-alerts]))
 
 (deftest complete-alert-routes-each-dialog-once-test
@@ -29,3 +29,9 @@
       (is (= [::c] @released))
       (is (false? @pending*))
       (finally (reset! release* old) (reset! pending* old-pending)))))
+
+(deftest button-labels-test
+  (testing "the labels end in the nil that closes GTK's array, for any number of buttons"
+    (is (= ["Save" "Don't Save" "Cancel" nil] (win-alerts/button-labels ["Save" "Don't Save" "Cancel"])))
+    (is (= ["Close Anyway" "Cancel" nil] (win-alerts/button-labels ["Close Anyway" "Cancel"])))
+    (is (= ["OK" nil] (win-alerts/button-labels '("OK"))))))

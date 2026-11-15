@@ -79,6 +79,12 @@
   (callable (fn [src res _data] (complete-alert! src (g/finish-choice src res)) nil)
             [:pointer :pointer :pointer] :void))
 
+(defn button-labels
+  "buttons as the array gtk_alert_dialog_set_buttons takes: the labels,
+  then the nil that ends it. An alert has two buttons or three."
+  [buttons]
+  (conj (vec buttons) nil))
+
 (defn show-alert!
   "Builds a fresh GtkAlertDialog (g_object_new_with_properties,
   0 properties -- gtk_alert_dialog_new is variadic and is never bound) for
@@ -94,8 +100,9 @@
     (swap! alert-cancellables assoc d cancellable)
     (g/gtk-alert-dialog-set-message d message)
     (when detail (g/gtk-alert-dialog-set-detail d detail))
-    (ffi/with-c-string-array [labels 4] (conj (vec buttons) nil)
-      (g/gtk-alert-dialog-set-buttons d labels))
+    (let [values (button-labels buttons)]
+      (ffi/with-c-string-array [labels (count values)] values
+        (g/gtk-alert-dialog-set-buttons d labels)))
     (g/gtk-alert-dialog-set-cancel-button d cancel)
     (g/gtk-alert-dialog-set-default-button d default)
     (g/gtk-alert-dialog-choose d win cancellable alert-choose-cb ffi/null)))

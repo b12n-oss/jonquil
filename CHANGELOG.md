@@ -6,6 +6,11 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Fixed
+
+- Closing the window while a program is still running in the terminal now asks, as 0.4.0 said it did. The question never opened: Jonquil's alerts were built for three buttons, and this one has two, so the close printed `; close: jolt.ffi: C string array count does not match values` in Interactions and the window stayed open. Stopping the program, or quitting it in the terminal, was the only way to close. Found by using the terminal on a Linux desktop by hand.
+- Move to Trash in the file tree asks before it trashes. Its question has two buttons too, so it failed the same way and nothing was trashed.
+
 ## [0.4.1] - 2026-11-15
 
 ### Fixed
