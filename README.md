@@ -170,6 +170,11 @@ and the gates it must pass. Changes written with an LLM's help are welcome
 on the same terms as any other: the person who submits a change owns its
 quality and correctness. [AI_POLICY.md](AI_POLICY.md) is the full stance.
 
+Ideas and questions are welcome in
+[Discussions](https://github.com/b12n-oss/jonquil/discussions), and bugs in
+[issues](https://github.com/b12n-oss/jonquil/issues/new/choose). There is
+also a `#jonquil` channel on the [Clojurians Slack](https://clojurians.slack.com).
+
 ## The name
 
 A jonquil (*Narcissus jonquilla*) is a small, scented narcissus with several yellow flowers to a stem.
