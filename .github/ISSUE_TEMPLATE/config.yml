@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Share an idea
+    url: https://github.com/b12n-oss/jonquil/discussions/categories/ideas
+    about: A rough idea or a direction for Jonquil. Others can vote on it and add to it, and it becomes an issue once it's clear what to build.
+  - name: Ask a question
+    url: https://github.com/b12n-oss/jonquil/discussions/categories/q-a
+    about: How to do something in Jonquil, or why it behaves the way it does.
   - name: The guide
     url: https://jonquil.b12n.app
     about: How to use Jonquil, its keys, dialects and known limits.

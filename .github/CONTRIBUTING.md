@@ -16,6 +16,9 @@ Changes written with an LLM's help are welcome on the same terms as any
 other, and [AI_POLICY.md](../AI_POLICY.md) says how that works: you own the
 code you submit and answer for it.
 
-Bug reports and ideas go in [issues](https://github.com/b12n-oss/jonquil/issues/new/choose).
+Bug reports and requests you can already describe go in
+[issues](https://github.com/b12n-oss/jonquil/issues/new/choose). Rough ideas
+and questions go in
+[Discussions](https://github.com/b12n-oss/jonquil/discussions).
 Please report security problems privately, as [SECURITY.md](../SECURITY.md)
 describes.

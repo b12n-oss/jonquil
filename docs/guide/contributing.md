@@ -3,6 +3,25 @@
 This page covers the local setup a change needs, the gates it must pass,
 and how to send it.
 
+## Where to post what
+
+You don't need to write code to help. Telling us what you'd like Jonquil to
+do, or what got in your way, shapes what gets built next.
+
+| You have | Post it in |
+|---|---|
+| A rough idea, or a direction you'd like Jonquil to take | [Discussions, Ideas](https://github.com/b12n-oss/jonquil/discussions/categories/ideas) |
+| A question about using Jonquil | [Discussions, Q&A](https://github.com/b12n-oss/jonquil/discussions/categories/q-a) |
+| Something you made with Jonquil | [Discussions, Show and tell](https://github.com/b12n-oss/jonquil/discussions/categories/show-and-tell) |
+| A bug, with the steps that show it | [A bug report](https://github.com/b12n-oss/jonquil/issues/new/choose) |
+| A feature you can describe well enough to build | [A feature request](https://github.com/b12n-oss/jonquil/issues/new/choose) |
+| A fix or a feature, written | A pull request, as below |
+
+An idea in Discussions can be voted on with the arrow beside it. When it's
+clear what to build, a maintainer turns it into an issue, and the pull
+request that builds it links that issue. If you aren't sure which to pick,
+post where it's easiest for you and it will be moved.
+
 ## What you'll need
 
 Everything in [Getting started](getting-started.md): Jolt and GTK 4. Jolt
