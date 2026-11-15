@@ -163,4 +163,6 @@
               {:command :help/key-hints :label "Key Hints in the Status Bar"}]
              [{:command :help/open-keys-file :label "Open Your Key Bindings File"}
               {:command :help/reload-keys :label "Reload Your Key Bindings"}]
+             [{:command :help/slow-events :label "List the Slow Events"}
+              {:command :help/save-slow-events :label "Save the Slow Events to a File"}]
              [{:command :help/version :label "Jonquil's Version"}]]}]

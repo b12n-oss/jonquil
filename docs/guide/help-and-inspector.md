@@ -212,6 +212,24 @@ read from the live keymap, so your own bindings show, and the line follows
 the caret a moment after it stops. **Show what keys do at the caret**, in
 the palette, turns the line off or back on for this session.
 
+### When Jonquil is slow
+
+Jonquil keeps a log of what held its window up. While one of its own
+callbacks runs, the window can't draw or take a key, so each one is timed,
+and one that takes 50 ms or longer is kept with the namespace and line
+that made it. The log is on from the start and holds the newest 200.
+
+- **List the slow events**, in the Help menu and the palette, prints the
+  places by what they cost, then the newest 20 events with their times.
+- **Save the slow events to a file** writes the same report, headed by the
+  Jonquil version and your system, next to `settings.edn` as
+  `slow-events-<date>-<time>.txt`. Attach it to a bug report about a pause
+  or a freeze.
+
+A line such as `183 ms  jonquil.gtk.editor:1626` names source code, which
+tells whoever reads the report where to look. Code you run isn't in this
+log: an evaluation runs on its own thread and doesn't hold the window up.
+
 ### The locations list
 
 Three palette commands list places in the buffer, in a panel on the right:

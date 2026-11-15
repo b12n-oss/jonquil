@@ -6,10 +6,12 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
+            [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.menus :as gm]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.menus :as menus]
+            [jonquil.slow-events :as slow-events]
             [jonquil.user-keys :as user-keys]))
 
 (defn row-menu-item-runs-and-keys-yield
@@ -110,3 +112,39 @@
                                   (= (str name-now " - Jonquil") window-title)
                                   (= folder-shown? (not= "" folder)))
                              {:name name-now :folder folder :folder-shown folder-shown? :window-title window-title})))))
+
+(defn row-slow-events-listed-and-saved
+  "A callback that holds the GTK thread for longer than the threshold is
+  kept in the slow-events log under the place its callable was made. Help >
+  List the Slow Events prints it in the console, and Save the Slow Events
+  to a File writes the report beside the settings file."
+  [ui]
+  (go-row :slow-events-listed-and-saved support/check
+    (let [{:keys [group]} (:menus ui)
+          dir (.getParentFile (java.io.File. ^String ((:settings-path* ui))))
+          reports #(vec (filter (fn [^java.io.File f] (str/starts-with? (.getName f) "slow-events-"))
+                                (.listFiles ^java.io.File dir)))
+          run! (fn [id] (on-gtk (g/g-action-group-activate-action group (menus/action-name id) ffi/null)))
+          _ (on-gtk (slow-events/clear!))
+          ;; on-gui!'s drain is a callable made in jonquil.gtk.callbacks
+          _ (on-gui! #(Thread/sleep (+ slow-events/threshold-ms 40)))
+          kept? (await-until 3000 20 #(pos? (:total @slow-events/log)))
+          event (first (:events @slow-events/log))
+          _ (run! :help/slow-events)
+          listed? (await-until 3000 20 #(str/includes? (support/console-text ui) "By where the callback was made"))
+          _ (run! :help/save-slow-events)
+          saved? (await-until 3000 20 #(and (seq (reports))
+                                            (str/includes? (support/console-text ui) "; Saved the slow events to ")))
+          text (some-> (first (reports)) slurp)]
+      (on-gtk (try
+                (support/check :slow-events-listed-and-saved
+                               (and kept? listed? saved?
+                                    (str/starts-with? (:site event) "jonquil.gtk.callbacks:")
+                                    (>= (:ms event) slow-events/threshold-ms)
+                                    (str/includes? text (:site event))
+                                    (str/starts-with? text "Jonquil "))
+                               {:kept kept? :event event :listed listed? :saved saved?
+                                :file-head (some-> text (subs 0 (min 80 (count text))))})
+                (finally
+                  (doseq [^java.io.File f (reports)] (.delete f))
+                  (slow-events/clear!)))))))

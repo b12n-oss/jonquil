@@ -185,7 +185,12 @@
         ;; since finished, so this call should start run 2 for real.
         (let [started (nil? (sut/eval-async ctx (prog 2) {:on-complete (fn [r] (deliver d2 r))}))]
           (is started))))
-    (Thread/sleep 100)
+    ;; run 2 registers itself once its worker starts; a loaded machine can
+    ;; take longer than a fixed 100 ms, so wait for it, up to 2 s
+    (loop [n 0]
+      (when (and (not= #{2} @live) (< n 200))
+        (Thread/sleep 10)
+        (recur (inc n))))
     (swap! max-live max (count @live))
     (println "S1e live set while second run is going:" @live)
     (is (= #{2} @live))

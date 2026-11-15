@@ -11,7 +11,8 @@
   the GTK thread themselves (the lock-caller rule) -- and on-gui! is that
   enqueue point."
   (:require [jolt.ffi :as ffi]
-            [jonquil.gtk.ffi :as g]))
+            [jonquil.gtk.ffi :as g]
+            [jonquil.slow-events :as slow-events]))
 
 ;; Every foreign-callable ever made through `callable`, kept alive for the
 ;; process lifetime. Not ^:private: the macro's expansion runs in whatever
@@ -57,17 +58,24 @@
   where that default is wrong passes its own, as a keyword option: a
   GSource that must keep running is (callable f sig :int :on-throw 1), and
   so is a close-request that must not close. The wrapper has sig's own
-  fixed arity, so foreign-callable sees the same shape f had."
+  fixed arity, so foreign-callable sees the same shape f had.
+
+  Every callable is timed too: one that takes jonquil.slow-events'
+  threshold or longer is kept in its log under the namespace and line of
+  this call, which is what List the slow events shows."
   [f sig ret & {:keys [on-throw] :or {on-throw ::default}}]
   (let [on-throw (if (= on-throw ::default) (default-on-throw ret) on-throw)
-        args (vec (repeatedly (count sig) #(gensym "arg")))]
+        args (vec (repeatedly (count sig) #(gensym "arg")))
+        site (str (ns-name *ns*) ":" (or (:line (meta &form)) "?"))]
     `(let [f# ~f
            c# (ffi/foreign-callable
                (fn ~args
-                 (try (f# ~@args)
-                      (catch :default e#
-                        (report-callback-exception! e#)
-                        ~on-throw)))
+                 (let [t0# (System/nanoTime)]
+                   (try (f# ~@args)
+                        (catch :default e#
+                          (report-callback-exception! e#)
+                          ~on-throw)
+                        (finally (slow-events/check! ~site t0#)))))
                ~sig ~ret :collect-safe)]
        (swap! retained conj c#)
        c#)))

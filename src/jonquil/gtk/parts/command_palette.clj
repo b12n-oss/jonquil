@@ -19,6 +19,7 @@
             [jonquil.palette :as pal-data]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.settings :as settings]
+            [jonquil.slow-events :as slow-events]
             [jonquil.theme :as theme]
             [jonquil.user-keys :as user-keys]
             [jonquil.version :as version]))
@@ -149,6 +150,30 @@
       (reset! user-keys/window-fns {:reload! reload! :open! open!})
       {:open-keys-file-fn open! :reload-keys-fn reload!})))
 
+(defn- machine-facts
+  "Lines about this Jonquil and machine, for the head of a slow-events
+  report."
+  []
+  [(version/version-line)
+   (str (System/getProperty "os.name") " " (System/getProperty "os.version")
+        " (" (System/getProperty "os.arch") ")")
+   ""])
+
+(defn- save-slow-events!
+  "Writes the slow events beside the window's settings file, as
+  slow-events-<date>-<time>.txt, and answers the console line that names
+  the file or says why it couldn't be written."
+  [{:keys [settings-path*]}]
+  (let [dir (.getParentFile (java.io.File. ^String @settings-path*))
+        stamp (.format (java.text.SimpleDateFormat. "yyyyMMdd-HHmmss") (java.util.Date.))
+        f (java.io.File. dir (str "slow-events-" stamp ".txt"))]
+    (try
+      (.mkdirs dir)
+      (spit f (slow-events/file-text @slow-events/log (machine-facts)))
+      (str "; Saved the slow events to " (.getPath f))
+      (catch Exception e
+        (str "; couldn't save the slow events to " (.getPath f) ": " (ex-message e))))))
+
 (defn- describe-fns
   "The describe-keys fns over pending (Describe Key's flag) and recent-keys
   (jonquil.describe's ring), both read and written on the GTK thread only."
@@ -160,6 +185,9 @@
                                       (assoc (live-keys) :os (System/getProperty "os.name")))))
      :recent-keys-fn (fn [] (print! (describe/recent-lines @recent-keys)))
      :version-fn (fn [] (print! [(str "; " (version/version-line))]))
+     :slow-events-fn (fn [] (print! (map #(str "; " %) (slow-events/report-lines
+                                                        @slow-events/log (machine-facts) 20))))
+     :save-slow-events-fn (fn [] (print! [(save-slow-events! ctx)]))
      :install-cli-fn (fn [] (print! (cli-install/install!)))
      :remove-cli-fn (fn [] (print! (cli-install/remove!)))}))
 

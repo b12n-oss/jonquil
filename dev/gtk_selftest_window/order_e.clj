@@ -135,6 +135,7 @@
    menus-rows/row-menus-follow-your-keys
    menus-rows/row-reset-on-run-from-the-menu
    menus-rows/row-header-title-follows-the-file
+   menus-rows/row-slow-events-listed-and-saved
    prefs-rows/row-prefs-records-a-key
    prefs-rows/row-prefs-asks-before-taking-a-key
    prefs-rows/row-prefs-chooses-a-key-set

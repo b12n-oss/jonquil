@@ -29,7 +29,7 @@ body:
     id: console
     attributes:
       label: Console output or error
-      description: Anything the console printed, and the error with its frames if there is one.
+      description: Anything the console printed, and the error with its frames if there is one. If Jonquil was slow or froze for a moment, run "List the slow events" from the Help menu or the command palette and paste what it prints.
       render: text
   - type: input
     id: jonquil-version
