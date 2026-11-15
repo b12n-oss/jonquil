@@ -257,3 +257,18 @@
     (is (nil? (lb "(let) x" 6 "x")) "a let with no bindings vector")
     (is (nil? (lb "(fn) x" 5 "x")) "a fn with no params")
     (is (= {:symbol "x" :start 6 :end 7} (lb "(let [x 1] (fn) x)" 16 "x")))))
+
+(deftest jump-click-test
+  (testing "the command modifier alone, one click, nothing selected"
+    (is (help/jump-click? {:os "Mac OS X" :n-press 1 :mods #{:meta} :selection? false}))
+    (is (help/jump-click? {:os "Linux" :n-press 1 :mods #{:ctrl} :selection? false})))
+  (testing "the other platform's modifier is not a jump"
+    (is (not (help/jump-click? {:os "Mac OS X" :n-press 1 :mods #{:ctrl} :selection? false})))
+    (is (not (help/jump-click? {:os "Linux" :n-press 1 :mods #{:meta} :selection? false}))))
+  (testing "a plain click, an extra modifier, a double click and a drag are not"
+    (is (not (help/jump-click? {:os "Linux" :n-press 1 :mods #{} :selection? false})))
+    (is (not (help/jump-click? {:os "Linux" :n-press 1 :mods #{:ctrl :shift} :selection? false})))
+    (is (not (help/jump-click? {:os "Linux" :n-press 1 :mods #{:alt} :selection? false})))
+    (is (not (help/jump-click? {:os "Linux" :n-press 2 :mods #{:ctrl} :selection? false})))
+    (is (not (help/jump-click? {:os "Linux" :n-press 1 :mods #{:ctrl} :selection? true})))))
+

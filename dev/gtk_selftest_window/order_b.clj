@@ -29,6 +29,7 @@
    popovers-quickdoc/row-quick-doc-cmd-shift-f1-does-nothing
    popovers-quickdoc/row-quick-doc-after-define
    popovers-quickdoc/row-jump-top-level
+   popovers-quickdoc/row-jump-click
    popovers-quickdoc/row-jump-local-binding
    popovers-quickdoc/row-jump-external
    popovers-quickdoc/row-jump-none

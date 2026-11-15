@@ -86,7 +86,9 @@ open.
 
 F12 or Ctrl+B jumps to the symbol's definition: the nearest local binding,
 then a top-level `def` or `defn` in the file, then another file if the
-runtime can say where it lives.
+runtime can say where it lives. With the mouse it's Cmd+click on the symbol
+on macOS and Ctrl+click on Linux. A drag that selects text with the key
+held is still a selection.
 
 - A file in your project opens in a tab; Cmd/Ctrl+[ goes back.
 - Library code and files outside the project open in a read-only source
