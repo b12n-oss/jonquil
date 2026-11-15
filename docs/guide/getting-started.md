@@ -6,7 +6,20 @@ On an Apple Silicon Mac with macOS 26 or later, download
 `Jonquil-0.4.0-macos-arm64.dmg` (or the `.zip`) from the
 [0.4.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.4.0),
 open it and drag Jonquil to Applications. It's signed and notarized, and it
-bundles GTK, so it needs no Homebrew. Running a project's Jolt out of process
+bundles GTK and the terminal's VTE, so it needs nothing else installed.
+
+If you use Homebrew, this installs the same app and puts a `jonquil` command
+on your `PATH`:
+
+```bash
+brew install b12n-oss/tap/jonquil
+```
+
+`brew upgrade jonquil` takes a newer release and `brew uninstall jonquil`
+removes the app and the command. `brew uninstall --zap jonquil` also removes
+your settings in `~/.config/jonquil`.
+
+Running a project's Jolt out of process
 still needs `jolt` on your login `PATH` and `git` (see
 [Requirements](#requirements)), and each other dialect needs what's listed
 below. Intel Macs and Linux build from source, as the rest of this page
