@@ -390,10 +390,11 @@
   (with-browser {:hold-setup-ms 800} {:timings {:page-timeout-ms 300}}
     (fn [_ {:keys [ev kills]}]
       (is (= :notice (:status (:result (run ev "(+ 1 2)" {:run? false})))))
-      ;; The setup answers ~500 ms later, inside this Run's own bound.
-      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
-        (is (or (= "3" (:printed r)) (= :notice (:status r))) (pr-str r)))
-      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
+      ;; The setup answers ~500 ms later. Each Run waits its own 300 ms for
+      ;; it, so one of the next few gets the answer. Which one depends on how
+      ;; busy the machine is: a slow CI runner once had no answer by the third.
+      (let [runs (repeatedly 8 #(:result (run ev "(+ 1 2)" {:run? false})))
+            r (first (drop-while #(= :notice (:status %)) runs))]
         (is (= "3" (:printed r)) (pr-str r)))
       (is (zero? @kills)))))
 
