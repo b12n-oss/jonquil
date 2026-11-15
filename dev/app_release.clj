@@ -206,6 +206,20 @@
          (filter #(and (str/starts-with? % "/opt/homebrew/") (on-disk? %)))
          (map real-path))))
 
+(def ^:private vte-lib
+  ;; VTE's GTK 4 build, the terminal's engine (Anchan loads it by path when
+  ;; a terminal is first shown, so it isn't a :jolt/native of deps.edn)
+  "/opt/homebrew/lib/libvte-2.91-gtk4.0.dylib")
+
+(defn- terminal-roots
+  "VTE's library when this Mac has it (brew install vte3), else none and a
+  warning: the bundle then has no terminal, and its Terminal tab says so."
+  []
+  (if (on-disk? vte-lib)
+    [(real-path vte-lib)]
+    (do (warn! "no VTE on this Mac (brew install vte3): the bundle will have no terminal")
+        [])))
+
 (defn- bundle-lib!
   "Copies plan entry {:src :name :refs} into Frameworks, relinked to @rpath."
   [{:keys [src name refs]}]
@@ -253,7 +267,13 @@
                           (io/make-parents (str licenses "/" n "/" x))
                           (sh! "cp" (str dir "/" x) (str licenses "/" n "/" x)))
                         {:name n :version v :stable (get-in f ["versions" "stable"]) :license (str (get f "license"))
-                         :note (when (= "cairo" n) (app-cairo-script/build-note))
+                         :note (case n
+                                 "cairo" (app-cairo-script/build-note)
+                                 ;; Homebrew's formula says LGPL-2.0-or-later; VTE's own files don't
+                                 "vte3" (str "the library's sources are LGPL-3.0-or-later (COPYING.README, "
+                                             "COPYING.LGPL3); COPYING.GPL3 covers VTE's own test app, "
+                                             "which isn't bundled")
+                                 nil)
                          :url (str (get-in f ["urls" "stable" "url"])) :license-files files})))]
     (when-let [old (seq (outdated formulae))]
       (warn! (str "these formulae are older than Homebrew's source links: " (str/join ", " old))))
@@ -326,7 +346,7 @@
   (sh! "rm" "-rf" (str bin ".build"))
   (spit launcher (launcher-text))
   (.setExecutable (io/file launcher) true)
-  (let [plan (closure-plan (roots) refs-of
+  (let [plan (closure-plan (concat (roots) (terminal-roots)) refs-of
                             ;; Homebrew's imports lzo (GPL-2.0); ours is built without it
                            {"libcairo-script-interpreter.2.dylib" (app-cairo-script/interpreter-path)})]
     (when (empty? plan) (fail! "no library to bundle"))

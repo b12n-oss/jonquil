@@ -380,14 +380,13 @@ the Interactions tab, and until you close the window.
   question. Unsaved files are asked about before the terminal.
 
 The terminal is [Anchan](https://github.com/b12n-oss/anchan), which uses
-VTE, the widget GNOME Terminal is built on. It needs VTE's GTK 4 build on
+VTE, the widget GNOME Terminal is built on. The downloaded Jonquil.app
+carries VTE with its other libraries, so the terminal works there with
+nothing to install. Run from source, Jonquil needs VTE's GTK 4 build on
 your machine: `brew install vte3` on a Mac, or your system's
-`libvte-2.91-gtk4` package on Linux. Without it the Terminal tab says so.
-
-The downloaded Jonquil.app doesn't include the terminal yet: the app
-carries its own GTK and can't use a VTE from Homebrew. There the Terminal
-tab says so, and **Open a terminal in the project folder**, in the Tools
-menu, starts your system's terminal
+`libvte-2.91-gtk4` package on Linux. Without it the Terminal tab says so,
+and **Open a terminal in the project folder**, in the Tools menu, still
+starts your system's terminal
 ([Open and Save](files-and-tabs.md#open-and-save)).
 
 ## Reset on Run, versus accumulate
