@@ -59,6 +59,7 @@
    tabs/row-tab-foreign-refuses-run
    tabs/row-tab-close-to-one-adopts-project
    tabs/row-close-all-message
+   tabs/row-two-button-alerts-show
    tabs/row-close-all-save-all
    tabs/row-close-all-save-failure
    tabs/row-tab-close-releases-namespaces

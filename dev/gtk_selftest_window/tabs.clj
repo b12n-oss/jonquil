@@ -12,12 +12,15 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
+            [jonquil.file-ops :as file-ops]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.tab :as tab]
+            [jonquil.gtk.window.alerts :as win-alerts]
+            [jonquil.tabs :as jtabs]
             [temp-dirs]))
 
 (defn- tabs [ui] ((:tabs* ui)))
@@ -442,6 +445,25 @@
                _ ((:close-choice! ui) {:index 2})
                v {:shown shown :closing @(:closing? ui) :n (count (tabs ui))}]
            (support/check :close-all-message (and (= 1 shown) (not (:closing v)) (= 3 (:n v))) v)))))))
+
+(defn row-two-button-alerts-show
+  "The alerts with two buttons are built as real dialogs: the terminal's
+  close question and the tree's Move to Trash. The other alerts have three
+  buttons, and show-alert! once allowed only that many, so these two threw
+  instead of showing. The harness dismisses them after the row."
+  [ui]
+  (go-row :two-button-alerts-show support/check
+    (on-gtk
+     (let [before @(:alert-dialog-count ui)
+           show! (fn [spec opts]
+                   (try (win-alerts/show-alert! (:window ui) spec opts (fn [_])) :shown
+                        (catch :default e (ex-message e))))
+           terminal (show! jtabs/terminal-alert win-alerts/TERMINAL-ALERT)
+           trash (show! (file-ops/trash-alert "a.clj" false) win-alerts/TRASH-ALERT)
+           shown (- @(:alert-dialog-count ui) before)]
+       (win-alerts/dismiss-pending-alerts!)
+       (support/check :two-button-alerts-show (and (= :shown terminal trash) (= 2 shown))
+                      {:terminal terminal :trash trash :shown shown})))))
 
 (defn row-close-all-save-all
   "Save All writes every dirty tab, then the window closes."
