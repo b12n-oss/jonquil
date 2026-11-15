@@ -12,6 +12,11 @@
 (def ^:private ctrl-alt (bit-or (:ctrl M) (:alt M)))
 (def ^:private mac "Mac OS X")
 
+(def ^:private alt
+  "How this system's notes name the Alt key: step! labels a note for the
+  system the test runs on."
+  (if (= mac (System/getProperty "os.name")) "Option" "Alt"))
+
 (defn- kv [n] (km/key-value n))
 
 (def ^:private rewrap-round
@@ -60,7 +65,7 @@
     (is (= 1 (press! ran (kv "j") ctrl-alt)) "the key is used up")
     (is (= [] @ran) "and its own binding doesn't run")
     (is (nil? (ks/pending)))
-    (is (= "Ctrl+Option+R Ctrl+Option+J isn't a key sequence." (:note @ks/live)))
+    (is (= (str "Ctrl+" alt "+R Ctrl+" alt "+J isn't a key sequence.") (:note @ks/live)))
     (testing "the next key is an ordinary one again"
       (press! ran (kv "j") ctrl-alt)
       (is (= [:plain/one] @ran)))))
@@ -72,7 +77,7 @@
     (is (some? (ks/pending)) "leaves the sequence waiting")
     (is (= 1 (press! ran (kv "Escape") 0)))
     (is (nil? (ks/pending)))
-    (is (= "Ctrl+Option+R cancelled." (:note @ks/live)))
+    (is (= (str "Ctrl+" alt "+R cancelled.") (:note @ks/live)))
     (is (= [] @ran))))
 
 (deftest without-start-seq-a-sequence-never-matches-test
