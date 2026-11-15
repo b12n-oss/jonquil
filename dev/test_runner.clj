@@ -34,6 +34,7 @@
     jonquil.terminal-colors-test
     jonquil.terminal-keys-test
     jonquil.terminal-open-test
+    jonquil.terminals-test
     jonquil.key-seq-test
     jonquil.slow-events-test
     jonquil.guide-examples-test

@@ -10,6 +10,7 @@
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.keymap :as km]))
 
 (defn row-terminal-in-the-bottom-area
@@ -73,3 +74,88 @@
                                   :columns cols-before :larger larger? :reset reset?
                                   :ctrl-r ctrl-r :f6-out f6-out :f6-back f6-back :left left
                                   :idle-busy idle :job-busy job? :stopped stopped?})))))))
+
+(defn- no-vte-pass
+  "The tab rows' answer on a machine without VTE: a pass, unless the run
+  says VTE must be there (jolt linux:selftest)."
+  [row]
+  (support/check row (nil? (System/getenv "JONQUIL_SELFTEST_NEEDS_VTE")) {:no-vte true}))
+
+(defn row-terminal-tabs
+  "More than one terminal: New Terminal adds a tab with its own shell, what
+  it is fed stays out of the first one, Show the terminal leaves it and
+  comes back to the one used last, and the tab's close button takes an
+  idle terminal away."
+  [ui]
+  (go-row :terminal-tabs support/check
+    (let [{:keys [state show! new! close! numbers focused? showing?]} (:terminal ui)]
+      (if (on-gtk (:why @state))
+        (on-gtk (no-vte-pass :terminal-tabs))
+        (let [pages (fn [] (g/gtk-notebook-get-n-pages (:notebook @state)))
+              before (on-gtk {:numbers (numbers) :pages (pages)})
+              first-term (on-gtk (:term @state))
+              _ (on-gtk (new!))
+              n (on-gtk (last (numbers)))
+              term (on-gtk (:term @state))
+              started? (await-until 8000 50 #(anchan/running? term))
+              added (on-gtk {:numbers (numbers) :pages (pages) :showing (showing?) :focused (focused?)})
+              _ (on-gtk (anchan/feed! term "echo tab-$((7*8))\n"))
+              echoed? (await-until 8000 50 #(str/includes? (anchan/text term) "tab-56"))
+              apart? (on-gtk (not (str/includes? (anchan/text first-term) "tab-56")))
+              away (on-gtk (show!) [(showing?) (focused?)])
+              back (on-gtk (show!) [(showing?) (focused?) (:last @state)])
+              _ (on-gtk (close! n))
+              closed (on-gtk {:numbers (numbers) :pages (pages)})
+              want {:added {:numbers (conj (:numbers before) n) :pages (inc (:pages before))
+                            :showing true :focused true}
+                    :away [false false] :back [true true n] :closed before}
+              got {:added added :away away :back back :closed closed}]
+          (on-gtk (support/check :terminal-tabs (and started? echoed? apart? (= want got))
+                                 (assoc got :before before :n n :started started? :echoed echoed? :apart apart?))))))))
+
+(defn row-terminal-tab-close-asks
+  "A tab's close button asks first while a program is running in its
+  terminal, and Cancel keeps the tab. With every terminal closed only
+  Interactions is left, and Show the terminal opens Terminal 1 again. The
+  row ends in the editor, so the rows after it have the window's keys."
+  [ui]
+  (go-row :terminal-tab-close-asks support/check
+    (let [{:keys [state show! new! close! numbers busy? focused? showing?]} (:terminal ui)]
+      (if (on-gtk (:why @state))
+        (on-gtk (no-vte-pass :terminal-tab-close-asks))
+        (let [pages (fn [] (g/gtk-notebook-get-n-pages (:notebook @state)))
+              _ (on-gtk (new!))
+              n (on-gtk (last (numbers)))
+              open (on-gtk (numbers))
+              term (on-gtk (:term @state))
+              started? (await-until 8000 50 #(anchan/running? term))
+              ;; the shell answers before the job is started: a shell that is
+              ;; still starting looks busy, and would take the line too early
+              _ (on-gtk (anchan/feed! term "echo ready-$((6*6))\n"))
+              ready? (await-until 8000 50 #(str/includes? (anchan/text term) "ready-36"))
+              _ (on-gtk (anchan/feed! term "sleep 20 &\n"))
+              job? (and (await-until 8000 50 #(re-find #"\[1\] \d+" (anchan/text term)))
+                        (await-until 8000 50 busy?))
+              alerts-before (on-gtk @(:alert-dialog-count ui))
+              _ (on-gtk (close! n))
+              asked (on-gtk (- @(:alert-dialog-count ui) alerts-before))
+              _ (on-gtk (win-alerts/dismiss-pending-alerts!))
+              settled? (await-until 3000 20 #(zero? ((:pending-alerts* ui))))
+              kept (on-gtk (numbers))
+              _ (on-gtk (anchan/feed! term "kill %1\n"))
+              idle? (await-until 8000 50 #(not (busy?)))
+              _ (on-gtk (doseq [m (numbers)] (close! m)))
+              none (on-gtk {:numbers (numbers) :pages (pages) :showing (showing?)})
+              _ (on-gtk (show!))
+              again (on-gtk {:numbers (numbers) :pages (pages) :focused (focused?)})
+              last-term (on-gtk (:term @state))
+              _ (on-gtk (anchan/stop! last-term))
+              stopped? (await-until 8000 50 #(not (anchan/running? last-term)))
+              left (on-gtk (show!) [(showing?) (focused?)])
+              want {:asked 1 :kept open :none {:numbers [] :pages 1 :showing false}
+                    :again {:numbers [1] :pages 2 :focused true} :left [false false]}
+              got {:asked asked :kept kept :none none :again again :left left}]
+          (on-gtk (support/check :terminal-tab-close-asks
+                                 (and started? ready? job? settled? idle? stopped? (= want got))
+                                 (assoc got :n n :started started? :ready ready? :job (boolean job?) :settled settled? :idle idle?
+                                        :stopped stopped?))))))))

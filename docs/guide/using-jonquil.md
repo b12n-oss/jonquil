@@ -356,9 +356,9 @@ demonstrates it.
 
 Ctrl+` (Control and the backquote key, on every system), or **Terminal** in
 the View menu, shows a terminal below the editor. The first time, the bottom
-area gets two tabs, Interactions and Terminal, and a login shell starts in
+area gets two tabs, Interactions and Terminal 1, and a login shell starts in
 the active file's project folder. The shell keeps running while you look at
-the Interactions tab, and until you close the window.
+the Interactions tab, and until you close its tab or the window.
 
 ![The Jonquil window with the bottom area on its Terminal tab, a shell prompt in /tmp below one line of output](../images/terminal.png)
 
@@ -370,7 +370,7 @@ the Interactions tab, and until you close the window.
   Ctrl+Shift+C and Ctrl+Shift+V copy and paste, and the other keys held
   with both Control and Shift stay Jonquil's, such as Ctrl+Shift+P for the
   palette.
-- **F6** moves between the editor and whichever of the two tabs is showing.
+- **F6** moves between the editor and whichever tab is showing.
 - **Colours** follow the theme: its text on its background, and one of
   two sets of the 16 ANSI colours, for a light theme or a dark one. Each
   colour is picked to be readable on every theme of its kind, except
@@ -378,8 +378,16 @@ the Interactions tab, and until you close the window.
   use to paint backgrounds.
 - **Text size** follows the editor's. Larger Text, Smaller Text and Reset
   Text Size in the View menu change the terminal with it.
-- **If the shell ends** (you typed `exit`), Show the terminal starts a new
-  one.
+- **More terminals.** The **+** at the end of the tab strip, or **New
+  Terminal** in the View menu, opens another one in its own tab: Terminal
+  2, Terminal 3 and so on, each with its own shell. Ctrl+` goes to the one
+  you used last.
+- **Closing a terminal.** The × on its tab ends its shell and takes the
+  tab away. If a program is still running in it, Jonquil asks first: Close
+  Anyway, or Cancel. With every terminal closed only Interactions is left,
+  and Ctrl+` opens Terminal 1 again.
+- **If the shell ends** (you typed `exit`), its tab stays, and Show the
+  terminal starts a new shell in it.
 - **Closing the window** ends the shell. If something is still running in
   it, in the foreground or as a background job started with `&`, Jonquil
   asks first: Close Anyway, or Cancel. An idle shell is closed without a

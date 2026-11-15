@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- More than one terminal. The **+** at the end of the bottom tab strip, or New Terminal in the View menu and the palette, opens another terminal in its own tab, named Terminal 2, Terminal 3 and so on. Each tab has a × that closes it, and asks first when a program is still running in that terminal. Ctrl+` goes to the terminal you used last. The first terminal's tab is now named Terminal 1.
+
 ### Changed
 
 - The terminal's colours are readable on every theme. It used the terminal engine's own 16 ANSI colours, which are made for a black or a white background: directory names in dark blue were close to invisible on a dark theme, and bright yellow on a light one. There are now two sets, one for light themes and one for dark, and a test checks each colour's contrast against all 16 themes' backgrounds. Black on a dark theme and bright white on a light one stay as they are, since programs paint backgrounds with them.

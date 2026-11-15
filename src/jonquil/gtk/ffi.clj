@@ -1372,6 +1372,8 @@
 (ffi/defcfn gtk-notebook-set-scrollable "gtk_notebook_set_scrollable" [:pointer :int] :void)
 ;; gtknotebook.h:180 void gtk_notebook_set_tab_label (GtkNotebook*, GtkWidget *child, GtkWidget *tab_label)
 (ffi/defcfn gtk-notebook-set-tab-label "gtk_notebook_set_tab_label" [:pointer :pointer :pointer] :void)
+;; void gtk_notebook_set_action_widget(GtkNotebook*, GtkWidget*, GtkPackType)
+(ffi/defcfn gtk-notebook-set-action-widget "gtk_notebook_set_action_widget" [:pointer :pointer :int] :void)
 ;; gtknotebook.h:205 void gtk_notebook_reorder_child (GtkNotebook*, GtkWidget *child, int position)
 (ffi/defcfn gtk-notebook-reorder-child "gtk_notebook_reorder_child" [:pointer :pointer :int] :void)
 ;; gtkbutton.h:88 void gtk_button_set_has_frame (GtkButton*, gboolean)
