@@ -21,6 +21,7 @@
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.settings :as settings]
             [jonquil.slow-events :as slow-events]
+            [jonquil.terminal-open :as terminal-open]
             [jonquil.theme :as theme]
             [jonquil.user-keys :as user-keys]
             [jonquil.version :as version]))
@@ -186,6 +187,9 @@
                                       (assoc (live-keys) :os (System/getProperty "os.name")))))
      :recent-keys-fn (fn [] (print! (describe/recent-lines @recent-keys)))
      :version-fn (fn [] (print! [(str "; " (version/version-line))]))
+     :open-terminal-fn (fn [] (print! [(terminal-open/open!
+                                        (some-> (:path ((:active-tab ctx))) deref)
+                                        (:terminal (settings/load-settings @(:settings-path* ctx))))]))
      :slow-events-fn (fn [] (print! (map #(str "; " %) (slow-events/report-lines
                                                         @slow-events/log (machine-facts) 20))))
      :save-slow-events-fn (fn [] (print! [(save-slow-events! ctx)]))

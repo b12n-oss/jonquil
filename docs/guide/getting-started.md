@@ -336,6 +336,11 @@ when that variable is unset, blank, or not an absolute path:
 - `:mcp-listen?` (hand-written): `true` makes each window serve Jonquil's
   MCP tools on a loopback socket, so an agent can attach to an open window
   with `jonquil --mcp-attach` (see [Driving Jonquil from an agent](mcp.md)).
+- `:terminal` (hand-written): the terminal that **Open a terminal in the
+  project folder** starts. On a Mac it is an app's name, such as
+  `"Ghostty"` or `"iTerm"`, and Terminal when unset. On Linux it is a
+  program, such as `"kitty"`; unset, Jonquil uses the first terminal it
+  finds on your `PATH`.
 
 The tabs live next door in `sessions.edn`, one entry per project folder,
 newest first, at most 20 (see
