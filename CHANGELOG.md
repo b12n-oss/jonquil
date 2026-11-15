@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- A Homebrew install: `brew install b12n-oss/tap/jonquil` puts the notarized Jonquil.app in Applications and a `jonquil` command on your `PATH`. The cask is in the public tap b12n-oss/homebrew-tap.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added
