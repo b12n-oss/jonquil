@@ -384,9 +384,10 @@ VTE, the widget GNOME Terminal is built on. The downloaded Jonquil.app
 carries VTE with its other libraries, so the terminal works there with
 nothing to install. Run from source, Jonquil needs VTE's GTK 4 build on
 your machine: `brew install vte3` on a Mac, or your system's VTE package
-for GTK 4 on Linux (`libvte-2.91-gtk4-0` on Ubuntu). On Linux the
-self-tests start a shell in it on Ubuntu 26.04 under X11, in Docker, and
-nobody has used it on a Linux desktop by hand yet. Without
+for GTK 4 on Linux (`libvte-2.91-gtk4-0` on Ubuntu). On Linux it is
+tested on Ubuntu 26.04 under X11 only: the self-tests start `/bin/sh` in it
+on a virtual screen in Docker. Wayland is untested, and nobody has used it
+on a Linux desktop by hand yet. Without
 VTE the Terminal tab says so,
 and **Open a terminal in the project folder**, in the Tools menu, still
 starts your system's terminal
