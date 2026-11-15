@@ -170,9 +170,10 @@ at the top of the Keys tab in Preferences chooses one, and the change
 applies at once:
 
 - **Jonquil default** adds nothing to the keys on this page.
-- **Calva paredit** adds Calva's structural editing keys, 37 on a Mac and
-  39 on Linux. Some of them replace a key that normally moves by a word or
-  deletes one ([Keys the Calva set changes](structural-editing.md#keys-the-calva-set-changes)).
+- **Calva paredit** adds Calva's structural editing keys, 42 on a Mac and
+  46 on Linux. Some of them replace a key that normally moves by a word or
+  deletes one ([Keys the Calva set changes](structural-editing.md#keys-the-calva-set-changes)),
+  and some are [two-step keys](structural-editing.md#two-step-keys).
 
 The choice is saved as `:key-set` in `settings.edn` (`:default` or
 `:calva`). A set's keys show in the Keys tab with the set's name as their
@@ -233,6 +234,15 @@ and writes a commented starter file the first time.
   types (a letter, a digit, Return, Space, punctuation) does need a modifier
   other than Shift, or the binding would run every time you typed it, so
   such an entry is skipped.
+- A binding can be a key sequence: `:then` holds the chords that follow
+  the first, each a key with its modifiers. This one, under
+  `:window`, runs the buffer on Ctrl+Alt+G then R:
+  `{:key "g" :exact #{:ctrl :alt} :then [{:key "r"}] :command :run/run}`.
+  The first chord follows the rules above. A later chord may be a plain
+  key, since the sequence is already under way. The status bar shows the
+  chords so far, and a list of what can follow opens after half a second
+  ([Two-step keys](structural-editing.md#two-step-keys)). The Keys tab
+  lists a sequence and records single chords only.
 - **List every key binding** in the palette prints each command's id with
   its keys, yours included.
 

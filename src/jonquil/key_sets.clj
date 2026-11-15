@@ -5,9 +5,11 @@
   GTK here.
 
   :default binds nothing. Every other set is an EDN file under
-  jonquil/keysets, shaped like keys.edn ({:window [...] :editor [...]})
-  with a :label, where an entry may carry :os :mac or :os :linux to be on
-  for that system only. settings.edn's :key-set names the chosen one."
+  jonquil/keysets, shaped like keys.edn ({:window [...] :editor [...]
+  :remove [...]}) with a :label, where an entry may carry :os :mac or :os
+  :linux to be on for that system only. :remove drops a plugin's or a
+  shipped binding while the set is on. settings.edn's :key-set names the
+  chosen one."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -49,8 +51,8 @@
   (if (= "Mac OS X" os-name) :mac :linux))
 
 (defn bindings
-  "The bindings set id has for scope on os-name's system, in file order,
-  without their :os."
+  "The entries set id has under scope (:window, :editor or :remove) on
+  os-name's system, in file order, without their :os."
   [id scope os-name]
   (let [sys (system os-name)]
     (into []
@@ -66,6 +68,7 @@
   (atom default-id))
 
 (defn live-bindings
-  "The chosen set's bindings for scope on this system."
+  "The chosen set's entries for scope (:window, :editor or :remove) on this
+  system."
   [scope]
   (bindings @live scope (System/getProperty "os.name")))

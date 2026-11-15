@@ -38,17 +38,17 @@ marks the caret and `«…»` a selection.
 
 | Command | Key | Before | After |
 |---|---|---|---|
-| Raise the form at the caret over the list around it | none | `(a ‸b c)` | `‸b` |
+| Raise the form at the caret over the list around it | Ctrl+Alt+P Ctrl+Alt+R | `(a ‸b c)` | `‸b` |
 | Splice: remove the brackets around the caret | Ctrl+Alt+S | `(a ‸b)` | `a ‸b` |
 | Wrap the form at the caret in () | Ctrl+Alt+Shift+P | `‸a b` | `(‸a) b` |
 | Wrap the form at the caret in [] | Ctrl+Alt+Shift+S | `‸a b` | `[‸a] b` |
 | Wrap the form at the caret in {} | Ctrl+Alt+Shift+C | `‸a b` | `{‸a} b` |
 | Wrap the form at the caret in #{} | Ctrl+Alt+Shift+E | `‸a b` | `#{‸a} b` |
 | Wrap the form at the caret in "" | Ctrl+Alt+Shift+Q | `‸a b` | `"‸a" b` |
-| Change the brackets around the caret to () | none | `[a ‸b]` | `(a ‸b)` |
-| Change the brackets around the caret to [] | none | `(a ‸b)` | `[a ‸b]` |
-| Change the brackets around the caret to {} | none | `(a ‸b)` | `{a ‸b}` |
-| Change the brackets around the caret to #{} | none | `(a ‸b)` | `#{a ‸b}` |
+| Change the brackets around the caret to () | Ctrl+Alt+R Ctrl+Alt+P | `[a ‸b]` | `(a ‸b)` |
+| Change the brackets around the caret to [] | Ctrl+Alt+R Ctrl+Alt+S | `(a ‸b)` | `[a ‸b]` |
+| Change the brackets around the caret to {} | Ctrl+Alt+R Ctrl+Alt+C | `(a ‸b)` | `{a ‸b}` |
+| Change the brackets around the caret to #{} | Ctrl+Alt+R Ctrl+Alt+H | `(a ‸b)` | `#{a ‸b}` |
 
 ## Drag, transpose, join and split
 
@@ -67,8 +67,8 @@ marks the caret and `«…»` a selection.
 |---|---|---|---|
 | Kill the form at the caret, onto the clipboard | Ctrl+Shift+Delete | `(a ‸b c)` | `(a ‸c)` |
 | Kill the form before the caret | Ctrl+Alt+Backspace | `(a b‸ c)` | `(a ‸ c)` |
-| Kill to the end of the line, keeping the brackets balanced | Mac: Ctrl+K | `(a ‸b c)` | `(a ‸)` |
-| Kill to the start of the line, keeping the brackets balanced | Mac: Cmd+Backspace | `(a b ‸c)` | `(‸c)` |
+| Kill to the end of the line, keeping the brackets balanced | Mac: Ctrl+K; Linux: Ctrl+K Ctrl+K | `(a ‸b c)` | `(a ‸)` |
+| Kill to the start of the line, keeping the brackets balanced | Mac: Cmd+Backspace; Linux: Ctrl+K Ctrl+H | `(a b ‸c)` | `(‸c)` |
 | Kill to the end of the list | Ctrl+Delete | `(a ‸b c)` | `(a ‸)` |
 | Kill to the start of the list | Ctrl+Backspace | `(a b ‸c)` | `(‸c)` |
 | Splice, killing what follows the caret in the list | Ctrl+Alt+Shift+Delete | `x (a ‸b c) y` | `x a ‸ y` |
@@ -132,19 +132,35 @@ editor and run a structural command, as they do in Calva:
 A key of your own in `keys.edn` still wins over the set, so you can take
 any of these back in Preferences.
 
+## Two-step keys
+
+Some of the set's keys are two chords, one after the other. Raise is
+Ctrl+Alt+P then Ctrl+Alt+R, and the four rewraps are Ctrl+Alt+R then a
+second chord. On Linux, Ctrl+K then Ctrl+K kills to the end of the line and
+Ctrl+K then Ctrl+H to its start.
+
+![The key sequence list over the last lines of the editor: Ctrl+Option+R, then the four rewrap keys and Esc](../images/key-sequence.png)
+
+- After the first chord the status bar shows it, followed by `…`.
+- If you pause for half a second, a list of what can follow opens over the
+  last lines of the editor. Press the second chord before that and the
+  list never shows.
+- Esc cancels. Any other key that doesn't continue ends the sequence, does
+  nothing else, and the status bar says it isn't a key sequence.
+- A sequence waits for as long as you like.
+
+While the set is on it takes two keys from Jonquil so these can start.
+Ctrl+Alt+P no longer cycles the Parinfer mode (on a Mac, Cmd+Option+P still
+does), and Cmd/Ctrl+Alt+R no longer runs the buffer (Cmd/Ctrl+R does).
+
 ## Calva keys the set leaves out
 
-- **Raise and the rewraps.** Calva puts them on two-step keys (Ctrl+Alt+P
-  then Ctrl+Alt+R, and Ctrl+Alt+R then a second key). Jonquil has no
-  two-step keys yet.
-- **Kill to the end and start of the line on Linux.** Calva uses Ctrl+K
-  then a second key there.
 - **Split.** Calva's Ctrl+Shift+S is Jonquil's Save As.
 - **Expand and shrink the selection on a Mac.** Calva's Ctrl+W and
   Ctrl+Shift+W close the tab in Jonquil. On Linux they are on
   Alt+Shift+Right and Left.
-- Calva's strict mode, its drags up and down a level, and its selection
-  variants of the moves have no Jonquil command.
+- Calva's strict mode, its rewrap in quotes, its drags up and down a
+  level, and its selection variants of the moves have no Jonquil command.
 
 Every command left out is still under Edit > Structure and in the palette.
 

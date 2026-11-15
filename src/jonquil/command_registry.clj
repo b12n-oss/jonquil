@@ -9,7 +9,8 @@
   The window's and the editor's chords are registered here; the context
   menus read the same table (editor-menu, console-menu, menu-items), the
   command palette lists it (run-command-in), and plugins add their own."
-  (:require [jonquil.keymap :as km]
+  (:require [jonquil.key-seq :as key-seq]
+            [jonquil.keymap :as km]
             [jonquil.structural :as se]
             [jonquil.parts :as parts]
             [jonquil.results :as results]))
@@ -348,6 +349,20 @@
 
 (def ^:private KEY-ESCAPE (km/key-value "Escape"))
 
+(defn- seq-step!
+  "The key as the next of a key sequence under way: 1, or nil when there
+  is none."
+  [keyval state {:keys [physical]}]
+  (key-seq/step! {:keyval keyval :state state :physical physical} (System/getProperty "os.name")))
+
+(defn- with-seq-start
+  "opts with :start-seq!, which starts a key sequence over bindings when a
+  binding with a :then matches this key. The sequence keeps opts' run!, so
+  its command runs as this handler would run it."
+  [bindings keyval state {:keys [holds? run! physical] :as opts}]
+  (assoc opts :start-seq!
+         (fn [b] (key-seq/start! bindings b {:keyval keyval :state state :physical physical} holds? run!))))
+
 (defn window-answer
   "on-window-key's whole answer for a lowered keyval and a modifier state,
   1 (used up) or 0 (GTK's): first the entry stage, then the keymap.
@@ -360,12 +375,17 @@
   editor's preedit yield, and asks the named condition :entry-focused.
 
   Then jonquil.keymap/dispatch over bindings with holds? and run!: :handled
-  is 1, :to-gtk and :unmatched are 0."
+  is 1, :to-gtk and :unmatched are 0.
+
+  Ahead of both, a key sequence under way (jonquil.key-seq) takes the key,
+  whichever handler started it: the window sees every key first."
   [bindings keyval state {:keys [holds?] :as opts}]
-  (cond
-    (and (not= keyval KEY-ESCAPE) (holds? :entry-focused)) 0
-    (= :handled (km/dispatch bindings keyval state opts)) 1
-    :else 0))
+  (if-some [answer (seq-step! keyval state opts)]
+    answer
+    (cond
+      (and (not= keyval KEY-ESCAPE) (holds? :entry-focused)) 0
+      (= :handled (km/dispatch bindings keyval state (with-seq-start bindings keyval state opts))) 1
+      :else 0)))
 
 (defn editor-answer
   "jonquil.gtk.editor/handle-key!'s whole answer for a lowered keyval and a
@@ -383,10 +403,14 @@
   Between them, jonquil.keymap/dispatch over bindings with holds?, run!
   and physical: :handled is 1 and :to-gtk is 0."
   [bindings keyval state {:keys [holds? popup-key! typing-key!] :as opts}]
-  (cond
-    (holds? :preedit-active) 0
-    (= 1 (popup-key!)) 1
-    :else (case (km/dispatch bindings keyval state opts)
-            :handled 1
-            :to-gtk 0
-            (typing-key!))))
+  (if-some [answer (seq-step! keyval state opts)]
+    ;; a key sequence under way takes the key; in the window it never gets
+    ;; this far, since the window's handler sees the key first
+    answer
+    (cond
+      (holds? :preedit-active) 0
+      (= 1 (popup-key!)) 1
+      :else (case (km/dispatch bindings keyval state (with-seq-start bindings keyval state opts))
+              :handled 1
+              :to-gtk 0
+              (typing-key!)))))

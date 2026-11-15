@@ -14,6 +14,7 @@
             [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.key-seq-hint :as key-seq-hint]
             [jonquil.gtk.palette :as palette]
             [jonquil.layouts :as layouts]
             [jonquil.palette :as pal-data]
@@ -206,7 +207,9 @@
                   :live-keys live-keys :print-lines! (partial print-lines! wctx)}
                  (describe-fns wctx pending recent-keys)
                  (start-user-keys! wctx))
-     :ui {:open-palette!* open-palette-fn}}))
+     :ui {:open-palette!* open-palette-fn
+          ;; the status bar hint and the list for a key sequence under way
+          :key-seq-hint (key-seq-hint/install! wctx)}}))
 
 (def part
   "The command palette part's install fn, (part wctx) -> contribution."

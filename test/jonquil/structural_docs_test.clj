@@ -28,12 +28,14 @@
 
 (defn- chord-text
   "A set's binding the way the page writes it: Ctrl, Alt, Shift and Cmd in
-  that order, then the key."
-  [{:keys [key exact]}]
-  (str/join "+" (concat (keep (fn [[m word]] (when (contains? exact m) word))
-                              [[:ctrl "Ctrl"] [:alt "Alt"] [:shift "Shift"] [:meta "Cmd"]])
-                        [(get {"period" "." "comma" "," "BackSpace" "Backspace"} key
-                              (if (= 1 (count key)) (str/upper-case key) key))])))
+  that order, then the key. A key sequence's later chords follow the
+  first, a space between."
+  [{:keys [key exact then]}]
+  (let [one (str/join "+" (concat (keep (fn [[m word]] (when (contains? exact m) word))
+                                        [[:ctrl "Ctrl"] [:alt "Alt"] [:shift "Shift"] [:meta "Cmd"]])
+                                  [(get {"period" "." "comma" "," "BackSpace" "Backspace"} key
+                                        (if (= 1 (count key)) (str/upper-case key) key))]))]
+    (str/join " " (cons one (map chord-text then)))))
 
 (defn- key-cell
   "The page's Key column for command id: the Calva set's keys that are the

@@ -138,16 +138,27 @@
   binding) returns for its command. :handled and :to-gtk (the key is
   GTK's, so stop here) are answers; :next, or nil for an unregistered
   command, moves on to the next matching binding. :unmatched when the
-  bindings run out. The :physical option goes to matches?."
-  [bindings keyval state {:keys [holds? run! physical]}]
+  bindings run out. The :physical option goes to matches?.
+
+  A binding with a :then is a key sequence (jonquil.key-seq): its first
+  chord matching hands it to the :start-seq! option, (fn [binding]), whose
+  answer counts like a command's. Without that option such a binding never
+  matches, so a caller that knows nothing of sequences runs none by half."
+  [bindings keyval state {:keys [holds? run! physical start-seq!]}]
   (or (some (fn [b]
-              (when (matches? b keyval state holds? physical)
-                (let [o (if (contains? b :outcome) (:outcome b) (run! b))]
+              (when (and (matches? b keyval state holds? physical)
+                         (or (not (:then b)) start-seq!))
+                (let [o (cond
+                          (:then b) (start-seq! b)
+                          (contains? b :outcome) (:outcome b)
+                          :else (run! b))]
                   (when (contains? outcomes o) o))))
             bindings)
       :unmatched))
 
-(def ^:private binding-keys #{:key :keys :mods :not :exact :physical? :when :command :args :outcome})
+(def ^:private binding-keys #{:key :keys :mods :not :exact :physical? :when :command :args :outcome :then})
+
+(def ^:private chord-keys #{:key :keys :mods :not :exact :physical?})
 
 (defn- coll-of [b k]
   (let [v (get b k)] (when (coll? v) v)))
@@ -210,6 +221,25 @@
     (some (complement binding-keys) (keys b))
     (conj (str "has unknown keys " (pr-str (remove binding-keys (keys b)))))))
 
+(defn- then-problems
+  "The problems of binding b's :then, the chords that follow its first: a
+  non-empty vector of chords, each a key with its modifiers and nothing
+  else, and a sequence runs a command, never a fixed :outcome."
+  [b]
+  (let [then (:then b)]
+    (cond
+      (not (contains? b :then)) []
+      (not (and (vector? then) (seq then))) [":then isn't a vector of at least one chord"]
+      (not-every? map? then) [":then holds something that isn't a chord map"]
+      :else
+      (vec (concat
+            (when (contains? b :outcome) ["has a :then and an :outcome; a key sequence runs a command"])
+            (for [[i c] (map-indexed vector then)
+                  p (concat (shape-problems c) (key-problems c) (modifier-problems c)
+                            (when-let [extra (seq (remove chord-keys (keys c)))]
+                              [(str "has unknown keys " (pr-str (vec extra)))]))]
+              (str ":then chord " (inc i) " " p)))))))
+
 (defn- binding-problems
   "Every problem with one binding, in rule order."
   [b command-ids condition-ids]
@@ -217,7 +247,8 @@
           (key-problems b)
           (modifier-problems b)
           (command-problems b command-ids)
-          (condition-problems b condition-ids)))
+          (condition-problems b condition-ids)
+          (then-problems b)))
 
 (defn problems
   "What's wrong with bindings, one sentence each naming the binding's
@@ -264,7 +295,9 @@
                (some (fn [[k st]]
                        (let [hit (when-let [kv (key-value k)]
                                    (resolve-binding scope-vector kv st (constantly true)))]
-                         (not (and hit (= (same? hit) (same? b))))))
+                         ;; two key sequences may share their first chord
+                         (not (and hit (or (= (same? hit) (same? b))
+                                           (and (:then hit) (:then b)))))))
                      (for [k (key-names b), st (chord-states b)]
                        [k st])))
              bindings)))

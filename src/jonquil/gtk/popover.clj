@@ -185,6 +185,21 @@
     (reset! open? true))
   nil)
 
+(defn show-at-bottom!
+  "Points pp's popover at the bottom left corner of its view's container
+  and pops it up, so a :top popover sits over the last lines of the view.
+  Callers set the popover's child (set-child!) before calling this."
+  [pp]
+  (let [{:keys [popover open?]} pp
+        anchor (g/gtk-widget-get-parent popover)
+        r (rect-alloc [12 (max 0 (- (g/gtk-widget-get-height anchor) 4)) 1 1])]
+    (try
+      (g/gtk-popover-set-pointing-to popover r)
+      (finally (ffi/free r)))
+    (g/gtk-popover-popup popover)
+    (reset! open? true))
+  nil)
+
 (defn hide!
   "Closes pp's popover (gtk_popover_popdown), idempotent when it's already
   closed. Never unparents -- a production popover is built once by
@@ -208,9 +223,11 @@
   caret's new rectangle (show-at-caret!, the clean repositioning path), or
   hides it once the caret left the visible text, so it never floats over
   unrelated lines. A no-op while closed. GTK-thread only, like show and
-  hide (value-changed handlers run there)."
+  hide (value-changed handlers run there). A popover with :fixed? true
+  isn't at the caret (the key sequence list sits at the bottom of the
+  view), so a scroll leaves it where it is."
   [pp]
-  (when @(:open? pp)
+  (when (and @(:open? pp) (not (:fixed? pp)))
     (if (caret-visible? (:view pp))
       (show-at-caret! pp)
       (hide! pp)))

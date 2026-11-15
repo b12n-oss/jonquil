@@ -31,8 +31,11 @@
   (is (= :linux (ks/system "Windows 11")))
   (let [cmds (fn [os] (set (map :command (ks/bindings :calva :editor os))))]
     (is (contains? (cmds "Mac OS X") :paredit/kill-right) "Ctrl+K is Calva's on a Mac")
-    (is (not (contains? (cmds "Linux") :paredit/kill-right)) "on Linux it is a two-step key")
+    (is (not (contains? (cmds "Mac OS X") :paredit/expand-selection)) "Ctrl+W closes the tab there")
     (is (contains? (cmds "Linux") :paredit/expand-selection)))
+  (let [kill (fn [os] (first (filter #(= :paredit/kill-right (:command %)) (ks/bindings :calva :editor os))))]
+    (is (nil? (:then (kill "Mac OS X"))) "one chord on a Mac")
+    (is (= [{:key "k" :exact #{:ctrl}}] (:then (kill "Linux"))) "Ctrl+K Ctrl+K on Linux"))
   (is (not-any? :os (ks/bindings :calva :editor "Linux")) "the :os is dropped"))
 
 (deftest every-binding-is-sound-test
@@ -53,8 +56,11 @@
   ;; window binding takes the key first, and no earlier entry of the set
   ;; shadows it
   (doseq [{:keys [id]} ks/sets os systems
-          :let [editor (into (ks/bindings id :editor os) (:editor km/shipped))
-                window (into (ks/bindings id :window os) (:window km/shipped))]
+          :let [layered (fn [scope]
+                          (user-keys/layer {scope (ks/bindings id scope os) :remove (ks/bindings id :remove os)}
+                                           scope (get km/shipped scope)))
+                editor (layered :editor)
+                window (layered :window)]
           b (ks/bindings id :editor os) k (key-names b) st states
           :let [kv (km/key-value k)
                 hit (km/resolve-binding editor kv st (constantly true))]
@@ -87,3 +93,24 @@
       (finally
         (reset! ks/live :default)
         (reset! user-keys/live user-keys/no-keys)))))
+
+(deftest set-sequences-test
+  ;; no two bindings of a set are the same whole sequence, and a set's
+  ;; :remove names bindings the shipped keys have
+  (doseq [{:keys [id]} ks/sets os systems
+          :let [bs (ks/bindings id :editor os)
+                whole (fn [b] [(key-names b) (:exact b) (:then b)])]]
+    (is (= (count bs) (count (distinct (map whole bs)))) (str id " on " os)))
+  (doseq [os systems r (ks/bindings :calva :remove os)]
+    (is (some #(and (= (:command r) (:command %)) (= (:key r) (:key %)) (= (:mods r) (:mods %)))
+              (concat (:window km/shipped) (:editor km/shipped)))
+        (pr-str r)))
+  (testing "with the Calva set on, Ctrl+Alt+P no longer cycles Parinfer in the window"
+    (let [reg (plugin-registry/empty-registry)
+          hit #(km/resolve-binding (plugin-registry/window-bindings reg) (km/key-value "p")
+                                   (bit-or (:ctrl M) (:alt M)) (constantly true))]
+      (try
+        (is (= :parinfer/next-mode (:command (hit))))
+        (reset! ks/live :calva)
+        (is (nil? (hit)))
+        (finally (reset! ks/live :default))))))

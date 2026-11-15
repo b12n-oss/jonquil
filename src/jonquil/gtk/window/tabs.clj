@@ -131,7 +131,7 @@
 
 (defn- remove-tab!
   "Takes tab id out of the window, in this order: out of tabs first
-  (so the switch-page remove_page fires never resolves to it), its five
+  (so the switch-page remove_page fires never resolves to it), its six
   popovers out of the registry and unparented (unparenting drops their
   last reference, and a page removed with a popover still parented spins
   GTK in a warning loop), then the page, then the neighbour selected."
@@ -347,12 +347,14 @@
 
 (defn- wire-doc-popovers!
   "Quick doc and full doc join the window's popover registry, every open popover of t follows a scroll, and the editor gets its quick doc and jump fns; a caret move hides quick doc."
-  [{:keys [register-popover-fn]} {:keys [ed help-pop full-doc-pop] :as t} {:keys [quick-doc-fn jump-fn]}]
+  [{:keys [register-popover-fn]} {:keys [ed help-pop full-doc-pop key-seq-pop] :as t} {:keys [quick-doc-fn jump-fn]}]
     ;; The quick-doc and full-doc popovers join the window's registry
     ;; (Escape and teardown close them) and close on any caret move or
-    ;; focus leaving the editor.
+    ;; focus leaving the editor. The key sequence list joins it too, for
+    ;; teardown.
   (register-popover-fn help-pop)
   (register-popover-fn full-doc-pop)
+  (register-popover-fn key-seq-pop)
     ;; A scroll moves the text, so every open caret-anchored popover of
     ;; this tab follows the caret, or hides once it leaves the visible text
     ;; (jonquil.gtk.popover/follow-caret!). value-changed fires on the GTK

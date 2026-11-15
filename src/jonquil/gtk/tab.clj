@@ -1,6 +1,6 @@
 (ns jonquil.gtk.tab
   "One tab's widgets: an editor with its find bar above it,
-  the four popovers parented on its view (quick doc, full doc, rename,
+  the popovers parented on its view (quick doc, full doc, rename,
   completion), and the label box the window's notebook shows for it. The
   window owns the notebook, the wiring and the tab list; this namespace
   never touches a notebook.
@@ -73,6 +73,19 @@
   (editor/set-profile! ed profile)
   (editor/set-text! ed (or text "")))
 
+(defn- make-key-seq-popover
+  "The list a key sequence under way shows (jonquil.gtk.key-seq-hint): a
+  popover over the last lines of view that takes no focus, holding one
+  label in the code font. :label is that label; :fixed? keeps it in place
+  when the view scrolls."
+  [view]
+  (let [pp (popover/make-popover view {:autohide? false :position :top})
+        label (g/gtk-label-new "")]
+    (g/gtk-label-set-xalign label 0.0)
+    (g/gtk-widget-add-css-class label "jonquil-doc")
+    (popover/set-child! pp label)
+    (assoc pp :label label :fixed? true)))
+
 (defn make-tab!
   "Builds one tab. opts is {:id :path :text :theme :profile
   :completion-opts}: :text (default \"\") is what the editor starts with,
@@ -96,13 +109,15 @@
             :rename-pop (help-popover/make-rename-popover view)
             :completion (completion/make-completion view (assoc completion-opts :ed ed))
             :palette (palette/make-palette view)
+            :key-seq-pop (make-key-seq-popover view)
             :path (atom path) :project (atom nil) :discard-warned? (atom false) :last-shown (atom nil)}
            w)))
 
 (defn popovers
-  "The tab's five popovers, each a jonquil.gtk.popover map."
+  "The tab's six popovers, each a jonquil.gtk.popover map."
   [tab]
-  [(:help-pop tab) (:full-doc-pop tab) (:rename-pop tab) (:completion tab) (:palette tab)])
+  [(:help-pop tab) (:full-doc-pop tab) (:rename-pop tab) (:completion tab) (:palette tab)
+   (:key-seq-pop tab)])
 
 (defn dispose-popovers!
   "Hides each open popover, then unparents every one whose parent isn't
