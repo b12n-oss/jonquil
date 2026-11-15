@@ -102,6 +102,7 @@
     jonquil.results
     jonquil.keymap
     jonquil.key-sets
+    jonquil.terminal-colors
     jonquil.terminal-keys
     jonquil.terminal-open
     jonquil.key-seq

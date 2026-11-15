@@ -93,7 +93,7 @@
              :plugins-on* :recent-tabs :refresh-labels! :refuse-foreign! :register-status-log! :rerun-failure! :run-ranges!
              :review-pane :right :sel* :select-tab! :set-status! :settings-path* :show-alert! :show-right-panel!
              :show-source! :showing-panel :source-ctx :status-label :tab-by-id :tab-ctx* :tabs :tree-pane
-             :tree-paned :unread-label :win :bottom-focus* :theme-name}
+             :tree-paned :unread-label :win :bottom-focus* :theme-name :zoom-px}
            (set (keys wctx))))
     (is (= [::win ::sl ::cv ::ev* ::sel* ::tabs ::active-tab ::settings ::bang ::recent ::right ::tree-pane
             ::tree-paned ::paned ::files-btn ::panel-focus ::unread ::plugins-on ::rp ::lp ::hp ::pending
