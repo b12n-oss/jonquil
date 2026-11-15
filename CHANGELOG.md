@@ -6,6 +6,8 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
 ### Added
 
 - The Mac download now carries the terminal. Jonquil.app bundles VTE's GTK 4 library and the 12 libraries it needs that the app didn't already have, with their license files and source links beside the others in the app's `licenses` folder. The app uses only its own copy, never a VTE from Homebrew. The zip grows from 79.8 MB to 98.1 MB.
