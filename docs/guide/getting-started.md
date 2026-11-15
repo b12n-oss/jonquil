@@ -360,6 +360,21 @@ when that variable is unset, blank, or not an absolute path:
   `"Ghostty"` or `"iTerm"`, and Terminal when unset. On Linux it is a
   program, such as `"kitty"`; unset, Jonquil uses the first terminal it
   finds on your `PATH`.
+- `:header` (hand-written): the buttons in the header bar, by command id,
+  left to right at each end. Leave a side out to keep its usual buttons,
+  or give it `[]` for none. The change shows in the next window you open.
+
+  ```clojure
+  {:header {:start [:tree/toggle :file/open :tab/new]
+            :end   [:run/run :run/stop :terminal/show]}}
+  ```
+
+  These are the usual ones, with Save swapped for Terminal. Any command
+  from **List every key binding** in the palette works, and a button for a
+  command that isn't one of the six usual buttons takes its name from the
+  menus. An id that isn't a command, or one named twice, is left out with a
+  note in the console. Plugin commands aren't offered yet. The ☰ menu
+  button stays on Linux, since it is the only way to the menus there.
 
 The tabs live next door in `sessions.edn`, one entry per project folder,
 newest first, at most 20 (see

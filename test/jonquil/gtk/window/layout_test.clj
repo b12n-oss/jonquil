@@ -1,5 +1,6 @@
 (ns jonquil.gtk.window.layout-test
   (:require [clojure.test :refer [deftest is]]
+            [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.layout :as win-layout]
@@ -61,7 +62,7 @@
            :part-panels* (atom {:a {:root ::a} :b {:root ::b}}) :vbox ::vbox :tree-paned ::tree-paned
            :tree-pane {:root ::tree} :win ::win :status-label ::status :hint-label ::hint :pending-label ::pending
            :unread-label ::unread :dialect-label ::dialect :parinfer-label ::parinfer :line-col-label ::line-col
-           :update-parinfer-label! ::update}]
+           :update-parinfer-label! ::update :settings-path* (atom "/no/such/dir/settings.edn")}]
     (with-redefs [g/gtk-box-append (fn [b c] (l [:append b c]))
                   g/gtk-box-new (fn [_ _] ::titles)
                   g/gtk-header-bar-pack-start (fn [h c] (l [:start-of h c]))
@@ -120,3 +121,41 @@
                           :line-col-label ::line-col :update-parinfer-label! ::update}]
             [:child ::win ::vbox] [:size ::win 900 700]]
            (drop-while #(not= [:keep ::reset] %) (remove #(= :native (first %)) @log))))))
+
+(deftest place-packs-the-header-from-the-settings-test
+  (let [log (atom []) l (fn [x] (swap! log conj x))
+        f (doto (java.io.File/createTempFile "settings" ".edn") (.deleteOnExit))
+        _ (spit f (pr-str {:header {:start [:file/open] :end [:run/run :terminal/show :no/such]}}))
+        appended (atom [])
+        m {:toolbar ::toolbar :files-btn ::files :run-btn ::run :stop-btn ::stop :open-btn ::open :save-btn ::save
+           :new-tab-btn ::new :title-label ::title :subtitle-label ::subtitle :menu-btn ::menu :reset-chk ::reset
+           :settings-path* (atom (.getPath f)) :cv ::cv :status-label ::status :active-tab (fn [] nil)}
+        plan (with-redefs [g/gtk-header-bar-pack-start (fn [h c] (l [:start-of h c]))
+                           g/gtk-header-bar-pack-end (fn [h c] (l [:end-of h c]))
+                           g/gtk-button-new-with-label (fn [t] (l [:button t]) ::terminal)
+                           g/g-signal-connect-data (fn [o s & _] (l [:connect o s]) 1)
+                           g/gtk-box-new (fn [_ _] ::titles)
+                           g/gtk-box-append (fn [_ _] nil)
+                           g/gtk-header-bar-set-title-widget (fn [_ _] nil)
+                           g/gtk-header-bar-set-use-native-controls (fn [_ _] nil)
+                           g/gtk-menu-button-set-label (fn [_ _] nil)
+                           g/gtk-widget-set-tooltip-text (fn [_ _] nil)
+                           g/gtk-widget-add-css-class (fn [_ _] nil)
+                           g/gtk-label-set-ellipsize (fn [_ _] nil)
+                           g/gtk-widget-set-valign (fn [_ _] nil)
+                           g/gtk-widget-set-visible (fn [_ _] nil)
+                           g/gtk-check-button-set-active (fn [_ _] nil)
+                           g/g-object-ref-sink (fn [o] (l [:keep o]) o)
+                           cview/append! (fn [_ _ text] (swap! appended conj text))]
+               (#'win-layout/pack-toolbar! m))]
+    (is (= [[:start-of ::toolbar ::open]
+            [:end-of ::toolbar ::menu]
+            [:button "Terminal"] [:connect ::terminal "clicked"] [:end-of ::toolbar ::terminal]
+            [:end-of ::toolbar ::run]]
+           (filter #(#{:start-of :end-of :button :connect} (first %)) @log))
+        "Open alone at the start; Run then Terminal at the end, packed from the edge inwards")
+    (is (= #{::files ::new ::stop ::save ::reset} (set (keep (fn [[k o]] (when (= :keep k) o)) @log)))
+        "the usual buttons left out are kept alive, as Reset on Run is")
+    (is (= [{:command :no/such :reason :unknown}] (:skipped plan)))
+    (is (= 1 (count @appended)))))
+

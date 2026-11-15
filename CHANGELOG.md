@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- The header bar's buttons can be chosen in `settings.edn`: `:header {:start [...] :end [...]}` lists command ids, left to right at each end. A side left out keeps its usual buttons. (#33)
+
 ## [0.4.3] - 2026-11-16
 
 ### Added
