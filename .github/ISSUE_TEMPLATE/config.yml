@@ -6,6 +6,9 @@ contact_links:
   - name: Ask a question
     url: https://github.com/b12n-oss/jonquil/discussions/categories/q-a
     about: How to do something in Jonquil, or why it behaves the way it does.
+  - name: Chat on Slack
+    url: https://clojurians.slack.com
+    about: The jonquil channel on the Clojurians Slack, for quick questions and talk.
   - name: The guide
     url: https://jonquil.b12n.app
     about: How to use Jonquil, its keys, dialects and known limits.

@@ -13,6 +13,7 @@ do, or what got in your way, shapes what gets built next.
 | A rough idea, or a direction you'd like Jonquil to take | [Discussions, Ideas](https://github.com/b12n-oss/jonquil/discussions/categories/ideas) |
 | A question about using Jonquil | [Discussions, Q&A](https://github.com/b12n-oss/jonquil/discussions/categories/q-a) |
 | Something you made with Jonquil | [Discussions, Show and tell](https://github.com/b12n-oss/jonquil/discussions/categories/show-and-tell) |
+| A quick question, or you'd like to chat | `#jonquil` on the [Clojurians Slack](https://clojurians.slack.com) |
 | A bug, with the steps that show it | [A bug report](https://github.com/b12n-oss/jonquil/issues/new/choose) |
 | A feature you can describe well enough to build | [A feature request](https://github.com/b12n-oss/jonquil/issues/new/choose) |
 | A fix or a feature, written | A pull request, as below |

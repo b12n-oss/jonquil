@@ -172,7 +172,8 @@ quality and correctness. [AI_POLICY.md](AI_POLICY.md) is the full stance.
 
 Ideas and questions are welcome in
 [Discussions](https://github.com/b12n-oss/jonquil/discussions), and bugs in
-[issues](https://github.com/b12n-oss/jonquil/issues/new/choose).
+[issues](https://github.com/b12n-oss/jonquil/issues/new/choose). There is
+also a `#jonquil` channel on the [Clojurians Slack](https://clojurians.slack.com).
 
 ## The name
 

@@ -19,6 +19,7 @@ code you submit and answer for it.
 Bug reports and requests you can already describe go in
 [issues](https://github.com/b12n-oss/jonquil/issues/new/choose). Rough ideas
 and questions go in
-[Discussions](https://github.com/b12n-oss/jonquil/discussions).
+[Discussions](https://github.com/b12n-oss/jonquil/discussions), or in
+`#jonquil` on the [Clojurians Slack](https://clojurians.slack.com).
 Please report security problems privately, as [SECURITY.md](../SECURITY.md)
 describes.
