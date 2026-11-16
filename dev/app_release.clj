@@ -289,9 +289,9 @@
     (io/make-parents (str licenses "/SOURCES.txt"))
     (spit (str licenses "/SOURCES.txt") (sources-txt formulae))
     (spit (str licenses "/NOTICE") bundle-notice)
-    ;; Jonquil's own NOTICE and the licences it names (code lifted into it,
-    ;; and the Clojure libraries compiled into its binary)
-    (doseq [f (cons "NOTICE" (map #(str "licenses/" %) (sort (.list (io/file "licenses")))))
+    ;; Jonquil's own LICENSE and NOTICE, and the licences NOTICE names (code
+    ;; lifted into it, and the libraries compiled into its binary)
+    (doseq [f (concat ["LICENSE" "NOTICE"] (map #(str "licenses/" %) (sort (.list (io/file "licenses")))))
             :let [to (str licenses "/jonquil/" (str/replace f #"^licenses/" ""))]]
       (io/make-parents to)
       (sh! "cp" f to))))
