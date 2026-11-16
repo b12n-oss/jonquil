@@ -73,3 +73,23 @@
         in {:right ::right :right* r :x 1}]
     (is (= in (win-right-slot/publish in)))
     (is (= ::right @r))))
+
+(deftest add-to-place-records-the-page-and-wires-its-tab-test
+  (let [log (atom []) menu (atom [])
+        right {:places {:left ::left :right ::right :bottom ::bottom}
+               :place-of* (atom {:repl :right}) :pages-of* (atom {})
+               :tab-menu* (atom (fn [id tab] (swap! menu conj [id tab])))}
+        press (atom nil)]
+    (with-redefs [g/gtk-label-new (fn [s] [:label s])
+                  g/gtk-gesture-click-new (fn [] ::click)
+                  g/gtk-gesture-single-set-button (fn [_ _] nil)
+                  g/g-signal-connect-data (fn [_ _ cb _ _ _] (reset! press cb) 1)
+                  g/gtk-widget-add-controller (fn [w c] (swap! log conj [:controller w c]))
+                  win-places/add! (fn [nb w tab] (swap! log conj [:add nb w tab]))
+                  win-places/remove! (fn [nb w] (swap! log conj [:remove nb w]))]
+      (win-right-slot/add-to-place! right :repl ::scroll "Interactions")
+      (is (= [[:controller [:label "Interactions"] ::click] [:add ::right ::scroll [:label "Interactions"]]] @log))
+      (is (= {:repl [::scroll]} @(:pages-of* right)))
+      (win-right-slot/remove-from-place! right :repl ::scroll)
+      (is (= [:remove ::right ::scroll] (last @log)))
+      (is (= {:repl []} @(:pages-of* right))))))

@@ -212,6 +212,8 @@
    (run-key-fns w)
    (file-key-fns w)
    {:panel-focus-fn panel-focus-fn
+    ;; the palette's Move commands (jonquil.gtk.window.place-move)
+    :move-part-fn (fn [id place] (some-> (:move!* (:right w)) deref (apply [id place])))
     :hints-toggle-fn hints-toggle-fn
     :toggle-focus-fn toggle-focus-fn
     :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn

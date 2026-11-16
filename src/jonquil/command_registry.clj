@@ -105,6 +105,24 @@
    ;; palette leaves it out
    })
 
+(def ^:private move-parts
+  ;; the palette's Move commands: the part, its id's word and its name
+  [[:file-tree "files" "Files"] [:repl "interactions" "Interactions"]
+   [:terminal "terminal" "the terminal"] [:panel "panel" "the panel on screen"]])
+
+(def ^:private move-places
+  [[:left "left" "to the left of the editor"] [:right "right" "to the right of the editor"]
+   [:bottom "bottom" "below the editor"]])
+
+(def ^:private move-commands
+  "Move each part to each place (issue #33's Move to), through ctx's
+  :move-part-fn; :panel is the panel on screen."
+  (into {} (for [[part word part-name] move-parts
+                 [place place-word where] move-places]
+             [(keyword "place" (str "move-" word "-" place-word))
+              {:doc (str "Move " part-name " " where ".") :scope :window
+               :run (call :move-part-fn part place)}])))
+
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])
   over the per-key ctx on-window-key builds, which carries the GTK reads as
@@ -260,14 +278,14 @@
                       :palette? false :run (act :complete!)}})
 
 ;; an id may have one owner across every scope, or `commands` would lose one
-(parts/check-clashes {:window core-window-commands
+(parts/check-clashes {:window (merge core-window-commands move-commands)
                       :editor core-editor-commands
                       :console core-console-commands}
                      parts/specs)
 
 (def window-commands
   "The window's commands: the core table plus the parts' window commands."
-  (parts/merge-commands core-window-commands parts/specs :window call))
+  (parts/merge-commands (merge core-window-commands move-commands) parts/specs :window call))
 
 (def editor-commands
   "The editor's commands: the core table plus the parts' editor commands."

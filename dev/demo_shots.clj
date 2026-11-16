@@ -103,6 +103,25 @@
       (on-gtk (check! :window (and ok (zero? exit))
                       {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
+(defn- scene-layout-move
+  "Interactions moved to the right of the editor (Move to, issue #33),
+  then hello.clj Run, so its output shows beside the code."
+  [ui]
+  (go-row :layout-move check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         ((:move-part!* ui) :repl :right)
+                         (editor/set-text! (:editor ui) (slurp (demo-path "hello.clj")))
+                         ((:run!* ui))
+                         m))
+          ok (await-until 5000 20 #(and (idle? ui)
+                                        (str/includes? (since ui mark) "Hello, Jonquil!")
+                                        (str/includes? (since ui mark) "=> 3")))
+          right? (on-gtk (= :right (:repl ((:place-of* ui)))))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :layout-move "png") (own-pid))]
+      (on-gtk (check! :layout-move (and ok right? (zero? exit))
+                      {:console (since ui mark) :right? right? :screenshot-exit exit :screenshot-err err})))))
+
 (defn- scene-repl
   "hello.clj Run, then a REPL entry evaluated afterward, in the same
   window."
@@ -1140,6 +1159,7 @@
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
 (def ^:private scenes
   [[:window scene-window]
+   [:layout-move scene-layout-move]
    [:repl scene-repl]
    [:stdin scene-stdin]
    [:stop scene-stop]

@@ -6,6 +6,7 @@
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.window.alerts :as win-alerts]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.places :as win-places]
             [jonquil.gtk.window.quit :as win-quit]
             [jonquil.gtk.window.reopen :as win-reopen]
             [jonquil.gtk.window.run :as win-run]
@@ -325,6 +326,14 @@
    ;; (settings.edn's :layout)
     :places (:places right)
     :place-of* (fn [] @(:place-of* right))
+   ;; Move to: (f id place), as the tab menu and the palette run it
+    :move-part!* (fn [id place] (some-> @(:move!* right) (apply [id place])))
+   ;; the tab menu for the part id over its first tab: answers
+   ;; {:popover :buttons {place button}}
+    :tab-menu!* (fn [id]
+                  (let [w (first (get @(:pages-of* right) id))
+                        nb (win-places/place-of w)]
+                    ((deref (:tab-menu* right)) id (g/gtk-notebook-get-tab-label nb w))))
    ;; the inspector's own Close
     :close-inspector!* on-inspector-close
    ;; The plugin history

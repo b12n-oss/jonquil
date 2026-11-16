@@ -56,3 +56,24 @@
                                              " already has a place"
                                              " isn't a part")))))
          ", left out\n")))
+
+(defn moved
+  "settings.edn's :layout setting (or nil) after the part id moves to
+  place: id leaves every place's list and goes at the end of place's. A
+  list that isn't a vector, and a setting that isn't a map, start again
+  empty; every other id and key the setting holds stays."
+  [setting id place]
+  (let [m (if (map? setting) setting {})]
+    (reduce (fn [acc p]
+              (let [v (get m p)
+                    kept (if (vector? v) (filterv #(not= id %) v) [])]
+                (assoc acc p (if (= p place) (conj kept id) kept))))
+            m
+            places)))
+
+(def ^:private place-names {:left "Left" :right "Right" :bottom "Bottom"})
+
+(defn move-label
+  "The tab menu's item for moving a part to place."
+  [place]
+  (str "Move to " (place-names place)))

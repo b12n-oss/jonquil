@@ -5,7 +5,7 @@
             [jonquil.gtk.window.ui :as win-ui]))
 
 (def ^:private ui-keys
-  "The ui map's 120 core keys (start!'s docstring names them with the parts' :ui keys)."
+  "The ui map's 122 core keys (start!'s docstring names them with the parts' :ui keys)."
   #{:activate-menu-action!* :activate-quit-action!* :active-tab* :alert-dialog-count :alert-pending? :alert-release!
     :app :clear-console!* :clear-last-output!* :close-choice! :close-inspector!* :close-popovers!* :close-tab!
     :close-tab-choice! :closing? :code-css* :complete!* :complete-alert-for-test! :completion :console :cycle-theme!*
@@ -17,7 +17,7 @@
     :plugin-list-pane :poll-appearance!* :poll-arm-count* :poll-armed?* :quick-doc!* :recent-panels*
     :register-alert-choice-for-test! :register-popover!* :rename!* :rename-popover :rename-to!*
     :repl-activate-menu-action!* :repl-complete!* :repl-completion :request-close!* :reset-check :restore-session!*
-    :places :place-of* :review-pane :right-slot :run!* :run-form!* :run-selection!* :save-session!* :save-to! :select-tab! :selection*
+    :places :place-of* :move-part!* :tab-menu!* :review-pane :right-slot :run!* :run-form!* :run-selection!* :save-session!* :save-to! :select-tab! :selection*
     :session :session-live!* :set-theme!* :settings-path!* :settings-path* :simulate-folder-result!
     :simulate-open-result! :simulate-save-result! :source-back!* :source-close!* :source-jump!* :source-open!*
     :source-pane :status-label :stop!* :suppress-close? :system-dark-fn!* :tabs* :theme-choice* :theme-name*

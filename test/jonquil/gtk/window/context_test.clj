@@ -167,7 +167,7 @@
     (is (= ::key-fn (:window-key-fn w)))
     (is (identical? a @got))
     (is (= #{:active-tab :clear-console-fn :clear-last-fn :close-fn :close-inspector-fn :close-popovers-fn
-             :digit-tab-fn :evaluating? :hints-toggle-fn :inspect-form-fn :inspect-last-fn :new-tab-fn :open-find-fn
+             :digit-tab-fn :evaluating? :hints-toggle-fn :inspect-form-fn :inspect-last-fn :move-part-fn :new-tab-fn :open-find-fn
              :open-fn :open-replace-fn :pane :panel-focus-fn :parinfer-fn :run-changed-fn :run-fn :run-selection-fn
              :save-as-fn :save-fn :source-keys :status-label :step-tab-fn :stop-fn :switch-tab-fn :tab-back-fn
              :theme-cycle-fn :theme-use-fn :toggle-focus-fn :win :zoom-fn :part-fn}

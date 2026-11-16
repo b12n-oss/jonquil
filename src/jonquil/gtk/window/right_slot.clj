@@ -1,6 +1,7 @@
 (ns jonquil.gtk.window.right-slot
   "The window's right-hand panels: the inspector, the source panel, the plugin panels and the parts' panels, each in one of the window's places (jonquil.gtk.window.places, the right-hand one unless settings.edn's :layout says otherwise), one showing per place at a time, and the fns that show, hide and name the one on screen. build makes activate!'s place and panel bindings, build-panels makes the four panels and publish resets *right. Internal to the window, as jonquil.gtk.window.status is."
   (:require [jolt.ffi :as ffi]
+            [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
@@ -50,16 +51,34 @@
   [right id]
   (get (:places right) (place-name right id)))
 
-(declare size-right-place!)
+(defn- on-right-press!
+  "Runs f on a right-button press on widget."
+  [widget f]
+  (let [click (g/gtk-gesture-click-new)]
+    (g/gtk-gesture-single-set-button click 3)
+    (g/g-signal-connect-data click "pressed"
+                             (callable (fn [_gesture _n _x _y _data] (f) nil)
+                                       [:pointer :int :double :double :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-widget-add-controller widget click)))
 
 (defn add-to-place!
   "Adds w, with the tab label (a string or a widget), to the place the
-  part id is in, which sizes itself as size-right-place! says when it's the
-  right-hand one."
+  part id is in, and records it as one of id's pages (:pages-of*). A
+  right-click on the tab runs right's tab menu (:tab-menu*, once set) with
+  id and the tab."
   [right id w label]
-  (let [nb (part-place right id)]
-    (win-places/add! nb w label
-                     (when (= nb (get-in right [:places :right])) (fn [] (size-right-place! right))))))
+  (let [nb (part-place right id)
+        tab (if (string? label) (g/gtk-label-new label) label)]
+    (on-right-press! tab (fn [] (when-let [f (some-> (:tab-menu* right) deref)] (f id tab))))
+    (when-let [p (:pages-of* right)] (swap! p update id (fnil conj []) w))
+    (win-places/add! nb w tab)))
+
+(defn remove-from-place!
+  "Takes w, one of the part id's pages, out of its place."
+  [right id w]
+  (when-let [p (:pages-of* right)] (swap! p update id #(filterv (fn [x] (not= x w)) %)))
+  (win-places/remove! (part-place right id) w))
 
 (defn size-right-place!
   "The right-hand place's on-shown: sizes h-paned so the place claims about
@@ -183,6 +202,9 @@
         ;; right-roots are built first, like *tab-ctx.
         part-panels* (atom {})
         right {:win win :h-paned h-paned :slot slot :places places :place-of* (atom {})
+               ;; {id [page ...]}: what a move takes along; and the tab
+               ;; menu's fn, set once the window can move parts
+               :pages-of* (atom {}) :tab-menu* (atom nil) :move!* (atom nil)
                :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp)
                :history-root (:root hp) :source-pane sp
@@ -192,6 +214,7 @@
                :part-panels* part-panels*}
         panel-focus-fn (make-panel-focus-fn {:right right :pane pane :sp sp :lp lp :part-panels* part-panels*
                                              :settings-path* settings-path* :status-label status-label})]
+    (win-places/on-shown! slot (fn [] (size-right-place! right)))
     (assoc w :places places :slot slot :part-panels* part-panels* :right right :panel-focus-fn panel-focus-fn)))
 
 (defn build-panels

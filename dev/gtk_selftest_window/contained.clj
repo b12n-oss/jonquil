@@ -8,7 +8,8 @@
   tracking.
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [jolt.ffi :as ffi]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -72,6 +73,62 @@
                              (and (= {:file-tree :left :repl :bottom :terminal :bottom :inspector :right :trace :right}
                                      (:place-of got))
                                   (:tree-left? got) (:repl-bottom? got) (:inspector-right? got))
+                             got)))))
+
+(defn row-move-to
+  "Move to takes Interactions to the right-hand place at once and writes
+  :layout, and moving it back puts both back. The settings file is
+  restored after, so later rows see the window they expect."
+  [ui]
+  (go-row :move-to support/check
+    (on-gtk (let [path ((:settings-path* ui))
+                  f (java.io.File. ^String path)
+                  before (when (.exists f) (slurp f))
+                  nb (g/gtk-notebook-get-type)
+                  in (fn [w] (g/gtk-widget-get-ancestor w nb))
+                  {:keys [right bottom]} (:places ui)
+                  scroll (:scroll (:console ui))
+                  look (fn [] {:right? (= right (in scroll)) :bottom? (= bottom (in scroll))
+                               :place (:repl ((:place-of* ui)))
+                               :layout (:layout (edn/read-string (slurp f)))})
+                  _ ((:move-part!* ui) :repl :right)
+                  moved (look)
+                  _ ((:move-part!* ui) :repl :bottom)
+                  back (look)
+                  got {:moved moved :back back}]
+              (if before (spit f before) (.delete f))
+              (support/check :move-to
+                             (and (:right? moved) (= :right (:place moved))
+                                  (= [:repl] (get-in moved [:layout :right]))
+                                  (:bottom? back) (= :bottom (:place back))
+                                  (= [:repl] (get-in back [:layout :bottom]))
+                                  (= [] (get-in back [:layout :right])))
+                             got)))))
+
+(defn row-tab-menu
+  "Interactions' tab menu pops up with Move to Bottom greyed (it is at
+  the bottom), and its Move to Right takes Interactions to the right. The
+  REPL goes back and the settings file is restored after."
+  [ui]
+  (go-row :tab-menu support/check
+    (on-gtk (let [path ((:settings-path* ui))
+                  f (java.io.File. ^String path)
+                  before (when (.exists f) (slurp f))
+                  nb (g/gtk-notebook-get-type)
+                  scroll (:scroll (:console ui))
+                  {:keys [popover buttons]} ((:tab-menu!* ui) :repl)
+                  shown? (pos? (g/gtk-widget-get-visible popover))
+                  sensitive (into {} (for [[p b] buttons] [p (pos? (g/gtk-widget-get-sensitive b))]))
+                  _ (g/g-signal-emit-by-name (:right buttons) "clicked")
+                  moved? (= (:right (:places ui)) (g/gtk-widget-get-ancestor scroll nb))
+                  closed? (zero? (g/gtk-widget-get-visible popover))
+                  _ ((:move-part!* ui) :repl :bottom)
+                  back? (= (:bottom (:places ui)) (g/gtk-widget-get-ancestor scroll nb))
+                  got {:shown? shown? :sensitive sensitive :moved? moved? :closed? closed? :back? back?}]
+              (if before (spit f before) (.delete f))
+              (support/check :tab-menu
+                             (and shown? (= {:left true :right true :bottom false} sensitive)
+                                  moved? closed? back?)
                              got)))))
 
 (defn row-find-change-throw-contained [ui]

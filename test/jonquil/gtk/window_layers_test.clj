@@ -11,6 +11,7 @@
   '[[jonquil.gtk.window.status jonquil.gtk.window.alerts jonquil.gtk.window.plugin-agent jonquil.gtk.window.session
      jonquil.gtk.window.places]
     [jonquil.gtk.window.files jonquil.gtk.window.right-slot jonquil.gtk.window.theme jonquil.gtk.window.keys jonquil.gtk.window.status-bar]
+    [jonquil.gtk.window.place-move]
     [jonquil.gtk.window.runtime jonquil.gtk.window.quit jonquil.gtk.window.layout]
     [jonquil.gtk.window.run]
     [jonquil.gtk.window.inspector jonquil.gtk.window.help]

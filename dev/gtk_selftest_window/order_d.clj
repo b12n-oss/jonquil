@@ -102,6 +102,8 @@
    restarts-rows/row-restart-bar
    contained/row-header-default-buttons
    contained/row-places-usual
+   contained/row-move-to
+   contained/row-tab-menu
    contained/row-find-change-throw-contained
    contained/row-find-replace-throw-contained
    contained/row-find-replace-all-throw-contained

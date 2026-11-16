@@ -375,14 +375,14 @@ when that variable is unset, blank, or not an absolute path:
   menus. An id that isn't a command, or one named twice, is left out with a
   note in the console. Plugin commands aren't offered yet. The ☰ menu
   button stays on Linux, since it is the only way to the menus there.
-- `:layout` (hand-written): where the window's parts go. The editor stays
+- `:layout`: where the window's parts go. The editor stays
   in the middle, and three places sit around it: `:left`, `:right` and
   `:bottom`. Each lists part ids in order. The parts are `:file-tree`,
   `:repl` (Interactions), `:terminal` and the right-hand panels, such as
   `:inspector`, `:debugger`, `:trace`, `:messages`, `:locations` and
   `:source`. Whatever you don't list stays where it usually is: the tree
   on the left, the REPL and the terminals at the bottom, the panels on the
-  right. The change shows in the next window you open.
+  right. A hand edit shows in the next window you open.
 
   ```clojure
   {:layout {:right  [:repl]
@@ -395,6 +395,17 @@ when that variable is unset, blank, or not an absolute path:
   still show one at a time, as they do on the right. The tree's saved
   width only applies while the tree is on the left. An id that isn't a
   part, or one listed twice, is left out with a note in the console.
+
+  You can also move a part while the window is open. Right-click its tab
+  and pick Move to Left, Move to Right or Move to Bottom. A part that's
+  alone in its place has no tab, which is why the palette has the moves as
+  well: type "move" and you'll find entries such as "Move the terminal to
+  the right of the editor", for Files, Interactions, the terminal and
+  whichever panel is on screen. Each move rewrites `:layout`, so the next
+  window opens the same way. For now Jonquil rewrites the whole settings
+  file when it saves, and any comments you put in it are lost on a move.
+
+  ![Jonquil with Interactions moved to the right of the editor, hello.clj on the left and its output, Hello, Jonquil! and => 3, on the right](../images/layout-move.png)
 
 The tabs live next door in `sessions.edn`, one entry per project folder,
 newest first, at most 20 (see
