@@ -123,3 +123,7 @@
 (deftest lzo-test
   (is (true? (ar/lzo? ["libgtk-4.1.dylib" "liblzo2.2.dylib"])))
   (is (false? (ar/lzo? ["libgtk-4.1.dylib"]))))
+
+(deftest bundle-notice-points-at-jonquils-own-test
+  (is (str/includes? ar/bundle-notice "SOURCES.txt"))
+  (is (str/includes? ar/bundle-notice "jonquil/NOTICE")))

@@ -251,6 +251,13 @@
        (map #(.getName %))
        sort vec))
 
+(def bundle-notice
+  "Resources/licenses/NOTICE in a release Jonquil.app."
+  (str "Jonquil is under the Eclipse Public License 2.0. The libraries in\n"
+       "Contents/Frameworks are separate works under their own licences, listed\n"
+       "with their sources in SOURCES.txt. jonquil/NOTICE credits the code and the\n"
+       "Clojure libraries inside Jonquil itself, with their licences beside it.\n"))
+
 (defn- write-licences!
   "licenses/<formula>/ with each bundled formula's licence files, then
   SOURCES.txt and NOTICE."
@@ -281,10 +288,13 @@
       (warn! (str "no licence file in the keg of " (str/join ", " bare) "; add its text before a public build")))
     (io/make-parents (str licenses "/SOURCES.txt"))
     (spit (str licenses "/SOURCES.txt") (sources-txt formulae))
-    (spit (str licenses "/NOTICE")
-          (str "Jonquil is under the Eclipse Public License 2.0. The libraries in\n"
-               "Contents/Frameworks are separate works under their own licences, listed\n"
-               "with their sources in SOURCES.txt.\n"))))
+    (spit (str licenses "/NOTICE") bundle-notice)
+    ;; Jonquil's own NOTICE and the licences it names (code lifted into it,
+    ;; and the Clojure libraries compiled into its binary)
+    (doseq [f (cons "NOTICE" (map #(str "licenses/" %) (sort (.list (io/file "licenses")))))
+            :let [to (str licenses "/jonquil/" (str/replace f #"^licenses/" ""))]]
+      (io/make-parents to)
+      (sh! "cp" f to))))
 
 (def ^:private schemas (str contents "/Resources/share/glib-2.0/schemas"))
 

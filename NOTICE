@@ -56,3 +56,14 @@ implements Parinfer v3.13.1 after parinfer.js
 (test-resources/parinfer/*.json) are parinfer.js's own. parinfer.js is
 Copyright (c) 2015 Shaun Williams and contributors and distributed under the
 MIT License, whose full text is in licenses/parinfer.js-LICENSE.md.
+
+Jonquil edits settings.edn with two libraries that are compiled into its
+binary:
+
+- rewrite-edn by Michiel Borkent (https://github.com/borkdude/rewrite-edn),
+  Copyright (c) 2021 - 2022 Michiel Borkent, distributed under the Eclipse
+  Public License 1.0, whose full text is in licenses/rewrite-edn-LICENSE.md.
+  Its source is at that address.
+- rewrite-clj 1.3.59 (https://github.com/clj-commons/rewrite-clj),
+  Copyright (c) 2013-2018 Yannick Scherer, distributed under the MIT
+  License, whose full text is in licenses/rewrite-clj-LICENSE.md.
