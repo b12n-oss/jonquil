@@ -9,6 +9,7 @@
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
   (:require [clojure.string :as str]
+            [jolt.ffi :as ffi]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.evaluator :as ev]
@@ -16,6 +17,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.layout :as win-layout]
+            [jonquil.header :as header]
             [jonquil.gtk.window.run :as win-run]))
 
 (defn- boom [msg] (fn [& _] (throw (ex-info msg {}))))
@@ -32,6 +35,25 @@
     (let [want (str "; " where ": " msg)
           ok (await-until 1000 20 #(str/includes? (status ui) want))]
       (on-gtk (support/check row-id ok {:status (status ui) :want want})))))
+
+(defn row-header-default-buttons
+  "With no :header in the settings file the header bar is the usual one:
+  the plan is jonquil.header/default with nothing skipped, and Files, Run,
+  Stop, Open and Save each sit in the header bar."
+  [ui]
+  (go-row :header-default-buttons support/check
+    (on-gtk (let [plan (win-layout/header-plan ((:settings-path* ui)))
+                  widgets (assoc (:toolbar ui) :files (:files-btn ui))
+                  parented (into {} (for [[k w] widgets]
+                                      [k (not (ffi/null? (g/gtk-widget-get-parent w)))]))
+                  got {:start (mapv :command (:start plan)) :end (mapv :command (:end plan))
+                       :skipped (:skipped plan) :parented parented}]
+              (support/check :header-default-buttons
+                             (and (= (:start header/default) (:start got))
+                                  (= (:end header/default) (:end got))
+                                  (empty? (:skipped got))
+                                  (every? true? (vals parented)))
+                             got)))))
 
 (defn row-find-change-throw-contained [ui]
   (status-row ui {:row-id :find-change-throw-contained :where "find" :msg "forced find-change failure"

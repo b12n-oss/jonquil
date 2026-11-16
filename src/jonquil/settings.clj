@@ -156,6 +156,21 @@
       (and (set? d) (every? keyword? d)) {:plugins {:disabled d}}
       :else {:warning (str path "'s :plugins :disabled isn't a set of plugin ids, ignoring it")})))
 
+(defn- ids? [v] (and (vector? v) (every? keyword? v)))
+
+(defn- header-part
+  "{:header {:start [id ...] :end [id ...]}} with whichever of the two m's
+  :header holds as a vector of command ids, {} when there's no :header, and
+  {:warning ..} when it isn't such a map. Which ids are commands the window
+  checks (jonquil.header/plan)."
+  [path m]
+  (let [v (when (map? m) (:header m))]
+    (cond
+      (nil? v) {}
+      (and (map? v) (every? ids? (vals (select-keys v [:start :end]))))
+      {:header (select-keys v [:start :end])}
+      :else {:warning (str path "'s :header isn't {:start [command ...] :end [command ...]}, using the usual buttons")})))
+
 (defn- layouts-part
   "{:layouts {name layout}} keeping the entries with a string name and a
   map layout (LM8's named layouts), {} when there are none, and a
@@ -190,7 +205,8 @@
   [path m]
   (map #(% path m)
        [theme-part dialect-part file-tree-part reopen-tabs-part remember-session-part
-        mcp-listen-part plugins-part parinfer-part key-set-part terminal-part layouts-part doc-bookmarks-part]))
+        mcp-listen-part plugins-part parinfer-part key-set-part terminal-part layouts-part doc-bookmarks-part
+        header-part]))
 
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
@@ -198,7 +214,8 @@
   :mcp-listen? when they hold a boolean, :plugins when it holds a set of disabled ids,
   :parinfer when it holds one of parinfer-modes, :key-set when it holds a
   key set's id, :terminal when it names a terminal, :layouts when it holds
-  named layouts, :doc-bookmarks when it holds doc pages, and
+  named layouts, :doc-bookmarks when it holds doc pages, :header when it
+  names the header bar's buttons, and
   :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."
   [path]

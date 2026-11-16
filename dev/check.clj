@@ -106,6 +106,7 @@
     jonquil.terminal-keys
     jonquil.terminal-open
     jonquil.terminals
+    jonquil.header
     jonquil.key-seq
     jonquil.slow-events
     jonquil.user-keys

@@ -6,7 +6,12 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.status :as win-status]
-            [jonquil.gtk.window.status-bar :as win-status-bar]))
+            [jonquil.gtk.window.status-bar :as win-status-bar]
+            [jonquil.command-registry :as cmd-registry]
+            [jonquil.gtk.console-view :as cview]
+            [jonquil.header :as header]
+            [jonquil.menus :as menus]
+            [jonquil.settings :as settings]))
 
 (defn- mac? [] (= "Mac OS X" (System/getProperty "os.name")))
 
@@ -67,22 +72,10 @@
     (g/gtk-widget-set-valign titles g/ALIGN-CENTER)
     (g/gtk-header-bar-set-title-widget toolbar titles)))
 
-(defn- pack-toolbar!
-  "place!'s first step, the header bar: Files, Open and the new-tab button
-  at the start, the title in the middle, and Run, Stop and Save at the end,
-  with the menu button last where there is one (pack_end fills from the
-  edge inwards, so the last one packed sits nearest the title). Reset on
-  Run starts ticked and is kept alive without a parent. On macOS the
-  window buttons are the system's own."
-  [{:keys [toolbar files-btn run-btn stop-btn open-btn save-btn new-tab-btn menu-btn reset-chk] :as m}]
-  (doseq [b [files-btn open-btn new-tab-btn]] (g/gtk-header-bar-pack-start toolbar b))
-  (pack-title! m)
-  (when menu-btn
-    (g/gtk-menu-button-set-label menu-btn "☰")
-    (g/gtk-widget-set-tooltip-text menu-btn "Menu")
-    (g/gtk-header-bar-pack-end toolbar menu-btn))
-  (doseq [b [save-btn stop-btn run-btn]] (g/gtk-header-bar-pack-end toolbar b))
-  (doseq [[k text] tooltips] (g/gtk-widget-set-tooltip-text (get m k) text))
+(defn- finish-toolbar!
+  "The rest of the header bar: the system's window buttons on macOS, and
+  Reset on Run, ticked and kept alive without a parent."
+  [{:keys [toolbar reset-chk]}]
   ;; GTK 4.18 added this, and only macOS calls it. Declaring it costs nothing
   ;; on an older GTK: Jolt looks a C function up when it is first called
   ;; (measured: a binding to a name the library lacks loads, and throws only
@@ -90,6 +83,57 @@
   (when (mac?) (g/gtk-header-bar-set-use-native-controls toolbar 1))
   (g/g-object-ref-sink reset-chk)
   (g/gtk-check-button-set-active reset-chk 1))
+
+(defn header-plan
+  "The header bar's plan for the settings file at path (jonquil.header/plan
+  over the registry's commands and the menus' items)."
+  [path]
+  (header/plan (:header (settings/load-settings path))
+               cmd-registry/commands
+               (mapcat menus/items menus/shipped)))
+
+(defn- plan-widget
+  "The widget for one button of the plan: the window's own for a built-in
+  one, else a new button that runs its command the way the palette does,
+  on the active tab."
+  [{:keys [active-tab status-label] :as m} {:keys [widget command label tooltip]}]
+  (if widget
+    (get m widget)
+    (let [b (g/gtk-button-new-with-label label)]
+      (when tooltip (g/gtk-widget-set-tooltip-text b tooltip))
+      (g/g-signal-connect-data b "clicked"
+                               (callable (win-status/contain-click status-label (name command)
+                                                                   (fn [_] ((deref (:on-run (:palette (active-tab)))) command)))
+                                         [:pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)
+      b)))
+
+(defn- pack-toolbar!
+  "place!'s first step, the header bar, from settings.edn's :header
+  (header-plan): its :start buttons at the start, the title in the middle,
+  and its :end buttons at the end, left to right, with the menu button
+  last where there is one (pack_end fills from the edge inwards, so the
+  :end buttons are packed in reverse). A built-in button the plan leaves
+  out is kept alive without a parent, since other parts still read it
+  (the tree's toggle holds whether the tree shows). Skipped ids are said in
+  the console. Reset on Run starts ticked and is kept alive without a
+  parent. On macOS the window buttons are the system's own. Answers the
+  plan."
+  [{:keys [toolbar menu-btn settings-path* cv] :as m}]
+  (let [{:keys [start end skipped] :as plan} (header-plan @settings-path*)
+        packed (set (keep :widget (concat start end)))]
+    (doseq [b start] (g/gtk-header-bar-pack-start toolbar (plan-widget m b)))
+    (pack-title! m)
+    (when menu-btn
+      (g/gtk-menu-button-set-label menu-btn "☰")
+      (g/gtk-widget-set-tooltip-text menu-btn "Menu")
+      (g/gtk-header-bar-pack-end toolbar menu-btn))
+    (doseq [b (reverse end)] (g/gtk-header-bar-pack-end toolbar (plan-widget m b)))
+    (doseq [[k text] tooltips] (g/gtk-widget-set-tooltip-text (get m k) text))
+    (doseq [k (vals header/built-in) :when (not (packed k))] (g/g-object-ref-sink (get m k)))
+    (when-let [text (header/skipped-text skipped)] (cview/append! cv :system text))
+    (finish-toolbar! m)
+    plan))
 
 (defn- pack-editor!
   "place!'s second step: the tabs' notebook over the console in the vertical paned."

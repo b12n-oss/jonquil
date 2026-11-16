@@ -316,6 +316,19 @@
       (is (= {"Good" {:tree? false}} (:layouts s)) "only string names with valid layouts are kept")
       (is (re-find #":layouts" (:warning s))))))
 
+(deftest header-test
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path (pr-str {:header {:start [:file/open] :end [:run/run :terminal/show] :other 1}}))
+    (is (= {:start [:file/open] :end [:run/run :terminal/show]} (:header (settings/load-settings path)))
+        "the two sides are kept and anything else is dropped")
+    (spit path (pr-str {:header {:end []}}))
+    (is (= {:end []} (:header (settings/load-settings path))) "an empty side is kept")
+    (doseq [bad [[:run/run] {:start ["run"]} {:end '(:run/run)} :nope]]
+      (spit path (pr-str {:header bad}))
+      (let [s (settings/load-settings path)]
+        (is (nil? (:header s)) (pr-str bad))
+        (is (re-find #":header" (:warning s)) (pr-str bad))))))
+
 (deftest read-doc-bookmarks-test
   (let [path (str (temp-dir) "/settings.edn")
         read #(settings/read-doc-bookmarks path)]
