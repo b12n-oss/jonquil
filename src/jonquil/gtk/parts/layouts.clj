@@ -9,27 +9,35 @@
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.layouts :as layouts]
             [jonquil.settings :as settings]))
 
 (defn- near? [a b] (<= (abs (- a b)) 2))
 
+(defn- tree-left?
+  "True when the tree is in the left-hand place, where its width is the
+  left split's position (settings.edn's :layout can put it elsewhere)."
+  [{:keys [right]}]
+  (= :left (win-right-slot/place-name right :file-tree)))
+
 (defn- tree-target?
-  "True when the target carries a tree width to set."
-  [{:keys [tree? tree-width]}]
-  (boolean (and tree? tree-width)))
+  "True when the target carries a tree width to set and the tree is on
+  the left."
+  [ctx {:keys [tree? tree-width]}]
+  (boolean (and tree? tree-width (tree-left? ctx))))
 
 (defn- push-targets!
   "Sets the tree's width and the split to the target's."
-  [{:keys [tree-paned paned]} {:keys [tree-width split] :as target}]
-  (when (tree-target? target) (g/gtk-paned-set-position tree-paned tree-width))
+  [{:keys [tree-paned paned] :as ctx} {:keys [tree-width split] :as target}]
+  (when (tree-target? ctx target) (g/gtk-paned-set-position tree-paned tree-width))
   (when split (g/gtk-paned-set-position paned split)))
 
 (defn- positions-read-back?
   "True when the tree's width and the split read back as the target's, or
   the target doesn't set them."
-  [{:keys [tree-paned paned]} {:keys [tree-width split] :as target}]
-  (and (or (not (tree-target? target)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
+  [{:keys [tree-paned paned] :as ctx} {:keys [tree-width split] :as target}]
+  (and (or (not (tree-target? ctx target)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
        (or (not split) (near? split (g/gtk-paned-get-position paned)))))
 
 (defn- settle!
@@ -67,9 +75,10 @@
   [{:keys [right tree-pane tree-paned paned showing-panel set-status!] :as ctx}]
   (let [panel (showing-panel right)
         l (cond-> {:tree? (pos? (g/gtk-widget-get-visible (:root tree-pane)))
-                   :tree-width (g/gtk-paned-get-position tree-paned)
                    :panel panel
-                   :split (g/gtk-paned-get-position paned)})]
+                   :split (g/gtk-paned-get-position paned)}
+            ;; the left split is the tree's width only with the tree there
+            (tree-left? ctx) (assoc :tree-width (g/gtk-paned-get-position tree-paned)))]
     (save-layouts! ctx (layouts/save (saved ctx) l))
     (set-status! (str "; Saved the layout \"" (layouts/layout-name l) "\"."))))
 

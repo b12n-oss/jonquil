@@ -36,6 +36,7 @@
     jonquil.terminal-open-test
     jonquil.terminals-test
     jonquil.header-test
+    jonquil.places-test
     jonquil.key-seq-test
     jonquil.slow-events-test
     jonquil.guide-examples-test

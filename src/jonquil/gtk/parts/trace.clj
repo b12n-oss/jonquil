@@ -9,6 +9,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.trace-pane :as trace-pane]
+            [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]))
 
@@ -101,7 +102,7 @@
   "After an evaluation: refreshes the rows while the panel shows."
   [{:keys [tracep right] :as ctx}]
   (when (and (pos? (g/gtk-widget-get-visible (:root tracep)))
-             (pos? (g/gtk-widget-get-visible (:slot right))))
+             (pos? (g/gtk-widget-get-visible (win-right-slot/part-place right :trace))))
     (trace-refresh! ctx false)))
 
 (defn- set-handlers!

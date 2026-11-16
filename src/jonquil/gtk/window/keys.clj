@@ -14,6 +14,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.window.places :as win-places]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.keymap :as km]
             [jonquil.plugin-registry :as plugin-registry]))
@@ -33,6 +34,8 @@
   ([win ed cv bottom-focus*]
    (if (= (g/gtk-root-get-focus win) (:view ed))
      (when-not (when-let [f (some-> bottom-focus* deref)] (f))
+       ;; the REPL may share its place with other tabs: bring it to the front
+       (win-places/reveal! (:scroll cv))
        (cview/focus! cv))
      (editor/focus! ed))))
 

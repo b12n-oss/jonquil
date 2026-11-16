@@ -1,5 +1,5 @@
 (ns jonquil.gtk.window.right-slot
-  "The window's right-hand slot: one box holding the inspector, the source panel, the plugin panels and the parts' panels, one showing at a time, and the fns that show, hide and name the one on screen. build makes activate!'s slot bindings, build-panels makes the four panels and publish resets *right. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window unchanged; build holds activate!'s own bindings in their order."
+  "The window's right-hand panels: the inspector, the source panel, the plugin panels and the parts' panels, each in one of the window's places (jonquil.gtk.window.places, the right-hand one unless settings.edn's :layout says otherwise), one showing per place at a time, and the fns that show, hide and name the one on screen. build makes activate!'s place and panel bindings, build-panels makes the four panels and publish resets *right. Internal to the window, as jonquil.gtk.window.status is."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.inspector-pane :as inspector-pane]
@@ -7,6 +7,8 @@
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.source-pane :as source-pane]
+            [jonquil.gtk.window.places :as win-places]
+            [jonquil.places :as places]
             [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.status :as win-status]))
 
@@ -15,15 +17,15 @@
   ;; (360) plus room for the paned's handle.
   420)
 
-;; --- the right-hand slot: the inspector and the source panel -------------
-;; One slot, last wins: a vertical GtkBox
+;; --- the right-hand panels: the inspector and the source panel -----------
+;; One panel per place, last wins: formerly a vertical GtkBox
 ;; holds both panels' roots, only one visible at a time, and the box itself
 ;; is hidden when neither is. Each root keeps its own visibility, so "is the
 ;; inspector showing?" is still (:root pane)'s own visible flag.
 ;; jonquil.gtk.window.runtime's apply-selection! hides the slot on a
 ;; runtime switch.
 
-(defn- right-roots
+(defn right-roots
   "{which root} for the panels right's slot holds, a part's among them; a
   right without :review-root, :plugins-root or :history-root (a test's) has
   fewer, and one without :part-panels* has no part panels."
@@ -36,35 +38,68 @@
     plugins-root (assoc :plugins plugins-root)
     history-root (assoc :history history-root)))
 
+(defn place-name
+  "The place (:left, :right or :bottom) the part id is in, by right's
+  :place-of*: the usual one (jonquil.places/usual, else :right) before the
+  parts are placed, or for a right without :place-of* (a test's)."
+  [right id]
+  (get (some-> (:place-of* right) deref) id (get places/usual id :right)))
+
+(defn part-place
+  "The place (a notebook) the part id is in (place-name)."
+  [right id]
+  (get (:places right) (place-name right id)))
+
+(declare size-right-place!)
+
+(defn add-to-place!
+  "Adds w, with the tab label (a string or a widget), to the place the
+  part id is in, which sizes itself as size-right-place! says when it's the
+  right-hand one."
+  [right id w label]
+  (let [nb (part-place right id)]
+    (win-places/add! nb w label
+                     (when (= nb (get-in right [:places :right])) (fn [] (size-right-place! right))))))
+
+(defn size-right-place!
+  "The right-hand place's on-shown: sizes h-paned so the place claims about
+  PANEL-WIDTH of the window (900 wide before it has a width); while it
+  shows, the split stays where the person put it."
+  [{:keys [win h-paned]}]
+  (let [w (g/gtk-widget-get-width win)]
+    (g/gtk-paned-set-position h-paned (max 0 (- (if (pos? w) w 900) PANEL-WIDTH)))))
+
 (defn show-right-panel!
   "Shows which (:inspector, :source, :review, :plugins, :history,
-  :locations, :debugger, :trace or :messages) in
-  the slot and hides the others; any but :history clears
-  plugin-history-shown, and which moves to the front of right's
-  :recent-panels when it has one. When the slot was hidden, also sizes h-paned so
-  the panel claims about PANEL-WIDTH; while
-  it's showing, the split stays where the person put it. right is {:win
-  :h-paned :slot :inspector-root :source-root :review-root}. GTK-thread
-  only."
-  [{:keys [win h-paned slot] :as right} which]
-  (let [was-hidden? (zero? (g/gtk-widget-get-visible slot))
-        roots (right-roots right)]
+  :locations, :debugger, :trace or :messages) in its place, as that
+  place's current page, and hides the other panels there: a place shows
+  one panel at a time, beside whatever else it holds (the tree, the REPL,
+  the terminals). Any but :history clears plugin-history-shown, and which
+  moves to the front of right's :recent-panels when it has one. which is
+  shown before the others hide, so its place never hides on the way and
+  keeps its size (the place sizes itself when it goes from hidden to
+  shown, size-right-place!). right is {:win :h-paned :places :place-of*
+  :inspector-root :source-root ...}. GTK-thread only."
+  [right which]
+  (let [roots (right-roots right)
+        place (part-place right which)
+        root (get roots which)]
     (when (not= which :history) (reset! win-plugin-agent/plugin-history-shown nil))
-    (doseq [[k root] roots :when (not= k which)] (g/gtk-widget-set-visible root 0))
-    (g/gtk-widget-set-visible (get roots which) 1)
-    (g/gtk-widget-set-visible slot 1)
+    (g/gtk-widget-set-visible root 1)
+    (doseq [[k r] roots :when (and (not= k which) (= place (part-place right k)))]
+      (g/gtk-widget-set-visible r 0))
+    (win-places/show-page! place root)
     ;; the recent panels, most recently shown first (a test's right has none)
     (when-let [r (:recent-panels right)]
-      (swap! r (fn [v] (into [which] (remove #{which}) v))))
-    (when was-hidden?
-      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
+      (swap! r (fn [v] (into [which] (remove #{which}) v))))))
 
 (defn showing-panel
-  "The key of the right-hand panel on screen, or nil when the slot is
-  hidden."
-  [{:keys [slot] :as right}]
-  (when (pos? (g/gtk-widget-get-visible slot))
-    (some (fn [[k root]] (when (pos? (g/gtk-widget-get-visible root)) k)) (right-roots right))))
+  "The key of a right-hand panel on screen, or nil when none is: one that
+  shows as its place's current page, the most recently shown first."
+  [right]
+  (let [roots (right-roots right)]
+    (some #(when (win-places/current? (part-place right %) (get roots %)) %)
+          (distinct (concat (some-> (:recent-panels right) deref) (keys roots))))))
 
 (defn focus-within?
   "True when keyboard focus is widget or inside it."
@@ -76,21 +111,20 @@
              (or (= f widget) (pos? (g/gtk-widget-is-ancestor f widget))))))))
 
 (defn hide-right-panel!
-  "Hides which's root, and the slot once no root is showing. Hiding
+  "Hides which's root; its place hides itself once nothing in it shows
+  (jonquil.gtk.window.places). Hiding
   :source also cancels any re-scroll settling still in flight for it
   (source-pane/cancel-scroll-settle!), so the
   shared settle timeout stops touching the view behind a hidden panel
   instead of only finding out once the view is actually destroyed.
   close-source-panel! reaches this same cancellation by calling through
   here, not by calling cancel-scroll-settle! a second time."
-  [{:keys [slot source-pane] :as right} which]
+  [{:keys [source-pane] :as right} which]
   (let [roots (right-roots right)]
     (g/gtk-widget-set-visible (get roots which) 0)
     (when (= which :history) (reset! win-plugin-agent/plugin-history-shown nil))
     (when (= which :source)
-      (source-pane/cancel-scroll-settle! (:scroll-cancelled? source-pane)))
-    (when (every? #(zero? (g/gtk-widget-get-visible %)) (vals roots))
-      (g/gtk-widget-set-visible slot 0))))
+      (source-pane/cancel-scroll-settle! (:scroll-cancelled? source-pane)))))
 
 (defn- focus-panel!
   "Moves focus into the panel k: the inspector, the source panel, the
@@ -133,14 +167,23 @@
       :else (win-status/set-status! status-label (empty-panel-message k)))))
 
 (defn build
-  "activate!'s right-hand slot bindings, in activate!'s order: the slot box, part-panels* (reset once the parts install), the right map every slot fn takes, and panel-focus-fn. w holds what they read: :win :h-paned :pane :sp :rp :lp :hp :settings-path* :status-label. Returns w with :slot :part-panels* :right and :panel-focus-fn added; activate! resets *right to the right map next."
+  "activate!'s place and panel bindings, in activate!'s order: the three
+  places (jonquil.gtk.window.places), part-panels* (reset once the parts
+  install), the right map every panel fn takes, and panel-focus-fn. w
+  holds what they read: :win :h-paned :pane :sp :rp :lp :hp
+  :settings-path* :status-label. Returns w with :places :slot (the
+  right-hand place) :part-panels* :right and :panel-focus-fn added;
+  activate! resets *right to the right map next. The right map's
+  :place-of* is reset when jonquil.gtk.window.layout places the parts."
   [{:keys [win h-paned pane sp rp lp hp settings-path* status-label] :as w}]
-  (let [slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+  (let [places {:left (win-places/make) :right (win-places/make) :bottom (win-places/make)}
+        slot (:right places)
         ;; {id {:root :focus! :open!}} of the parts' panels, reset once the
         ;; parts install (after part-contribution): panel-focus-fn and
         ;; right-roots are built first, like *tab-ctx.
         part-panels* (atom {})
-        right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
+        right {:win win :h-paned h-paned :slot slot :places places :place-of* (atom {})
+               :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp)
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
@@ -149,7 +192,7 @@
                :part-panels* part-panels*}
         panel-focus-fn (make-panel-focus-fn {:right right :pane pane :sp sp :lp lp :part-panels* part-panels*
                                              :settings-path* settings-path* :status-label status-label})]
-    (assoc w :slot slot :part-panels* part-panels* :right right :panel-focus-fn panel-focus-fn)))
+    (assoc w :places places :slot slot :part-panels* part-panels* :right right :panel-focus-fn panel-focus-fn)))
 
 (defn build-panels
   "activate!'s right-hand slot panels, in activate!'s order: the source panel, the review panel, the plugin list and the plugin history, then *right, the right map's forward atom. Reads nothing from w. Returns w with :sp :rp :lp :hp and :right* (the *right atom) added."

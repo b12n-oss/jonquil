@@ -375,6 +375,26 @@ when that variable is unset, blank, or not an absolute path:
   menus. An id that isn't a command, or one named twice, is left out with a
   note in the console. Plugin commands aren't offered yet. The ☰ menu
   button stays on Linux, since it is the only way to the menus there.
+- `:layout` (hand-written): where the window's parts go. The editor stays
+  in the middle, and three places sit around it: `:left`, `:right` and
+  `:bottom`. Each lists part ids in order. The parts are `:file-tree`,
+  `:repl` (Interactions), `:terminal` and the right-hand panels, such as
+  `:inspector`, `:debugger`, `:trace`, `:messages`, `:locations` and
+  `:source`. Whatever you don't list stays where it usually is: the tree
+  on the left, the REPL and the terminals at the bottom, the panels on the
+  right. The change shows in the next window you open.
+
+  ```clojure
+  {:layout {:right  [:repl]
+            :bottom [:terminal :debugger]}}
+  ```
+
+  That puts Interactions beside the editor and the debugger under it,
+  next to the terminals. A place holding more than one thing shows tabs,
+  and a place with nothing showing takes no room. Panels sharing a place
+  still show one at a time, as they do on the right. The tree's saved
+  width only applies while the tree is on the left. An id that isn't a
+  part, or one listed twice, is left out with a note in the console.
 
 The tabs live next door in `sessions.edn`, one entry per project folder,
 newest first, at most 20 (see

@@ -55,6 +55,25 @@
                                   (every? true? (vals parented)))
                              got)))))
 
+(defn row-places-usual
+  "With no :layout in the settings file every part is in its usual place:
+  the tree's root in the left-hand place, Interactions at the bottom and
+  the inspector on the right."
+  [ui]
+  (go-row :places-usual support/check
+    (on-gtk (let [nb (g/gtk-notebook-get-type)
+                  in (fn [w] (g/gtk-widget-get-ancestor w nb))
+                  {:keys [left right bottom]} (:places ui)
+                  got {:place-of (select-keys ((:place-of* ui)) [:file-tree :repl :terminal :inspector :trace])
+                       :tree-left? (= left (in (:root (:file-tree ui))))
+                       :repl-bottom? (= bottom (in (:scroll (:console ui))))
+                       :inspector-right? (= right (in (:root (:inspector ui))))}]
+              (support/check :places-usual
+                             (and (= {:file-tree :left :repl :bottom :terminal :bottom :inspector :right :trace :right}
+                                     (:place-of got))
+                                  (:tree-left? got) (:repl-bottom? got) (:inspector-right? got))
+                             got)))))
+
 (defn row-find-change-throw-contained [ui]
   (status-row ui {:row-id :find-change-throw-contained :where "find" :msg "forced find-change failure"
                   :fire! (fn [msg]
