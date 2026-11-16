@@ -375,20 +375,24 @@
 (defn row-clj-quick-doc
   "Ctrl+Q on greet in (greet \"x\"), with the evaluator already attached
   (an earlier row's own Run): ev/lookup answers from the fake's own :docs
-  table, and the quick-doc popover shows demo.core/greet's own short doc."
+  table, and the quick-doc popover shows demo.core/greet's own short doc.
+  An answer later than ev/help-grace-ms (25 ms) lands on the GTK thread a
+  moment after, which a busy CI runner hits now and then, so the row waits
+  for the popover, as row-clj-full-doc does."
   [ui]
   (go-row :clj-quick-doc support/check
-    (on-gtk (let [ed (:editor ui) hp (:help-popover ui)]
-              (editor/set-text! ed "(greet \"x\")")
-              (support/place-cursor! (:buf ed) 2)
-              ((:quick-doc!* ui))
-              (let [text (help-popover/quick-doc-text hp)]
-                (support/check :clj-quick-doc
-                               (and (popover/open? hp)
-                                    (str/includes? text "demo.core/greet")
-                                    (str/includes? text "Says hello."))
-                               {:open (popover/open? hp) :text text})
-                (popover/hide! hp))))))
+    (let [hp (:help-popover ui)]
+      (on-gtk (let [ed (:editor ui)]
+                (editor/set-text! ed "(greet \"x\")")
+                (support/place-cursor! (:buf ed) 2)
+                ((:quick-doc!* ui))))
+      (let [ok (await-until 2000 20 #(and (popover/open? hp)
+                                          (str/includes? (help-popover/quick-doc-text hp) "demo.core/greet")))]
+        (on-gtk (let [text (help-popover/quick-doc-text hp)]
+                  (support/check :clj-quick-doc
+                                 (and ok (str/includes? text "Says hello."))
+                                 {:open (popover/open? hp) :text text})
+                  (popover/hide! hp)))))))
 
 (defn row-clj-full-doc
   "Quick doc twice on greet: the second press is a repeat on
