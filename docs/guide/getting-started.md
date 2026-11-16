@@ -3,8 +3,8 @@
 ## Download
 
 On an Apple Silicon Mac with macOS 26 or later, download
-`Jonquil-0.4.3-macos-arm64.dmg` (or the `.zip`) from the
-[0.4.3 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.4.3),
+`Jonquil-0.4.4-macos-arm64.dmg` (or the `.zip`) from the
+[0.4.4 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.4.4),
 open it and drag Jonquil to Applications. It's signed and notarized, and it
 bundles GTK and the terminal's VTE, so it needs nothing else installed.
 
