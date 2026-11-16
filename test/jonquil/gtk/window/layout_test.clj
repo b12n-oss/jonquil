@@ -4,7 +4,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.files :as win-files]
             [jonquil.gtk.window.layout :as win-layout]
-            [jonquil.gtk.window.places :as win-places]
+            [jonquil.gtk.window.place-move :as win-place-move]
+            [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.status-bar :as win-status-bar]))
 
 (deftest build-makes-the-frame-widgets-test
@@ -97,7 +98,9 @@
                   g/gtk-widget-set-visible (fn [o v] (l [:visible o v]))
                   g/gtk-window-set-child (fn [w c] (l [:child w c]))
                   g/gtk-window-set-default-size (fn [w x y] (l [:size w x y]))
-                  win-places/add! (fn [nb w label _] (l [:add nb w label]))
+                  win-right-slot/add-to-place! (fn [right id w label]
+                                                 (l [:add (win-right-slot/part-place right id) w label]))
+                  win-place-move/install! (fn [_ _] nil)
                   win-status-bar/place! (fn [sm] (l [:status-bar sm]))]
       (win-layout/place! m))
     (is (= [[:start-of ::toolbar ::files] [:start-of ::toolbar ::open] [:start-of ::toolbar ::new]
@@ -189,7 +192,9 @@
                   g/gtk-paned-set-end-child (fn [_ _] nil)
                   g/gtk-paned-set-resize-end-child (fn [_ _] nil)
                   g/gtk-paned-set-shrink-end-child (fn [_ _] nil)
-                  win-places/add! (fn [nb w label _] (l [nb w label]))
+                  win-right-slot/add-to-place! (fn [right id w label]
+                                                 (l [(win-right-slot/part-place right id) w label]))
+                  win-place-move/install! (fn [_ _] nil)
                   cview/append! (fn [_ _ text] (swap! appended conj text))]
       (#'win-layout/pack-places! m))
     (is (= [[::right ::tree "Files"] [::right ::scroll "Interactions"]

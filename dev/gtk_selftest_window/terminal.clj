@@ -29,11 +29,11 @@
           unbuilt? (on-gtk (nil? @state))
           _ (on-gtk (show!))
           term (on-gtk (:term @state))
-          shown (on-gtk {:showing (showing?) :pages (g/gtk-notebook-get-n-pages (:notebook @state))})]
+          shown (on-gtk {:showing (showing?) :pages (g/gtk-notebook-get-n-pages ((:place @state)))})]
       (if-not term
         ;; no VTE here: the tab is there and says why
         (let [why (on-gtk (:why @state))
-              _ (on-gtk (g/gtk-notebook-set-current-page (:notebook @state) 0))]
+              _ (on-gtk (g/gtk-notebook-set-current-page ((:place @state)) 0))]
           (on-gtk (support/check :terminal-in-the-bottom-area
                                  (and unbuilt? (= {:showing true :pages 2} shown) (string? why)
                                       (nil? (System/getenv "JONQUIL_SELFTEST_NEEDS_VTE")))
@@ -91,7 +91,7 @@
     (let [{:keys [state show! new! close! numbers focused? showing?]} (:terminal ui)]
       (if (on-gtk (:why @state))
         (on-gtk (no-vte-pass :terminal-tabs))
-        (let [pages (fn [] (g/gtk-notebook-get-n-pages (:notebook @state)))
+        (let [pages (fn [] (g/gtk-notebook-get-n-pages ((:place @state))))
               before (on-gtk {:numbers (numbers) :pages (pages)})
               first-term (on-gtk (:term @state))
               _ (on-gtk (new!))
@@ -123,7 +123,7 @@
     (let [{:keys [state show! new! close! numbers busy? focused? showing?]} (:terminal ui)]
       (if (on-gtk (:why @state))
         (on-gtk (no-vte-pass :terminal-tab-close-asks))
-        (let [pages (fn [] (g/gtk-notebook-get-n-pages (:notebook @state)))
+        (let [pages (fn [] (g/gtk-notebook-get-n-pages ((:place @state))))
               _ (on-gtk (new!))
               n (on-gtk (last (numbers)))
               open (on-gtk (numbers))

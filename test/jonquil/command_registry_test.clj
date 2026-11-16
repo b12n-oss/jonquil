@@ -3,7 +3,7 @@
             [jonquil.command-registry :as registry]))
 
 (def ^:private ctx-fns
-  [:run-fn :open-fn :save-as-fn :save-fn :close-fn :toggle-tree-fn :run-selection-fn
+  [:run-fn :move-part-fn :open-fn :save-as-fn :save-fn :close-fn :toggle-tree-fn :run-selection-fn
    :clear-last-fn :clear-console-fn :open-find-fn :open-replace-fn :zoom-fn
    :digit-tab-fn :new-tab-fn :theme-cycle-fn :inspect-form-fn :inspect-last-fn :step-tab-fn
    :open-palette-fn :reload-plugins-fn :review-proposals-fn :plugins-list-fn :parinfer-fn
@@ -76,7 +76,16 @@
    :processes/show [:processes-show-fn]
    :change-set/make [:change-set-make-fn] :change-set/browse [:change-set-list-fn]
    :pages/show [:docs-show-fn] :pages/bookmark [:docs-bookmark-fn]
-   :pages/bookmarks [:docs-bookmarks-fn] :pages/guide [:docs-guide-fn]})
+   :pages/bookmarks [:docs-bookmarks-fn] :pages/guide [:docs-guide-fn]
+   ;; Move to (issue #33): each part to each place
+   :place/move-files-left [:move-part-fn :file-tree :left] :place/move-files-right [:move-part-fn :file-tree :right]
+   :place/move-files-bottom [:move-part-fn :file-tree :bottom]
+   :place/move-interactions-left [:move-part-fn :repl :left] :place/move-interactions-right [:move-part-fn :repl :right]
+   :place/move-interactions-bottom [:move-part-fn :repl :bottom]
+   :place/move-terminal-left [:move-part-fn :terminal :left] :place/move-terminal-right [:move-part-fn :terminal :right]
+   :place/move-terminal-bottom [:move-part-fn :terminal :bottom]
+   :place/move-panel-left [:move-part-fn :panel :left] :place/move-panel-right [:move-part-fn :panel :right]
+   :place/move-panel-bottom [:move-part-fn :panel :bottom]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)

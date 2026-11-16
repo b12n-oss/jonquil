@@ -375,7 +375,7 @@ when that variable is unset, blank, or not an absolute path:
   menus. An id that isn't a command, or one named twice, is left out with a
   note in the console. Plugin commands aren't offered yet. The ☰ menu
   button stays on Linux, since it is the only way to the menus there.
-- `:layout` (hand-written): where the window's parts go. The editor stays
+- `:layout`: where the window's parts go. The editor stays
   in the middle, and three places sit around it: `:left`, `:right` and
   `:bottom`. Each lists part ids in order. The parts are `:file-tree`,
   `:repl` (Interactions), `:terminal` and the right-hand panels, such as
@@ -395,6 +395,15 @@ when that variable is unset, blank, or not an absolute path:
   still show one at a time, as they do on the right. The tree's saved
   width only applies while the tree is on the left. An id that isn't a
   part, or one listed twice, is left out with a note in the console.
+
+  You don't have to write it by hand. Right-click a part's tab and pick
+  Move to Left, Move to Right or Move to Bottom, and the part moves at
+  once. A part alone in its place has no tab, so the palette has the same
+  moves too: type "move" to see Move Files, Move Interactions, Move the
+  terminal and Move the panel on screen, each to the left of, right of or
+  below the editor. Every move rewrites `:layout` so the next window opens
+  the same way. Jonquil writes the whole settings file when it saves, so
+  comments in it don't survive a move yet.
 
 The tabs live next door in `sessions.edn`, one entry per project folder,
 newest first, at most 20 (see

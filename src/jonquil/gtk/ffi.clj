@@ -1388,6 +1388,8 @@
 (ffi/defcfn gtk-notebook-reorder-child "gtk_notebook_reorder_child" [:pointer :pointer :int] :void)
 ;; a page's place (jonquil.gtk.window.places): its nearest notebook ancestor
 (ffi/defcfn gtk-notebook-get-type "gtk_notebook_get_type" [] :size_t)
+(ffi/defcfn gtk-notebook-get-tab-label "gtk_notebook_get_tab_label" [:pointer :pointer] :pointer)
+(ffi/defcfn gtk-window-get-child "gtk_window_get_child" [:pointer] :pointer)
 (ffi/defcfn gtk-widget-get-ancestor "gtk_widget_get_ancestor" [:pointer :size_t] :pointer)
 ;; gtkbutton.h:88 void gtk_button_set_has_frame (GtkButton*, gboolean)
 (ffi/defcfn gtk-button-set-has-frame "gtk_button_set_has_frame" [:pointer :int] :void)

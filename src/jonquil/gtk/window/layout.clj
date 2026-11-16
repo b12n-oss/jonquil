@@ -5,6 +5,7 @@
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.place-move :as win-place-move]
             [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.status-bar :as win-status-bar]
@@ -205,6 +206,8 @@
             :when w]
       (win-right-slot/add-to-place! right id w label))
     (when-let [text (places/skipped-text (:skipped plan))] (cview/append! cv :system text))
+    (win-place-move/install! {:right right :settings-path* settings-path*}
+                             (fn [text] (cview/append! cv :system text)))
     plan))
 
 (defn- pack-window!

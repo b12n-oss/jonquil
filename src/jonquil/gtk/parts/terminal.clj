@@ -121,8 +121,9 @@
 (defn- build!
   "Readies the terminal's place, once: with VTE the + at the end of its
   strip opens a terminal (on-new); without it a Terminal tab says why.
-  Answers the part's state: {:notebook :why :message :terms [] :last nil
-  :term nil}, :notebook being the place."
+  Answers the part's state: {:place :why :message :terms [] :last nil
+  :term nil}, :place answering the terminal's place now (a Move to can
+  change it)."
   [{:keys [right]} on-new]
   (let [bundled (bundled-vte (bundle-env/frameworks))
         ;; a release app loads the VTE beside its own GTK and no other: a
@@ -136,12 +137,19 @@
       (let [plus (flat-button "+" "Open another terminal")]
         (on-click! plus on-new)
         (g/gtk-notebook-set-action-widget nb plus PACK-END)))
-    {:notebook nb :why why :message message :terms [] :last nil :term nil}))
+    {:place (fn [] (win-right-slot/part-place right :terminal))
+     :why why :message message :terms [] :last nil :term nil}))
+
+(defn- now
+  "The part's state with :notebook, the terminal's place now, or nil
+  before anything is built."
+  [state]
+  (when-let [m @state] (assoc m :notebook ((:place m)))))
 
 (defn- back-to-repl!
   "Shows the Interactions tab when the REPL shares the terminal's place."
   [{:keys [cv]} state]
-  (win-places/show-page! (:notebook @state) (:scroll cv)))
+  (win-places/show-page! (:notebook (now state)) (:scroll cv)))
 
 (defn- start-shell!
   "Starts a login shell in the active file's project folder, unless one is
@@ -177,7 +185,7 @@
   "The number of the terminal whose tab is showing, or nil on Interactions
   and before anything is built."
   [state]
-  (when-let [{:keys [notebook terms]} @state]
+  (when-let [{:keys [notebook terms]} (now state)]
     (let [page (g/gtk-notebook-get-current-page notebook)]
       (:n (first (filter #(= page (g/gtk-notebook-page-num notebook (:widget %))) terms))))))
 
@@ -190,7 +198,7 @@
   "True when a terminal's tab, or the tab saying why there is none, is the
   current page of its place."
   [state]
-  (boolean (when-let [{:keys [notebook terms message]} @state]
+  (boolean (when-let [{:keys [notebook terms message]} (now state)]
              (some #(win-places/current? notebook %) (remove nil? (cons message (map :widget terms)))))))
 
 (defn- go-to!
@@ -198,7 +206,7 @@
   gives it the focus. Remembers it as the one used last."
   [ctx state n]
   (when-let [{:keys [term widget]} (by-number state n)]
-    (let [{:keys [notebook]} @state]
+    (let [{:keys [notebook]} (now state)]
       (g/gtk-notebook-set-current-page notebook (g/gtk-notebook-page-num notebook widget))
       (swap! state assoc :last n :term term)
       (start-shell! ctx term)
@@ -218,12 +226,12 @@
   the Interactions tab and the editor do."
   [{:keys [active-tab] :as ctx} state n]
   (when-let [{:keys [term widget]} (by-number state n)]
-    (let [{:keys [notebook terms]} @state
+    (let [{:keys [notebook terms]} (now state)
           had-focus? (focused? ctx state)
           was-showing? (= n (showing-number state))
           then (terminals/after-close (map :n terms) n)]
       (anchan/dispose! term)
-      (win-places/remove! notebook widget)
+      (win-right-slot/remove-from-place! (:right ctx) :terminal widget)
       (swap! state (fn [m]
                      (let [left (filterv #(not= n (:n %)) (:terms m))]
                        (assoc m :terms left
@@ -290,7 +298,7 @@
   "With no VTE: shows the Terminal tab that says why, and says it in the
   status line."
   [{:keys [set-status!]} state]
-  (let [{:keys [notebook message why]} @state]
+  (let [{:keys [notebook message why]} (now state)]
     (win-places/show-page! notebook message)
     (set-status! (str "; " why))))
 
@@ -322,7 +330,7 @@
   "The terminal part for one window. Nothing is built until a terminal is
   first shown. ui's :terminal is {:state :show! :new! :close! :numbers
   :busy? :focused? :showing?}, for the self-tests; :state holds nil, then
-  {:notebook :why :terms [{:n :term :widget}] :last :term}, :term being
+  {:place :why :terms [{:n :term :widget}] :last :term}, :term being
   the terminal used last."
   [{:keys [bottom-focus* theme-name zoom-px] :as wctx}]
   (let [state (atom nil)

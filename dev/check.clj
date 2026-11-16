@@ -200,6 +200,7 @@
     jonquil.gtk.window.plugin-agent
     jonquil.gtk.window.session
     jonquil.gtk.window.files
+    jonquil.gtk.window.place-move
     jonquil.gtk.window.places
     jonquil.gtk.window.right-slot
     jonquil.gtk.window.theme

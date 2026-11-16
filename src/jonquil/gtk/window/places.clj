@@ -24,15 +24,20 @@
 (defn refresh!
   "Shows nb's tabs when more than one page shows, or when one does and the
   strip has a button at its end (the terminals' +, whose tabs also carry
-  their close buttons), and nb itself when any page shows. on-shown (or
-  nil) runs when nb goes from hidden to shown."
-  [nb on-shown]
+  their close buttons), and nb itself when any page shows."
+  [nb]
   (let [n (count (filter visible? (pages nb)))
-        action? (not (ffi/null? (g/gtk-notebook-get-action-widget nb PACK-END)))
-        was? (visible? nb)]
+        action? (not (ffi/null? (g/gtk-notebook-get-action-widget nb PACK-END)))]
     (g/gtk-notebook-set-show-tabs nb (if (or (> n 1) (and (pos? n) action?)) 1 0))
-    (g/gtk-widget-set-visible nb (if (pos? n) 1 0))
-    (when (and on-shown (not was?) (pos? n)) (on-shown))))
+    (g/gtk-widget-set-visible nb (if (pos? n) 1 0))))
+
+(defn on-shown!
+  "Runs f whenever the place nb goes from hidden to shown."
+  [nb f]
+  (g/g-signal-connect-data nb "notify::visible"
+                           (callable (fn [_w _pspec _d] (when (visible? nb) (f)) nil)
+                                     [:pointer :pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
 
 (defn- holds-focus?
   "True when the keyboard focus is w or inside it."
@@ -56,12 +61,17 @@
         (g/gtk-notebook-set-current-page nb i)
         (when had-focus? (g/gtk-widget-child-focus w g/DIR-TAB-FORWARD))))))
 
+(defn place-of
+  "The place (a notebook) the page widget w is in, or nil."
+  [w]
+  (let [nb (g/gtk-widget-get-ancestor w (g/gtk-notebook-get-type))]
+    (when-not (ffi/null? nb) nb)))
+
 (defn reveal!
   "Makes the page widget w the current page of the place it is in, so a
   part about to take the focus is in front of the others there."
   [w]
-  (let [nb (g/gtk-widget-get-ancestor w (g/gtk-notebook-get-type))]
-    (when-not (ffi/null? nb) (show-page! nb w))))
+  (when-let [nb (place-of w)] (show-page! nb w)))
 
 (defn current?
   "True when w is nb's current page and both show."
@@ -81,20 +91,22 @@
     nb))
 
 (defn add!
-  "Adds w to the place nb as a page whose tab is label (a string, or a
-  widget), and refreshes nb whenever w shows or hides (a w that shows
-  becomes the current page). on-shown is refresh!'s. Answers w's page
+  "Adds w to the place nb as a page whose tab is the widget label, and
+  refreshes w's place whenever w shows or hides (a w that shows becomes
+  the current page). The place is looked up each time, so a page that
+  moves (move-page!) refreshes the place it is in now. Answers w's page
   number."
-  [nb w label on-shown]
-  (let [i (g/gtk-notebook-append-page nb w (if (string? label) (g/gtk-label-new label) label))]
+  [nb w label]
+  (let [i (g/gtk-notebook-append-page nb w label)]
     (g/g-signal-connect-data w "notify::visible"
                              (callable (fn [_w _pspec _d]
-                                         (when (visible? w) (show-page! nb w))
-                                         (refresh! nb on-shown)
+                                         (when-let [now (place-of w)]
+                                           (when (visible? w) (show-page! now w))
+                                           (refresh! now))
                                          nil)
                                        [:pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    (refresh! nb on-shown)
+    (refresh! nb)
     i))
 
 (defn remove!
@@ -104,4 +116,41 @@
   (let [i (g/gtk-notebook-page-num nb w)]
     (when (<= 0 i)
       (g/gtk-notebook-remove-page nb i)
-      (refresh! nb nil))))
+      (refresh! nb))))
+
+(defn move-page!
+  "Moves the page w, with its tab, from the place from to the end of the
+  place to. A w that shows comes to the front there, and keeps the focus
+  when it had it. Both places refresh."
+  [from to w]
+  (let [i (g/gtk-notebook-page-num from w)]
+    (when (and (<= 0 i) (not= from to))
+      (let [label (g/gtk-notebook-get-tab-label from w)
+            had-focus? (holds-focus? w)]
+        ;; the notebook drops its refs on remove; these keep both alive
+        (g/g-object-ref w)
+        (g/g-object-ref label)
+        (try
+          (g/gtk-notebook-remove-page from i)
+          (g/gtk-notebook-append-page to w label)
+          (finally
+            (g/g-object-unref label)
+            (g/g-object-unref w)))
+        (refresh! from)
+        (when (visible? w) (show-page! to w))
+        (refresh! to)
+        (when had-focus? (g/gtk-widget-child-focus w g/DIR-TAB-FORWARD))))))
+
+(defn move-action!
+  "Moves the button at the end of from's tab strip (the terminals' +) to
+  the end of to's."
+  [from to]
+  (let [b (g/gtk-notebook-get-action-widget from PACK-END)]
+    (when (and (not (ffi/null? b)) (not= from to))
+      (g/g-object-ref b)
+      (try
+        (g/gtk-notebook-set-action-widget from ffi/null PACK-END)
+        (g/gtk-notebook-set-action-widget to b PACK-END)
+        (finally (g/g-object-unref b)))
+      (refresh! from)
+      (refresh! to))))
