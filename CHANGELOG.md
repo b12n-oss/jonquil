@@ -10,7 +10,7 @@ everything that shipped before that.
 
 - The header bar's buttons can be chosen in `settings.edn`: `:header {:start [...] :end [...]}` lists command ids, left to right at each end. A side left out keeps its usual buttons. (#33)
 - The window's parts can be placed in `settings.edn`: `:layout {:left [...] :right [...] :bottom [...]}` puts the file tree, the REPL, the terminals and the right-hand panels (the debugger, the inspector, Trace and the rest) on any side of the editor. A part left out stays where it usually is. (#33)
-- Parts can move while the window is open: right-click a part's tab for Move to Left, Move to Right or Move to Bottom, or use the palette's Move commands, which also reach a part with no tab. Each move is written to `:layout` in `settings.edn`. (#33)
+- Parts can move while the window is open. Right-click a part's tab for Move to Left, Move to Right or Move to Bottom, or type "move" in the palette, which also reaches a part that has no tab. Each move is saved to `:layout` in `settings.edn`. (#33)
 
 ## [0.4.3] - 2026-11-16
 

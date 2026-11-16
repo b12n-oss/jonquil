@@ -382,7 +382,7 @@ when that variable is unset, blank, or not an absolute path:
   `:inspector`, `:debugger`, `:trace`, `:messages`, `:locations` and
   `:source`. Whatever you don't list stays where it usually is: the tree
   on the left, the REPL and the terminals at the bottom, the panels on the
-  right. The change shows in the next window you open.
+  right. A hand edit shows in the next window you open.
 
   ```clojure
   {:layout {:right  [:repl]
@@ -396,14 +396,16 @@ when that variable is unset, blank, or not an absolute path:
   width only applies while the tree is on the left. An id that isn't a
   part, or one listed twice, is left out with a note in the console.
 
-  You don't have to write it by hand. Right-click a part's tab and pick
-  Move to Left, Move to Right or Move to Bottom, and the part moves at
-  once. A part alone in its place has no tab, so the palette has the same
-  moves too: type "move" to see Move Files, Move Interactions, Move the
-  terminal and Move the panel on screen, each to the left of, right of or
-  below the editor. Every move rewrites `:layout` so the next window opens
-  the same way. Jonquil writes the whole settings file when it saves, so
-  comments in it don't survive a move yet.
+  You can also move a part while the window is open. Right-click its tab
+  and pick Move to Left, Move to Right or Move to Bottom. A part that's
+  alone in its place has no tab, which is why the palette has the moves as
+  well: type "move" and you'll find entries such as "Move the terminal to
+  the right of the editor", for Files, Interactions, the terminal and
+  whichever panel is on screen. Each move rewrites `:layout`, so the next
+  window opens the same way. For now Jonquil rewrites the whole settings
+  file when it saves, and any comments you put in it are lost on a move.
+
+  ![Jonquil with Interactions moved to the right of the editor, hello.clj on the left and its output, Hello, Jonquil! and => 3, on the right](../images/layout-move.png)
 
 The tabs live next door in `sessions.edn`, one entry per project folder,
 newest first, at most 20 (see
