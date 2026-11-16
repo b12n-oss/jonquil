@@ -379,3 +379,46 @@
       (is (re-find #":doc-bookmarks" (:warning s))))
     (spit path (pr-str {:theme :light :doc-bookmarks []}))
     (is (not (contains? (settings/load-settings path) :doc-bookmarks)) "an empty list reads as none")))
+
+(deftest save-keeps-comments-and-layout-test
+  (testing "a changed key is edited in place; comments, blank lines and the rest of the text stay"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path ";; my settings\n{:theme :light ;; the light one\n\n :layout {:left  [:file-tree] ;; tree\n          :bottom [:repl]}}\n")
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= ";; my settings\n{:theme :dark ;; the light one\n\n :layout {:left  [:file-tree] ;; tree\n          :bottom [:repl]}}\n"
+             (slurp path)))))
+  (testing "a new key is added to the map and the comments stay"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path ";; my settings\n{:theme :light} ;; end\n")
+      (is (nil? (settings/save-settings! path {:parinfer :smart})))
+      (let [text (slurp path)]
+        (is (str/includes? text ";; my settings"))
+        (is (str/includes? text ";; end"))
+        (is (= {:theme :light :parinfer :smart} (edn/read-string (str/replace text #";[^\n]*" "")))))))
+  (testing "a file with only comments keeps them, with the settings after"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path ";; nothing yet\n")
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= ";; nothing yet\n{:theme :dark}\n" (slurp path)))
+      (is (= :dark (:theme (settings/load-settings path))))))
+  (testing "an empty file is written as before"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "")
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= {:theme :dark} (edn/read-string (slurp path)))))))
+
+(deftest save-over-a-non-map-test
+  (testing "a file holding EDN that isn't a map is replaced by the settings, as before"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path ";; odd\n[:not :a :map]\n")
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= {:theme :dark} (edn/read-string (slurp path)))))))
+
+(deftest a-comment-above-a-saved-key-stays-test
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light\n ;; where my parts go\n :layout {:left [:file-tree] ;; inside\n          :bottom [:repl]}}\n")
+    (is (nil? (settings/save-settings! path {:layout {:left [] :right [:file-tree] :bottom [:repl]}})))
+    (let [text (slurp path)]
+      (is (str/includes? text ";; where my parts go") "the comment above the key stays")
+      (is (not (str/includes? text ";; inside")) "a comment inside the replaced value goes, as the guide says")
+      (is (= {:left [] :right [:file-tree] :bottom [:repl]} (:layout (edn/read-string text)))))))

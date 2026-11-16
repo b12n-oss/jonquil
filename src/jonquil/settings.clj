@@ -309,13 +309,45 @@
                [java.nio.file.StandardCopyOption/REPLACE_EXISTING
                 java.nio.file.StandardCopyOption/ATOMIC_MOVE])))
 
+(defn- rewrite-edn
+  "The rewrite-edn fn named sym. It loads on the first save, not when
+  Jonquil starts (about 0.15 s), so deps.edn's :jolt/build :include bakes
+  borkdude.rewrite-edn into a built binary."
+  [sym]
+  (requiring-resolve (symbol "borkdude.rewrite-edn" (name sym))))
+
+(defn- edited-text
+  "content, the settings file's text, with each key of m set to its value
+  through rewrite-edn, so comments, blank lines and the layout of every
+  other key stay as written. nil when content holds no map to edit (blank,
+  or comments only) or the edit doesn't read back as (merge existing m)."
+  [content existing m]
+  (when (map? existing)
+    (try
+      (let [text (str (reduce-kv (rewrite-edn 'assoc) ((rewrite-edn 'parse-string) content) m))]
+        (when (= (merge existing m) (edn/read-string text)) text))
+      (catch Exception _ nil))))
+
+(defn- saved-text
+  "The text a save of m writes over the file whose text is content (nil
+  when there's no file) and whose map is existing: the file edited in
+  place when it holds a map, the settings after its comments when it holds
+  only comments, else m (merged into existing) printed on its own."
+  [content existing m]
+  (or (edited-text content existing m)
+      (when (and (nil? existing) content (not (str/blank? content))
+                 (nil? (try (edn/read-string content) (catch Exception _ ::bad))))
+        (str content (when-not (str/ends-with? content "\n") "\n") (pr-str m) "\n"))
+      (pr-str (merge existing m))))
+
 (defn save-settings!
   "Merges map m (say {:theme k}, or {:file-tree {...}}) into the settings
   file at path and writes it atomically, so a save keeps every key the file
   already holds -- a theme change must not drop a hand-set :dialect or the
-  file tree's state. A missing file is created with m
-  alone; an unreadable or malformed one is left untouched and reported.
-  nil on success, else a message.
+  file tree's state. Only the keys in m change in the text (edited-text):
+  comments and hand formatting elsewhere stay. A missing file is created
+  with m alone; an unreadable or malformed one is left untouched and
+  reported. nil on success, else a message.
   When path is a symlink, the real target is rewritten in place (the temp
   file sits beside the target and the rename lands on the target), so the
   link itself survives the save."
@@ -323,10 +355,12 @@
   (let [tmp (atom nil)]
     (try
       (let [target (resolved-target path)
-            existing (existing-settings target (io/file target))]
+            f (io/file target)
+            existing (existing-settings target f)
+            content (when (.exists f) (slurp target))]
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
-        (spit @tmp (pr-str (merge existing m)))
+        (spit @tmp (saved-text content existing m))
         (move-over! @tmp target)
         nil)
       (catch Exception e

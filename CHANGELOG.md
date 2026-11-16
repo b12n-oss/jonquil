@@ -12,6 +12,10 @@ everything that shipped before that.
 - The window's parts can be placed in `settings.edn`: `:layout {:left [...] :right [...] :bottom [...]}` puts the file tree, the REPL, the terminals and the right-hand panels (the debugger, the inspector, Trace and the rest) on any side of the editor. A part left out stays where it usually is. (#33)
 - Parts can move while the window is open. Right-click a part's tab for Move to Left, Move to Right or Move to Bottom, or type "move" in the palette, which also reaches a part that has no tab. Each move is saved to `:layout` in `settings.edn`. (#33)
 
+### Changed
+
+- Saving a setting keeps the comments and hand formatting in `settings.edn`. Jonquil now changes only the key it saves (the theme, the tree's width, a Move to's `:layout` and the rest) and leaves the other text as it was. It used to write the whole file again, which dropped every comment.
+
 ## [0.4.3] - 2026-11-16
 
 ### Added
