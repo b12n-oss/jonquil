@@ -34,9 +34,44 @@
          (set (map #(get % "name") (:defs (:t @env))))))
   (is (every? #(vector? (get-in % ["inputSchema" "required"])) (:defs (:t @env)))))
 
+(defn- plain [r] (dissoc r :data))
+
 (deftest eval-value-and-output
   (is (= {:text "hi\n=> 3" :error? false}
-         (call "jonquil_eval" {"code" "(println \"hi\") (+ 1 2)"}))))
+         (plain (call "jonquil_eval" {"code" "(println \"hi\") (+ 1 2)"})))))
+
+(deftest eval-data-names-the-parts
+  (let [d (:data (call "jonquil_eval" {"code" "(println \"hi\") (+ 1 2)"}))]
+    (is (= {"status" "ok" "output" "hi\n" "value" "3" "ns" "user"} (dissoc d "ms")))
+    (is (nat-int? (get d "ms")))))
+
+(deftest eval-data-keeps-stderr-apart
+  (let [d (:data (call "jonquil_eval" {"code" "(println \"o\") (binding [*out* *err*] (println \"e\")) 1"}))]
+    (is (= "o\ne\n" (get d "output")))
+    (is (= "e\n" (get d "err")))))
+
+(deftest eval-error-data
+  (let [d (:data (call "jonquil_eval" {"code" "(/ 1 0)"}))]
+    (is (= "error" (get d "status")))
+    (is (not (contains? d "value")))
+    (is (str/includes? (get-in d ["error" "message"]) "Divide by zero"))
+    (is (str/includes? (get-in d ["error" "type"]) "ArithmeticException"))))
+
+(deftest eval-timeout-data
+  (let [d (:data (call "jonquil_eval" {"code" "(println \"p\") (loop [] (recur))" "timeout_ms" 300}))]
+    (is (= "timeout" (get d "status")))
+    (is (= "p\n" (get d "output")))
+    (is (>= (get d "ms") 300))))
+
+(deftest eval-output-is-capped
+  (let [r (call "jonquil_eval" {"code" "(dotimes [_ 100] (print \"0123456789\")) :done"
+                                "max_output_chars" 25})]
+    (is (= (str "; 975 earlier characters of output dropped\n"
+                "5678901234567890123456789\n=> :done")
+           (:text r)))
+    (is (= 975 (get-in r [:data "dropped_chars"])))
+    (is (= 25 (count (get-in r [:data "output"]))))
+    (is (not (:error? r)))))
 
 (deftest eval-error-is-error
   (let [r (call "jonquil_eval" {"code" "(/ 1 0)"})]
@@ -159,11 +194,11 @@
         asked (atom [])
         select @#'tools/selection]
     (with-redefs [tools/selection (fn [ctx path] (swap! asked conj path) (select ctx path))]
-      (is (= {:text "=> 3" :error? false} ((:call tt) "jonquil_eval" {"code" "(+ 1 2)" "path" f})))
+      (is (= {:text "=> 3" :error? false} (plain ((:call tt) "jonquil_eval" {"code" "(+ 1 2)" "path" f}))))
       (is (seq @asked))
       (is (every? #(= (.getCanonicalPath (io/file f)) (.getCanonicalPath (io/file %))) @asked)
           "every project lookup the eval makes is for the path it was given")
       (reset! asked [])
-      (is (= {:text "=> 3" :error? false} ((:call tt) "jonquil_eval" {"code" "(+ 1 2)"})))
+      (is (= {:text "=> 3" :error? false} (plain ((:call tt) "jonquil_eval" {"code" "(+ 1 2)"}))))
       (is (seq @asked))
       (is (every? nil? @asked) "with no path, the lookup is for no path"))))

@@ -111,19 +111,31 @@
   (let [r {:status :ok :printed "3"}
         t (tools-for {:mcp-eval!* (fn [_ notify] (notify {:done {:result r :output "hi\n"}}) (fn [] "hi\n"))
                       :evaluator* (fn [] (evaluator {}))})]
-    (is (= {:text (tools/result-text "hi\n" r) :error? false}
-           (call t "jonquil_eval" {"code" "x"})))))
+    (is (= {:text (tools/result-text "hi\n" r) :error? false
+            :data {"status" "ok" "output" "hi\n" "value" "3"}}
+           (update (call t "jonquil_eval" {"code" "x"}) :data dissoc "ms")))))
+
+(deftest done-output-is-capped
+  (let [t (tools-for {:mcp-eval!* (fn [_ notify]
+                                    (notify {:done {:result {:status :ok :printed "1"} :output "abcdefgh\n"}})
+                                    (fn [] ""))
+                      :evaluator* (fn [] (evaluator {}))})
+        r (call t "jonquil_eval" {"code" "x" "max_output_chars" 4})]
+    (is (= "; 5 earlier characters of output dropped\nfgh\n=> 1" (:text r)))
+    (is (= 5 (get-in r [:data "dropped_chars"])))))
 
 (deftest done-error-status-is-error
   (let [t (tools-for {:mcp-run!* (fn [notify] (notify {:done {:result {:status :error :error-text "bad"} :output ""}}) (fn [] ""))
                       :evaluator* (fn [] (evaluator {}))})]
-    (is (:error? (call t "jonquil_run" {})))))
+    (is (:error? (call t "jonquil_run" {})))
+    (is (= {"message" "bad"} (get-in (call t "jonquil_run" {}) [:data "error"])))))
 
 (deftest busy-refused-problem-none-map-to-errors
   (doseq [k [:busy :refused :problem :none]]
     (let [t (tools-for {:mcp-eval!* (fn [_ notify] (notify {k (str "msg " (name k))}) (fn [] ""))
                         :evaluator* (fn [] (evaluator {}))})]
-      (is (= {:text (str "msg " (name k)) :error? true}
+      (is (= {:text (str "msg " (name k)) :error? true
+              :data {"status" "refused" "output" ""}}
              (call t "jonquil_eval" {"code" "x"}))
           (name k)))))
 
@@ -144,6 +156,7 @@
     (is (:error? r))
     (is (str/starts-with? (:text r) "partial"))
     (is (str/includes? (:text r) "Timed out after 100 ms; interrupted, but the evaluation has not stopped."))
+    (is (= {"status" "timeout" "output" "partial"} (dissoc (:data r) "ms")))
     (is (= 1 @stopped))
     (is (< (millis-since t0) 2000))))
 
@@ -167,8 +180,9 @@
         r (call t "jonquil_eval" {"code" "x" "timeout_ms" 10000})]
     (is (< (millis-since t0) 2000))
     (is (= {:text "so far\n; waiting for console input (a person can type in the window, or call jonquil_stop)"
-            :error? false}
-           r))
+            :error? false
+            :data {"status" "waiting-for-input" "output" "so far"}}
+           (update r :data dissoc "ms")))
     (is (zero? @stopped))))
 
 (deftest stop-idle-does-not-interrupt
@@ -491,7 +505,7 @@
           text (:text (call (tools-for {:mcp-run!* run :evaluator* (fn [] (evaluator {}))}) "jonquil_run" {}))
           with-tab (tools-for (assoc (fake-ui [(fake-tab 4 "/p/4.clj" false)] 4 (atom []))
                                      :mcp-run!* run :evaluator* (fn [] (evaluator {}))))]
-      (is (= {:text text :error? false :tab-id 4} (call with-tab "jonquil_run" {})))
+      (is (= {:text text :error? false :tab-id 4} (dissoc (call with-tab "jonquil_run" {}) :data)))
       (is (not (contains? (call (tools-for {:mcp-run!* run :evaluator* (fn [] (evaluator {}))}) "jonquil_run" {}) :tab-id))))))
 
 (deftest change-set-propose-tool-test

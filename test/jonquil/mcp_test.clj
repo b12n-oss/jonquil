@@ -7,6 +7,7 @@
 
 (def ^:private stub-defs
   [{"name" "echo" "description" "echo s" "inputSchema" {"type" "object"}}
+   {"name" "data" "description" "structured" "inputSchema" {"type" "object"}}
    {"name" "boom" "description" "throws" "inputSchema" {"type" "object"}}
    {"name" "nope" "description" "error result" "inputSchema" {"type" "object"}}])
 
@@ -15,6 +16,7 @@
    :call (fn [tname args]
            (case tname
              "echo" {:text (get args "s") :error? false}
+             "data" {:text "t" :error? false :data (get args "d")}
              "boom" (throw (ex-info "bad" {}))
              "nope" {:text "nope" :error? true}))})
 
@@ -57,6 +59,16 @@
   (is (= {"content" [{"type" "text" "text" "hi"}] "isError" false}
          (get (mcp/handle-message tools (req 4 "tools/call" {"name" "echo" "arguments" {"s" "hi"}}))
               "result"))))
+
+(deftest tools-call-structured-content
+  (is (= {"content" [{"type" "text" "text" "t"}] "isError" false
+          "structuredContent" {"status" "ok"}}
+         (get (mcp/handle-message tools (req 4 "tools/call" {"name" "data" "arguments" {"d" {"status" "ok"}}}))
+              "result")))
+  ;; only a map is sent: structuredContent has to be a JSON object
+  (is (not (contains? (get (mcp/handle-message tools (req 4 "tools/call" {"name" "data" "arguments" {"d" "x"}}))
+                           "result")
+                      "structuredContent"))))
 
 (deftest tools-call-error-result
   (let [r (get (mcp/handle-message tools (req 5 "tools/call" {"name" "nope" "arguments" {}})) "result")]
@@ -177,11 +189,11 @@
   (let [t (atom tools)
         f (fn [] @t)
         names (fn [] (map #(get % "name") (get-in (mcp/handle-message f (req 1 "tools/list" {})) ["result" "tools"])))]
-    (is (= ["echo" "boom" "nope"] (names)))
+    (is (= ["echo" "data" "boom" "nope"] (names)))
     (swap! t (fn [m] (-> m
                          (update :defs conj {"name" "late" "description" "added" "inputSchema" {"type" "object"}})
                          (assoc :call (fn [n a] (if (= "late" n) {:text "here" :error? false} ((:call tools) n a)))))))
-    (is (= ["echo" "boom" "nope" "late"] (names)))
+    (is (= ["echo" "data" "boom" "nope" "late"] (names)))
     (is (= "here" (get-in (mcp/handle-message f (req 2 "tools/call" {"name" "late" "arguments" {}}))
                           ["result" "content" 0 "text"])))
     (reset! t tools)

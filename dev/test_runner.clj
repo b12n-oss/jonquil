@@ -67,6 +67,7 @@
     jonquil.mcp.tools-test
     jonquil.mcp.window-test
     jonquil.mcp.listen-test
+    jonquil.mcp.result-test
     jonquil.mcp.describe-test
     jonquil.session-test
     jonquil.commands-test

@@ -5,7 +5,9 @@
   this namespace never touches stdin or stdout itself. The tool table is
   `{:defs [tool-def ...] :call (fn [name args] {:text s :error? b})}`, or
   a no-argument fn answering one, read once per message, so
-  the tools a window serves can change between calls. A table with
+  the tools a window serves can change between calls. A result may also
+  hold :data, a map with string keys, sent as the result's
+  structuredContent beside the text. A table with
   :list-changed? true declares the capability, and serve!'s :subscribe
   is how the server learns when to send
   notifications/tools/list_changed."
@@ -40,6 +42,13 @@
 (defn- text-result [text error?]
   {"content" [{"type" "text" "text" text}] "isError" (boolean error?)})
 
+(defn- tool-result
+  "A tool's {:text :error? :data} as an MCP result. structuredContent is a
+  2025-06-18 field; an older client ignores it and reads the text."
+  [{:keys [text error? data]}]
+  (cond-> (text-result (str text) error?)
+    (map? data) (assoc "structuredContent" data)))
+
 (defn- tools-call [tools msg]
   (let [id (get msg "id")
         tname (get-in msg ["params" "name"])
@@ -55,7 +64,7 @@
        (try
          (let [r ((:call tools) tname args)]
            (if (map? r)
-             (text-result (str (:text r)) (:error? r))
+             (tool-result r)
              (text-result (str "Error: tool returned " (pr-str r)) true)))
          (catch Throwable e
            (text-result (str "Error: " (or (ex-message e) (str e))) true)))))))

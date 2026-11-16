@@ -116,7 +116,8 @@
   (let [r (request! srv "tools/call" {"name" name "arguments" args} ms)]
     (if (:fail r)
       r
-      {:text (get-in r ["result" "content" 0 "text"]) :error? (get-in r ["result" "isError"])})))
+      {:text (get-in r ["result" "content" 0 "text"]) :error? (get-in r ["result" "isError"])
+       :data (get-in r ["result" "structuredContent"])})))
 
 (defn- children [pid]
   (let [{:keys [out]} @(p/process ["pgrep" "-P" (str pid)] {:out :string :err :string})]
@@ -159,6 +160,19 @@
           (check! "tools/list has six tools" (= 6 (count (get-in r ["result" "tools"]))) r))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
+        (let [r (tool! srv "jonquil_eval" {"code" "(println \"hi\") (+ 1 2)"} 60000)
+              d (:data r)]
+          (check! "eval answers structured content beside the text"
+                  (and (= "ok" (get d "status")) (= "3" (get d "value")) (= "hi\n" (get d "output"))
+                       (number? (get d "ms")))
+                  r))
+        (let [r (tool! srv "jonquil_eval" {"code" "(dotimes [_ 50] (print \"0123456789\")) :done"
+                                           "max_output_chars" 20} 60000)]
+          (check! "max_output_chars keeps the last characters and says what was dropped"
+                  (and (= 480 (get-in r [:data "dropped_chars"]))
+                       (= "01234567890123456789" (get-in r [:data "output"]))
+                       (string? (:text r)) (str/starts-with? (:text r) "; 480 earlier characters"))
+                  r))
         (let [r1 (tool! srv "jonquil_eval" {"code" "(do (.start (Thread. (fn [] (println \"noise\")))) (Thread/sleep 200) :ok)"} 30000)
               r2 (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 30000)]
           (check! "background println does not reach stdout"
@@ -322,6 +336,11 @@
     (check! "run after save => 9" (ends-with? r "=> 9") r))
   (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
     (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
+  (let [d (:data (tool! srv "jonquil_eval" {"code" "(println \"hi\") (/ 1 0)"} 60000))]
+    (check! "a window eval's error comes as structured content"
+            (and (= "error" (get d "status")) (string? (get-in d ["error" "message"]))
+                 (str/includes? (str (get d "output")) "hi"))
+            d))
   (let [r (tool! srv "jonquil_console" {"since" 0} 30000)]
     (check! "console since 0 starts with mark and has the banner"
             (and (string? (:text r))
