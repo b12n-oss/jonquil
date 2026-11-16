@@ -420,5 +420,27 @@
     (is (nil? (settings/save-settings! path {:layout {:left [] :right [:file-tree] :bottom [:repl]}})))
     (let [text (slurp path)]
       (is (str/includes? text ";; where my parts go") "the comment above the key stays")
-      (is (not (str/includes? text ";; inside")) "a comment inside the replaced value goes, as the guide says")
+      (is (str/includes? text ";; inside") "a comment beside a list in :layout stays too")
       (is (= {:left [] :right [:file-tree] :bottom [:repl]} (:layout (edn/read-string text)))))))
+
+(deftest a-map-value-is-edited-key-by-key-test
+  (testing "a Move to changes only the place lists that change, so comments inside :layout stay"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:layout {:left  [:file-tree] ;; the tree\n          ;; under the editor\n          :bottom [:repl :terminal]}}\n")
+      (is (nil? (settings/save-settings! path {:layout {:left [:file-tree] :right [:terminal] :bottom [:repl]}})))
+      (let [text (slurp path)]
+        (is (str/includes? text ";; the tree"))
+        (is (str/includes? text ";; under the editor"))
+        (is (= {:left [:file-tree] :right [:terminal] :bottom [:repl]} (:layout (edn/read-string text)))))))
+  (testing "a key the new map leaves out goes"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:file-tree {:visible? true ;; shown\n             :width 240 :old 1}}\n")
+      (is (nil? (settings/save-settings! path {:file-tree {:visible? true :width 300}})))
+      (let [text (slurp path)]
+        (is (str/includes? text ";; shown"))
+        (is (= {:visible? true :width 300} (:file-tree (edn/read-string text)))))))
+  (testing "a map replacing something that isn't a map is written whole"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:layout :oops}\n")
+      (is (nil? (settings/save-settings! path {:layout {:right [:repl]}})))
+      (is (= {:right [:repl]} (:layout (edn/read-string (slurp path))))))))
