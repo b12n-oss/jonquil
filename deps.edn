@@ -7,7 +7,15 @@
         ;; The terminal in the window's bottom area (jonquil.gtk.parts.terminal).
         ;; Anchan loads VTE only when a terminal is first shown.
         io.github.b12n-oss/anchan {:git/url "https://github.com/b12n-oss/anchan.git"
-                                   :git/sha "f0a7a876774e7e6cd394f063632ad4366800a35e"}}
+                                   :git/sha "f0a7a876774e7e6cd394f063632ad4366800a35e"}
+        ;; Saving settings.edn edits only the keys that change, so the
+        ;; file's comments and layout stay (jonquil.settings/save-settings!).
+        ;; It brings rewrite-clj from Maven.
+        borkdude/rewrite-edn {:git/url "https://github.com/borkdude/rewrite-edn.git"
+                              :git/sha "7acf79a96057f5b835ba5678ac624f82fb8b6178"}}
+ ;; jonquil.settings loads rewrite-edn on the first save, by name, so
+ ;; jolt build's require scan can't see it: bake it in.
+ :jolt/build {:include [borkdude.rewrite-edn]}
  :jolt/native [{:name "glib-2.0" :optional true
                 :darwin ["/opt/homebrew/lib/libglib-2.0.0.dylib" "/usr/local/lib/libglib-2.0.0.dylib" "libglib-2.0.0.dylib"]
                 :linux ["libglib-2.0.so.0" "libglib-2.0.so"]}

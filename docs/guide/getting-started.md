@@ -334,6 +334,12 @@ when that variable is unset, blank, or not an absolute path:
  :remember-session? true}
 ```
 
+You can edit the file by hand and leave comments in it. When Jonquil saves
+a choice, it changes only that key and leaves the rest of the text as you
+wrote it, comments and line breaks included. A comment inside the value
+it replaces does go, though, so a note about your `:layout` is safer on
+the line above it than inside its brackets.
+
 - `:theme`: the theme you last picked with Cmd/Ctrl+Shift+M or the
   palette's Use theme entries, one of `:light`, `:dark`, `:solarized`,
   `:navy`, `:gruvbox-dark`, `:gruvbox-light`, `:dracula`, `:nord`,
@@ -402,8 +408,7 @@ when that variable is unset, blank, or not an absolute path:
   well: type "move" and you'll find entries such as "Move the terminal to
   the right of the editor", for Files, Interactions, the terminal and
   whichever panel is on screen. Each move rewrites `:layout`, so the next
-  window opens the same way. For now Jonquil rewrites the whole settings
-  file when it saves, and any comments you put in it are lost on a move.
+  window opens the same way.
 
   ![Jonquil with Interactions moved to the right of the editor, hello.clj on the left and its output, Hello, Jonquil! and => 3, on the right](../images/layout-move.png)
 
