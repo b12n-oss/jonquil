@@ -14,7 +14,7 @@ everything that shipped before that.
 
 ### Changed
 
-- Saving a setting keeps the comments and hand formatting in `settings.edn`. Jonquil now changes only the key it saves (the theme, the tree's width, a Move to's `:layout` and the rest) and leaves the other text as it was. It used to write the whole file again, which dropped every comment.
+- Saving a setting keeps the comments and hand formatting in `settings.edn`. Jonquil now changes only the key it saves (the theme, the tree's width, a Move to's `:layout` and the rest) and leaves the other text as it was. It used to write the whole file again, which dropped every comment. Inside a map such as `:layout`, only the entries that change are written, so a Move to keeps the comments beside the other place lists.
 
 ## [0.4.3] - 2026-11-16
 

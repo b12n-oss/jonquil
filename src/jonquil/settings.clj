@@ -316,15 +316,38 @@
   [sym]
   (requiring-resolve (symbol "borkdude.rewrite-edn" (name sym))))
 
+(defn- edit-key
+  "node (the parsed settings file, whose map is existing) with key k set to
+  v. A map v over a map already there is edited key by key: only the inner
+  keys that change are set and the ones v leaves out are taken out, so
+  comments beside the rest stay (a Move to changes one or two of
+  :layout's lists). An unchanged v leaves node alone."
+  [node existing k v]
+  (let [old (get existing k)]
+    (cond
+      (= old v) node
+      (and (map? v) (map? old))
+      (let [set-changed (fn [n sk sv]
+                          (if (and (contains? old sk) (= (get old sk) sv))
+                            n
+                            ((rewrite-edn 'assoc-in) n [k sk] sv)))
+            n (reduce-kv set-changed node v)]
+        (reduce (fn [n sk] ((rewrite-edn 'update) n k #((rewrite-edn 'dissoc) % sk)))
+                n
+                (remove #(contains? v %) (keys old))))
+      :else ((rewrite-edn 'assoc) node k v))))
+
 (defn- edited-text
   "content, the settings file's text, with each key of m set to its value
-  through rewrite-edn, so comments, blank lines and the layout of every
-  other key stay as written. nil when content holds no map to edit (blank,
-  or comments only) or the edit doesn't read back as (merge existing m)."
+  through rewrite-edn (edit-key), so comments, blank lines and the layout
+  of everything that doesn't change stay as written. nil when content
+  holds no map to edit (blank, or comments only) or the edit doesn't read
+  back as (merge existing m)."
   [content existing m]
   (when (map? existing)
     (try
-      (let [text (str (reduce-kv (rewrite-edn 'assoc) ((rewrite-edn 'parse-string) content) m))]
+      (let [text (str (reduce-kv (fn [n k v] (edit-key n existing k v))
+                                 ((rewrite-edn 'parse-string) content) m))]
         (when (= (merge existing m) (edn/read-string text)) text))
       (catch Exception _ nil))))
 
