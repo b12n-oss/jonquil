@@ -1,8 +1,9 @@
 (ns jonquil.gtk.parts.terminal
   "The terminals as a window part (the commands and the key are
-  jonquil.parts.terminal/spec). The first time one is shown, the console's
-  place below the editor becomes a notebook: Interactions, then a tab for
-  each terminal, with a + at the end of the strip that opens another. Each
+  jonquil.parts.terminal/spec). Each terminal is a tab in the terminal's
+  place (settings.edn's :layout, below the editor beside Interactions
+  unless it says otherwise), with a + at the end of the strip that opens
+  another. Each
   terminal is a login shell in the active file's project folder, and its
   tab has a close button. Until the first one the window is as it was.
   Colours follow the theme and the text size the editor's
@@ -22,13 +23,14 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.window.places :as win-places]
+            [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.terminal-colors :as terminal-colors]
             [jonquil.terminal-keys :as terminal-keys]
             [jonquil.terminal-open :as terminal-open]
             [jonquil.terminals :as terminals]
             [jonquil.theme :as theme]))
 
-(def CONSOLE-PAGE 0)
 ;; GtkPackType's GTK_PACK_END: the + goes at the end of the tab strip
 (def PACK-END 1)
 ;; the tab's close question: Close Anyway is 0 and Cancel 1, and Cancel is
@@ -117,33 +119,29 @@
     b))
 
 (defn- build!
-  "Turns the console's place into a notebook, once: Interactions first.
-  With VTE the + at the end of the strip opens a terminal (on-new); without
-  it a Terminal tab says why. Answers the part's state: {:notebook :why
-  :terms [] :last nil :term nil}."
-  [{:keys [paned cv]} on-new]
+  "Readies the terminal's place, once: with VTE the + at the end of its
+  strip opens a terminal (on-new); without it a Terminal tab says why.
+  Answers the part's state: {:notebook :why :message :terms [] :last nil
+  :term nil}, :notebook being the place."
+  [{:keys [right]} on-new]
   (let [bundled (bundled-vte (bundle-env/frameworks))
         ;; a release app loads the VTE beside its own GTK and no other: a
         ;; VTE from Homebrew would bring a second GTK into the process
         _ (when bundled (swap! vte/library-paths assoc :darwin [bundled] :linux [bundled]))
         why (unavailable (some? bundled) (anchan/problem vte/backend))
-        scroll (:scroll cv)
-        nb (g/gtk-notebook-new)]
-    ;; the console's scrolled window moves from the paned into the
-    ;; notebook: a reference keeps it alive while it has no parent
-    (g/g-object-ref scroll)
-    (g/gtk-paned-set-end-child paned ffi/null)
-    (g/gtk-notebook-set-show-border nb 0)
-    (g/gtk-notebook-set-scrollable nb 1)
-    (g/gtk-notebook-append-page nb scroll (g/gtk-label-new "Interactions"))
+        nb (win-right-slot/part-place right :terminal)
+        message (when why (message-widget why))]
     (if why
-      (g/gtk-notebook-append-page nb (message-widget why) (g/gtk-label-new "Terminal"))
+      (win-right-slot/add-to-place! right :terminal message "Terminal")
       (let [plus (flat-button "+" "Open another terminal")]
         (on-click! plus on-new)
         (g/gtk-notebook-set-action-widget nb plus PACK-END)))
-    (g/gtk-paned-set-end-child paned nb)
-    (g/g-object-unref scroll)
-    {:notebook nb :why why :terms [] :last nil :term nil}))
+    {:notebook nb :why why :message message :terms [] :last nil :term nil}))
+
+(defn- back-to-repl!
+  "Shows the Interactions tab when the REPL shares the terminal's place."
+  [{:keys [cv]} state]
+  (win-places/show-page! (:notebook @state) (:scroll cv)))
 
 (defn- start-shell!
   "Starts a login shell in the active file's project folder, unless one is
@@ -188,9 +186,12 @@
              (let [focus (g/gtk-root-get-focus win)]
                (some #(= focus (:widget %)) terms)))))
 
-(defn- showing? [state]
-  (boolean (when-let [{:keys [notebook]} @state]
-             (pos? (g/gtk-notebook-get-current-page notebook)))))
+(defn- showing?
+  "True when a terminal's tab, or the tab saying why there is none, is the
+  current page of its place."
+  [state]
+  (boolean (when-let [{:keys [notebook terms message]} @state]
+             (some #(win-places/current? notebook %) (remove nil? (cons message (map :widget terms)))))))
 
 (defn- go-to!
   "Shows terminal number n's tab, starts its shell when it has none, and
@@ -222,7 +223,7 @@
           was-showing? (= n (showing-number state))
           then (terminals/after-close (map :n terms) n)]
       (anchan/dispose! term)
-      (g/gtk-notebook-remove-page notebook (g/gtk-notebook-page-num notebook widget))
+      (win-places/remove! notebook widget)
       (swap! state (fn [m]
                      (let [left (filterv #(not= n (:n %)) (:terms m))]
                        (assoc m :terms left
@@ -235,7 +236,7 @@
           (g/gtk-notebook-set-current-page notebook (g/gtk-notebook-page-num notebook w))
           (swap! state assoc :last then :term t))
         (nil? then)
-        (do (g/gtk-notebook-set-current-page notebook CONSOLE-PAGE)
+        (do (back-to-repl! ctx state)
             (when had-focus? (editor/focus! (:ed (active-tab)))))))))
 
 (defn- close-terminal!
@@ -269,14 +270,14 @@
 (defn- add-terminal!
   "Makes one more terminal with its tab at the end. Answers its number."
   [ctx state]
-  (let [{:keys [notebook terms]} @state
+  (let [{:keys [terms]} @state
         n (terminals/next-number (map :n terms))
         term (anchan/terminal vte/backend)
         widget (anchan/widget term)]
     (apply-theme! ctx term)
     (apply-font! ctx term)
     (connect-clipboard-keys! term)
-    (g/gtk-notebook-append-page notebook widget (tab-label ctx state n))
+    (win-right-slot/add-to-place! (:right ctx) :terminal widget (tab-label ctx state n))
     (swap! state update :terms conj {:n n :term term :widget widget})
     n))
 
@@ -289,8 +290,8 @@
   "With no VTE: shows the Terminal tab that says why, and says it in the
   status line."
   [{:keys [set-status!]} state]
-  (let [{:keys [notebook why]} @state]
-    (g/gtk-notebook-set-current-page notebook 1)
+  (let [{:keys [notebook message why]} @state]
+    (win-places/show-page! notebook message)
     (set-status! (str "; " why))))
 
 (defn- new!
@@ -308,10 +309,10 @@
   tab and the editor."
   [{:keys [active-tab] :as ctx} state]
   (ensure-built! ctx state)
-  (let [{:keys [notebook why terms last]} @state]
+  (let [{:keys [why terms last]} @state]
     (cond
       why (say-why! ctx state)
-      (focused? ctx state) (do (g/gtk-notebook-set-current-page notebook CONSOLE-PAGE)
+      (focused? ctx state) (do (back-to-repl! ctx state)
                                (editor/focus! (:ed (active-tab))))
       :else (if-let [n (terminals/target {:numbers (map :n terms) :showing (showing-number state) :last last})]
               (go-to! ctx state n)

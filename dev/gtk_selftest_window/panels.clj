@@ -165,7 +165,8 @@
   (one timer serves both uses, so the later layout takes it over outright)."
   [ui]
   (go-row :layout-use-twice support/check
-    (let [paned (g/gtk-widget-get-parent (:scroll (:console ui)))
+    (let [;; the editor over the bottom place, h-paned's start child
+          paned (g/gtk-paned-get-start-child (:h-paned ui))
           pos (fn [] (g/gtk-paned-get-position paned))
           near? (fn [a b] (<= (abs (- a b)) 2))
           _ (on-gtk (g/gtk-toggle-button-set-active (:files-btn ui) 0)

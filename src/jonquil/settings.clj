@@ -171,6 +171,19 @@
       {:header (select-keys v [:start :end])}
       :else {:warning (str path "'s :header isn't {:start [command ...] :end [command ...]}, using the usual buttons")})))
 
+(defn- layout-part
+  "{:layout {:left [id ...] :right [id ...] :bottom [id ...]}} with whichever
+  of the three m's :layout holds as a vector of part ids, {} when there's
+  no :layout, and {:warning ..} when it isn't such a map. Which ids are
+  parts the window checks (jonquil.places/plan)."
+  [path m]
+  (let [v (when (map? m) (:layout m))]
+    (cond
+      (nil? v) {}
+      (and (map? v) (every? ids? (vals (select-keys v [:left :right :bottom]))))
+      {:layout (select-keys v [:left :right :bottom])}
+      :else {:warning (str path "'s :layout isn't {:left [part ...] :right [part ...] :bottom [part ...]}, using the usual places")})))
+
 (defn- layouts-part
   "{:layouts {name layout}} keeping the entries with a string name and a
   map layout (LM8's named layouts), {} when there are none, and a
@@ -206,7 +219,7 @@
   (map #(% path m)
        [theme-part dialect-part file-tree-part reopen-tabs-part remember-session-part
         mcp-listen-part plugins-part parinfer-part key-set-part terminal-part layouts-part doc-bookmarks-part
-        header-part]))
+        header-part layout-part]))
 
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
@@ -215,7 +228,7 @@
   :parinfer when it holds one of parinfer-modes, :key-set when it holds a
   key set's id, :terminal when it names a terminal, :layouts when it holds
   named layouts, :doc-bookmarks when it holds doc pages, :header when it
-  names the header bar's buttons, and
+  names the header bar's buttons, :layout when it says where the parts go, and
   :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."
   [path]

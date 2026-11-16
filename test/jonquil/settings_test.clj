@@ -329,6 +329,19 @@
         (is (nil? (:header s)) (pr-str bad))
         (is (re-find #":header" (:warning s)) (pr-str bad))))))
 
+(deftest layout-test
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path (pr-str {:layout {:right [:repl] :bottom [:terminal :debugger] :top [:x]}}))
+    (is (= {:right [:repl] :bottom [:terminal :debugger]} (:layout (settings/load-settings path)))
+        "the three places are kept and anything else is dropped")
+    (spit path (pr-str {:layout {:left []}}))
+    (is (= {:left []} (:layout (settings/load-settings path))) "an empty place is kept")
+    (doseq [bad [[:repl] {:left ["repl"]} {:right '(:repl)} :nope]]
+      (spit path (pr-str {:layout bad}))
+      (let [s (settings/load-settings path)]
+        (is (nil? (:layout s)) (pr-str bad))
+        (is (re-find #":layout" (:warning s)) (pr-str bad))))))
+
 (deftest read-doc-bookmarks-test
   (let [path (str (temp-dir) "/settings.edn")
         read #(settings/read-doc-bookmarks path)]

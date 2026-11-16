@@ -5,6 +5,7 @@
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.source-pane :as source-pane]
+            [jonquil.gtk.window.places :as win-places]
             [jonquil.gtk.window.plugin-agent :as win-plugin-agent]
             [jonquil.gtk.window.right-slot :as win-right-slot]))
 
@@ -15,15 +16,18 @@
                                         :history-root ::h :part-panels* (atom {:trace {:root ::t}})}))))
 
 (deftest show-and-hide-right-panel-test
-  (let [vis (atom {::slot 0 ::i 0 ::s 0 ::h 0}) pos (atom []) cancelled (atom [])
+  (let [vis (atom {::i 0 ::s 0 ::h 0}) current (atom {}) cancelled (atom [])
         shown* @#'win-plugin-agent/plugin-history-shown old @shown*
-        right {:win ::win :h-paned ::hp :slot ::slot :inspector-root ::i :source-root ::s
+        ;; the source panel is at the bottom, the others on the right
+        right {:win ::win :h-paned ::hp :places {:left ::left :right ::right :bottom ::bottom}
+               :place-of* (atom {:source :bottom})
+               :inspector-root ::i :source-root ::s
                :history-root ::h :source-pane {:scroll-cancelled? ::flag} :recent-panels (atom [])}]
     (try
       (with-redefs [g/gtk-widget-get-visible (fn [w] (get @vis w 0))
                     g/gtk-widget-set-visible (fn [w v] (swap! vis assoc w v))
-                    g/gtk-widget-get-width (fn [_] 1000)
-                    g/gtk-paned-set-position (fn [_ p] (swap! pos conj p))
+                    win-places/show-page! (fn [nb w] (swap! current assoc nb w))
+                    win-places/current? (fn [nb w] (and (= 1 (get @vis w)) (= w (get @current nb))))
                     source-pane/cancel-scroll-settle! (fn [f] (swap! cancelled conj f))]
         (reset! shown* "demo")
         (#'win-right-slot/show-right-panel! right :history)
@@ -31,14 +35,25 @@
         (is (= :history (#'win-right-slot/showing-panel right)))
         (#'win-right-slot/show-right-panel! right :source)
         (is (nil? @shown*))
-        (is (= {::slot 1 ::i 0 ::s 1 ::h 0} @vis))
-        (is (= [580] @pos))
-        (is (= [:source :history] @(:recent-panels right)))
+        (is (= {::i 0 ::s 1 ::h 1} @vis) "the source panel's place is another, so History stays")
+        (#'win-right-slot/show-right-panel! right :inspector)
+        (is (= {::i 1 ::s 1 ::h 0} @vis) "one panel per place: the inspector takes History's place")
+        (is (= {::right ::i ::bottom ::s} @current))
+        (is (= [:inspector :source :history] @(:recent-panels right)))
+        (is (= :inspector (#'win-right-slot/showing-panel right)) "the most recently shown first")
+        (#'win-right-slot/hide-right-panel! right :inspector)
+        (is (= :source (#'win-right-slot/showing-panel right)))
         (#'win-right-slot/hide-right-panel! right :source)
         (is (= [::flag] @cancelled))
-        (is (= {::slot 0 ::i 0 ::s 0 ::h 0} @vis))
+        (is (= {::i 0 ::s 0 ::h 0} @vis))
         (is (nil? (#'win-right-slot/showing-panel right))))
       (finally (reset! shown* old)))))
+
+(deftest place-name-test
+  (is (= :left (win-right-slot/place-name {} :file-tree)) "the usual place before the parts are placed")
+  (is (= :bottom (win-right-slot/place-name {} :repl)))
+  (is (= :right (win-right-slot/place-name {} :trace)))
+  (is (= :right (win-right-slot/place-name {:place-of* (atom {:file-tree :right})} :file-tree))))
 
 (deftest build-panels-makes-the-panels-test
   (let [log (atom [])

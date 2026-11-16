@@ -262,6 +262,7 @@
 (ffi/defcfn gtk-paned-set-start-child "gtk_paned_set_start_child" [:pointer :pointer] :void)
 (ffi/defcfn gtk-paned-set-end-child "gtk_paned_set_end_child" [:pointer :pointer] :void)
 (ffi/defcfn gtk-paned-set-position "gtk_paned_set_position" [:pointer :int] :void)
+(ffi/defcfn gtk-paned-get-start-child "gtk_paned_get_start_child" [:pointer] :pointer)
 (ffi/defcfn gtk-button-new-with-label "gtk_button_new_with_label" [:string] :pointer)
 (ffi/defcfn gtk-button-set-label "gtk_button_set_label" [:pointer :string] :void)
 ;; gtkbutton.h gtk_button_get_label (GtkButton*) -> const char* (borrowed)
@@ -817,6 +818,9 @@
 ;; focus grabbed on the query entry and on the replacement entry, false
 ;; with focus grabbed on the editor and on the console.
 (ffi/defcfn gtk-widget-is-ancestor "gtk_widget_is_ancestor" [:pointer :pointer] :int)
+;; moves the focus into a widget's first focusable child (GtkDirectionType)
+(ffi/defcfn gtk-widget-child-focus "gtk_widget_child_focus" [:pointer :int] :int)
+(def DIR-TAB-FORWARD 0)
 (ffi/defcfn gtk-widget-has-focus "gtk_widget_has_focus" [:pointer] :int)
 (ffi/defcfn gtk-widget-is-focus "gtk_widget_is_focus" [:pointer] :int)
 (ffi/defcfn gtk-window-is-active "gtk_window_is_active" [:pointer] :int)
@@ -1379,8 +1383,12 @@
 (ffi/defcfn gtk-notebook-set-tab-label "gtk_notebook_set_tab_label" [:pointer :pointer :pointer] :void)
 ;; void gtk_notebook_set_action_widget(GtkNotebook*, GtkWidget*, GtkPackType)
 (ffi/defcfn gtk-notebook-set-action-widget "gtk_notebook_set_action_widget" [:pointer :pointer :int] :void)
+(ffi/defcfn gtk-notebook-get-action-widget "gtk_notebook_get_action_widget" [:pointer :int] :pointer)
 ;; gtknotebook.h:205 void gtk_notebook_reorder_child (GtkNotebook*, GtkWidget *child, int position)
 (ffi/defcfn gtk-notebook-reorder-child "gtk_notebook_reorder_child" [:pointer :pointer :int] :void)
+;; a page's place (jonquil.gtk.window.places): its nearest notebook ancestor
+(ffi/defcfn gtk-notebook-get-type "gtk_notebook_get_type" [] :size_t)
+(ffi/defcfn gtk-widget-get-ancestor "gtk_widget_get_ancestor" [:pointer :size_t] :pointer)
 ;; gtkbutton.h:88 void gtk_button_set_has_frame (GtkButton*, gboolean)
 (ffi/defcfn gtk-button-set-has-frame "gtk_button_set_has_frame" [:pointer :int] :void)
 ;; gtkwidget.h:395 void gtk_widget_set_focus_on_click (GtkWidget*, gboolean)

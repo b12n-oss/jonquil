@@ -107,6 +107,7 @@
     jonquil.terminal-open
     jonquil.terminals
     jonquil.header
+    jonquil.places
     jonquil.key-seq
     jonquil.slow-events
     jonquil.user-keys
@@ -199,6 +200,7 @@
     jonquil.gtk.window.plugin-agent
     jonquil.gtk.window.session
     jonquil.gtk.window.files
+    jonquil.gtk.window.places
     jonquil.gtk.window.right-slot
     jonquil.gtk.window.theme
     jonquil.gtk.window.keys

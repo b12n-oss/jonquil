@@ -9,6 +9,7 @@ everything that shipped before that.
 ### Added
 
 - The header bar's buttons can be chosen in `settings.edn`: `:header {:start [...] :end [...]}` lists command ids, left to right at each end. A side left out keeps its usual buttons. (#33)
+- The window's parts can be placed in `settings.edn`: `:layout {:left [...] :right [...] :bottom [...]}` puts the file tree, the REPL, the terminals and the right-hand panels (the debugger, the inspector, Trace and the rest) on any side of the editor. A part left out stays where it usually is. (#33)
 
 ## [0.4.3] - 2026-11-16
 

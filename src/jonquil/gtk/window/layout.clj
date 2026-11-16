@@ -5,12 +5,15 @@
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.files :as win-files]
+            [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.gtk.window.status-bar :as win-status-bar]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.gtk.console-view :as cview]
             [jonquil.header :as header]
             [jonquil.menus :as menus]
+            [jonquil.palette :as palette]
+            [jonquil.places :as places]
             [jonquil.settings :as settings]))
 
 (defn- mac? [] (= "Mac OS X" (System/getProperty "os.name")))
@@ -136,8 +139,9 @@
     plan))
 
 (defn- pack-editor!
-  "place!'s second step: the tabs' notebook over the console in the vertical paned."
-  [{:keys [paned notebook cv]}]
+  "place!'s second step: the tabs' notebook over the bottom place in the
+  vertical paned."
+  [{:keys [paned notebook places]}]
   (g/gtk-widget-set-vexpand paned 1)
   ;; A notebook of tabs is the paned's start child; each page is a tab's
   ;; own find bar over its editor (jonquil.gtk.tab). The strip stays
@@ -147,48 +151,68 @@
   (g/gtk-notebook-set-scrollable notebook 1)
   (g/gtk-widget-set-vexpand notebook 1)
   (g/gtk-paned-set-start-child paned notebook)
-  (g/gtk-paned-set-end-child paned (:scroll cv))
+  (g/gtk-paned-set-end-child paned (:bottom places))
   (g/gtk-paned-set-position paned 430))
 
-(defn- part-roots
-  "The root widgets of the parts' panels in part-panels*, in id order."
-  [part-panels*]
-  (map (fn [[_ p]] (:root p)) @part-panels*))
+(def ^:private core-panels
+  ;; the right-hand panels the window makes itself, in order; the parts'
+  ;; panels follow
+  [:inspector :source :review :plugins :history])
 
-(defn- append-expanding!
-  "Appends root to slot, expanding vertically."
-  [slot root]
-  (g/gtk-widget-set-vexpand root 1)
-  (g/gtk-box-append slot root))
+(def ^:private panel-labels
+  ;; a panel's tab, when its place shows more than one page
+  (merge palette/PANEL-LABELS {:review "Review" :history "History"}))
 
-(defn- pack-right-slot!
-  "place!'s third step: the vertical paned beside the right-hand slot in h-paned, each panel in the slot, and the panels and the slot hidden until one opens."
-  [{:keys [h-paned paned pane sp slot rp lp hp part-panels*]}]
-  ;; The editor/console paned is h-paned's start child; the
-  ;; inspector panel is its end child, hidden until the first open
-  ;; (show-inspector-panel!), and kept at a fixed width when the window
-  ;; resizes (never grows/shrinks with it, never squeezed below its own
-  ;; WIDTH-REQUEST).
+(defn places-plan
+  "Where the parts go for the settings file at path (jonquil.places/plan
+  over the window's panels, the core ones then the parts' in id order)."
+  [path part-ids]
+  (places/plan (:layout (settings/load-settings path)) (concat core-panels part-ids)))
+
+(defn- part-page
+  "The widget and tab label for the part id, or nil for the terminal, whose
+  part adds its own pages when a terminal first shows."
+  [{:keys [tree-pane cv right]} id]
+  (case id
+    :file-tree [(:root tree-pane) "Files"]
+    :repl [(:scroll cv) "Interactions"]
+    :terminal nil
+    (let [root (get (win-right-slot/right-roots right) id)]
+      ;; a panel stays hidden until it opens
+      (g/gtk-widget-set-vexpand root 1)
+      (g/gtk-widget-set-visible root 0)
+      [root (get panel-labels id (name id))])))
+
+(defn- pack-places!
+  "place!'s third step: the vertical paned beside the right-hand place in
+  h-paned, then every part in its place from settings.edn's :layout
+  (places-plan). The right-hand place keeps a fixed width when the window
+  resizes (never grows or shrinks with it, never squeezed below its
+  children's requests) and claims about the panel's width when it shows
+  (win-right-slot/size-right-place!). Skipped ids are said in the console.
+  Answers the plan."
+  [{:keys [h-paned paned places right part-panels* settings-path* cv] :as m}]
   (g/gtk-widget-set-vexpand h-paned 1)
   (g/gtk-paned-set-start-child h-paned paned)
-  (g/gtk-widget-set-vexpand (:root pane) 1)
-  (g/gtk-widget-set-vexpand (:root sp) 1)
-  (g/gtk-box-append slot (:root pane))
-  (g/gtk-box-append slot (:root sp))
-  (doseq [root (concat (map :root [rp lp hp]) (part-roots part-panels*))]
-    (append-expanding! slot root))
-  (g/gtk-paned-set-end-child h-paned slot)
+  (g/gtk-paned-set-end-child h-paned (:right places))
   (g/gtk-paned-set-resize-end-child h-paned 0)
   (g/gtk-paned-set-shrink-end-child h-paned 0)
-  (doseq [w (concat (map :root [pane sp rp lp]) (part-roots part-panels*) [(:root hp) slot])]
-    (g/gtk-widget-set-visible w 0)))
+  (let [plan (places-plan @settings-path* (keys @part-panels*))]
+    (reset! (:place-of* right) (:place-of plan))
+    (doseq [place places/places
+            id (get plan place)
+            :let [[w label] (part-page m id)]
+            :when w]
+      (win-right-slot/add-to-place! right id w label))
+    (when-let [text (places/skipped-text (:skipped plan))] (cview/append! cv :system text))
+    plan))
 
 (defn- pack-window!
-  "place!'s last step: the toolbar, the tree's paned and the status bar in the window's column, which becomes the window's child at its default size."
-  [{:keys [vbox toolbar title-label subtitle-label tree-paned tree-pane h-paned win status-label hint-label pending-label unread-label dialect-label parinfer-label line-col-label update-parinfer-label!]}]
+  "place!'s last step: the toolbar, the left-hand place's paned and the status bar in the window's column, which becomes the window's child at its default size."
+  [{:keys [vbox toolbar title-label subtitle-label tree-paned places h-paned win status-label hint-label pending-label unread-label dialect-label parinfer-label line-col-label update-parinfer-label!]}]
   (g/gtk-window-set-titlebar win toolbar)
   (win-files/register-title-labels! win title-label subtitle-label)
-  (g/gtk-paned-set-start-child tree-paned (:root tree-pane))
+  (g/gtk-paned-set-start-child tree-paned (:left places))
   (g/gtk-paned-set-end-child tree-paned h-paned)
   (g/gtk-paned-set-resize-start-child tree-paned 0)
   (g/gtk-paned-set-shrink-start-child tree-paned 0)
@@ -202,14 +226,14 @@
 
 (defn place!
   "activate!'s widget placement, in activate!'s order: the toolbar, the
-  editor and console paned, the right-hand slot, then the window's
-  column with the status bar. m holds the widgets they place, under
+  editor's paned over the bottom place, every part in its place
+  (settings.edn's :layout), then the window's column with the status bar. m holds the widgets they place, under
   activate!'s local names; each step reads its own keys. Called once per
   window; activate! reads nothing it returns."
   [m]
   (pack-toolbar! m)
   (pack-editor! m)
-  (pack-right-slot! m)
+  (pack-places! m)
   (pack-window! m))
 
 (defn- connect-clicked!

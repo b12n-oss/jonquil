@@ -8,6 +8,7 @@
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.window.keys :as win-keys]
+            [jonquil.gtk.window.places :as win-places]
             [jonquil.gtk.window.status :as win-status]
             [jonquil.plugin-registry :as plugin-registry]))
 
@@ -18,13 +19,16 @@
                   cview/clear-last-output! (fn [cv] (swap! log conj [:clear-last cv]))
                   cview/focus! (fn [cv] (swap! log conj [:cv-focus cv]))
                   editor/focus! (fn [ed] (swap! log conj [:ed-focus ed]))
-                  g/gtk-root-get-focus (fn [_] @focus)]
+                  g/gtk-root-get-focus (fn [_] @focus)
+                  win-places/reveal! (fn [w] (swap! log conj [:reveal w]))]
       (#'win-keys/do-clear-console! ::cv)
       (#'win-keys/do-clear-last-output! ::cv)
-      (#'win-keys/do-toggle-focus! ::win {:view ::view} ::cv)
+      (#'win-keys/do-toggle-focus! ::win {:view ::view} {:scroll ::scroll})
       (reset! focus ::other)
-      (#'win-keys/do-toggle-focus! ::win {:view ::view} ::cv)
-      (is (= [[:clear ::cv] [:clear-last ::cv] [:cv-focus ::cv] [:ed-focus {:view ::view}]] @log)))))
+      (#'win-keys/do-toggle-focus! ::win {:view ::view} {:scroll ::scroll})
+      (is (= [[:clear ::cv] [:clear-last ::cv] [:reveal ::scroll] [:cv-focus {:scroll ::scroll}]
+              [:ed-focus {:view ::view}]] @log)
+          "the REPL comes to the front of its place before it takes the focus"))))
 
 (deftest window-key-ctx-adds-the-reads-test
   (let [log (atom [])

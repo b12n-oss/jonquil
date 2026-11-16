@@ -321,6 +321,10 @@
    ;; panel keys' and Switch to panel's fn
     :recent-panels* (fn [] (:recent-panels right))
     :panel-focus!* panel-focus-fn
+   ;; the three places around the editor and where each part went
+   ;; (settings.edn's :layout)
+    :places (:places right)
+    :place-of* (fn [] @(:place-of* right))
    ;; the inspector's own Close
     :close-inspector!* on-inspector-close
    ;; The plugin history

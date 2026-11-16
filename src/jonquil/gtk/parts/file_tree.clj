@@ -11,7 +11,22 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
+            [jonquil.gtk.window.right-slot :as win-right-slot]
             [jonquil.settings :as settings]))
+
+(defn- left?
+  "True when the tree is in the left-hand place, where its width is the
+  left split's position (settings.edn's :layout can put it elsewhere)."
+  [{:keys [right]}]
+  (= :left (win-right-slot/place-name right :file-tree)))
+
+(defn- width
+  "The tree's width to save: the left split's position with the tree on
+  the left, else the width saved before (240 when none was)."
+  [{:keys [settings-path* tree-paned] :as wctx}]
+  (if (left? wctx)
+    (g/gtk-paned-get-position tree-paned)
+    (or (:width (:file-tree (settings/load-settings @settings-path*))) 240)))
 
 (defn- tree-keys
   "The Escape keys' context: whether the tree has focus or its menu is open,
@@ -32,10 +47,10 @@
   "The files button's toggled handler, the one place that shows, hides and
   saves the tree. applying-start? is true while the starting visibility is
   applied."
-  [{:keys [win cv active-tab settings-path* tree-pane tree-paned]} applying-start?]
+  [{:keys [win cv active-tab settings-path* tree-pane] :as wctx} applying-start?]
   (fn [btn]
     (let [show? (pos? (g/gtk-toggle-button-get-active btn))
-          width (g/gtk-paned-get-position tree-paned)
+          width (width wctx)
           had-focus? (file-tree-pane/focused? tree-pane win)]
       (g/gtk-widget-set-visible (:root tree-pane) (if show? 1 0))
       ;; Hiding the focused tree leaves focus nowhere;
@@ -53,7 +68,7 @@
   directory launch), and the toggle's handler."
   [{:keys [tree-pane tree-paned files-btn contain-click] :as wctx} applying-start?]
   (fn [{:keys [tree-settings dir]}]
-    (g/gtk-paned-set-position tree-paned (or (:width tree-settings) 240))
+    (when (left? wctx) (g/gtk-paned-set-position tree-paned (or (:width tree-settings) 240)))
     (g/g-signal-connect-data files-btn "toggled"
                              (callable (contain-click "files" (toggled-handler wctx applying-start?))
                                        [:pointer :pointer] :void)
@@ -66,12 +81,12 @@
 
 (defn- save-width!
   "The tree's width, when it's showing. Answers the save's error or nil."
-  [{:keys [settings-path* tree-pane tree-paned]}]
+  [{:keys [settings-path* tree-pane] :as wctx}]
   (when (pos? (g/gtk-widget-get-visible (:root tree-pane)))
     (settings/save-settings!
      @settings-path*
      {:file-tree {:visible? true
-                  :width (g/gtk-paned-get-position tree-paned)}})))
+                  :width (width wctx)}})))
 
 (defn- on-quit
   "The quit hook: saves the width and says on stderr when that fails. Never
