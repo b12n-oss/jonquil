@@ -342,7 +342,7 @@
 ;; is, so tests defined only in the session run. JVM Clojure throws there.
 (deftest test-session-only-namespace-runs-as-it-is
   ((:call (:t @test-env)) "jonquil_eval"
-   {"code" "(ns demo.only-here (:require [clojure.test :refer [deftest is]])) (deftest t (is true)) (in-ns 'user)"})
+                          {"code" "(ns demo.only-here (:require [clojure.test :refer [deftest is]])) (deftest t (is true)) (in-ns 'user)"})
   (let [r (run-tests {"ns" "demo.only-here"})]
     (is (= "ok" (get-in r [:data "status"])))
     (is (= 1 (get-in r [:data "counts" "tests"])))))

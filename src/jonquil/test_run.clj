@@ -63,37 +63,37 @@
 (def ^:private show-form
   (qualified
    '(fn [v]
-     (let [s (binding [*print-length* 100 *print-level* 10]
-               (if (instance? Throwable v)
-                 (str (.getName (class v)) ": " (ex-message v))
-                 (pr-str v)))]
-       (if (> (count s) MAX-CHARS) (str (subs s 0 MAX-CHARS) "...") s)))))
+      (let [s (binding [*print-length* 100 *print-level* 10]
+                (if (instance? Throwable v)
+                  (str (.getName (class v)) ": " (ex-message v))
+                  (pr-str v)))]
+        (if (> (count s) MAX-CHARS) (str (subs s 0 MAX-CHARS) "...") s)))))
 
 (def ^:private collector-form
   (qualified
    '(fn [state tv show]
-     (fn [m]
-       (case (:type m)
-         :begin-test-var (swap! state update :tests inc)
-         :pass (swap! state update :pass inc)
-         (:fail :error)
-         (let [v (first (deref (tv "*testing-vars*")))
-               row {:test (when v (name (:name (meta v))))
-                    :kind (:type m)
-                    :file (when v (:file (meta v)))
-                    :event-file (:file m)
-                    :line (:line m)
-                    :var-line (when v (:line (meta v)))
-                    :context (vec (reverse (deref (tv "*testing-contexts*"))))
-                    :message (when (some? (:message m)) (str (:message m)))
-                    :expected (show (:expected m))
-                    :actual (show (:actual m))}]
-           (swap! state (fn [s]
-                          (let [s (update s (:type m) inc)]
-                            (if (< (count (:failures s)) MAX-FAILURES)
-                              (update s :failures conj row)
-                              (update s :failures-dropped inc))))))
-         nil)))))
+      (fn [m]
+        (case (:type m)
+          :begin-test-var (swap! state update :tests inc)
+          :pass (swap! state update :pass inc)
+          (:fail :error)
+          (let [v (first (deref (tv "*testing-vars*")))
+                row {:test (when v (name (:name (meta v))))
+                     :kind (:type m)
+                     :file (when v (:file (meta v)))
+                     :event-file (:file m)
+                     :line (:line m)
+                     :var-line (when v (:line (meta v)))
+                     :context (vec (reverse (deref (tv "*testing-contexts*"))))
+                     :message (when (some? (:message m)) (str (:message m)))
+                     :expected (show (:expected m))
+                     :actual (show (:actual m))}]
+            (swap! state (fn [s]
+                           (let [s (update s (:type m) inc)]
+                             (if (< (count (:failures s)) MAX-FAILURES)
+                               (update s :failures conj row)
+                               (update s :failures-dropped inc))))))
+          nil)))))
 
 ;; A reload redefines what the file holds and removes nothing, so a test
 ;; that was renamed or deleted would stay in the namespace and keep running.
@@ -129,24 +129,24 @@
 (def ^:private run-form
   (qualified
    '(do
-     (require 'clojure.test)
-     (let [tv (fn [n] (resolve (symbol "clojure.test" n)))
-           state (atom {:tests 0 :pass 0 :fail 0 :error 0 :failures [] :failures-dropped 0})
-           collect (COLLECTOR state tv SHOW)
-           ns-sym 'NS-SYM
-           _ (RELOAD ns-sym)
-           vars (if TEST-NAME
-                  (let [v (ns-resolve ns-sym (symbol TEST-NAME))]
-                    (when (and v (:test (meta v))) [v]))
-                  (filter (fn [v] (:test (meta v))) (vals (ns-interns ns-sym))))
-           outcome (cond (nil? vars) :no-such-test (empty? vars) :no-tests :else :ran)]
-       (when (= outcome :ran)
-         (with-bindings {(tv "report") collect}
-           (if TEST-NAME
-             ((deref (tv "test-vars")) vars)
-             ((deref (tv "test-ns")) ns-sym))))
-       (binding [*print-length* nil *print-level* nil]
-         (pr-str (assoc (deref state) :outcome outcome)))))))
+      (require 'clojure.test)
+      (let [tv (fn [n] (resolve (symbol "clojure.test" n)))
+            state (atom {:tests 0 :pass 0 :fail 0 :error 0 :failures [] :failures-dropped 0})
+            collect (COLLECTOR state tv SHOW)
+            ns-sym 'NS-SYM
+            _ (RELOAD ns-sym)
+            vars (if TEST-NAME
+                   (let [v (ns-resolve ns-sym (symbol TEST-NAME))]
+                     (when (and v (:test (meta v))) [v]))
+                   (filter (fn [v] (:test (meta v))) (vals (ns-interns ns-sym))))
+            outcome (cond (nil? vars) :no-such-test (empty? vars) :no-tests :else :ran)]
+        (when (= outcome :ran)
+          (with-bindings {(tv "report") collect}
+            (if TEST-NAME
+              ((deref (tv "test-vars")) vars)
+              ((deref (tv "test-ns")) ns-sym))))
+        (binding [*print-length* nil *print-level* nil]
+          (pr-str (assoc (deref state) :outcome outcome)))))))
 
 (defn snippet
   "Code that runs namespace :ns (a string), or only its test :test, and
