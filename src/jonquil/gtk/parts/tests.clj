@@ -41,6 +41,25 @@
     (when warning (cview/append! cv :system warning))
     (nil? warning)))
 
+(defn- agent-eval!
+  "The MCP server's test evaluation: code in the window's runtime with no
+  console entry, what it prints shown on the console as output is. notify
+  hears exactly one map, {:busy warning} or {:done {:result r :output s}},
+  and the return value reads the output so far, as win-run/mcp-eval! does."
+  [{:keys [cv ev*]} code notify]
+  (let [e @ev*
+        out (atom [])
+        warning (ev/eval! e code
+                          (assoc (quiet-opts e)
+                                 :on-output (fn [kind s]
+                                              (cview/append! cv kind s)
+                                              (swap! out conj s))
+                                 :on-wait-input (fn [waiting?] (when waiting? (ev/send-eof! e)))
+                                 :on-complete (fn [r]
+                                                (notify {:done {:result r :output (apply str @out)}}))))]
+    (when warning (notify {:busy warning}))
+    (fn [] (apply str @out))))
+
 (defn report-run!
   "Shows a test run's report (jonquil.test-run/report): its lines on the
   console, after a line naming who, the agent that ran it, when given; the
@@ -123,9 +142,10 @@
 
 (defn- install
   "The tests part for one window. Answers :test-run-file-fn and
-  :test-run-caret-fn, and the ui entry :test-report!, (fn [report who]),
-  which shows a run made elsewhere (the MCP server's). Reads the Locations
-  part's exports :show-failures! and :clear-failures!."
+  :test-run-caret-fn, and two ui entries for the MCP server: :mcp-test!,
+  (fn [code notify]), which evaluates its snippet with no console entry,
+  and :test-report!, (fn [report who]), which shows its run. Reads the
+  Locations part's exports :show-failures! and :clear-failures!."
   [{:keys [active-tab cv ev* sel* status-label set-status! tree-pane show-failures! clear-failures!]}]
   (let [project-root (fn []
                        (or (:root @(:state tree-pane))
@@ -135,7 +155,8 @@
              :show-failures! show-failures! :clear-failures! clear-failures!}]
     {:fns {:test-run-file-fn (fn [] (run-tests! ctx false))
            :test-run-caret-fn (fn [] (run-tests! ctx true))}
-     :ui {:test-report! (fn [report who] (report-run! ctx report who))}}))
+     :ui {:mcp-test! (fn [code notify] (agent-eval! ctx code notify))
+          :test-report! (fn [report who] (report-run! ctx report who))}}))
 
 (def part
   "The tests part's install fn, (part wctx) -> contribution."

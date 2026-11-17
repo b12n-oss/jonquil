@@ -1,5 +1,5 @@
 (ns jonquil.mcp.window
-  "The twenty MCP tools over a live Jonquil window, four of them over its
+  "The twenty-one MCP tools over a live Jonquil window, four of them over its
   plugins folder (through jonquil.plugin-mcp) and one saving a change set
   an agent proposes (jonquil.change-sets).
 
@@ -14,6 +14,7 @@
   notify callback runs on the eval worker and only delivers a promise."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jonquil.clj :as clj]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.editor :as editor]
@@ -24,7 +25,8 @@
             [jonquil.mcp.result :as result]
             [jonquil.mcp.tools :as tools]
             [jonquil.plugin-mcp :as plugin-mcp]
-            [jonquil.tabs :as tabs]))
+            [jonquil.tabs :as tabs]
+            [jonquil.test-run :as test-run]))
 
 (def ^:private gui-deadline-ms 5000)
 (def ^:private default-grace-ms 5000)
@@ -135,6 +137,14 @@
                    "properties" {"id" (prop "string" plugin-id-doc)
                                  "n" (prop "integer" "The proposal's version number.")}
                    "required" ["id"]}}
+   {"name" "jonquil_test"
+    "description" "Run a namespace's clojure.test tests, or one test, in the window's runtime. Reloads the test namespace from disk first. Answers counts and each failure's test, file, line, expected and actual; the window shows the summary on its console and the failures in its Locations list. Jolt and JVM Clojure."
+    "inputSchema" {"type" "object"
+                   "properties" {"ns" (prop "string" "The test namespace. Default: the active tab's.")
+                                 "test" (prop "string" "One test's name in that namespace. Default: every test.")
+                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
+                                 "max_output_chars" tools/max-output-prop}
+                   "required" []}}
    {"name" "jonquil_change_set_propose"
     "description" "Propose a change set: a named list of top-level forms, each with the file it belongs to. It is saved marked as yours and listed under Change Sets in the window, where the user reviews each form as a diff against the file and applies or reverts the set. No tool applies one. A name that is taken is refused."
     "inputSchema" {"type" "object"
@@ -487,6 +497,33 @@
            :error? false}))
       {:text "Refused: this window keeps no change sets." :error? true})))
 
+(defn- test-namespace
+  "The namespace a jonquil_test call names: its ns, else the active tab's.
+  Throws when there is neither."
+  [{:keys [ui turn]} args]
+  (let [given (get args "ns")]
+    (or (when (and (string? given) (not (str/blank? given))) given)
+        (turn (fn [] (some-> ((:active-tab* ui)) :ed editor/editor-text clj/buffer-ns)))
+        (throw (ex-info "Give ns, or select the test file's tab: the active tab has no ns form." {})))))
+
+(defn- tool-test
+  "Runs the tests without a console entry (the ui's :mcp-test!), answers
+  as the headless tool does, and shows the run in the window as a person's
+  run is shown (the ui's :test-report!)."
+  [{:keys [ui dir await! turn client-fn] :as ctx} args]
+  (let [sel ((:selection* ui))]
+    (if-not (test-run/supported? (:id (:profile sel)))
+      (tools/unsupported-test-result sel)
+      (let [ns-name (test-namespace ctx args)
+            test (get args "test")
+            code (test-run/snippet {:ns ns-name :test test})
+            r (await! args (fn [notify] ((:mcp-test! ui) code notify)))
+            files (delay (test-run/project-files (or (:project-dir sel) dir)))
+            answer (tools/test-result r {:ns-name ns-name :test test :files files})]
+        (when-let [report (:report answer)]
+          (turn (fn [] ((:test-report! ui) report (or (client-fn) "An agent")))))
+        (dissoc answer :report)))))
+
 (defn- window-handlers
   "Tool name -> (fn [args]) over ctx."
   [ctx]
@@ -510,6 +547,7 @@
      "jonquil_plugin_read" (h tool-plugin-read)
      "jonquil_plugin_propose" (h tool-plugin-propose)
      "jonquil_plugin_status" (h tool-plugin-status)
+     "jonquil_test" (h tool-test)
      "jonquil_change_set_propose" (h tool-change-set-propose)}))
 
 (defn make-window-tools

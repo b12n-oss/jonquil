@@ -303,11 +303,13 @@
                (dissoc "value")
                (assoc "status" "error" "ns" ns-name "error" {"message" message}))}))
 
-(defn- test-result
-  "A jonquil_test answer from r, run-eval!'s answer for the snippet. An
+(defn test-result
+  "A jonquil_test answer from r, an eval tool's answer for the snippet. An
   evaluation that didn't finish with a value (an error while loading, a
   timeout) keeps its text and status. files is a delay of the project's
-  file paths, where failures' files are looked up."
+  file paths, where failures' files are looked up. A run that was read
+  also carries :report, jonquil.test-run/report's map, a side field the
+  agent never sees."
   [r {:keys [ns-name test files]}]
   (let [d (:data r)]
     (if (not= "ok" (get d "status"))
@@ -317,12 +319,15 @@
                                          :locate (fn [rel] (test-run/locate @files rel))})
               dropped (or (get d "dropped_chars") 0)]
           {:text (str (result/dropped-line dropped) (test-run/text report) (get d "output"))
+           :report report
            :error? (not (contains? #{"ok" "failed"} (:status report)))
            :data (test-run/data report {:output (get d "output") :err (get d "err")
                                         :dropped dropped :ms (get d "ms")})})
         (unreadable-test-result r ns-name)))))
 
-(defn- unsupported-test-result [sel]
+(defn unsupported-test-result
+  "The answer for a project whose dialect jonquil_test can't run."
+  [sel]
   {:text (str "jonquil_test runs Jolt and JVM Clojure tests for now. This project is "
               (:name (:profile sel)) ".")
    :error? true
@@ -340,8 +345,9 @@
       (let [e (evaluator-for! (:cache env) sel)
             opts (cond-> {:run? false :owner :repl}
                    (satisfies? ev/QuietEval e) (assoc :quiet (str "jonquil-test-" (random-uuid) ":")))]
-        (test-result (run-in! env {:path path :e e :code code :opts opts :args args})
-                     {:ns-name ns-name :test test :files files})))))
+        (dissoc (test-result (run-in! env {:path path :e e :code code :opts opts :args args})
+                             {:ns-name ns-name :test test :files files})
+                :report)))))
 
 (defn- tool-brackets [env args] (brackets-result (:dir env) args))
 
