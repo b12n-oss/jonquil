@@ -74,24 +74,26 @@ quicker pass.
 
 `jolt mcp:smoke` runs `jonquil --mcp` over real stdio from the checkout,
 speaks JSON-RPC from a jolt script, and prints a PASS or FAIL line per check
-(11): handshake, tools, an evaluation, a background `println` that must not
-reach stdout, a bracket check, a `{:runtime :nrepl}` project starting a
-real Jolt child, and a clean exit once stdin closes. Responses have
+(29): handshake, tools, an evaluation, a background `println` that must not
+reach stdout, a bracket check, the test, describe and frames tools, a
+`{:runtime :nrepl}` project starting a real Jolt child, and a clean exit
+once stdin closes. Responses have
 deadlines, so a hang fails a check. `--bin ./jonquil` runs it against the
 binary `jolt app:build` made, which proves `jolt build` links the MCP
 namespaces. The nREPL step uses a jolt-lang/nrepl checkout if present,
 otherwise fetches v0.4.2 as a git dependency (git and network, first time).
 
 `--window` opens a real window (don't type while it runs) and checks the
-handshake and `listChanged`, the twenty-four window tools plus a startup
+handshake and `listChanged`, the twenty-five window tools plus a startup
 plugin's tool, open/Run/edit/save, a runaway evaluation that must time out
-within 10 s, the plugin tools, and the EOF path: closing stdin with an
+within 10 s, the test, describe and frames tools, the plugin tools, and the
+EOF path: closing stdin with an
 unsaved edit must end the process within 20 s, leave no Jolt child, and
-leave the file unchanged. 25 checks; `--bin PATH` works too.
+leave the file unchanged. 36 checks; `--bin PATH` works too.
 
 `--attach` starts a real window with `:mcp-listen? true` under a temp
 `XDG_CONFIG_HOME` (don't type) and runs `jonquil --mcp-attach` against it.
-It checks the twenty-four window tools, an evaluation, that closing stdin ends
+It checks the twenty-five window tools, an evaluation, that closing stdin ends
 the bridge within 10 s with the window still running, and that a second
 bridge attaches. It ends with SIGTERM to the window, which must exit within
 20 s and remove its registry file. 17 checks.

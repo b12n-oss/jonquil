@@ -11,12 +11,12 @@ claude mcp add jonquil -- jonquil --mcp /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp /path/to/project
 ```
 
-Ten tools. Most take an optional `path` selecting the project (default
+Eleven tools. Most take an optional `path` selecting the project (default
 `DIR`); `jonquil_run_file` requires a file `path`, and `jonquil_check_brackets`
 takes `text` or a `path`.
 
 <details>
-<summary><strong>The ten tools</strong></summary>
+<summary><strong>The eleven tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -29,6 +29,7 @@ takes `text` or a `path`.
 | `jonquil_namespaces` | The namespaces loaded in the runtime, the program's own first |
 | `jonquil_vars` | A loaded namespace's vars, with arglists, first doc line, file and line |
 | `jonquil_apropos` | Loaded vars whose name contains some text, the program's own first |
+| `jonquil_frames` | The last error's call stack with each frame's locals; `jonquil_eval` can then run code in a frame |
 | `jonquil_project` | The dialect, runtime and directory the other tools would use; starts nothing |
 
 </details>
@@ -164,6 +165,64 @@ A few things to know about them:
 - On Jolt the queries leave the REPL alone. On JVM Clojure they show in the
   session's history and change `*1`.
 
+### Reading the last error
+
+When code fails, `jonquil_eval` answers the error's message and place.
+`jonquil_frames` shows more: the last error's call stack, innermost first, as
+the [Frames panel](help-and-inspector.md#the-last-errors-frames) lists it for
+a person. Each frame has its fn, file and line, and its locals with a short
+printed value (100 characters at most, 8 items, 3 levels deep). It reads the
+last error of the project's runtime, whoever caused it, so right after a
+failing `jonquil_eval` it shows that failure.
+
+```
+ArithmeticException: Divide by zero
+error_id: 1b54ce73-dc00-46d8-8225-ed23f14ee8b9:1797999536
+0  demo.core/ratio  src/demo/core.clj:12
+     x = 7
+     y = 0
+Evaluate a local's name in its frame (jonquil_eval with frame) to see its whole value.
+```
+
+To see a whole value, call `jonquil_eval` with a `frame` such as
+`{"index": 0, "error_id": "1b54ce73-…"}`, both taken from `jonquil_frames`.
+The code runs in that frame's namespace with its locals bound, so a local's
+name prints its full value, up to 100 items and 10 levels. The answer has the
+usual [structured result](#structured-results) fields except `ns`. The
+`error_id` is required because another error may have happened since you
+read the frames, and then the call answers `stale` instead of running in the
+wrong one.
+
+Neither call changes the last error, `*1` or `*e`, even when the code in a
+frame throws. Over a window they leave the console and the Frames panel as
+they were, too.
+
+| `status` | When |
+|---|---|
+| `ok` | The frames, or the frame evaluation's value |
+| `no-error` | Nothing has failed in this runtime yet |
+| `no-frames` | The error kept no frames from your code; the text says why |
+| `stale` | `jonquil_eval` only: a newer error replaced the one `error_id` names, so call `jonquil_frames` again |
+| `busy` | An evaluation is running. Wait for it, or stop it with `jonquil_stop` |
+| `paused` | Over a window: an evaluation is paused in the Frames panel, for the person to Continue or Stop |
+| `unsupported` | A dialect other than Jolt and JVM Clojure, or `jonquil_eval` with a frame on JVM Clojure |
+| `timeout` | `jonquil_eval` only: the frame evaluation ran past `timeout_ms` |
+| `error` | The runtime couldn't answer, or the code in the frame threw |
+
+A few things to know about them:
+
+- Jolt keeps every local only in debug mode. Without it a frame can come back
+  with fewer locals or none, and the answer then suggests turning on **Debug
+  Mode** in the Run menu and running the code again. The tools never turn it
+  on themselves.
+- JVM Clojure keeps no locals at all. `jonquil_frames` still lists its fns,
+  files and lines, but code can't run in a frame there.
+- Both calls take `timeout_ms` (default 30 s). In process, a frame evaluation
+  past it is interrupted. A Jolt child keeps its own limit, so the evaluation
+  may go on running there after the answer.
+- They only read a finished error. A paused evaluation (Break on error or a
+  breakpoint) stays the person's to look at in the window.
+
 ### Structured results
 
 The tools that evaluate (`jonquil_eval` and `jonquil_run_file` here,
@@ -196,11 +255,11 @@ claude mcp add jonquil -- jonquil --mcp --window /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/project
 ```
 
-With `--window` the server offers twenty-four tools (headless keeps ten), acting
+With `--window` the server offers twenty-five tools (headless keeps eleven), acting
 on the live window:
 
 <details>
-<summary><strong>The twenty-four window tools</strong></summary>
+<summary><strong>The twenty-five window tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -218,6 +277,7 @@ on the live window:
 | `jonquil_doc` | Documentation for a symbol, from the window's evaluator |
 | `jonquil_complete` | Up to 50 completion candidates, one per line |
 | `jonquil_namespaces`, `jonquil_vars`, `jonquil_apropos` | As [headless](#asking-whats-loaded), without `path`. They run quietly: nothing shows on the console |
+| `jonquil_frames` | As [headless](#reading-the-last-error), without `path`, and quiet too. `jonquil_eval` with a `frame` runs quietly as well, unlike a plain `jonquil_eval` |
 | `jonquil_check_brackets` | "ok", or the sentence naming the first problem |
 | `jonquil_project` | The window's live dialect selection: label, runtime, directory, source, warnings |
 | `jonquil_plugins_list` | One line per plugin: version, loaded or disabled, effects, pending proposal, doc |
@@ -306,7 +366,7 @@ A plugin gives agents tools in `:mcp-tools`:
 ```
 
 A window serving MCP (`--mcp --window`, or one you attach to) serves each live
-plugin's tools as `plugin_<id>_<name>` after its twenty-four: `plugin_smoke-t_twice`
+plugin's tools as `plugin_<id>_<name>` after its twenty-five: `plugin_smoke-t_twice`
 for plugin `smoke-t` above.
 
 - Argument types: `string`, `integer`, `number`, `boolean`. A missing or
@@ -333,7 +393,7 @@ listening on in `settings.edn`:
 {:mcp-listen? true}
 ```
 
-That window serves the same twenty-four tools on a socket bound to 127.0.0.1, on
+That window serves the same twenty-five tools on a socket bound to 127.0.0.1, on
 a port the OS picks, to one client at a time. It publishes the port in
 `mcp/<pid>.edn` beside `settings.edn`. Then register the bridge:
 

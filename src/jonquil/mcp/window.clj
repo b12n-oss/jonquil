@@ -1,5 +1,5 @@
 (ns jonquil.mcp.window
-  "The twenty-four MCP tools over a live Jonquil window, four of them over its
+  "The twenty-five MCP tools over a live Jonquil window, four of them over its
   plugins folder (through jonquil.plugin-mcp) and one saving a change set
   an agent proposes (jonquil.change-sets).
 

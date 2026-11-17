@@ -14,7 +14,7 @@ one, so the headless entry never opens a window:
   into a response map or nil. `serve!` loops over a line reader and a line
   writer it is handed, skips blank lines and guards every message, so one bad
   request never ends the loop or mislabels its error.
-- `jonquil.mcp.tools` holds the ten tool definitions and `make-tools`. It
+- `jonquil.mcp.tools` holds the eleven tool definitions and `make-tools`. It
   keeps one evaluator per project selection (the same `.jonquil.edn` choice
   the window makes) and registers each with `jonquil.runtime-registry`, so
   `registry/stop-all!` stops them. An evaluation that passes its deadline is
@@ -28,8 +28,14 @@ one, so the headless entry never opens a window:
   `ns-interns` in the project's runtime, and the answers made from its value.
   The window runs it through `win-run/mcp-query!`, which makes no console
   entry.
+- `jonquil.mcp.frames` makes the answers of `jonquil_frames` and of
+  `jonquil_eval` with a `frame` from what the evaluator's
+  `jonquil.evaluator/Frames` gives (`error-frames!`, `eval-in-frame!`), plus
+  the refusals (busy, paused, unsupported). It calls no evaluator itself:
+  both tables call `Frames` and hand the result over, and neither call
+  records an error or touches `*1`.
 
-**Window mode.** `jonquil.mcp.window` builds the twenty-four tools for
+**Window mode.** `jonquil.mcp.window` builds the twenty-five tools for
 `jonquil --mcp --window`. It never requires `jonquil.gtk.window`. It receives
 the window's `ui` map (the `:on-ready` map) and touches it only through
 `gui-call`, a thunk handed to the GTK thread with a bounded deref, so the
@@ -44,9 +50,13 @@ abandoned call can't block the worker. The window keeps its one evaluator;
 the tools never stop or swap it. `jonquil_change_set_propose` saves through
 the ui's `:change-set-propose!*` hook (the change sets part, with the
 client's name from `make-window-tools`' `:client-fn`) and applies nothing.
+The frames tools go through `:mcp-frames!*` and `:mcp-frame-eval!*`, which
+call the window evaluator's `Frames` directly, so the Frames panel and the
+console stay as they were. The debugger part adds `:mcp-paused?*`, read on
+the GTK thread, so they refuse while an evaluation is paused there.
 
 **Listener and bridge.** `jonquil.mcp.listen` lets a window with
-`:mcp-listen? true` serve those twenty-four tools to a socket client. It binds
+`:mcp-listen? true` serve those twenty-five tools to a socket client. It binds
 127.0.0.1 on an OS-picked port, accepts one connection at a time and runs
 `serve!` over it. It records the port in a per-window registry file
 (`<settings-dir>/mcp/<pid>.edn`), which `stop!` removes and startup
