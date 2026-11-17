@@ -118,6 +118,9 @@
   are kept, the last ones; :ms the wall time."
   [r {:keys [max-output ms]}]
   (cond
+    (= "No error yet." (:error r))
+    {:text "No error yet." :error? true :data {"status" "no-error"}}
+
     (= debugger/STALE (:error r))
     {:text stale-text :error? true :data (result/eval-data {:status :stale :output "" :ms ms})}
 

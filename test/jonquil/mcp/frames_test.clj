@@ -84,6 +84,9 @@
     (let [r (frames/frame-eval-answer {:out "hi\n" :text "7"} {:max-output 100 :ms 5})]
       (is (= {:text "hi\n=> 7" :error? false} (dissoc r :data)))
       (is (= {"status" "ok" "output" "hi\n" "value" "7" "ms" 5} (:data r)))))
+  (testing "no error to evaluate in"
+    (is (= {:text "No error yet." :error? true :data {"status" "no-error"}}
+           (frames/frame-eval-answer {:error "No error yet."} {:max-output 100 :ms 5}))))
   (testing "an older error"
     (let [r (frames/frame-eval-answer {:error debugger/STALE} {:max-output 100 :ms 5})]
       (is (:error? r))

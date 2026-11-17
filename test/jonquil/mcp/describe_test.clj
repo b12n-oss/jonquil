@@ -16,6 +16,10 @@
     (let [e (call "jonquil_eval" {"code" (str/join "\n" (repeat 30 "x"))} {:text "ok" :error? false})]
       (is (str/includes? (:detail e) "… 10 more lines")))))
 
+(deftest eval-in-a-frame-entry
+  (is (= "Claude Code evaluated code in frame 2"
+         (:summary (call "jonquil_eval" {"code" "x" "frame" {"index" 2 "error_id" "i"}} {:text "1" :error? false})))))
+
 (deftest tab-tools-carry-target
   (doseq [[tool summary] [["jonquil_run" "Claude Code ran tab 3"]
                           ["jonquil_run_selection" "Claude Code ran a selection of tab 3"]
@@ -44,6 +48,7 @@
   (doseq [[tool args summary] [["jonquil_tabs" {} "Claude Code read the tabs"]
                                ["jonquil_read_tab" {} "Claude Code read tab 2"]
                                ["jonquil_console" {} "Claude Code read the console"]
+                               ["jonquil_frames" {} "Claude Code read the last error's frames"]
                                ["jonquil_doc" {"symbol" "map"} "Claude Code read the docs for map"]
                                ["jonquil_complete" {"prefix" "ma"} "Claude Code read completions for ma"]
                                ["jonquil_project" {} "Claude Code read the project"]

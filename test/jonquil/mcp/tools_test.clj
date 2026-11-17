@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
+            [jonquil.debugger :as debugger]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
@@ -28,9 +29,9 @@
 
 (defn- call [name args] ((:call (:t @env)) name args))
 
-(deftest defs-name-ten-tools
+(deftest defs-name-eleven-tools
   (is (= ["jonquil_eval" "jonquil_run_file" "jonquil_test" "jonquil_check_brackets"
-          "jonquil_doc" "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos"
+          "jonquil_doc" "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
           "jonquil_project"]
          (map #(get % "name") (:defs (:t @env)))))
   (is (every? #(vector? (get-in % ["inputSchema" "required"])) (:defs (:t @env)))))
@@ -485,3 +486,117 @@
   (let [{:keys [answer]} (tools/describe-request "jonquil_vars" {"ns" "a.b"}
                                                  {:root "/p" :files (delay []) :run-hint "jonquil_run"})]
     (is (str/includes? (:text (answer {:found? false})) "(jonquil_run)"))))
+
+;; --- the last error's frames (UF5) -------------------------------------------
+
+(defn- fresh-tools
+  "A tool table over a new in-process project of its own, so its last error
+  is only what the test makes. cache, when given, is the evaluator cache."
+  ([] (fresh-tools nil))
+  ([cache]
+   (let [d (temp-dirs/temp-dir! "jonquil-mcp-frames-")]
+     (spit (io/file d "deps.edn") "{}")
+     (spit (io/file d ".jonquil.edn") "{:runtime :in-process}")
+     {:dir d
+      :key (dialect/selection-key (ft/project-selection d nil))
+      :call (:call (tools/make-tools (cond-> {:dir d :grace-ms 2000 :settings-path (str (io/file d "s.edn"))}
+                                       cache (assoc :cache cache))))})))
+
+(def ^:private fixture-code "(defn uf5-inner [x] (let [y 0] (/ x y)))")
+
+(defn- fail! [c] (c "jonquil_eval" {"code" fixture-code}) (c "jonquil_eval" {"code" "(uf5-inner 7)"}))
+
+(defn- frames-of [c] (c "jonquil_frames" {}))
+
+(defn- frame-eval [c code id & [i extra]]
+  (c "jonquil_eval" (merge {"code" code "frame" {"index" (or i 0) "error_id" id}} extra)))
+
+(defmacro ^:private with-debug-mode [& body]
+  `(do (debugger/set-debug-mode! true)
+       (try ~@body (finally (debugger/set-debug-mode! false)))))
+
+(deftest frames-after-an-error
+  (let [{c :call} (fresh-tools)
+        _ (fail! c)
+        r (frames-of c)]
+    (is (= "ok" (get-in r [:data "status"])) (:text r))
+    (is (string? (get-in r [:data "error_id"])))
+    (is (str/includes? (get-in r [:data "frames" 0 "fn"]) "uf5-inner"))))
+
+(deftest frame-eval-sees-locals
+  (with-debug-mode
+    (let [{c :call} (fresh-tools)
+          _ (fail! c)
+          id (get-in (frames-of c) [:data "error_id"])
+          r (frame-eval c "x" id)]
+      (is (= "ok" (get-in r [:data "status"])) (:text r))
+      (is (= "7" (get-in r [:data "value"]))))))
+
+(deftest frame-eval-after-a-newer-error-is-stale
+  (let [{c :call} (fresh-tools)
+        _ (fail! c)
+        id (get-in (frames-of c) [:data "error_id"])
+        _ (c "jonquil_eval" {"code" "(throw (ex-info \"newer\" {}))"})
+        r (frame-eval c "1" id)]
+    (is (:error? r))
+    (is (= "stale" (get-in r [:data "status"])))))
+
+(deftest frame-index-past-the-end
+  (let [{c :call} (fresh-tools)
+        _ (fail! c)
+        id (get-in (frames-of c) [:data "error_id"])
+        r (frame-eval c "1" id 999)]
+    (is (:error? r))
+    (is (= "error" (get-in r [:data "status"])))
+    (is (seq (get-in r [:data "error" "message"])))))
+
+(deftest frame-eval-timeout-interrupts
+  (let [{c :call} (fresh-tools)
+        _ (fail! c)
+        id (get-in (frames-of c) [:data "error_id"])
+        r (frame-eval c "(loop [] (recur))" id 0 {"timeout_ms" 300})]
+    (is (= "timeout" (get-in r [:data "status"])) (:text r))
+    (is (= "Timed out after 300 ms; interrupted." (:text r)))
+    (is (= "=> 3" (:text (c "jonquil_eval" {"code" "(+ 1 2)"}))))))
+
+(deftest frame-calls-leave-last-error-and-star-1
+  (let [{c :call} (fresh-tools)
+        _ (fail! c)
+        _ (c "jonquil_eval" {"code" ":marker"})
+        id (get-in (frames-of c) [:data "error_id"])
+        r (frame-eval c "(/ 1 0)" id)]
+    (is (= "error" (get-in r [:data "status"])))
+    (is (= id (get-in (frames-of c) [:data "error_id"])) "the frame eval's error didn't become the last error")
+    (is (= "=> :marker" (:text (c "jonquil_eval" {"code" "*1"}))))))
+
+(deftest no-error-yet
+  (let [{c :call} (fresh-tools)
+        r (frames-of c)]
+    (is (= {"status" "no-error"} (:data r)))
+    (is (= {"status" "no-error"} (:data (frame-eval c "1" "rt:1"))) "a frame eval with no error answers the same")))
+
+(defn- fake-ev
+  "A fake evaluator: evaluating? as given, Frames when frames? (never
+  called back)."
+  [evaluating? frames?]
+  (let [base {:evaluating? evaluating?}]
+    (if frames?
+      (reify ev/Evaluator
+        (evaluating? [_] (:evaluating? base))
+        (set-mode! [_ _] nil)
+        ev/Frames
+        (error-frames! [_ _] nil)
+        (eval-in-frame! [_ _ _] nil))
+      (reify ev/Evaluator
+        (evaluating? [_] (:evaluating? base))
+        (set-mode! [_ _] nil)))))
+
+(deftest frames-busy-and-unsupported
+  (let [cache (atom {})
+        {c :call k :key} (fresh-tools cache)]
+    (swap! cache assoc k (fake-ev true true))
+    (is (= {"status" "busy"} (:data (frames-of c))))
+    (is (= {"status" "busy"} (:data (frame-eval c "1" "rt:1"))))
+    (swap! cache assoc k (fake-ev false false))
+    (is (= {"status" "unsupported"} (:data (frames-of c))))
+    (is (= {"status" "unsupported"} (:data (frame-eval c "1" "rt:1"))))))
