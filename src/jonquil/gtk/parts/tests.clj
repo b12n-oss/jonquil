@@ -22,6 +22,7 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.window.run :as win-run]
+            [jonquil.tabs :as tabs]
             [jonquil.test-run :as test-run]))
 
 (defn- quiet-opts
@@ -66,42 +67,67 @@
         warning (ev/eval! e code (merge (quiet-opts e) (noting ctx out on-done)))]
     (when warning (notify {:busy warning}))))
 
+(defn- new-token [] (str "run-" (random-uuid)))
+
+(defn- tab-gone? [tab] @(:destroyed? (:ed tab)))
+
 (defn- agent-tab-run!
   "The MCP server's run of a namespace that tab holds: mark, the tab's
   Run, test, as a person's command, so the tab's unsaved edits count. A
   Run that was refused, found a problem or ended in an error is what
-  notify hears, and the tests don't run."
+  notify hears, as is a tab closed before its Run, and the tests don't
+  run."
   [{:keys [cv ev* sel* status-label] :as ctx} tab {:keys [ns-name test]} {:keys [out notify]}]
-  (let [done (fn [r] (notify {:done {:result r :output (apply str @out)}}))
+  (let [token (new-token)
+        done (fn [r] (notify {:done {:result r :output (apply str @out)}}))
         test! (fn []
-                (agent-eval! ctx (test-run/snippet {:ns ns-name :test test :drop-marked? true})
+                (agent-eval! ctx (test-run/snippet {:ns ns-name :test test :drop-marked token})
                              {:out out :notify notify :on-done done}))
         run! (fn []
-               (win-run/do-run! {:tab tab :cv cv :ev* ev* :sel* sel* :status-label status-label}
-                                (fn [m]
-                                  (if (= :ok (get-in m [:done :result :status]))
-                                    (do (swap! out conj (get-in m [:done :output]))
-                                        (on-gui! test!))
-                                    (notify m)))))]
-    (agent-eval! ctx (test-run/mark-snippet {:ns ns-name})
+               (if (tab-gone? tab)
+                 (notify {:refused "The tab closed before its tests could run."})
+                 (win-run/do-run! {:tab tab :cv cv :ev* ev* :sel* sel* :status-label status-label}
+                                  (fn [m]
+                                    (if (= :ok (get-in m [:done :result :status]))
+                                      (do (swap! out conj (get-in m [:done :output]))
+                                          (on-gui! test!))
+                                      (notify m))))))]
+    (agent-eval! ctx (test-run/mark-snippet {:ns ns-name :token token})
                  {:out (atom []) :notify notify :on-done (fn [_] (on-gui! run!))})))
+
+(defn- tabs-holding
+  "The open tabs whose text names namespace ns-name and that this window
+  can run (its own project and dialect)."
+  [{:keys [tabs sel*]} ns-name]
+  (filter (fn [t]
+            (and (= ns-name (clj/buffer-ns (editor/editor-text (:ed t))))
+                 (tabs/runnable-here? @sel* @(:project t))))
+          @tabs))
 
 (defn- agent-run!
   "The MCP server's test run of namespace :ns-name (:test names one test).
-  When an open tab's text holds that namespace, the tab runs first, as a
-  person's command runs it. Otherwise :code, the snippet that reloads the
-  namespace from disk, is evaluated. Nothing makes a console entry. notify
-  hears exactly one map, {:busy warning}, a refused Run's map or {:done
-  {:result r :output s}}, and the return value reads the output so far, as
+  When one open tab of this window's project holds that namespace, or the
+  active tab is one of several that do, that tab runs first, as a person's
+  command runs it. Several such tabs with none of them active is refused:
+  which one's tests to run is the caller's to say, by selecting it. With
+  no such tab, :code, the snippet that reloads the namespace from disk, is
+  evaluated. Nothing makes a console entry. notify hears exactly one map,
+  {:busy warning}, {:refused msg}, a refused Run's map or {:done {:result
+  r :output s}}, and the return value reads the output so far, as
   win-run/mcp-eval! does. GTK thread."
-  [{:keys [tabs] :as ctx} {:keys [ns-name code] :as run} notify]
+  [{:keys [active-tab] :as ctx} {:keys [ns-name code] :as run} notify]
   (let [out (atom [])
-        tab (first (filter #(= ns-name (clj/buffer-ns (editor/editor-text (:ed %)))) @tabs))]
-    (if tab
-      (agent-tab-run! ctx tab run {:out out :notify notify})
-      (agent-eval! ctx code
-                   {:out out :notify notify
-                    :on-done (fn [r] (notify {:done {:result r :output (apply str @out)}}))}))
+        holding (tabs-holding ctx ns-name)
+        active (active-tab)
+        tab (or (some #(when (= (:id active) (:id %)) %) holding)
+                (when (= 1 (count holding)) (first holding)))]
+    (cond
+      tab (agent-tab-run! ctx tab run {:out out :notify notify})
+      (seq holding) (notify {:refused (str (count holding) " tabs hold " ns-name
+                                           ". Select the one to test, then call again.")})
+      :else (agent-eval! ctx code
+                         {:out out :notify notify
+                          :on-done (fn [r] (notify {:done {:result r :output (apply str @out)}}))}))
     (fn [] (apply str @out))))
 
 (defn- unrun-lines
@@ -166,19 +192,24 @@
   refused, found a problem or ended in an error has said so itself, and
   the tests don't run."
   [{:keys [cv ev* sel* status-label set-status! tabs] :as ctx} {:keys [tab ns-name test]}]
-  (let [run {:ns-name ns-name :test test :tab-path @(:path tab)
+  (let [token (new-token)
+        run {:ns-name ns-name :test test :tab-path @(:path tab)
              :warnings (vec (unrun-lines tabs (:id tab)))}
         test! (fn []
                 (set-status! (str "Running the tests in " ns-name "…"))
-                (eval-then! ctx (test-run/snippet {:ns ns-name :test test :drop-marked? true})
-                            {:on-output (fn [kind s] (cview/append! cv kind s))
-                             :then (fn [r] (finish! ctx r run))}))
+                (when-not (eval-then! ctx (test-run/snippet {:ns ns-name :test test :drop-marked token})
+                                      {:on-output (fn [kind s] (cview/append! cv kind s))
+                                       :then (fn [r] (finish! ctx r run))})
+                  ;; busy again: the warning is on the console
+                  (set-status! "Ready")))
         run! (fn []
-               (win-run/do-run! {:tab tab :cv cv :ev* ev* :sel* sel* :status-label status-label}
-                                (fn [m]
-                                  (when (= :ok (get-in m [:done :result :status]))
-                                    (on-gui! test!)))))]
-    (eval-then! ctx (test-run/mark-snippet {:ns ns-name}) {:then (fn [_] (run!))})))
+               (if (tab-gone? tab)
+                 (set-status! "; The tab closed before its tests could run.")
+                 (win-run/do-run! {:tab tab :cv cv :ev* ev* :sel* sel* :status-label status-label}
+                                  (fn [m]
+                                    (when (= :ok (get-in m [:done :result :status]))
+                                      (on-gui! test!))))))]
+    (eval-then! ctx (test-run/mark-snippet {:ns ns-name :token token}) {:then (fn [_] (run!))})))
 
 (defn- run-tests!
   "Run Tests in This File, or with caret? Run Test at the Caret: says on
@@ -219,7 +250,8 @@
     {:fns {:test-run-file-fn (fn [] (run-tests! ctx false))
            :test-run-caret-fn (fn [] (run-tests! ctx true))}
      :ui {:mcp-test! (fn [run notify] (agent-run! ctx run notify))
-          ;; an agent's run reloads from disk, so every tab's unrun edits count
+          ;; asked after an agent's run, when the tab it ran has no unrun
+          ;; forms left, so every tab is looked at
           :test-unrun-lines (fn [] (vec (unrun-lines tabs nil)))
           :test-report! (fn [report opts] (report-run! ctx report opts))}}))
 

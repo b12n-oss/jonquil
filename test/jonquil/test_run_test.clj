@@ -160,17 +160,17 @@
     (is (not (contains? missing "ms")))))
 
 (deftest mark-snippet-is-one-qualified-form
-  (let [s (tr/mark-snippet {:ns "demo.core-test"})
+  (let [s (tr/mark-snippet {:ns "demo.core-test" :token "run-1"})
         form (read-string s)]
     (is (= 'clojure.core/let (first form)))
     (is (str/includes? s "(quote demo.core-test)"))
-    (is (str/includes? s ":jonquil/stale"))
+    (is (str/includes? s ":jonquil/stale \"run-1\""))
     (is (nil? (re-find #"[(\[ ](let|fn|count|keep|when|alter-meta!|vals) " s)))
     (is (thrown? Exception (tr/mark-snippet {:ns "a) (b"})))))
 
 (deftest snippet-drop-marked
-  (let [s (tr/snippet {:ns "demo.core-test" :drop-marked? true})]
-    (is (str/includes? s ":jonquil/stale"))
+  (let [s (tr/snippet {:ns "demo.core-test" :drop-marked "run-1"})]
+    (is (str/includes? s "(clojure.core/= \"run-1\" (:jonquil/stale"))
     (is (not (str/includes? s ":reload")) "the caller ran the text itself")))
 
 ;; Runs clojure.test inside clojure.test, in a namespace of its own.
@@ -178,16 +178,20 @@
   (let [head "(ns jonquil.test-run-test.marked (:require [clojure.test :refer [deftest is]]))\n"
         run! (fn [code] (binding [*ns* *ns*] (load-string code)))
         value (fn [] (tr/read-value (pr-str (run! (tr/snippet {:ns "jonquil.test-run-test.marked"
-                                                               :drop-marked? true})))))]
+                                                               :drop-marked "run-1"})))))]
     (try
       (run! (str head "(deftest keep-me (is true))\n(deftest old-name (is (= 1 2)))\n"))
-      (is (= 2 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.marked"}))))
+      (is (= 2 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.marked" :token "run-1"}))))
       (run! (str head "(deftest keep-me (is true))\n(deftest new-name (is true))\n"))
       (let [v (value)]
         (is (= [2 2 0] ((juxt :tests :pass :fail) v)))
         (is (= :ran (:outcome v))))
       (is (nil? (ns-resolve 'jonquil.test-run-test.marked 'old-name)))
-      (is (= 0 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.no-such"}))))
+      ;; another run's mark lands before this run's tests: its token is not
+      ;; ours, so nothing of ours is dropped
+      (run! (tr/mark-snippet {:ns "jonquil.test-run-test.marked" :token "run-2"}))
+      (is (= [2 2] ((juxt :tests :pass) (value))) "a later run's tag drops nothing here")
+      (is (= 0 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.no-such" :token "x"}))))
       (finally (remove-ns 'jonquil.test-run-test.marked)))))
 
 (deftest console-lines-for-each-status

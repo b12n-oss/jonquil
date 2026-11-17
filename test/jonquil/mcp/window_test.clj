@@ -625,3 +625,12 @@
     (call (tools-for (test-ui {:r run-value :runs runs})) "jonquil_test" {"ns" "demo.core-test" "test" "fails"})
     (is (= [{:ns-name "demo.core-test" :test "fails"}] @runs)
         "the window picks the tab or the reload from these")))
+
+(deftest window-test-keeps-the-answer-when-the-window-cannot-show-it
+  (let [ui (assoc (test-ui {:r run-value})
+                  :test-unrun-lines (fn [] (throw (ex-info "no tabs" {})))
+                  :test-report! (fn [_ _] (throw (ex-info "no panel" {}))))
+        r (call (tools-for ui) "jonquil_test" {"ns" "demo.core-test"})]
+    (is (= "failed" (get-in r [:data "status"])))
+    (is (= 1 (get-in r [:data "counts" "fail"])))
+    (is (str/ends-with? (:text r) "; The window could not show this run: no panel"))))

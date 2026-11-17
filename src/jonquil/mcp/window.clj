@@ -532,10 +532,19 @@
                              ((:mcp-test! ui) {:ns-name ns-name :test test :code code} notify)))
             files (delay (test-run/project-files (or (:project-dir sel) dir)))
             answer (tools/test-result r {:ns-name ns-name :test test :files files})
-            warnings (when (:report answer) (turn (fn [] ((:test-unrun-lines ui)))))]
-        (when-let [report (:report answer)]
-          (turn (fn [] ((:test-report! ui) report {:who (or (client-fn) "An agent") :warnings warnings}))))
-        (with-warnings (dissoc answer :report) warnings)))))
+            report (:report answer)
+            ;; the tests have run: a window that can't take a turn now (a
+            ;; throw, a held GTK thread) costs the display, never the answer
+            warnings (when report
+                       (try (turn (fn [] ((:test-unrun-lines ui))))
+                            (catch :default _ nil)))
+            shown (when report
+                    (try (turn (fn [] ((:test-report! ui) report {:who (or (client-fn) "An agent")
+                                                                  :warnings warnings})))
+                         nil
+                         (catch :default e (or (ex-message e) (str e)))))]
+        (cond-> (with-warnings (dissoc answer :report) warnings)
+          shown (update :text str "\n; The window could not show this run: " shown))))))
 
 (defn- window-handlers
   "Tool name -> (fn [args]) over ctx."

@@ -130,13 +130,15 @@
 ;; no reload to compare across. mark-form tags every test the namespace
 ;; holds before that Run. Evaluating a deftest again replaces its var's
 ;; metadata, tag included, so after the Run the tag is left only on tests
-;; the buffer no longer defines, and drop-marked-form unmaps those.
+;; the buffer no longer defines, and drop-marked-form unmaps those. The tag
+;; is the run's own token, so two runs whose steps interleave (a person's
+;; and an agent's) never drop each other's tests.
 (def ^:private mark-form
   (qualified
    '(let [n (find-ns 'NS-SYM)]
       (count (keep (fn [v]
                      (when (:test (meta v))
-                       (alter-meta! v assoc :jonquil/stale true)))
+                       (alter-meta! v assoc :jonquil/stale TOKEN)))
                    (if n (vals (ns-interns n)) []))))))
 
 (def ^:private drop-marked-form
@@ -144,7 +146,7 @@
    '(fn [ns-sym]
       (when-let [n (find-ns ns-sym)]
         (doseq [[s v] (ns-interns n)]
-          (when (:jonquil/stale (meta v))
+          (when (= TOKEN (:jonquil/stale (meta v)))
             (ns-unmap ns-sym s)))))))
 
 (def ^:private run-form
@@ -176,18 +178,18 @@
   most max-failures rows) and :failures-dropped. A load failure is left to
   throw. The namespace is reloaded from disk first, and the tests the
   reload didn't redefine (renamed or deleted in the file) are unmapped.
-  :reload? false skips the reload. :drop-marked? true is for a namespace
-  the caller has just run itself after mark-snippet: no reload, and the
-  tests still carrying mark-snippet's tag are unmapped. Throws when :ns or
-  :test isn't a plain symbol name."
-  [{:keys [ns test reload? drop-marked?] :or {reload? true}}]
+  :reload? false skips the reload. :drop-marked, a mark-snippet's token,
+  is for a namespace the caller has just run itself after that
+  mark-snippet: no reload, and the tests still carrying the token are
+  unmapped. Throws when :ns or :test isn't a plain symbol name."
+  [{:keys [ns test reload? drop-marked] :or {reload? true}}]
   (let [ns-sym (checked-symbol "namespace" ns)
         test-name (when (some? test) (name (checked-symbol "test" test)))
         fill (fn [form m] (walk/postwalk-replace m form))
         limits {'MAX-CHARS max-shown-chars 'MAX-FAILURES max-failures}
         form (fill run-form
                    {'RELOAD (cond
-                              drop-marked? drop-marked-form
+                              drop-marked (fill drop-marked-form {'TOKEN (str drop-marked)})
                               reload? reload-form
                               :else (qualified '(fn [_] nil)))
                     'NS-SYM ns-sym
@@ -198,13 +200,15 @@
       (pr-str form))))
 
 (defn mark-snippet
-  "Code that tags every test namespace :ns holds, for snippet's
-  :drop-marked? to find after the caller has run the namespace's text
-  again. Its value is how many it tagged, 0 when the namespace isn't
-  loaded. Throws when :ns isn't a plain symbol name."
-  [{:keys [ns]}]
+  "Code that tags every test namespace :ns holds with :token, a string
+  naming this run, for snippet's :drop-marked to find after the caller
+  has run the namespace's text again. Its value is how many it tagged, 0
+  when the namespace isn't loaded. Throws when :ns isn't a plain symbol
+  name."
+  [{:keys [ns token]}]
   (binding [*print-length* nil *print-level* nil]
-    (pr-str (walk/postwalk-replace {'NS-SYM (checked-symbol "namespace" ns)} mark-form))))
+    (pr-str (walk/postwalk-replace {'NS-SYM (checked-symbol "namespace" ns) 'TOKEN (str token)}
+                                   mark-form))))
 
 (defn form-name
   "The name a top-level form defines, as a string: the symbol after the
