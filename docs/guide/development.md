@@ -74,7 +74,7 @@ quicker pass.
 
 `jolt mcp:smoke` runs `jonquil --mcp` over real stdio from the checkout,
 speaks JSON-RPC from a jolt script, and prints a PASS or FAIL line per check
-(29): handshake, tools, an evaluation, a background `println` that must not
+(31): handshake, tools, an evaluation, a background `println` that must not
 reach stdout, a bracket check, the test, describe and frames tools, a
 `{:runtime :nrepl}` project starting a real Jolt child, and a clean exit
 once stdin closes. Responses have
@@ -89,7 +89,7 @@ plugin's tool, open/Run/edit/save, a runaway evaluation that must time out
 within 10 s, the test, describe and frames tools, the plugin tools, and the
 EOF path: closing stdin with an
 unsaved edit must end the process within 20 s, leave no Jolt child, and
-leave the file unchanged. 36 checks; `--bin PATH` works too.
+leave the file unchanged. 37 checks; `--bin PATH` works too.
 
 `--attach` starts a real window with `:mcp-listen? true` under a temp
 `XDG_CONFIG_HOME` (don't type) and runs `jonquil --mcp-attach` against it.

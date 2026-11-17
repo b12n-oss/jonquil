@@ -217,9 +217,9 @@ A few things to know about them:
   on themselves.
 - JVM Clojure keeps no locals at all. `jonquil_frames` still lists its fns,
   files and lines, but code can't run in a frame there.
-- Both calls take `timeout_ms` (default 30 s). In process, a frame evaluation
-  past it is interrupted. A Jolt child keeps its own limit, so the evaluation
-  may go on running there after the answer.
+- Both calls take `timeout_ms` (default 30 s). A frame evaluation past it is
+  interrupted, and only it: an evaluation the person started in the
+  meantime keeps running.
 - They only read a finished error. A paused evaluation (Break on error or a
   breakpoint) stays the person's to look at in the window.
 

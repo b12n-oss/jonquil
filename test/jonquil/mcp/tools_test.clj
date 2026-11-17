@@ -1,7 +1,7 @@
 (ns jonquil.mcp.tools-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.debugger :as debugger]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
@@ -600,3 +600,29 @@
     (swap! cache assoc k (fake-ev false false))
     (is (= {"status" "unsupported"} (:data (frames-of c))))
     (is (= {"status" "unsupported"} (:data (frame-eval c "1" "rt:1"))))))
+
+(deftest frame-index-past-the-listed-frames
+  (testing "the index just past the last listed frame"
+    (let [{c :call} (fresh-tools)
+          _ (fail! c)
+          r (frames-of c)
+          n (count (get-in r [:data "frames"]))
+          e (frame-eval c "1" (get-in r [:data "error_id"]) n)]
+      (is (= "error" (get-in e [:data "status"])) (:text e))))
+  (testing "index 0 after a top-level error, which lists no frames"
+    (let [{c :call} (fresh-tools)
+          _ (c "jonquil_eval" {"code" "(/ 1 0)"})
+          r (frames-of c)
+          e (frame-eval c "1" (get-in r [:data "error_id"]) 0)]
+      (is (= "no-frames" (get-in r [:data "status"])))
+      (is (= "error" (get-in e [:data "status"])) (:text e)))))
+
+(deftest frame-eval-timeout-leaves-other-evals-alone
+  (let [{c :call} (fresh-tools)
+        _ (fail! c)
+        id (get-in (frames-of c) [:data "error_id"])
+        stuck (future (frame-eval c "(loop [] (recur))" id 0 {"timeout_ms" 1500}))
+        _ (Thread/sleep 300)
+        person (future (c "jonquil_eval" {"code" "(do (Thread/sleep 2500) :person-done)"}))]
+    (is (= "Timed out after 1500 ms; interrupted." (:text @stuck)))
+    (is (= "=> :person-done" (:text @person)) "the timeout stopped only the frame evaluation")))

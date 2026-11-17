@@ -176,7 +176,9 @@
     error's frame frame-i's locals bound
     (jonquil.debugger/eval-in-frame), off the caller's thread; on-result gets
     {:out :text} or {:error s}, jonquil.debugger/STALE when error-id names
-    an older error."))
+    an older error. req's optional :on-stop is called, before the code
+    runs, with a fn that stops this frame evaluation alone (an MCP
+    timeout's), where the runtime can."))
 
 (defprotocol LineCounts
   "LM4's exact line counts (jonquil.line-counts over jolt.profile), for the

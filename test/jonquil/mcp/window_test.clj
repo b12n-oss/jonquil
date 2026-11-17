@@ -719,7 +719,7 @@
      :mcp-paused?* (fn [] (boolean paused?))
      :mcp-eval!* (fn [_ _] (throw (ex-info "a console entry was made" {})))
      :mcp-frames!* (fn [on-data] (some-> seen (swap! conj :frames)) (on-data d))
-     :mcp-frame-eval!* (fn [req on-result] (some-> seen (swap! conj [:frame-eval req])) (on-result r))}))
+     :mcp-frame-eval!* (fn [req on-result] (some-> seen (swap! conj [:frame-eval (dissoc req :on-stop)])) (on-result r))}))
 
 (defn- in-frame [code] {"code" code "frame" {"index" 0 "error_id" "rt:9"}})
 
@@ -758,3 +758,18 @@
 (deftest window-frames-unsupported-runtime
   (let [ui (assoc (frames-ui {}) :evaluator* (fn [] (evaluator {})))]
     (is (= {"status" "unsupported"} (:data (call (tools-for ui) "jonquil_frames" {}))))))
+
+(deftest window-frame-eval-timeout-stops-only-the-frame-eval
+  (testing "the evaluator gave a stop fn: it alone is called"
+    (let [stopped (atom 0)
+          ui (assoc (frames-ui {})
+                    :mcp-frame-eval!* (fn [req on-result]
+                                        ((:on-stop req) (fn [] (swap! stopped inc) (on-result {:error "Stopped."})))))
+          r (call (tools-for ui) "jonquil_eval" (assoc (in-frame "(loop [] (recur))") "timeout_ms" 50))]
+      (is (= "Timed out after 50 ms; interrupted." (:text r)))
+      (is (= 1 @stopped))))
+  (testing "no stop fn: the answer says it may still run, and nothing else is stopped"
+    (let [ui (assoc (frames-ui {}) :mcp-frame-eval!* (fn [_ _] nil))
+          r (call (tools-for ui) "jonquil_eval" (assoc (in-frame "(loop [] (recur))") "timeout_ms" 50))]
+      (is (= "timeout" (get-in r [:data "status"])))
+      (is (= "Timed out after 50 ms; the frame evaluation may still be running in the runtime." (:text r))))))

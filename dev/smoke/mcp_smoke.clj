@@ -230,7 +230,14 @@
               r)
       (let [v (tool! srv "jonquil_eval" {"code" "x" "frame" {"index" 0 "error_id" (str id)}} 60000)]
         (check! (str label " jonquil_eval in the frame sees its local")
-                (= "7" (get-in v [:data "value"])) {:frames (:text r) :eval v})))
+                (= "7" (get-in v [:data "value"])) {:frames (:text r) :eval v}))
+      (let [t (tool! srv "jonquil_eval" {"code" "(loop [] (recur))" "timeout_ms" 1000
+                                         "frame" {"index" 0 "error_id" (str id)}} 60000)
+            n (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
+        (check! (str label " a frame evaluation past its timeout is interrupted, and the runtime answers next")
+                (and (= "Timed out after 1000 ms; interrupted." (:text t))
+                     (str/ends-with? (str/trim (str (:text n))) "=> 3"))
+                {:timeout t :next n})))
     (finally
       (tool! srv "jonquil_eval" {"code" "((requiring-resolve 'jolt.profile/instrument!) false)"} 60000))))
 

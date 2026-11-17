@@ -613,8 +613,7 @@
   (let [sel ((:selection* ui))
         e ((:evaluator* ui))]
     (or (frames-refusal ctx sel e)
-        (tools/run-frame-eval {:sel sel :grace-ms grace-ms :start! (:mcp-frame-eval!* ui)
-                               :interrupt! (fn [] (ev/interrupt! e))}
+        (tools/run-frame-eval {:sel sel :grace-ms grace-ms :start! (:mcp-frame-eval!* ui)}
                               req args))))
 
 (defn- window-handlers

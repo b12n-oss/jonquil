@@ -161,9 +161,10 @@
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)
-  (eval-in-frame! [_ {:keys [frame-i code error-id]} on-result]
+  (eval-in-frame! [_ {:keys [frame-i code error-id on-stop]} on-result]
     (future
       (let [token (debugger/make-token)
+            _ (when on-stop (try (on-stop (fn [] (debugger/interrupt-token! token))) (catch Throwable _)))
             r (try (let [e (:last-error @state)]
                      (cond (nil? e) {:error "No error yet."}
                            (debugger/stale? e error-id) {:error debugger/STALE}
