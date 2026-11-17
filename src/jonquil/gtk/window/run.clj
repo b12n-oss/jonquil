@@ -556,6 +556,25 @@
         (notify {:busy warning})))
     (fn [] (apply str @out))))
 
+(defn mcp-query!
+  "Evaluates code, Jonquil's own query for the MCP server, in the window's
+  runtime with no console entry: nothing is echoed, what it prints is only
+  collected, a read of stdin gets end of file, and it's quiet where the
+  evaluator honours that, so the REPL's history and *1 stay as they were.
+  notify gets exactly one map: {:busy warning} (said on no console) or,
+  later, {:done {:result r :output s}}. Returns the output reader."
+  [{:keys [ev*]} code notify]
+  (let [e @ev*
+        out (atom [])
+        warning (ev/eval! e code
+                          (cond-> {:run? false :owner :repl
+                                   :on-output (fn [_ s] (swap! out conj s))
+                                   :on-wait-input (fn [waiting?] (when waiting? (ev/send-eof! e)))
+                                   :on-complete (fn [r] (notify {:done {:result r :output (apply str @out)}}))}
+                            (satisfies? ev/QuietEval e) (assoc :quiet (str "jonquil-query-" (random-uuid) ":"))))]
+    (when warning (notify {:busy warning}))
+    (fn [] (apply str @out))))
+
 (defn mcp-run-selection!
   "Selects start..end (clamped to the buffer) in the active tab, then takes
   the do-run-selection! path: {:none s} for a blank range, {:refused msg}
