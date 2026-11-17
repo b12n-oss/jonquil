@@ -23,6 +23,7 @@
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
             [jonquil.mcp.describe :as describe]
+            [jonquil.mcp.frames :as frames]
             [jonquil.mcp.result :as result]
             [jonquil.mcp.tools :as tools]
             [jonquil.plugin-mcp :as plugin-mcp]
@@ -50,7 +51,11 @@
     "inputSchema" {"type" "object"
                    "properties" {"code" (prop "string" "The code to evaluate.")
                                  "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
-                                 "max_output_chars" tools/max-output-prop}
+                                 "max_output_chars" tools/max-output-prop
+                                 "frame" (assoc frames/frame-prop "description"
+                                                (str "Run code in a frame of the last error instead, quietly (no console entry), "
+                                                     "with that frame's locals bound, in its namespace (Jolt): index and error_id "
+                                                     "from jonquil_frames."))}
                    "required" ["code"]}}
    {"name" "jonquil_run"
     "description" "Run the active tab the way the Run button does: banner, bracket check, reset-on-run as configured."
@@ -116,6 +121,7 @@
    (describe-def "jonquil_namespaces")
    (describe-def "jonquil_vars")
    (describe-def "jonquil_apropos")
+   (update-in frames/frames-def ["inputSchema" "properties"] dissoc "path")
    {"name" "jonquil_check_brackets"
     "description" "Check brackets in text or in a file. Answers ok, or names the first unclosed or unmatched bracket and its line."
     "inputSchema" {"type" "object"
@@ -321,9 +327,13 @@
 ;; make-window-tools' tools, one named fn each. ctx is {:ui :dir :grace-ms
 ;; :turn :await!}: turn runs a thunk on the GUI thread, await! runs an eval.
 
-(defn- tool-eval [{:keys [ui await!]} args]
+(declare frame-eval!)
+
+(defn- tool-eval [{:keys [ui await!] :as ctx} args]
   (let [code (tools/required-string args "code")]
-    (await! args (fn [notify] ((:mcp-eval!* ui) code notify)))))
+    (if-let [req (frames/frame-arg args)]
+      (frame-eval! ctx (assoc req :code code) args)
+      (await! args (fn [notify] ((:mcp-eval!* ui) code notify))))))
 
 ;; the tab a run runs, for the Messages entry's jump (a :tab-id
 ;; side field the agent never sees); a ui without tabs has none
@@ -573,6 +583,40 @@
           (tools/describe-result (await! args (fn [notify] ((:mcp-query!* ui) code notify)))
                                  answer))))))
 
+;; --- the last error's frames (UF5) -------------------------------------------
+
+(defn- frames-refusal
+  "As tools/frames-refusal, with paused before busy: an evaluation paused
+  in the Frames panel (the debugger part's :mcp-paused?*, read on the GUI
+  thread) is also evaluating."
+  [{:keys [ui turn]} sel e]
+  (cond (not (satisfies? ev/Frames e)) (frames/unsupported-result sel)
+        (when-let [paused? (:mcp-paused?* ui)] (turn paused?)) frames/paused-result
+        :else (tools/frames-refusal sel e)))
+
+(defn- tool-frames
+  "jonquil_frames over the window's runtime, through the ui's :mcp-frames!*:
+  the Frames panel and the console stay as they were."
+  [{:keys [ui] :as ctx} args]
+  (let [sel ((:selection* ui))]
+    (or (frames-refusal ctx sel ((:evaluator* ui)))
+        (let [t (tools/timeout-of args)
+              d (frames/await-callback (:mcp-frames!* ui) t)]
+          (if (= ::frames/timeout d)
+            (frames/frames-timeout-result t)
+            (frames/frames-answer d (tools/frames-opts ctx sel)))))))
+
+(defn- frame-eval!
+  "jonquil_eval with a frame over the window's runtime, through the ui's
+  :mcp-frame-eval!*: no console entry."
+  [{:keys [ui grace-ms] :as ctx} req args]
+  (let [sel ((:selection* ui))
+        e ((:evaluator* ui))]
+    (or (frames-refusal ctx sel e)
+        (tools/run-frame-eval {:sel sel :grace-ms grace-ms :start! (:mcp-frame-eval!* ui)
+                               :interrupt! (fn [] (ev/interrupt! e))}
+                              req args))))
+
 (defn- window-handlers
   "Tool name -> (fn [args]) over ctx."
   [ctx]
@@ -593,6 +637,7 @@
      "jonquil_namespaces" (h (tool-describe "jonquil_namespaces"))
      "jonquil_vars" (h (tool-describe "jonquil_vars"))
      "jonquil_apropos" (h (tool-describe "jonquil_apropos"))
+     "jonquil_frames" (h tool-frames)
      "jonquil_check_brackets" (h tool-brackets)
      "jonquil_project" (h tool-project)
      "jonquil_plugins_list" (h tool-plugins-list)

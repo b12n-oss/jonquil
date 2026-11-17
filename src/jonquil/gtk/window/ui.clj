@@ -1,6 +1,7 @@
 (ns jonquil.gtk.window.ui
   "The window's ui map, the one activate! hands its on-ready callback: the window's widgets and the fns its buttons, keys and menus call, for the self-test rows, the docs shots and the MCP server (jonquil.gtk.window/start!'s docstring names the keys). ui-map builds it from activate!'s bindings, one map per topic, merged with the parts' :ui keys. Internal to the window, as jonquil.gtk.window.status is. Moved out of jonquil.gtk.window's activate! unchanged."
   (:require [jolt.ffi :as ffi]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
@@ -148,6 +149,10 @@
                    (win-run/mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
                                       text {:hook-source :repl :hook-tab (:id t)} notify)))
    :mcp-query!* (fn [code notify] (win-run/mcp-query! {:ev* ev*} code notify))
+   ;; the last error's frames for the MCP server (UF5), straight from the
+   ;; evaluator: the Frames panel and the console stay as they were
+   :mcp-frames!* (fn [on-data] (ev/error-frames! @ev* on-data))
+   :mcp-frame-eval!* (fn [req on-result] (ev/eval-in-frame! @ev* req on-result))
    :mcp-run-selection!* (fn [start end notify]
                           (win-run/mcp-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
                                                        :status-label status-label}

@@ -442,7 +442,9 @@
     (watch-break! ctx)
     (set-restart-handler! ctx)
     {:fns (debugger-fns ctx)
-     :ui {:debugger-pane dbgp}
+     :ui {:debugger-pane dbgp
+          ;; for the MCP frames tools (UF5): an evaluation is paused here (GTK thread)
+          :mcp-paused?* (fn [] (boolean (:paused? @(:frames-state ctx))))}
      :hooks {:on-tab-wired (fn [_ t] (tab-wired! ctx t))}
      :panels {:debugger {:root (:root dbgp)
                          :focus! (fn [] (debugger-pane/focus! dbgp))

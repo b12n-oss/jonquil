@@ -490,9 +490,10 @@
 
 ;; --- the last error's frames (UF5) -------------------------------------------
 
-(defn- frames-opts
-  "frames-answer's opts for selection sel: files shown relative to its
-  project, and whether it is JVM Clojure."
+(defn frames-opts
+  "frames-answer's opts for selection sel (env's :dir when it has no
+  project): files shown relative to its project, and whether it is JVM
+  Clojure."
   [env sel]
   (let [root (or (:project-dir sel) (:dir env))
         files (delay (test-run/project-files root))]
@@ -515,7 +516,7 @@
               (frames/frames-timeout-result t)
               (frames/frames-answer d (frames-opts env sel))))))))
 
-(defn frame-eval-timed-out
+(defn- frame-eval-timed-out
   "The answer for a frame evaluation past its timeout-ms. In process,
   interrupt! (which reaches a frame evaluation) stops it, then up to
   grace-ms is given for it to end; the Jolt child keeps its own bound."
@@ -531,21 +532,34 @@
      (str "Timed out after " timeout-ms " ms; the frame evaluation may still be running in the Jolt child.")
      (ms))))
 
+(defn run-frame-eval
+  "jonquil_eval with a frame, once nothing refused it: JVM Clojure answers
+  that it keeps no locals, else (start! req on-result) runs req
+  ({:frame-i :error-id :code}) and the answer waits for it until the
+  call's deadline. interrupt! stops it in process; grace-ms is the wait
+  after that."
+  [{:keys [sel start! interrupt! grace-ms]} req args]
+  (if (= :clj (:id (:profile sel)))
+    frames/jvm-frame-result
+    (let [t (timeout-of args)
+          t0 (System/currentTimeMillis)
+          ms (fn [] (- (System/currentTimeMillis) t0))
+          p (promise)
+          _ (start! req (fn [r] (deliver p r)))
+          r (deref p t ::frames/timeout)]
+      (if (= ::frames/timeout r)
+        (frame-eval-timed-out {:in-process? (= :in-process (:runtime sel)) :interrupt! interrupt!
+                               :p p :timeout-ms t :grace-ms grace-ms :ms ms})
+        (frames/frame-eval-answer r {:max-output (result/max-output-of args) :ms (ms)})))))
+
 (defn- frame-eval!
   "jonquil_eval with a frame on evaluator e: req is {:frame-i :error-id :code}."
   [env sel e req args]
   (or (frames-refusal sel e)
-      (when (= :clj (:id (:profile sel))) frames/jvm-frame-result)
-      (let [t (timeout-of args)
-            t0 (System/currentTimeMillis)
-            ms (fn [] (- (System/currentTimeMillis) t0))
-            p (promise)
-            _ (ev/eval-in-frame! e req (fn [r] (deliver p r)))
-            r (deref p t ::frames/timeout)]
-        (if (= ::frames/timeout r)
-          (frame-eval-timed-out {:in-process? (= :in-process (:runtime sel)) :interrupt! (fn [] (ev/interrupt! e))
-                                 :p p :timeout-ms t :grace-ms (:grace-ms env) :ms ms})
-          (frames/frame-eval-answer r {:max-output (result/max-output-of args) :ms (ms)})))))
+      (run-frame-eval {:sel sel :grace-ms (:grace-ms env)
+                       :start! (fn [r on-result] (ev/eval-in-frame! e r on-result))
+                       :interrupt! (fn [] (ev/interrupt! e))}
+                      req args)))
 
 (def ^:private tool-fns
   {"jonquil_eval" tool-eval

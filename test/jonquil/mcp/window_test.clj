@@ -9,6 +9,7 @@
             [jonquil.help :as help]
             [jonquil.describe-run :as dr]
             [jonquil.mcp :as mcp]
+            [jonquil.mcp.frames :as frames]
             [jonquil.mcp.tools :as tools]
             [jonquil.mcp.window :as w]))
 
@@ -35,11 +36,11 @@
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 
-(deftest defs-are-the-twenty-four
+(deftest defs-are-the-twenty-five
   (is (= ["jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop"
           "jonquil_open" "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab"
           "jonquil_replace_text" "jonquil_save" "jonquil_console" "jonquil_doc"
-          "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos"
+          "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
           "jonquil_check_brackets" "jonquil_project"
           "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
           "jonquil_test" "jonquil_change_set_propose"]
@@ -310,7 +311,7 @@
                        :call (fn [args] {:text (str "echo " (get args "text")) :error? false})}])
         f (w/with-plugin-tools (tools-for {}) {:plugin-tools* (fn [] @served)})
         names (fn [] (map #(get % "name") (:defs (f))))]
-    (is (= 25 (count (names))))
+    (is (= 26 (count (names))))
     (is (= "plugin_fmt_echo" (last (names))))
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
     (is (= {:text "Selected tab 1." :error? false :tab-id 1}
@@ -318,8 +319,8 @@
                       {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
     (reset! served [])
-    (is (= 24 (count (names))))
-    (is (= 24 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
+    (is (= 25 (count (names))))
+    (is (= 25 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
 
 (deftest plugin-tools-table-says-list-changed
   ;; a window that can watch its plugin tools declares it
@@ -347,7 +348,7 @@
     (is (= [{:kind :agent :summary "Claude Code switched to tab 1" :client "Claude Code"
              :target {:tab-id 1} :summary-tab 1}]
            @entries))
-    (is (= 24 (count (:defs (f)))) "the defs pass through")))
+    (is (= 25 (count (:defs (f)))) "the defs pass through")))
 
 (deftest with-messages-rethrows
   (let [entries (atom [])
@@ -694,3 +695,66 @@
   (let [r (call (tools-for (describe-ui {:r {:found? false :vars [] :dropped 0}})) "jonquil_vars" {"ns" "a.b"})]
     (is (= "not-found" (get-in r [:data "status"])))
     (is (str/includes? (:text r) "(jonquil_open, then jonquil_run)"))))
+
+;; --- the last error's frames (UF5) -------------------------------------------
+
+(def ^:private frames-value
+  {:title "ArithmeticException: Divide by zero" :error-id "rt:9"
+   :frames [{:fn "demo.core/inner" :file nil :line 2 :locals [{:name "x" :text "7"}]}]})
+
+(defn- frames-ui
+  "A fake ui for the frames calls: a Jolt (or profile) selection, an
+  evaluator that has Frames and is evaluating? as given, :mcp-paused?*
+  answering paused?, and the two frames keys recording their calls in seen
+  and answering d and r. An :mcp-eval!* that must not be called."
+  [{:keys [profile evaluating? paused? d r seen]}]
+  (let [e #_{:clj-kondo/ignore [:missing-protocol-method]}
+        (reify ev/Evaluator
+          (evaluating? [_] (boolean evaluating?))
+          ev/Frames
+          (error-frames! [_ _] nil))]
+    {:selection* (fn [] {:profile {:id (or profile :jolt) :name "Jolt"} :project-dir "/nonexistent/jonquil-wfr"
+                         :runtime :in-process})
+     :evaluator* (fn [] e)
+     :mcp-paused?* (fn [] (boolean paused?))
+     :mcp-eval!* (fn [_ _] (throw (ex-info "a console entry was made" {})))
+     :mcp-frames!* (fn [on-data] (some-> seen (swap! conj :frames)) (on-data d))
+     :mcp-frame-eval!* (fn [req on-result] (some-> seen (swap! conj [:frame-eval req])) (on-result r))}))
+
+(defn- in-frame [code] {"code" code "frame" {"index" 0 "error_id" "rt:9"}})
+
+(deftest window-frames-answers-like-headless
+  (let [r (call (tools-for (frames-ui {:d frames-value})) "jonquil_frames" {})]
+    (is (false? (:error? r)))
+    (is (= (:data (frames/frames-answer frames-value {:root "/nonexistent/jonquil-wfr" :locate (constantly nil)}))
+           (:data r)))))
+
+(deftest window-frame-eval-is-quiet
+  (let [seen (atom [])
+        r (call (tools-for (frames-ui {:r {:out "" :text "7"} :seen seen})) "jonquil_eval" (in-frame "x"))]
+    (is (= "7" (get-in r [:data "value"])))
+    (is (= [[:frame-eval {:frame-i 0 :error-id "rt:9" :code "x"}]] @seen) "only :mcp-frame-eval!* ran")))
+
+(deftest window-paused-refuses-both
+  (let [seen (atom [])
+        t (tools-for (frames-ui {:paused? true :evaluating? true :seen seen}))]
+    (is (= {"status" "paused"} (:data (call t "jonquil_frames" {}))))
+    (is (= {"status" "paused"} (:data (call t "jonquil_eval" (in-frame "x")))))
+    (is (= [] @seen))))
+
+(deftest window-busy-refuses-both
+  (let [seen (atom [])
+        t (tools-for (frames-ui {:evaluating? true :seen seen}))]
+    (is (= {"status" "busy"} (:data (call t "jonquil_frames" {}))))
+    (is (= {"status" "busy"} (:data (call t "jonquil_eval" (in-frame "x")))))
+    (is (= [] @seen))))
+
+(deftest window-jvm-frame-eval-unsupported
+  (let [seen (atom [])
+        r (call (tools-for (frames-ui {:profile :clj :seen seen})) "jonquil_eval" (in-frame "x"))]
+    (is (= {"status" "unsupported"} (:data r)))
+    (is (= [] @seen))))
+
+(deftest window-frames-unsupported-runtime
+  (let [ui (assoc (frames-ui {}) :evaluator* (fn [] (evaluator {})))]
+    (is (= {"status" "unsupported"} (:data (call (tools-for ui) "jonquil_frames" {}))))))
