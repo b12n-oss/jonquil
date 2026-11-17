@@ -214,11 +214,33 @@
   (tool! srv "jonquil_eval" {"code" ":before"} 60000)
   (describe-checks! srv label true))
 
+(defn- frames-checks!
+  "jonquil_frames after a failing call, then jonquil_eval in its innermost
+  frame, with Jolt's debug mode on (so the frame keeps x) and off again."
+  [srv label]
+  (tool! srv "jonquil_eval" {"code" "((requiring-resolve 'jolt.profile/instrument!) :debug)"} 60000)
+  (try
+    (tool! srv "jonquil_eval" {"code" "(defn uf5-smoke [x] (let [y 0] (/ x y)))"} 60000)
+    (tool! srv "jonquil_eval" {"code" "(uf5-smoke 7)"} 60000)
+    (let [r (tool! srv "jonquil_frames" {} 60000)
+          id (get-in r [:data "error_id"])]
+      (check! (str label " jonquil_frames names the failing fn")
+              (and (= "ok" (get-in r [:data "status"]))
+                   (str/includes? (str (get-in r [:data "frames" 0 "fn"])) "uf5-smoke"))
+              r)
+      (let [v (tool! srv "jonquil_eval" {"code" "x" "frame" {"index" 0 "error_id" (str id)}} 60000)]
+        (check! (str label " jonquil_eval in the frame sees its local")
+                (= "7" (get-in v [:data "value"])) {:frames (:text r) :eval v})))
+    (finally
+      (tool! srv "jonquil_eval" {"code" "((requiring-resolve 'jolt.profile/instrument!) false)"} 60000))))
+
 (defn- runtime-tool-checks!
-  "jonquil_test, then the describe tools, over the server's runtime."
+  "jonquil_test, then the describe tools, then the frames tools, over the
+  server's runtime."
   [srv proj label]
   (test-tool-checks! srv proj label)
-  (describe-tool-checks! srv proj label))
+  (describe-tool-checks! srv proj label)
+  (frames-checks! srv label))
 
 (defn- main []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
@@ -240,7 +262,7 @@
       (try
         (handshake! srv "in-process")
         (let [r (request! srv "tools/list" {} 20000)]
-          (check! "tools/list has ten tools" (= 10 (count (get-in r ["result" "tools"]))) r))
+          (check! "tools/list has eleven tools" (= 11 (count (get-in r ["result" "tools"]))) r))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
         (structured-checks! srv)
@@ -281,7 +303,7 @@
   #{"jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop" "jonquil_open"
     "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab" "jonquil_replace_text"
     "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
-    "jonquil_namespaces" "jonquil_vars" "jonquil_apropos"
+    "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
     "jonquil_check_brackets" "jonquil_project"
     "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
     "jonquil_test" "jonquil_change_set_propose"})
@@ -382,7 +404,7 @@
     (println "[mcp-smoke] startup plugin tool seen" (name path))
     (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
             (and (not= :no-list-changed path)
-                 (= 25 (count (get-in r ["result" "tools"])))
+                 (= 26 (count (get-in r ["result" "tools"])))
                  (= want (names-of r)))
             {:path path :r r}))
   (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
@@ -499,6 +521,7 @@
       (window-edit-checks! srv a)
       (window-test-checks! srv proj)
       (window-describe-checks! srv)
+      (frames-checks! srv "window")
       (plugin-checks! srv xdg)
       (window-dirty-eof-checks! srv a pid)
       (check! "every stdout line is JSON"
@@ -556,8 +579,8 @@
             (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
   (let [r (request! b1 "tools/list" {} 60000)
         names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-    (check! "tools/list has exactly the twenty-four window tools"
-            (and (= 24 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+    (check! "tools/list has exactly the twenty-five window tools"
+            (and (= 25 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
   (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
     (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
   (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]
