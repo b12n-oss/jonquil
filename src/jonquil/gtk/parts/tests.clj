@@ -10,8 +10,9 @@
   the rest. The same report shows an agent's run (jonquil.mcp.window).
 
   Only the tab's own text runs. Another open tab with forms edited since
-  they last ran is named on the console before the summary, since the
-  tests ran against what the runtime held."
+  they last ran, or a file with unsaved edits that never ran, is named on
+  the console before the summary, since the tests ran against what the
+  runtime held."
   (:require [clojure.string :as str]
             [jonquil.changed :as changed]
             [jonquil.clj :as clj]
@@ -130,18 +131,27 @@
                           :on-done (fn [r] (notify {:done {:result r :output (apply str @out)}}))}))
     (fn [] (apply str @out))))
 
+(defn- unrun-line
+  "The warning for tab t, or nil. A tab that has run is named when it holds
+  forms edited since (the changed-form gutter's record). A tab that never
+  ran is named when it is a file with unsaved edits: what the runtime
+  loaded of it, if anything, is the file on disk."
+  [t]
+  (let [ed (:ed t)
+        path @(:path t)
+        file-name (when path (.getName (java.io.File. ^String path)))]
+    (if-let [ran (some-> (:changed ed) :ran deref)]
+      (let [n (count (changed/changed (editor/editor-text ed) ran))]
+        (when (pos? n)
+          (test-run/unrun-line (or file-name "An untitled tab") n)))
+      (when (and file-name (editor/dirty? ed))
+        (test-run/never-run-line file-name)))))
+
 (defn- unrun-lines
   "A warning line for each open tab, other than the one with id skip-id,
-  that has run and holds forms edited since (the changed-form gutter's
-  record). GTK thread."
+  whose edits a test run didn't see (unrun-line). GTK thread."
   [tabs skip-id]
-  (keep (fn [t]
-          (when-let [ran (and (not= skip-id (:id t)) (some-> (:changed (:ed t)) :ran deref))]
-            (let [n (count (changed/changed (editor/editor-text (:ed t)) ran))
-                  path @(:path t)]
-              (when (pos? n)
-                (test-run/unrun-line (if path (.getName (java.io.File. ^String path)) "An untitled tab") n)))))
-        @tabs))
+  (keep (fn [t] (when (not= skip-id (:id t)) (unrun-line t))) @tabs))
 
 (defn report-run!
   "Shows a test run's report (jonquil.test-run/report): its lines on the

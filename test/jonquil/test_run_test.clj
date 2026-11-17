@@ -231,3 +231,7 @@
          (tr/unrun-line "core.clj" 1)))
   (is (= "core.clj has 3 forms changed since they last ran. The tests use what last ran."
          (tr/unrun-line "core.clj" 3))))
+
+(deftest never-run-line-names-the-file
+  (is (= "core.clj has unsaved edits that were never run, so the tests don't see them."
+         (tr/never-run-line "core.clj"))))

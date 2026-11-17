@@ -160,8 +160,16 @@ edited since they last ran, the console says so before the summary:
 ; core.clj has 1 form changed since it last ran. The tests use what last ran.
 ```
 
-Run that tab, or use Run Changed Forms there, and run the tests again. The
-line can only name open tabs that have run at least once.
+Run that tab, or use Run Changed Forms there, and run the tests again.
+
+A file you opened and edited but never ran has no last run to compare with.
+It is named when its edits aren't saved:
+
+```
+; core.clj has unsaved edits that were never run, so the tests don't see them.
+```
+
+Neither line can name a file that isn't open.
 
 ![Run Tests after shapes.clj was edited but not run: the console says shapes.clj has 1 form changed since it last ran, before the summary of one failure](../images/run-tests-unrun.png)
 
