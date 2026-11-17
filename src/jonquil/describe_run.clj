@@ -6,7 +6,8 @@
   holding one EDN map (jonquil.test-run/read-value reads it back). The
   answer makers turn that map into a tool's text and structured content.
   No evaluator here, and nothing reads the disk."
-  (:require [clojure.walk :as walk]
+  (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [jonquil.test-run :as test-run]))
 
 (def runtime-cap
@@ -128,3 +129,112 @@
   with its :ns, sorted by namespace then name, at most :cap."
   [{:keys [query cap] :or {cap runtime-cap}}]
   (printed apropos-form {'QUERY (str query) 'CAP cap}))
+
+;; --- answers -----------------------------------------------------------------
+
+(defn clamp-limit
+  "x as a whole number in 1..runtime-cap, default when x isn't a number."
+  [x default]
+  (if (number? x) (max 1 (min runtime-cap (long x))) default))
+
+(defn shown-file
+  "file as the answer shows it: relative to :root when :locate finds it in
+  the project, else as given. nil stays nil."
+  [file {:keys [root locate]}]
+  (when file
+    (if-let [p (locate file)]
+      (let [prefix (str root "/")]
+        (if (str/starts-with? p prefix) (subs p (count prefix)) p))
+      file)))
+
+(defn- own? [file {:keys [locate]}] (boolean (and file (locate file))))
+
+(defn- more-line [n]
+  (when (pos? n) (str "(" n " more not shown; raise limit to see them)")))
+
+(defn- answer [lines data]
+  {:text (str/join "\n" (remove nil? lines))
+   :error? false
+   :data (assoc data "status" "ok")})
+
+(defn- own-first
+  "rows split by own? on (file-of row): own ones first, the rest after them
+  only when all?. [kept left-out-count]."
+  [rows file-of all? opts]
+  (let [{mine true theirs false} (group-by #(own? (file-of %) opts) rows)]
+    [(concat mine (when all? theirs)) (if all? 0 (count theirs))]))
+
+(defn namespaces-answer
+  "The jonquil_namespaces answer for namespaces-snippet's value v: the
+  project's own namespaces (their file found by :locate) first, the rest
+  after them with :all?, else only counted as hidden. At most :limit
+  (500)."
+  [v {:keys [all? limit] :as opts}]
+  (let [limit (clamp-limit limit 500)
+        [kept hidden] (own-first (sort-by :name (:namespaces v)) :file all? opts)
+        shown (take limit kept)
+        dropped (+ (or (:dropped v) 0) (- (count kept) (count shown)))]
+    (answer (concat (map :name shown)
+                    [(when (pos? hidden)
+                       (str "(+ " hidden " Clojure and library namespaces; pass all: true to list them)"))
+                     (more-line dropped)])
+            {"namespaces" (mapv (fn [{:keys [name file vars]}]
+                                  {"name" name "file" (shown-file file opts) "vars" vars
+                                   "own" (own? file opts)})
+                                shown)
+             "hidden" hidden
+             "dropped" dropped})))
+
+(defn- var-data [{:keys [arglists doc file line private? macro?] :as row} opts]
+  {"name" (:name row) "arglists" arglists "doc" doc "file" (shown-file file opts)
+   "line" line "private" private? "macro" macro?})
+
+(defn- location [file line]
+  (when file (if line (str file ":" line) file)))
+
+(defn- var-line [head {:keys [arglists doc private? macro?]} file line]
+  (str/join "  " (remove str/blank? [(str/join " " (concat [head] arglists
+                                                           (when private? ["(private)"])
+                                                           (when macro? ["(macro)"])))
+                                     doc
+                                     (location file line)])))
+
+(defn vars-answer
+  "The jonquil_vars answer for vars-snippet's value v and namespace :ns:
+  its vars sorted by name, private ones left out unless :private? (true),
+  at most :limit (500). An error naming :ns when it isn't loaded."
+  [v {:keys [ns private? limit] :or {private? true} :as opts}]
+  (if-not (:found? v)
+    {:text (str "Namespace " ns " isn't loaded. Run its file (jonquil_run_file), then call again.")
+     :error? true
+     :data {"status" "not-found" "ns" ns}}
+    (let [limit (clamp-limit limit 500)
+          kept (cond->> (sort-by :name (:vars v)) (not private?) (remove :private?))
+          shown (take limit kept)
+          dropped (+ (or (:dropped v) 0) (- (count kept) (count shown)))
+          rows (map #(var-data % opts) shown)]
+      (answer (concat (map (fn [row d] (var-line (:name row) row (get d "file") (:line row))) shown rows)
+                      [(more-line dropped)])
+              {"ns" ns "vars" (vec rows) "dropped" dropped}))))
+
+(defn apropos-answer
+  "The jonquil_apropos answer for apropos-snippet's value v: the project's
+  own vars first, the rest after them unless :all? is false, each part
+  sorted by namespace then name, at most :limit (50)."
+  [v {:keys [query all? limit] :or {all? true} :as opts}]
+  (let [limit (clamp-limit limit 50)
+        [kept _] (own-first (sort-by (juxt :ns :name) (:vars v)) :file all? opts)
+        shown (take limit kept)
+        dropped (+ (or (:dropped v) 0) (- (count kept) (count shown)))
+        rows (map (fn [row] (-> (var-data row opts) (select-keys ["name" "arglists" "doc" "file" "line"])
+                                (assoc "ns" (:ns row))))
+                  shown)]
+    (if (empty? shown)
+      (answer [(str "No loaded var's name contains " (pr-str (str query)) ".")]
+              {"query" query "matches" [] "dropped" dropped})
+      (answer (concat (map (fn [row d]
+                             (str/join "  " (remove nil? [(str (:ns row) "/" (:name row) " " (str/join " " (:arglists row)))
+                                                          (location (get d "file") (:line row))])))
+                           shown rows)
+                      [(more-line dropped)])
+              {"query" query "matches" (vec rows) "dropped" dropped}))))
