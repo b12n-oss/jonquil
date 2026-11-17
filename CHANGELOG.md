@@ -10,6 +10,7 @@ everything that shipped before that.
 
 - The MCP tools that evaluate code (`jonquil_eval`, `jonquil_run`, `jonquil_run_file` and `jonquil_run_selection`) answer with structured content beside their text: the status, the printed value, the output, the error's message, type and line, the namespace and the time taken. An agent can read those fields without taking the text apart.
 - The same tools take `max_output_chars` (default 100000). A program that prints more than that gets an answer holding the last characters and a first line saying how many were dropped. Headless, a program that prints without end no longer grows the server's memory until its timeout.
+- `jonquil --mcp` has a seventh tool, `jonquil_test`. It runs a test namespace, or one test, in the project's runtime and answers the counts and each failure's test, file, line, expected and actual values, as text and as structured content. The test namespace is reloaded from disk before every run, and tests that were renamed or deleted in the file stop running. It works for Jolt and JVM Clojure projects. See [Running tests](docs/guide/mcp.md#running-tests).
 
 ## [0.4.4] - 2026-11-17
 

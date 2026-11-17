@@ -155,6 +155,30 @@
                  (string? (:text r)) (str/starts-with? (:text r) "; 480 earlier characters"))
             r)))
 
+(defn- test-tool-checks!
+  "jonquil_test against a test file in proj, run by the server's runtime."
+  [srv proj label]
+  (fs/create-dirs (str proj "/test/demo"))
+  (spit (str proj "/test/demo/core_test.clj")
+        (str "(ns demo.core-test (:require [clojure.test :refer [deftest is testing]]))\n"
+             "(deftest passes (is (= 1 1)))\n"
+             "(deftest fails (testing \"outer\" (is (= 1 2) \"msg\")))\n"
+             "(deftest throws (is (= 1 (/ 1 0))))\n"))
+  (let [r (tool! srv "jonquil_test" {"ns" "demo.core-test"} 60000)
+        d (:data r)
+        f (first (get d "failures"))]
+    (check! (str label " jonquil_test answers the counts of a failing run")
+            (and (= "failed" (get d "status"))
+                 (= {"tests" 3 "assertions" 3 "pass" 1 "fail" 1 "error" 1} (get d "counts"))
+                 (string? (:text r)) (str/starts-with? (:text r) "2 failures in demo.core-test"))
+            r)
+    (check! (str label " jonquil_test names the failing test, its file and its line")
+            (and (= ["fails" 3 ["outer"] "msg"] (map #(get f %) ["test" "line" "context" "message"]))
+                 (string? (get f "file"))
+                 (fs/absolute? (get f "file"))
+                 (str/ends-with? (get f "file") "/test/demo/core_test.clj"))
+            r)))
+
 (defn- main []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
         xdg (str tmp "/xdg")
@@ -162,7 +186,8 @@
         nrepl-proj (str tmp "/nrepl-proj")]
     (doseq [d [proj nrepl-proj]]
       (fs/create-dirs d)
-      (spit (str d "/deps.edn") "{}")
+      ;; test is a source root so jonquil_test can load the test namespace
+      (spit (str d "/deps.edn") "{:paths [\"src\" \"test\"]}")
       (spit (str d "/a.clj") "(ns a)\n(def x 1)\n"))
     ;; proj has a deps.edn, where Jolt runs out of process by default; this
     ;; block is the in-process headless path (where a stray println could
@@ -174,10 +199,11 @@
       (try
         (handshake! srv "in-process")
         (let [r (request! srv "tools/list" {} 20000)]
-          (check! "tools/list has six tools" (= 6 (count (get-in r ["result" "tools"]))) r))
+          (check! "tools/list has seven tools" (= 7 (count (get-in r ["result" "tools"]))) r))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
         (structured-checks! srv)
+        (test-tool-checks! srv proj "in-process")
         (let [r1 (tool! srv "jonquil_eval" {"code" "(do (.start (Thread. (fn [] (println \"noise\")))) (Thread/sleep 200) :ok)"} 30000)
               r2 (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 30000)]
           (check! "background println does not reach stdout"
@@ -197,6 +223,7 @@
           (handshake! srv "nrepl")
           (let [r (tool! srv "jonquil_eval" {"code" "(+ 5 5)"} 60000)]
             (check! "nrepl eval (+ 5 5) => 10" (and (string? (:text r)) (str/includes? (:text r) "=> 10")) r))
+          (test-tool-checks! srv nrepl-proj "nrepl")
           (let [kids (children pid)]
             (check! (str "nrepl run started a child (pid " (str/join "," kids) ")") (seq kids) kids)
             (stop! srv "nrepl")

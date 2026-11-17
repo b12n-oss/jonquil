@@ -11,17 +11,18 @@ claude mcp add jonquil -- jonquil --mcp /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp /path/to/project
 ```
 
-Six tools. Most take an optional `path` selecting the project (default
+Seven tools. Most take an optional `path` selecting the project (default
 `DIR`); `jonquil_run_file` requires a file `path`, and `jonquil_check_brackets`
 takes `text` or a `path`.
 
 <details>
-<summary><strong>The six tools</strong></summary>
+<summary><strong>The seven tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
 | `jonquil_eval` | Evaluates code as a REPL line; definitions persist |
 | `jonquil_run_file` | Runs a file's text like the Run button |
+| `jonquil_test` | Runs a namespace's `clojure.test` tests, or one test, and answers each failure as data |
 | `jonquil_check_brackets` | Names the first unclosed or unmatched bracket |
 | `jonquil_doc` | Documentation for a symbol |
 | `jonquil_complete` | Up to 50 completion candidates for a prefix |
@@ -44,6 +45,68 @@ process, and `{:dialect :clj}` attaches to its nREPL server.
 - Closing stdin ends the server and its runtimes.
 - With an out-of-process runtime, `jonquil_doc` and `jonquil_complete` use the
   editor's offline tables until a first evaluation starts the runtime.
+
+### Running tests
+
+`jonquil_test` runs one test namespace in the project's runtime, the same one
+`jonquil_eval` uses, so it sees what the agent has defined there. It works for
+Jolt and JVM Clojure projects. Any other dialect gets the status `unsupported`.
+
+| Argument | What it does |
+|---|---|
+| `ns` | The test namespace. Leave it out when `path` is a test file; the file's `ns` form names it |
+| `test` | One test's name. Without it every test in the namespace runs |
+| `path` | A file or directory selecting the project, as in the other tools |
+| `timeout_ms`, `max_output_chars` | As in `jonquil_eval` |
+
+The test namespace is reloaded from disk before each run, so an edit to a
+test file is always seen. A test you renamed or deleted in the file is
+removed from the running namespace too, so it can't keep running under its
+old name. Source namespaces are not reloaded: evaluate or run
+what you changed first. The namespace has to be loadable by name, which means
+the test folder is on the project's source paths (for a Jolt project,
+`{:paths ["src" "test"]}` in `deps.edn`; for JVM Clojure, the classpath of
+the nREPL server Jonquil attaches to).
+
+The text answer is a summary line, three lines per failure, then whatever the
+tests printed:
+
+```
+2 failures in demo.core-test: 3 tests, 3 assertions, 1 passed, 1 failed, 1 error
+FAIL fails (/work/app/test/demo/core_test.clj:9) outer > inner: msg
+  expected: (= 1 2)
+  actual:   (not (= 1 2))
+```
+
+The same run comes as `structuredContent`:
+
+| Field | What it holds |
+|---|---|
+| `status` | `ok` when everything passed, `failed`, `no-tests`, `error` (the namespace didn't load, or there is no test by that name), `timeout`, `interrupted`, `refused` or `unsupported` |
+| `ns` | The namespace that ran |
+| `counts` | `tests`, `assertions`, `pass`, `fail` and `error` |
+| `failures` | One entry per failed assertion or thrown exception, sorted by file, line and test: `test`, `kind` (`fail` or `error`), `file`, `line`, `context` (the `testing` strings, outermost first), `message`, `expected`, `actual` |
+| `failures_dropped` | How many failures past the first 100 were left out |
+| `error` | For `error`: the `message`, and `type`, `line` and `column` when known |
+| `output`, `err`, `ms`, `dropped_chars` | As in the next section |
+
+A failing test is not a tool error. The answer is marked as an error only
+when the tests couldn't run, so read `status` for pass or fail.
+
+- `expected` and `actual` are printed text, at most 2000 characters each.
+  Long collections print their first 100 items, so an endless sequence can't
+  hang a run.
+- `file` is absolute when Jonquil finds exactly one file under the project
+  directory that matches the test's path. Otherwise it stays relative to the
+  source root.
+- On JVM Clojure an exception thrown inside library code reports the line
+  of its `deftest`, since the throw itself is in another file.
+- On a timeout the results of the tests that had already run are lost.
+- A namespace with no file on the source paths (one defined in the session,
+  or loaded with `jonquil_run_file` from another folder) can't be reloaded.
+  Jolt runs its tests as they are. JVM Clojure answers `error`.
+- On Jolt the run leaves the REPL alone. On JVM Clojure it shows in the
+  session's history, and `*1` holds the run's data afterwards.
 
 ### Structured results
 

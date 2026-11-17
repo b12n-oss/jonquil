@@ -1,5 +1,5 @@
 (ns jonquil.mcp.tools
-  "The six MCP tools over a per-project evaluator.
+  "The seven MCP tools over a per-project evaluator.
 
   `make-tools` returns the table jonquil.mcp consumes:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`.
@@ -9,6 +9,7 @@
             [clojure.string :as str]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
+            [jonquil.clj :as clj]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
@@ -23,7 +24,8 @@
             [jonquil.nrepl.shadow]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
-            [jonquil.settings :as settings]))
+            [jonquil.settings :as settings]
+            [jonquil.test-run :as test-run]))
 
 (def ^:private default-timeout-ms 30000)
 (def ^:private interrupt-grace-ms 5000)
@@ -50,6 +52,15 @@
                                  "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
                                  "max_output_chars" max-output-prop}
                    "required" ["path"]}}
+   {"name" "jonquil_test"
+    "description" "Run a namespace's clojure.test tests, or one test, in the project's runtime. Reloads the test namespace from disk first. Answers counts and each failure's test, file, line, expected and actual. Jolt and JVM Clojure."
+    "inputSchema" {"type" "object"
+                   "properties" {"ns" (prop "string" "The test namespace. Optional when path is a test file.")
+                                 "test" (prop "string" "One test's name in that namespace. Default: every test.")
+                                 "path" (prop "string" "A file or directory selecting the project. A test file here also names the namespace when ns is absent.")
+                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
+                                 "max_output_chars" max-output-prop}
+                   "required" []}}
    {"name" "jonquil_check_brackets"
     "description" "Check brackets in text or in a file. Answers ok, or names the first unclosed or unmatched bracket and its line."
     "inputSchema" {"type" "object"
@@ -269,6 +280,87 @@
           (fn [_ e] (run-in! env {:path p :e e :code text :opts {:run? true :path p :owner :run}
                                   :args args})))))))
 
+;; --- tests -------------------------------------------------------------------
+
+(def ^:private max-located-files 20000)
+
+(defn- project-files
+  "The paths of the files under dir, at most max-located-files, skipping
+  dot directories, target and node_modules."
+  [dir]
+  (let [skip? (fn [^java.io.File f]
+                (let [n (.getName f)]
+                  (or (str/starts-with? n ".") (contains? #{"target" "node_modules"} n))))
+        walk (fn walk [^java.io.File d]
+               (mapcat (fn [^java.io.File f]
+                         (cond
+                           (skip? f) nil
+                           (.isDirectory f) (walk f)
+                           :else [(.getPath f)]))
+                       (.listFiles d)))]
+    (take max-located-files (walk (io/file dir)))))
+
+(defn- test-ns-name
+  "The namespace a jonquil_test call names: its ns, or the ns form of the
+  file at its path. Throws when it gives neither."
+  [dir args]
+  (let [ns-name (get args "ns")
+        path (get args "path")
+        f (when (string? path) (io/file (absolute dir path)))]
+    (cond
+      (and (string? ns-name) (not (str/blank? ns-name))) ns-name
+      (and f (.isFile f)) (or (clj/buffer-ns (slurp f))
+                              (throw (ex-info (str "No ns form in " (.getPath f) ".") {})))
+      :else (throw (ex-info "Give ns, or the path of a test file." {})))))
+
+(defn- unreadable-test-result [r ns-name]
+  (let [message "The test run returned something unreadable."]
+    {:text (str message "\n" (:text r))
+     :error? true
+     :data (-> (:data r)
+               (dissoc "value")
+               (assoc "status" "error" "ns" ns-name "error" {"message" message}))}))
+
+(defn- test-result
+  "A jonquil_test answer from r, run-eval!'s answer for the snippet. An
+  evaluation that didn't finish with a value (an error while loading, a
+  timeout) keeps its text and status. files is a delay of the project's
+  file paths, where failures' files are looked up."
+  [r {:keys [ns-name test files]}]
+  (let [d (:data r)]
+    (if (not= "ok" (get d "status"))
+      (assoc r :error? true :data (-> d (dissoc "value") (assoc "ns" ns-name)))
+      (if-let [v (test-run/read-value (get d "value"))]
+        (let [report (test-run/report v {:ns ns-name :test test
+                                         :locate (fn [rel] (test-run/locate @files rel))})
+              dropped (or (get d "dropped_chars") 0)]
+          {:text (str (result/dropped-line dropped) (test-run/text report) (get d "output"))
+           :error? (not (contains? #{"ok" "failed"} (:status report)))
+           :data (test-run/data report {:output (get d "output") :err (get d "err")
+                                        :dropped dropped :ms (get d "ms")})})
+        (unreadable-test-result r ns-name)))))
+
+(defn- unsupported-test-result [sel]
+  {:text (str "jonquil_test runs Jolt and JVM Clojure tests for now. This project is "
+              (:name (:profile sel)) ".")
+   :error? true
+   :data {"status" "unsupported"}})
+
+(defn- tool-test [env args]
+  (let [path (get args "path")
+        ns-name (test-ns-name (:dir env) args)
+        test (get args "test")
+        sel (selection (:ctx env) path)
+        files (delay (project-files (or (:project-dir sel) (:dir env))))
+        code (test-run/snippet {:ns ns-name :test test})]
+    (if-not (test-run/supported? (:id (:profile sel)))
+      (unsupported-test-result sel)
+      (let [e (evaluator-for! (:cache env) sel)
+            opts (cond-> {:run? false :owner :repl}
+                   (satisfies? ev/QuietEval e) (assoc :quiet (str "jonquil-test-" (random-uuid) ":")))]
+        (test-result (run-in! env {:path path :e e :code code :opts opts :args args})
+                     {:ns-name ns-name :test test :files files})))))
+
 (defn- tool-brackets [env args] (brackets-result (:dir env) args))
 
 (defn- tool-doc [env args]
@@ -304,6 +396,7 @@
 (def ^:private tool-fns
   {"jonquil_eval" tool-eval
    "jonquil_run_file" tool-run
+   "jonquil_test" tool-test
    "jonquil_check_brackets" tool-brackets
    "jonquil_doc" tool-doc
    "jonquil_complete" tool-complete
