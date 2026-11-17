@@ -6,6 +6,8 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-17
+
 ### Added
 
 - The MCP tools that evaluate code (`jonquil_eval`, `jonquil_run`, `jonquil_run_file` and `jonquil_run_selection`) answer with structured content beside their text: the status, the printed value, the output, the error's message, type and line, the namespace and the time taken. An agent can read those fields without taking the text apart.
