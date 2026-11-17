@@ -120,6 +120,61 @@ the forms they sent. An evaluation that fails or is stopped records nothing,
 so its forms stay marked. A file reloaded from disk keeps its record, so
 the forms that differ from what last ran show up marked.
 
+### Running tests
+
+**Run Tests in This File** (Cmd/Ctrl+Shift+T, or the Run menu) runs the tab
+and then the `clojure.test` tests in its namespace. **Run Test at the Caret**
+does the same for the one test the caret is in. Both work for Jolt and JVM
+Clojure, in a tab that has an `ns` form.
+
+The tab runs first, exactly as Run does, so edits you haven't saved count and
+the file on disk is left alone. If that Run fails, its error shows as usual
+and no test runs. A test you renamed or deleted in the tab stops running: only
+the tests the tab holds now are run.
+
+The console gets a summary line, then three lines for each failure:
+
+```
+; Tests: 2 failures in demo.core-test: 3 tests, 3 assertions, 1 passed, 1 failed, 1 error
+; FAIL fails (core_test.clj:9) outer > inner: msg
+;   expected: (= 1 2)
+;   actual:   (not (= 1 2))
+```
+
+The failures also open as a [locations list](help-and-inspector.md#the-locations-list),
+one row per failure with its file, line, test and message. Enter or a click
+goes to the failing line, and F8 and Shift+F8 step through them. A failure in
+another file opens that file.
+
+![Run Tests in This File on a test file: the summary and each failure's expected and actual values on the console, and the Locations panel listing the two failures with the first one's line selected in the editor](../images/run-tests.png)
+
+When every test passes, the console says so in one line. The Locations panel
+is left as it was, unless it was showing that namespace's failures, which are
+then cleared.
+
+Only this tab runs before the tests. Code in another tab counts once you
+have run it, as with anything at a REPL. When another open tab holds forms you
+edited since they last ran, the console says so before the summary:
+
+```
+; core.clj has 1 form changed since it last ran. The tests use what last ran.
+```
+
+Run that tab, or use Run Changed Forms there, and run the tests again. The
+line can only name open tabs that have run at least once.
+
+![Run Tests after shapes.clj was edited but not run: the console says shapes.clj has 1 form changed since it last ran, before the summary of one failure](../images/run-tests-unrun.png)
+
+On Jolt, the first time a test file requires a source namespace, that
+namespace's file is loaded from disk, even when you ran its tab a moment
+before with edits you hadn't saved. From then on, running the source tab is
+what the tests see. So after the first test run, run an edited source tab
+again, or save it before the first run.
+
+On JVM Clojure the two helper evaluations around the Run show in the session's
+history, and `*1` holds the run's data afterwards. On Jolt the REPL is left as
+it was.
+
 ### Change sets
 
 A change set holds the forms you changed for one idea, so you can look at

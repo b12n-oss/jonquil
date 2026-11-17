@@ -89,6 +89,7 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 |---|---|---|
 | Cmd/Ctrl+E | anywhere in the window | Run the editor's selection, or its current line, at the console prompt |
 | Cmd/Ctrl+Enter | Definitions editor | Run the form at the caret (in a comment block, the form inside it) |
+| Cmd/Ctrl+Shift+T | anywhere in the window | Run the tests in this file: the tab runs first, then its tests |
 | Cmd/Ctrl+L | anywhere in the window | Clear the console's output history |
 | Cmd/Ctrl+Shift+L | anywhere in the window | Clear the last entry's output (CIDER's C-c C-o) |
 | Return | console prompt | Evaluate, send the line as stdin, or insert a newline for an unfinished multi-line entry |

@@ -1,9 +1,10 @@
 (ns gtk-selftest-window.order-b
-  "Rows 112 to 221 of the window self-test, in the order they run.
+  "Rows 112 to 225 of the window self-test, in the order they run.
   dev/gtk_selftest_window.clj joins the five parts order-a to order-e
   into its row list."
   (:require [gtk-selftest-window.completion :as completion]
             [gtk-selftest-window.locations :as locations-rows]
+            [gtk-selftest-window.tests-part :as tests-part-rows]
             [gtk-selftest-window.palette :as palette-rows]
             [gtk-selftest-window.plugins :as plugin-rows]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
@@ -116,6 +117,10 @@
    locations-rows/row-find-usages-stale-file
    locations-rows/row-find-usages-resolved
    locations-rows/row-locations-empty-says-no-places
+   tests-part-rows/row-run-tests-lists-failures-then-forgets-a-rename
+   tests-part-rows/row-run-tests-needs-an-ns-form
+   tests-part-rows/row-run-tests-warns-about-unrun-edits
+   tests-part-rows/row-agent-test-runs-the-unsaved-tab
    locations-rows/row-compare-with-disk-and-take
    locations-rows/row-compare-this-form-and-take
    locations-rows/row-compare-with-head

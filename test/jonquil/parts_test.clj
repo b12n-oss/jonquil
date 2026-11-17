@@ -6,6 +6,7 @@
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.replay :as replay-part]
+            [jonquil.gtk.parts.tests :as tests-part]
             [jonquil.gtk.parts.time-form :as time-form-part]
             [jonquil.gtk.parts.worlds :as worlds-part]
             [jonquil.palette :as palette]
@@ -61,7 +62,7 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :prefs :terminal :menus :trace :live-results :locations :debugger :breakpoints :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :prefs :terminal :menus :trace :live-results :locations :tests :debugger :breakpoints :command-palette :file-tree :plugins :change-sets :reader :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
            :panel/processes :processes/show
            :change-set/make :change-set/browse
@@ -69,6 +70,7 @@
            :result/inspect :result/copy :result/define :result/jump :result/doc :result/open-location
            :panel/locations :locations/uses :locations/definitions :locations/matches
            :locations/usages-in-project :locations/next :locations/previous
+           :test/run-file :test/run-at-caret
            :compare/disk :compare/head :compare/take :compare/last-run
            :compare-form/disk :compare-form/head :compare-form/last-run
            :panel/frames :debug/show-frames :debug/locals-mode :run/line-counts :run/clear-line-counts
@@ -474,3 +476,62 @@
           :debugger "Frames" :plugins "Plugins" :messages "Messages"
           :processes "Processes" :trace "Trace" :change-sets "Change Sets" :reader "Reader"}
          palette/PANEL-LABELS)))
+
+;; The tests part: its commands, and how a run's report is shown.
+
+(deftest tests-part-owns-its-commands
+  (let [spec (some #(when (= :tests (:id %)) %) parts/specs)]
+    (is (= [:test-run-file-fn] (get-in spec [:commands :test/run-file :call])))
+    (is (= [:test-run-caret-fn] (get-in spec [:commands :test/run-at-caret :call])))
+    (is (contains? registry/window-commands :test/run-file))
+    (is (contains? registry/window-commands :test/run-at-caret))))
+
+(defn- test-report [status]
+  {:status status :ns "demo.core-test"
+   :counts {"tests" 3 "assertions" 3 "pass" (if (= "ok" status) 3 1)
+            "fail" (if (= "ok" status) 0 2) "error" 0}
+   :failures [] :failures-dropped 0})
+
+(defn- report-with
+  "tests-part/report-run! against stand-ins: what reached the console, the
+  failures list and the clear."
+  [report who]
+  (let [queue (atom [])
+        shown (atom [])
+        cleared (atom [])]
+    ;; :drain-scheduled? true: append! queues and schedules nothing on GTK
+    (tests-part/report-run! {:cv {:queue queue :drain-scheduled? (atom true)}
+                             :show-failures! #(swap! shown conj %)
+                             :clear-failures! #(swap! cleared conj %)}
+                            report {:who who :warnings (:warnings report)})
+    {:console (apply str (map second @queue)) :shown @shown :cleared @cleared}))
+
+(deftest tests-part-shows-a-failing-run
+  (let [r (report-with (test-report "failed") nil)]
+    (is (= "; Tests: 2 failures in demo.core-test: 3 tests, 3 assertions, 1 passed, 2 failed, 0 errors\n"
+           (:console r)))
+    (is (= [(test-report "failed")] (:shown r)))
+    (is (= [] (:cleared r)))))
+
+(deftest tests-part-passing-run-clears-only-its-own-list
+  (let [r (report-with (test-report "ok") nil)]
+    (is (= "; Tests: all passed in demo.core-test: 3 tests, 3 assertions\n" (:console r)))
+    (is (= [] (:shown r)) "a pass makes no list")
+    (is (= ["demo.core-test"] (:cleared r)) "and asks only for its own namespace's failures to go")))
+
+(deftest tests-part-names-the-agent
+  (is (= (str "; claude-code ran the tests in demo.core-test\n"
+              "; Tests: all passed in demo.core-test: 3 tests, 3 assertions\n")
+         (:console (report-with (test-report "ok") "claude-code")))))
+
+(deftest tests-part-no-tests-touches-no-list
+  (let [r (report-with (assoc (test-report "no-tests") :counts {"tests" 0 "assertions" 0 "pass" 0 "fail" 0 "error" 0}) nil)]
+    (is (= "; Tests: no tests in demo.core-test.\n" (:console r)))
+    (is (= [[] []] [(:shown r) (:cleared r)]))))
+
+(deftest tests-part-warns-before-the-summary
+  (is (= (str "; core.clj has 1 form changed since it last ran. The tests use what last ran.\n"
+              "; Tests: all passed in demo.core-test: 3 tests, 3 assertions\n")
+         (:console (report-with (assoc (test-report "ok")
+                                       :warnings ["core.clj has 1 form changed since it last ran. The tests use what last ran."])
+                                nil)))))

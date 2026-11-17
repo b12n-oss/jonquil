@@ -34,13 +34,13 @@
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 
-(deftest defs-are-the-twenty
+(deftest defs-are-the-twenty-one
   (is (= ["jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop"
           "jonquil_open" "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab"
           "jonquil_replace_text" "jonquil_save" "jonquil_console" "jonquil_doc"
           "jonquil_complete" "jonquil_check_brackets" "jonquil_project"
           "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
-          "jonquil_change_set_propose"]
+          "jonquil_test" "jonquil_change_set_propose"]
          (map #(get % "name") (:defs (tools-for {}))))))
 
 (defn- plugin-ui
@@ -308,7 +308,7 @@
                        :call (fn [args] {:text (str "echo " (get args "text")) :error? false})}])
         f (w/with-plugin-tools (tools-for {}) {:plugin-tools* (fn [] @served)})
         names (fn [] (map #(get % "name") (:defs (f))))]
-    (is (= 21 (count (names))))
+    (is (= 22 (count (names))))
     (is (= "plugin_fmt_echo" (last (names))))
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
     (is (= {:text "Selected tab 1." :error? false :tab-id 1}
@@ -316,8 +316,8 @@
                       {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
     (reset! served [])
-    (is (= 20 (count (names))))
-    (is (= 20 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
+    (is (= 21 (count (names))))
+    (is (= 21 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
 
 (deftest plugin-tools-table-says-list-changed
   ;; a window that can watch its plugin tools declares it
@@ -345,7 +345,7 @@
     (is (= [{:kind :agent :summary "Claude Code switched to tab 1" :client "Claude Code"
              :target {:tab-id 1} :summary-tab 1}]
            @entries))
-    (is (= 20 (count (:defs (f)))) "the defs pass through")))
+    (is (= 21 (count (:defs (f)))) "the defs pass through")))
 
 (deftest with-messages-rethrows
   (let [entries (atom [])
@@ -530,3 +530,107 @@
         "no client-fn, no client")
     (is (:error? (call (tools-for {}) "jonquil_change_set_propose" {"name" "x" "forms" forms}))
         "a window without the hook refuses")))
+
+;; --- jonquil_test --------------------------------------------------------------
+
+(def ^:private run-value
+  "What the test snippet answers for one failure in three tests, as the
+  evaluation prints it: a string holding EDN."
+  (pr-str (pr-str {:outcome :ran :tests 3 :pass 2 :fail 1 :error 0 :failures-dropped 0
+                   :failures [{:test "fails" :kind :fail :file "demo/core_test.clj"
+                               :event-file "core_test.clj" :line 9 :var-line 6
+                               :context ["outer"] :message "msg"
+                               :expected "(= 1 2)" :actual "(not (= 1 2))"}]})))
+
+(defn- test-ui
+  "A fake ui for jonquil_test: a Jolt selection, :mcp-test! answering done
+  with result r and recording the code it was sent, :test-report!
+  recording what the window was asked to show."
+  [{:keys [r seen shown profile warnings runs]}]
+  {:selection* (fn [] {:profile {:id (or profile :jolt) :name "Jolt"} :project-dir "/nonexistent/jonquil-wtest"})
+   :evaluator* (fn [] (evaluator {}))
+   :mcp-test! (fn [{:keys [code] :as run} notify]
+                (when seen (swap! seen conj code))
+                (when runs (swap! runs conj (dissoc run :code)))
+                (notify (if (map? r) r {:done {:result {:status :ok :printed r} :output "out\n"}}))
+                (fn [] "out\n"))
+   :test-unrun-lines (fn [] (or warnings []))
+   :test-report! (fn [report {:keys [who]}] (when shown (swap! shown conj [(:status report) (:ns report) who])))})
+
+(deftest window-test-answers-like-headless
+  (let [seen (atom []) shown (atom [])
+        t (tools-for (test-ui {:r run-value :seen seen :shown shown}))
+        r (call t "jonquil_test" {"ns" "demo.core-test"})
+        d (:data r)]
+    (is (not (:error? r)))
+    (is (not (contains? r :report)) "the side field stays inside")
+    (is (= "failed" (get d "status")))
+    (is (= {"tests" 3 "assertions" 3 "pass" 2 "fail" 1 "error" 0} (get d "counts")))
+    (is (= ["fails" "fail" "demo/core_test.clj" 9 ["outer"] "msg"]
+           (map #(get-in d ["failures" 0 %]) ["test" "kind" "file" "line" "context" "message"])))
+    (is (str/starts-with? (:text r) "1 failure in demo.core-test: 3 tests, 3 assertions, 2 passed, 1 failed, 0 errors\n"))
+    (is (str/ends-with? (:text r) "out\n") "what the tests printed comes after the report")
+    (is (str/includes? (first @seen) "(quote demo.core-test)"))
+    (is (str/includes? (first @seen) ":reload") "an agent's run reloads from disk")
+    (is (= [["failed" "demo.core-test" "An agent"]] @shown))))
+
+(deftest window-test-names-the-client-and-one-test
+  (let [seen (atom []) shown (atom [])
+        t (tools-for (test-ui {:r run-value :seen seen :shown shown}) :client-fn (constantly "claude-code"))]
+    (call t "jonquil_test" {"ns" "demo.core-test" "test" "fails"})
+    (is (str/includes? (first @seen) "\"fails\""))
+    (is (= "claude-code" (last (first @shown))))))
+
+(deftest window-test-busy-is-refused
+  (let [shown (atom [])
+        t (tools-for (test-ui {:r {:busy "; busy"} :shown shown}))
+        r (call t "jonquil_test" {"ns" "demo.core-test"})]
+    (is (:error? r))
+    (is (= "refused" (get-in r [:data "status"])))
+    (is (= "demo.core-test" (get-in r [:data "ns"])))
+    (is (= [] @shown) "nothing ran, so the window shows nothing")))
+
+(deftest window-test-load-error-keeps-the-eval-text
+  (let [shown (atom [])
+        t (tools-for (test-ui {:r {:done {:result {:status :error :error-text "Error: Could not locate demo/x_test.clj"} :output ""}}
+                               :shown shown}))
+        r (call t "jonquil_test" {"ns" "demo.x-test"})]
+    (is (:error? r))
+    (is (= "error" (get-in r [:data "status"])))
+    (is (= [] @shown))))
+
+(deftest window-test-unsupported-dialect-starts-nothing
+  (let [seen (atom [])
+        t (tools-for (test-ui {:r run-value :seen seen :profile :cljs}))
+        r (call t "jonquil_test" {"ns" "demo.core-test"})]
+    (is (= {"status" "unsupported"} (:data r)))
+    (is (= [] @seen))))
+
+(deftest window-test-needs-a-namespace
+  (let [t (tools-for (assoc (test-ui {:r run-value}) :active-tab* (fn [] nil)))]
+    (is (thrown-with-msg? Exception #"Give ns, or select the test file's tab"
+                          (call t "jonquil_test" {})))
+    (is (thrown-with-msg? Exception #"Not a namespace name" (call t "jonquil_test" {"ns" "a) (b"})))))
+
+(deftest window-test-carries-the-unrun-warnings
+  (let [w "core.clj has 1 form changed since it last ran. The tests use what last ran."
+        r (call (tools-for (test-ui {:r run-value :warnings [w]})) "jonquil_test" {"ns" "demo.core-test"})]
+    (is (str/starts-with? (:text r) (str w "\n1 failure in demo.core-test")))
+    (is (= [w] (get-in r [:data "warnings"]))))
+  (is (not (contains? (:data (call (tools-for (test-ui {:r run-value})) "jonquil_test" {"ns" "demo.core-test"}))
+                      "warnings"))))
+
+(deftest window-test-hands-the-window-the-names
+  (let [runs (atom [])]
+    (call (tools-for (test-ui {:r run-value :runs runs})) "jonquil_test" {"ns" "demo.core-test" "test" "fails"})
+    (is (= [{:ns-name "demo.core-test" :test "fails"}] @runs)
+        "the window picks the tab or the reload from these")))
+
+(deftest window-test-keeps-the-answer-when-the-window-cannot-show-it
+  (let [ui (assoc (test-ui {:r run-value})
+                  :test-unrun-lines (fn [] (throw (ex-info "no tabs" {})))
+                  :test-report! (fn [_ _] (throw (ex-info "no panel" {}))))
+        r (call (tools-for ui) "jonquil_test" {"ns" "demo.core-test"})]
+    (is (= "failed" (get-in r [:data "status"])))
+    (is (= 1 (get-in r [:data "counts" "fail"])))
+    (is (str/ends-with? (:text r) "; The window could not show this run: no panel"))))

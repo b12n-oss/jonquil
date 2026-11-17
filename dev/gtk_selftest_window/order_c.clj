@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.order-c
-  "Rows 222 to 332 of the window self-test, in the order they run.
+  "Rows 226 to 336 of the window self-test, in the order they run.
   dev/gtk_selftest_window.clj joins the five parts order-a to order-e
   into its row list."
   (:require [gtk-selftest-window.dialects :as dialects]

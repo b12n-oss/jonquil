@@ -51,6 +51,8 @@ process, and `{:dialect :clj}` attaches to its nREPL server.
 `jonquil_test` runs one test namespace in the project's runtime, the same one
 `jonquil_eval` uses, so it sees what the agent has defined there. It works for
 Jolt and JVM Clojure projects. Any other dialect gets the status `unsupported`.
+A window serves it too, with no `path`: see the window tools below. For the
+command a person uses, see [Running tests](using-jonquil.md#running-tests).
 
 | Argument | What it does |
 |---|---|
@@ -140,11 +142,11 @@ claude mcp add jonquil -- jonquil --mcp --window /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/project
 ```
 
-With `--window` the server offers twenty tools (headless keeps six), acting
+With `--window` the server offers twenty-one tools (headless keeps seven), acting
 on the live window:
 
 <details>
-<summary><strong>The twenty window tools</strong></summary>
+<summary><strong>The twenty-one window tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -167,6 +169,7 @@ on the live window:
 | `jonquil_plugin_read` | A plugin's live source and history, or one `version`'s source |
 | `jonquil_plugin_propose` | Proposes whole new `source` for `id` with a `reason`; answers pending, rejected-by-checks or refused |
 | `jonquil_plugin_status` | A proposal's status (latest without `n`) and your note if rejected |
+| `jonquil_test` | Runs a namespace's tests, or one test, and answers as the headless tool does. Without `ns` it takes the active tab's namespace. When the namespace is open in a tab, that tab runs first, unsaved edits included, the way [Run Tests in This File](using-jonquil.md#running-tests) does; otherwise the namespace reloads from disk. The window shows the run: a line naming the client, the summary, and the failures in the Locations list. When an open tab holds forms edited since they last ran, the answer starts with a line saying so and lists them under `warnings` |
 | `jonquil_change_set_propose` | Saves a named list of `forms` (each a `path` and the form's `text`) as a change set marked as yours, for you to apply or revert |
 
 </details>
@@ -248,7 +251,7 @@ A plugin gives agents tools in `:mcp-tools`:
 ```
 
 A window serving MCP (`--mcp --window`, or one you attach to) serves each live
-plugin's tools as `plugin_<id>_<name>` after its twenty: `plugin_smoke-t_twice`
+plugin's tools as `plugin_<id>_<name>` after its twenty-one: `plugin_smoke-t_twice`
 for plugin `smoke-t` above.
 
 - Argument types: `string`, `integer`, `number`, `boolean`. A missing or
@@ -275,7 +278,7 @@ listening on in `settings.edn`:
 {:mcp-listen? true}
 ```
 
-That window serves the same twenty tools on a socket bound to 127.0.0.1, on
+That window serves the same twenty-one tools on a socket bound to 127.0.0.1, on
 a port the OS picks, to one client at a time. It publishes the port in
 `mcp/<pid>.edn` beside `settings.edn`. Then register the bridge:
 

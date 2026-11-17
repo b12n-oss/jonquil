@@ -23,6 +23,7 @@
             [jonquil.parts.replay :as replay]
             [jonquil.parts.live-results :as live-results]
             [jonquil.parts.trace :as trace]
+            [jonquil.parts.tests :as tests]
             [jonquil.parts.time-form :as time-form]
             [jonquil.parts.worlds :as worlds]))
 
@@ -31,7 +32,7 @@
   :panels [{:id kw :label s}] :bindings {:window [binding ...] :editor [binding ...]}};
   :panels and :bindings are optional, a binding has keymap.edn's shape. The
   real parts, then any registered in jonquil.parts.extra."
-  (into [messages/spec disk-poll/spec layouts/spec worlds/spec time-form/spec processes/spec prefs/spec terminal/spec menus/spec trace/spec live-results/spec locations/spec debugger/spec breakpoints/spec command-palette/spec file-tree/spec plugins/spec change-sets/spec docs/spec replay/spec] @extra/specs*))
+  (into [messages/spec disk-poll/spec layouts/spec worlds/spec time-form/spec processes/spec prefs/spec terminal/spec menus/spec trace/spec live-results/spec locations/spec tests/spec debugger/spec breakpoints/spec command-palette/spec file-tree/spec plugins/spec change-sets/spec docs/spec replay/spec] @extra/specs*))
 
 (defn- claim
   "owners with id's owner added, or throws when id is already owned."

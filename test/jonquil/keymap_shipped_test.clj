@@ -135,6 +135,7 @@
            [0x30 cmd #{} [:view/zoom-reset {}]]
            [0x33 cmd #{} [:tab/select {:n 3}]]
            [0x39 cmd #{} [:tab/select {:n 9}]]
+           [0x74 sh #{} [:test/run-file {}]]
            [0x74 cmd #{} [:tab/new {}]]
            [0x6d sh #{} [:view/cycle-theme {}]]
            [0x6d cmd #{} nil]

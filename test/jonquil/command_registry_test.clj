@@ -10,7 +10,7 @@
    :describe-key-fn :key-bindings-fn :recent-keys-fn :version-fn :slow-events-fn :save-slow-events-fn :open-terminal-fn :install-cli-fn :remove-cli-fn
    :open-keys-file-fn :reload-keys-fn :prefs-open-fn :terminal-show-fn :terminal-new-fn :reset-toggle-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
-   :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
+   :locations-project-usages-fn :test-run-file-fn :test-run-caret-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
    :replay-open-fn :replay-forget-fn :change-set-make-fn :change-set-list-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :compare-last-run-fn :compare-form-disk-fn :compare-form-head-fn :compare-form-last-run-fn :layout-save-fn :layout-forget-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :step-fn :step-over-fn :step-out-fn :toggle-breakpoint-fn :clear-breakpoints-fn :instrument-tab-fn :uninstrument-tab-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :result-open-location-fn :panel-focus-fn
@@ -47,6 +47,7 @@
    :locations/uses [:locations-uses-fn] :locations/definitions [:locations-definitions-fn]
    :locations/matches [:locations-matches-fn]
    :locations/usages-in-project [:locations-project-usages-fn]
+   :test/run-file [:test-run-file-fn] :test/run-at-caret [:test-run-caret-fn]
    :world/save [:world-save-fn] :world/restore [:world-restore-fn]
    :world/restore-earlier [:world-restore-earlier-fn]
    :session/open-replay [:replay-open-fn] :session/forget-last [:replay-forget-fn]

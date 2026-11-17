@@ -81,6 +81,8 @@
   {:key "8" :mods #{:cmd} :command :tab/select :args {:n 8}}
   ;; 9 is the last tab, whatever the count
   {:key "9" :mods #{:cmd} :command :tab/select :args {:n 9}}
+  ;; before New Tab, whose binding would take the Shift chord too
+  {:key "t" :mods #{:cmd :shift} :not #{:alt} :command :test/run-file}
   {:key "t" :mods #{:cmd} :not #{:alt} :command :tab/new}
   {:key "m" :mods #{:cmd :shift} :command :view/cycle-theme}
   {:key "i" :mods #{:cmd :shift} :command :inspect/form}

@@ -158,3 +158,76 @@
     (is (= {"message" "No test named t in a."} (get missing "error")))
     (is (= "" (get missing "output")))
     (is (not (contains? missing "ms")))))
+
+(deftest mark-snippet-is-one-qualified-form
+  (let [s (tr/mark-snippet {:ns "demo.core-test" :token "run-1"})
+        form (read-string s)]
+    (is (= 'clojure.core/let (first form)))
+    (is (str/includes? s "(quote demo.core-test)"))
+    (is (str/includes? s ":jonquil/stale \"run-1\""))
+    (is (nil? (re-find #"[(\[ ](let|fn|count|keep|when|alter-meta!|vals) " s)))
+    (is (thrown? Exception (tr/mark-snippet {:ns "a) (b"})))))
+
+(deftest snippet-drop-marked
+  (let [s (tr/snippet {:ns "demo.core-test" :drop-marked "run-1"})]
+    (is (str/includes? s "(clojure.core/= \"run-1\" (:jonquil/stale"))
+    (is (not (str/includes? s ":reload")) "the caller ran the text itself")))
+
+;; Runs clojure.test inside clojure.test, in a namespace of its own.
+(deftest mark-then-rerun-drops-the-renamed
+  (let [head "(ns jonquil.test-run-test.marked (:require [clojure.test :refer [deftest is]]))\n"
+        run! (fn [code] (binding [*ns* *ns*] (load-string code)))
+        value (fn [] (tr/read-value (pr-str (run! (tr/snippet {:ns "jonquil.test-run-test.marked"
+                                                               :drop-marked "run-1"})))))]
+    (try
+      (run! (str head "(deftest keep-me (is true))\n(deftest old-name (is (= 1 2)))\n"))
+      (is (= 2 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.marked" :token "run-1"}))))
+      (run! (str head "(deftest keep-me (is true))\n(deftest new-name (is true))\n"))
+      (let [v (value)]
+        (is (= [2 2 0] ((juxt :tests :pass :fail) v)))
+        (is (= :ran (:outcome v))))
+      (is (nil? (ns-resolve 'jonquil.test-run-test.marked 'old-name)))
+      ;; another run's mark lands before this run's tests: its token is not
+      ;; ours, so nothing of ours is dropped
+      (run! (tr/mark-snippet {:ns "jonquil.test-run-test.marked" :token "run-2"}))
+      (is (= [2 2] ((juxt :tests :pass) (value))) "a later run's tag drops nothing here")
+      (is (= 0 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.no-such" :token "x"}))))
+      (finally (remove-ns 'jonquil.test-run-test.marked)))))
+
+(deftest console-lines-for-each-status
+  (let [lines (fn [m opts] (tr/console-lines (tr/report (value m) (merge {:ns "a.b"} opts))))]
+    (is (= ["; Tests: 2 failures in demo.core-test: 3 tests, 3 assertions, 1 passed, 1 failed, 1 error"
+            "; FAIL fails (core_test.clj:9) outer > inner: msg"
+            ";   expected: (= 1 2)"
+            ";   actual:   (not (= 1 2))"
+            "; ERROR throws (core_test.clj:11)"
+            ";   expected: (= 1 (/ 1 0))"
+            ";   actual:   java.lang.ArithmeticException: Divide by zero"]
+           (tr/console-lines two-failures)))
+    (is (= ["; Tests: all passed in a.b: 3 tests, 4 assertions"] (lines {:tests 3 :pass 4} {})))
+    (is (= ["; Tests: no tests in a.b."] (lines {:outcome :no-tests} {})))
+    (is (= ["; Tests: no test named t in a.b."] (lines {:outcome :no-such-test} {:test "t"})))
+    (is (= "; 3 more failures not listed."
+           (last (lines {:tests 1 :fail 103 :failures [(failure {})] :failures-dropped 3} {}))))))
+
+(deftest form-name-reads-what-a-form-defines
+  (is (= ["fails" "a-b?" "f" nil nil nil nil]
+         (map tr/form-name ["(deftest fails (is 1))" "(deftest ^:slow a-b? [])" "(defn ^{:x 1} f [] 1)"
+                            "(+ 1 2)" "x" "(deftest)" nil]))))
+
+(deftest project-files-skips-build-and-dot-folders
+  (let [dir (java.io.File/createTempFile "jonquil-test-run" "")
+        _ (.delete dir)
+        mk (fn [rel] (let [f (java.io.File. dir ^String rel)] (.mkdirs (.getParentFile f)) (spit f "x") (.getPath f)))]
+    (try
+      (let [kept (set [(mk "test/demo/a_test.clj") (mk "src/demo/a.clj")])]
+        (doseq [rel [".git/config" "target/classes/x.clj" "node_modules/m/index.js"]] (mk rel))
+        (is (= kept (set (tr/project-files (.getPath dir))))))
+      (finally
+        (doseq [f (reverse (file-seq dir))] (.delete ^java.io.File f))))))
+
+(deftest unrun-line-counts-forms
+  (is (= "core.clj has 1 form changed since it last ran. The tests use what last ran."
+         (tr/unrun-line "core.clj" 1)))
+  (is (= "core.clj has 3 forms changed since they last ran. The tests use what last ran."
+         (tr/unrun-line "core.clj" 3))))
