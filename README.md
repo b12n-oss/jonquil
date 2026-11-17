@@ -51,7 +51,7 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 
 ## Download
 
-On an Apple Silicon Mac with macOS 26 or later, download the notarized `Jonquil-0.4.4-macos-arm64.dmg` (or `.zip`) from the [0.4.4 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.4.4) and drag Jonquil to Applications. Or, with Homebrew, run `brew install b12n-oss/tap/jonquil`, which installs the same app and puts a `jonquil` command on your `PATH`. GTK is bundled, so the app needs nothing else from Homebrew. Running a project's Jolt out of process still needs `jolt` and `git` (see Requirements). Intel Macs and Linux build from source, below.
+On an Apple Silicon Mac with macOS 26 or later, download the notarized `Jonquil-0.5.0-macos-arm64.dmg` (or `.zip`) from the [0.5.0 release](https://github.com/b12n-oss/jonquil/releases/tag/v0.5.0) and drag Jonquil to Applications. Or, with Homebrew, run `brew install b12n-oss/tap/jonquil`, which installs the same app and puts a `jonquil` command on your `PATH`. GTK is bundled, so the app needs nothing else from Homebrew. Running a project's Jolt out of process still needs `jolt` and `git` (see Requirements). Intel Macs and Linux build from source, below.
 
 ## Running
 
@@ -81,7 +81,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-17, 2327 tests pass (15631 assertions, on macOS).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `jolt test` to verify. As of 2026-11-17, 2408 tests pass (15933 assertions, on macOS).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>
