@@ -221,3 +221,9 @@
         (is (= kept (set (tr/project-files (.getPath dir))))))
       (finally
         (doseq [f (reverse (file-seq dir))] (.delete ^java.io.File f))))))
+
+(deftest unrun-line-counts-forms
+  (is (= "core.clj has 1 form changed since it last ran. The tests use what last ran."
+         (tr/unrun-line "core.clj" 1)))
+  (is (= "core.clj has 3 forms changed since they last ran. The tests use what last ran."
+         (tr/unrun-line "core.clj" 3))))

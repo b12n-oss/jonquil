@@ -138,7 +138,7 @@
                                  "n" (prop "integer" "The proposal's version number.")}
                    "required" ["id"]}}
    {"name" "jonquil_test"
-    "description" "Run a namespace's clojure.test tests, or one test, in the window's runtime. Reloads the test namespace from disk first. Answers counts and each failure's test, file, line, expected and actual; the window shows the summary on its console and the failures in its Locations list. Jolt and JVM Clojure."
+    "description" "Run a namespace's clojure.test tests, or one test, in the window's runtime. When the namespace is open in a tab, that tab runs first, unsaved edits included, as the window's own Run Tests does; otherwise the namespace is reloaded from disk. Answers counts and each failure's test, file, line, expected and actual; the window shows the summary on its console and the failures in its Locations list. Jolt and JVM Clojure."
     "inputSchema" {"type" "object"
                    "properties" {"ns" (prop "string" "The test namespace. Default: the active tab's.")
                                  "test" (prop "string" "One test's name in that namespace. Default: every test.")
@@ -506,9 +506,20 @@
         (turn (fn [] (some-> ((:active-tab* ui)) :ed editor/editor-text clj/buffer-ns)))
         (throw (ex-info "Give ns, or select the test file's tab: the active tab has no ns form." {})))))
 
+(defn- with-warnings
+  "answer with the window's warnings (tabs holding forms edited since they
+  last ran) as the first lines of its text and as \"warnings\" in its data."
+  [answer warnings]
+  (if (seq warnings)
+    (-> answer
+        (update :text #(str (str/join "\n" warnings) "\n" %))
+        (assoc-in [:data "warnings"] (vec warnings)))
+    answer))
+
 (defn- tool-test
-  "Runs the tests without a console entry (the ui's :mcp-test!), answers
-  as the headless tool does, and shows the run in the window as a person's
+  "Runs the tests without a console entry (the ui's :mcp-test!, which runs
+  the namespace's open tab first, else reloads it from disk), answers as
+  the headless tool does, and shows the run in the window as a person's
   run is shown (the ui's :test-report!)."
   [{:keys [ui dir await! turn client-fn] :as ctx} args]
   (let [sel ((:selection* ui))]
@@ -517,12 +528,14 @@
       (let [ns-name (test-namespace ctx args)
             test (get args "test")
             code (test-run/snippet {:ns ns-name :test test})
-            r (await! args (fn [notify] ((:mcp-test! ui) code notify)))
+            r (await! args (fn [notify]
+                             ((:mcp-test! ui) {:ns-name ns-name :test test :code code} notify)))
             files (delay (test-run/project-files (or (:project-dir sel) dir)))
-            answer (tools/test-result r {:ns-name ns-name :test test :files files})]
+            answer (tools/test-result r {:ns-name ns-name :test test :files files})
+            warnings (when (:report answer) (turn (fn [] ((:test-unrun-lines ui)))))]
         (when-let [report (:report answer)]
-          (turn (fn [] ((:test-report! ui) report (or (client-fn) "An agent")))))
-        (dissoc answer :report)))))
+          (turn (fn [] ((:test-report! ui) report {:who (or (client-fn) "An agent") :warnings warnings}))))
+        (with-warnings (dissoc answer :report) warnings)))))
 
 (defn- window-handlers
   "Tool name -> (fn [args]) over ctx."

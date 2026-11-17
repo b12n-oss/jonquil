@@ -169,7 +169,7 @@ on the live window:
 | `jonquil_plugin_read` | A plugin's live source and history, or one `version`'s source |
 | `jonquil_plugin_propose` | Proposes whole new `source` for `id` with a `reason`; answers pending, rejected-by-checks or refused |
 | `jonquil_plugin_status` | A proposal's status (latest without `n`) and your note if rejected |
-| `jonquil_test` | Runs a namespace's tests, or one test, and answers as the headless tool does. Without `ns` it takes the active tab's namespace. The window shows the run: a line naming the client, the summary, and the failures in the Locations list |
+| `jonquil_test` | Runs a namespace's tests, or one test, and answers as the headless tool does. Without `ns` it takes the active tab's namespace. When the namespace is open in a tab, that tab runs first, unsaved edits included, the way [Run Tests in This File](using-jonquil.md#running-tests) does; otherwise the namespace reloads from disk. The window shows the run: a line naming the client, the summary, and the failures in the Locations list. When an open tab holds forms edited since they last ran, the answer starts with a line saying so and lists them under `warnings` |
 | `jonquil_change_set_propose` | Saves a named list of `forms` (each a `path` and the form's `text`) as a change set marked as yours, for you to apply or revert |
 
 </details>

@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.order-e
-  "Rows 445 to 561 of the window self-test, in the order they run.
+  "Rows 447 to 563 of the window self-test, in the order they run.
   dev/gtk_selftest_window.clj joins the five parts order-a to order-e
   into its row list."
   (:require [gtk-selftest-window.app-open :as app-open]

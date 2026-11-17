@@ -340,7 +340,7 @@
     (println "[mcp-smoke] startup plugin tool seen" (name path))
     (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
             (and (not= :no-list-changed path)
-                 (= 21 (count (get-in r ["result" "tools"])))
+                 (= 22 (count (get-in r ["result" "tools"])))
                  (= want (names-of r)))
             {:path path :r r}))
   (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]

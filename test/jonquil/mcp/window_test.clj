@@ -546,14 +546,16 @@
   "A fake ui for jonquil_test: a Jolt selection, :mcp-test! answering done
   with result r and recording the code it was sent, :test-report!
   recording what the window was asked to show."
-  [{:keys [r seen shown profile]}]
+  [{:keys [r seen shown profile warnings runs]}]
   {:selection* (fn [] {:profile {:id (or profile :jolt) :name "Jolt"} :project-dir "/nonexistent/jonquil-wtest"})
    :evaluator* (fn [] (evaluator {}))
-   :mcp-test! (fn [code notify]
+   :mcp-test! (fn [{:keys [code] :as run} notify]
                 (when seen (swap! seen conj code))
+                (when runs (swap! runs conj (dissoc run :code)))
                 (notify (if (map? r) r {:done {:result {:status :ok :printed r} :output "out\n"}}))
                 (fn [] "out\n"))
-   :test-report! (fn [report who] (when shown (swap! shown conj [(:status report) (:ns report) who])))})
+   :test-unrun-lines (fn [] (or warnings []))
+   :test-report! (fn [report {:keys [who]}] (when shown (swap! shown conj [(:status report) (:ns report) who])))})
 
 (deftest window-test-answers-like-headless
   (let [seen (atom []) shown (atom [])
@@ -609,3 +611,17 @@
     (is (thrown-with-msg? Exception #"Give ns, or select the test file's tab"
                           (call t "jonquil_test" {})))
     (is (thrown-with-msg? Exception #"Not a namespace name" (call t "jonquil_test" {"ns" "a) (b"})))))
+
+(deftest window-test-carries-the-unrun-warnings
+  (let [w "core.clj has 1 form changed since it last ran. The tests use what last ran."
+        r (call (tools-for (test-ui {:r run-value :warnings [w]})) "jonquil_test" {"ns" "demo.core-test"})]
+    (is (str/starts-with? (:text r) (str w "\n1 failure in demo.core-test")))
+    (is (= [w] (get-in r [:data "warnings"]))))
+  (is (not (contains? (:data (call (tools-for (test-ui {:r run-value})) "jonquil_test" {"ns" "demo.core-test"}))
+                      "warnings"))))
+
+(deftest window-test-hands-the-window-the-names
+  (let [runs (atom [])]
+    (call (tools-for (test-ui {:r run-value :runs runs})) "jonquil_test" {"ns" "demo.core-test" "test" "fails"})
+    (is (= [{:ns-name "demo.core-test" :test "fails"}] @runs)
+        "the window picks the tab or the reload from these")))

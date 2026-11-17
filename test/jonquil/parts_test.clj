@@ -503,7 +503,7 @@
     (tests-part/report-run! {:cv {:queue queue :drain-scheduled? (atom true)}
                              :show-failures! #(swap! shown conj %)
                              :clear-failures! #(swap! cleared conj %)}
-                            report who)
+                            report {:who who :warnings (:warnings report)})
     {:console (apply str (map second @queue)) :shown @shown :cleared @cleared}))
 
 (deftest tests-part-shows-a-failing-run
@@ -528,3 +528,10 @@
   (let [r (report-with (assoc (test-report "no-tests") :counts {"tests" 0 "assertions" 0 "pass" 0 "fail" 0 "error" 0}) nil)]
     (is (= "; Tests: no tests in demo.core-test.\n" (:console r)))
     (is (= [[] []] [(:shown r) (:cleared r)]))))
+
+(deftest tests-part-warns-before-the-summary
+  (is (= (str "; core.clj has 1 form changed since it last ran. The tests use what last ran.\n"
+              "; Tests: all passed in demo.core-test: 3 tests, 3 assertions\n")
+         (:console (report-with (assoc (test-report "ok")
+                                       :warnings ["core.clj has 1 form changed since it last ran. The tests use what last ran."])
+                                nil)))))

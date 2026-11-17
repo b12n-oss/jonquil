@@ -1,7 +1,8 @@
 (ns gtk-selftest-window.tests-part
   "Run Tests in This File in the real window: the failures in the
   Locations list and on the console, a renamed test dropped on the next
-  run, and the refusal for a tab with no ns form."
+  run, the refusal for a tab with no ns form, the warning about another
+  tab's unrun edits, and an agent's jonquil_test on an unsaved tab."
   (:require [selftest-keys]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -11,6 +12,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.locations-pane :as lpane]
+            [jonquil.mcp.window :as window]
             [temp-dirs]))
 
 (def ^:private KEY-F8 0xffc5)
@@ -97,3 +99,63 @@
          (support/check :run-tests-needs-an-ns-form
                         (and (= want got) (not (str/includes? added "Tests:")))
                         {:status got :console added}))))))
+
+(defn row-run-tests-warns-about-unrun-edits
+  "Another tab that has run and was edited since is named on the console
+  before the summary: the tests ran against what that tab last ran."
+  [ui]
+  (go-row :run-tests-warns-about-unrun-edits support/check
+    (let [d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-tests-")))
+          f (io/file d "run_tests_test.clj")
+          _ (spit f fixed)
+          [ran? _] (support/run-and-await ui "(def selftest-unrun 1)" 10000
+                                          #(str/includes? % "selftest-unrun"))
+          since (count (on-gtk (editor/set-text! (:editor ui) "(def selftest-unrun 2)")
+                               (support/console-text ui)))
+          console (fn [] (subs (support/console-text ui) since))]
+      (on-gtk ((:open-file! ui) (.getPath f)) (run-tests! ui))
+      (await-until 15000 50 #(str/includes? (console) "; Tests: all passed in"))
+      (on-gtk
+       (let [text (console)
+             warning (re-find #"; .+ has 1 form changed since it last ran\. The tests use what last ran\." text)]
+         (try
+           (support/check :run-tests-warns-about-unrun-edits
+                          (and ran? warning
+                               (< (str/index-of text warning) (str/index-of text "; Tests: all passed in")))
+                          {:ran ran? :console text})
+           (finally
+             (close-extra-tabs! ui)
+             (remove-ns 'jonquil-selftest.run-tests-test))))))))
+
+(defn row-agent-test-runs-the-unsaved-tab
+  "jonquil_test over the live window, for a namespace open in a tab whose
+  edits aren't saved: the tab runs first, so the answer counts the tab's
+  tests and not the file's. The console names the agent and shows the
+  summary, none of the tool's own code, and the file stays as it was."
+  [ui]
+  (go-row :agent-test-runs-the-unsaved-tab support/check
+    (let [d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-tests-")))
+          f (io/file d "run_tests_test.clj")
+          _ (spit f failing)
+          since (count (on-gtk ((:open-file! ui) (.getPath f))
+                               (editor/set-text! (:ed ((:active-tab* ui))) fixed)
+                               (support/console-text ui)))
+          tools (window/make-window-tools {:ui ui :dir d})
+          r ((:call tools) "jonquil_test" {"ns" "jonquil-selftest.run-tests-test"})
+          _ (await-until 5000 50 #(str/includes? (subs (support/console-text ui) since) "; Tests: all passed in"))]
+      (on-gtk
+       (let [text (subs (support/console-text ui) since)
+             d' (:data r)]
+         (try
+           (support/check :agent-test-runs-the-unsaved-tab
+                          (and (not (:error? r))
+                               (= "ok" (get d' "status"))
+                               (= {"tests" 2 "assertions" 2 "pass" 2 "fail" 0 "error" 0} (get d' "counts"))
+                               (str/includes? text "; An agent ran the tests in jonquil-selftest.run-tests-test")
+                               (str/includes? text "; Tests: all passed in jonquil-selftest.run-tests-test: 2 tests, 2 assertions")
+                               (not (str/includes? text "clojure.core/require"))
+                               (= failing (slurp f)))
+                          {:answer r :console text :disk-unchanged (= failing (slurp f))})
+           (finally
+             (close-extra-tabs! ui)
+             (remove-ns 'jonquil-selftest.run-tests-test))))))))

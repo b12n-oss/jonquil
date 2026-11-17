@@ -344,6 +344,13 @@
                   (when (pos? failures-dropped)
                     [(str failures-dropped " more failures not listed.")])))))
 
+(defn unrun-line
+  "The line warning that the tab shown as tab-name holds n forms edited
+  since they last ran, so a test run didn't see them."
+  [tab-name n]
+  (str tab-name " has " n (if (= 1 n) " form changed since it last ran." " forms changed since they last ran.")
+       " The tests use what last ran."))
+
 (defn- failure-data [{:keys [message] :as f}]
   (cond-> {"test" (:test f) "kind" (:kind f) "file" (:file f) "line" (:line f)
            "context" (:context f) "expected" (:expected f) "actual" (:actual f)}

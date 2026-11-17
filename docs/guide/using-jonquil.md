@@ -150,6 +150,17 @@ When every test passes, the console says so in one line. The Locations panel
 is left as it was, unless it was showing that namespace's failures, which are
 then cleared.
 
+Only this tab runs before the tests. Code in another tab counts once you
+have run it, as with anything at a REPL. When another open tab holds forms you
+edited since they last ran, the console says so before the summary:
+
+```
+; core.clj has 1 form changed since it last ran. The tests use what last ran.
+```
+
+Run that tab, or use Run Changed Forms there, and run the tests again. The
+line can only name open tabs that have run at least once.
+
 On JVM Clojure the two helper evaluations around the Run show in the session's
 history, and `*1` holds the run's data afterwards. On Jolt the REPL is left as
 it was.
