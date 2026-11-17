@@ -242,7 +242,7 @@
     "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
     "jonquil_check_brackets" "jonquil_project"
     "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
-    "jonquil_change_set_propose"})
+    "jonquil_test" "jonquil_change_set_propose"})
 
 (defn- ends-with? [r suffix]
   (and (string? (:text r)) (str/ends-with? (str/trim (:text r)) suffix)))
@@ -305,7 +305,8 @@
         proj (str tmp "/proj")
         a (str proj "/a.clj")]
     (fs/create-dirs proj)
-    (spit (str proj "/deps.edn") "{}")
+    ;; test is a source root so jonquil_test can load the test namespace
+    (spit (str proj "/deps.edn") "{:paths [\"src\" \"test\"]}")
     ;; In process, as this window block was written against.
     (spit (str proj "/.jonquil.edn") "{:runtime :in-process}")
     (spit a "(ns demo.a) (def y 7) y")
@@ -408,6 +409,22 @@
     (check! "the discard really discarded: bytes on disk unchanged"
             (= before (slurp a) "(def z 9) z") {:before before :after (slurp a)})))
 
+(defn- window-test-checks!
+  "jonquil_test over a real window: the answer, and what the window's
+  console shows of the run."
+  [srv proj]
+  (test-tool-checks! srv proj "window")
+  (let [r (tool! srv "jonquil_console" {"since" 0} 30000)
+        text (str (:text r))]
+    (check! "the window's console shows the agent's test run as a person's"
+            (and (str/includes? text " ran the tests in demo.core-test")
+                 (str/includes? text "; Tests: 2 failures in demo.core-test: 3 tests, 3 assertions, 1 passed, 1 failed, 1 error")
+                 (str/includes? text "; FAIL fails (core_test.clj:3) outer: msg"))
+            r)
+    (check! "and none of the code the tool evaluates"
+            (not (or (str/includes? text "clojure.core/require") (str/includes? text ":failures-dropped")))
+            r)))
+
 (defn- window-main []
   (let [{:keys [tmp xdg proj a]} (window-fixture!)
         srv (launch! proj xdg)
@@ -415,6 +432,7 @@
     (try
       (window-startup-checks! srv)
       (window-edit-checks! srv a)
+      (window-test-checks! srv proj)
       (plugin-checks! srv xdg)
       (window-dirty-eof-checks! srv a pid)
       (check! "every stdout line is JSON"
@@ -472,8 +490,8 @@
             (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
   (let [r (request! b1 "tools/list" {} 60000)
         names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-    (check! "tools/list has exactly the twenty window tools"
-            (and (= 20 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+    (check! "tools/list has exactly the twenty-one window tools"
+            (and (= 21 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
   (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
     (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
   (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]

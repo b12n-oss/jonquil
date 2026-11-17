@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.order-d
-  "Rows 333 to 442 of the window self-test, in the order they run.
+  "Rows 335 to 444 of the window self-test, in the order they run.
   dev/gtk_selftest_window.clj joins the five parts order-a to order-e
   into its row list."
   (:require [gtk-selftest-window.change-sets :as change-sets-rows]
