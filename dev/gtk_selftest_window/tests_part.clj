@@ -127,6 +127,88 @@
              (close-extra-tabs! ui)
              (remove-ns 'jonquil-selftest.run-tests-test))))))))
 
+(defn row-run-tests-warns-about-a-file-never-run
+  "A source file opened, edited and left unrun is named on the console
+  before the summary: its tab has no last run to compare with, so the
+  unsaved edits are what gives it away. Once the tab reads saved, that line
+  is gone (the saved-since row covers what a saved file gets)."
+  [ui]
+  (go-row :run-tests-warns-about-a-file-never-run support/check
+    (let [d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-tests-")))
+          f (io/file d "run_tests_test.clj")
+          src (io/file d "never_run_source.clj")
+          _ (spit f fixed)
+          _ (spit src "(ns jonquil-selftest.never-run-source)\n(def a 1)\n")
+          since (count (on-gtk ((:open-file! ui) (.getPath src))
+                               ;; an edit as typing makes it: set-text! is a load and
+                               ;; leaves the tab saved
+                               (let [ed (:ed ((:active-tab* ui)))
+                                     i (str/index-of (editor/editor-text ed) "1")]
+                                 (editor/apply-op-plain! ed {:edits [[i (inc i) "2"]] :caret i}))
+                               (support/console-text ui)))
+          console (fn [] (subs (support/console-text ui) since))
+          want "; never_run_source.clj has unsaved edits that were never run, so the tests don't see them."]
+      (on-gtk ((:open-file! ui) (.getPath f)) (run-tests! ui))
+      (await-until 15000 50 #(str/includes? (console) "; Tests: all passed in"))
+      (let [first-text (on-gtk (console))
+            mark (count (on-gtk (doseq [t ((:tabs* ui))] (editor/mark-saved! (:ed t)))
+                                (run-tests! ui)
+                                (support/console-text ui)))
+            _ (await-until 15000 50 #(str/includes? (subs (support/console-text ui) mark) "; Tests: all passed in"))
+            second-text (on-gtk (subs (support/console-text ui) mark))]
+        (on-gtk
+         (try
+           (support/check :run-tests-warns-about-a-file-never-run
+                          (and (str/includes? first-text want)
+                               (< (str/index-of first-text want) (str/index-of first-text "; Tests: all passed in"))
+                               (not (str/includes? second-text "unsaved edits")))
+                          {:first first-text :second second-text})
+           (finally
+             (close-extra-tabs! ui)
+             (remove-ns 'jonquil-selftest.run-tests-test))))))))
+
+(defn row-run-tests-warns-about-a-file-saved-since
+  "A source file that never ran, saved after the tests first ran in this
+  window, is named before the summary: the tests may have loaded it
+  before that save. A file saved before the tests' first run isn't named,
+  and neither is a file with no ns form, however recently it was saved."
+  [ui]
+  (go-row :run-tests-warns-about-a-file-saved-since support/check
+    (let [d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-tests-")))
+          f (io/file d "run_tests_test.clj")
+          src (io/file d "saved_since_source.clj")
+          _ (spit f fixed)
+          _ (spit src "(ns jonquil-selftest.saved-since-source)\n(def a 1)\n")
+          ;; long before any run in this window, whichever row ran first
+          _ (.setLastModified src (- (System/currentTimeMillis) 86400000))
+          run-and-read! (fn []
+                          (let [mark (count (on-gtk ((:open-file! ui) (.getPath f))
+                                                    (run-tests! ui)
+                                                    (support/console-text ui)))]
+                            (await-until 15000 50 #(str/includes? (subs (support/console-text ui) mark)
+                                                                  "; Tests: all passed in"))
+                            (on-gtk (subs (support/console-text ui) mark))))
+          notes (io/file d "notes.md")
+          _ (spit notes "# Notes\n")
+          _ (.setLastModified notes (+ (System/currentTimeMillis) 5000))
+          _ (on-gtk ((:open-file! ui) (.getPath src)) ((:open-file! ui) (.getPath notes)))
+          before (run-and-read!)
+          _ (spit src "(ns jonquil-selftest.saved-since-source)\n(def a 2)\n")
+          _ (.setLastModified src (+ (System/currentTimeMillis) 5000))
+          after (run-and-read!)
+          want "; saved_since_source.clj was saved after the tests first ran here and was never run."]
+      (on-gtk
+       (try
+         (support/check :run-tests-warns-about-a-file-saved-since
+                        (and (not (str/includes? before "saved_since_source.clj"))
+                             (not (str/includes? (str before after) "notes.md"))
+                             (str/includes? after want)
+                             (< (str/index-of after want) (str/index-of after "; Tests: all passed in")))
+                        {:before before :after after})
+         (finally
+           (close-extra-tabs! ui)
+           (remove-ns 'jonquil-selftest.run-tests-test)))))))
+
 (defn row-agent-test-runs-the-unsaved-tab
   "jonquil_test over the live window, for a namespace open in a tab whose
   edits aren't saved: the tab runs first, so the answer counts the tab's

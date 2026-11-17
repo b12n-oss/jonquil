@@ -160,8 +160,28 @@ edited since they last ran, the console says so before the summary:
 ; core.clj has 1 form changed since it last ran. The tests use what last ran.
 ```
 
-Run that tab, or use Run Changed Forms there, and run the tests again. The
-line can only name open tabs that have run at least once.
+Run that tab, or use Run Changed Forms there, and run the tests again.
+
+A file you opened and edited but never ran has no last run to compare with.
+It is named when its edits aren't saved:
+
+```
+; core.clj has unsaved edits that were never run, so the tests don't see them.
+```
+
+Saving doesn't make the tests see an edit either. A namespace that is
+already loaded isn't read from disk again, so a fix you saved without running
+is still the old code to the tests. Jonquil can't tell what the runtime has
+loaded, so it names a file that never ran and was saved after the tests first
+ran in this window, and says when that matters:
+
+```
+; core.clj was saved after the tests first ran here and was never run. If it was already loaded, the tests still use the old code.
+```
+
+Running the tab clears either line. Only files with an `ns` form are named,
+so a README or a `deps.edn` you have open never is. None of the lines can
+name a file that isn't open.
 
 ![Run Tests after shapes.clj was edited but not run: the console says shapes.clj has 1 form changed since it last ran, before the summary of one failure](../images/run-tests-unrun.png)
 

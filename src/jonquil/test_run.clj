@@ -355,6 +355,21 @@
   (str tab-name " has " n (if (= 1 n) " form changed since it last ran." " forms changed since they last ran.")
        " The tests use what last ran."))
 
+(defn never-run-line
+  "The line warning that the file shown as tab-name is open with unsaved
+  edits and has not been run, so a test run didn't see them."
+  [tab-name]
+  (str tab-name " has unsaved edits that were never run, so the tests don't see them."))
+
+(defn saved-unrun-line
+  "The line warning that the file shown as tab-name was saved after the
+  tests first ran in this window and has not been run. Whether the tests
+  saw the change depends on whether the file was loaded before it, which
+  the window can't know, so the line says when it matters."
+  [tab-name]
+  (str tab-name " was saved after the tests first ran here and was never run."
+       " If it was already loaded, the tests still use the old code."))
+
 (defn- failure-data [{:keys [message] :as f}]
   (cond-> {"test" (:test f) "kind" (:kind f) "file" (:file f) "line" (:line f)
            "context" (:context f) "expected" (:expected f) "actual" (:actual f)}
