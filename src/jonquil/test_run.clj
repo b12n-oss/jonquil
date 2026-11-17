@@ -5,7 +5,7 @@
   runs it with clojure.test's report rebound, and its value is a string
   holding one EDN map. `read-value` reads that back, `report` turns it into
   counts and a sorted failure list, and `text` and `data` are the two forms
-  an answer takes. Pure: no evaluator, no files."
+  an answer takes. No evaluator here, and only project-files reads the disk."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.walk :as walk]))
@@ -205,6 +205,32 @@
   [{:keys [ns]}]
   (binding [*print-length* nil *print-level* nil]
     (pr-str (walk/postwalk-replace {'NS-SYM (checked-symbol "namespace" ns)} mark-form))))
+
+(defn form-name
+  "The name a top-level form defines, as a string: the symbol after the
+  form's head, metadata skipped. nil when the text isn't such a form."
+  [text]
+  (let [n (second (re-find #"^\(\s*[^\s()\[\]{}\"]+\s+(?:\^(?:\{[^}]*\}|[^\s]+)\s+)*([^\s()\[\]{}\"^]+)" (str text)))]
+    (when (and n (re-matches name-re n)) n)))
+
+(def ^:private max-located-files 20000)
+
+(defn project-files
+  "The paths of the files under dir, at most 20000, skipping dot
+  directories, target and node_modules. The one fn here that reads the
+  disk: callers hand its answer to locate."
+  [dir]
+  (let [skip? (fn [^java.io.File f]
+                (let [n (.getName f)]
+                  (or (str/starts-with? n ".") (contains? #{"target" "node_modules"} n))))
+        walk (fn walk [^java.io.File d]
+               (mapcat (fn [^java.io.File f]
+                         (cond
+                           (skip? f) nil
+                           (.isDirectory f) (walk f)
+                           :else [(.getPath f)]))
+                       (.listFiles d)))]
+    (take max-located-files (walk (java.io.File. ^String (str dir))))))
 
 (defn read-value
   "The snippet's map from an evaluation's printed value, a printed string

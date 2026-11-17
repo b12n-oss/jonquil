@@ -282,24 +282,6 @@
 
 ;; --- tests -------------------------------------------------------------------
 
-(def ^:private max-located-files 20000)
-
-(defn- project-files
-  "The paths of the files under dir, at most max-located-files, skipping
-  dot directories, target and node_modules."
-  [dir]
-  (let [skip? (fn [^java.io.File f]
-                (let [n (.getName f)]
-                  (or (str/starts-with? n ".") (contains? #{"target" "node_modules"} n))))
-        walk (fn walk [^java.io.File d]
-               (mapcat (fn [^java.io.File f]
-                         (cond
-                           (skip? f) nil
-                           (.isDirectory f) (walk f)
-                           :else [(.getPath f)]))
-                       (.listFiles d)))]
-    (take max-located-files (walk (io/file dir)))))
-
 (defn- test-ns-name
   "The namespace a jonquil_test call names: its ns, or the ns form of the
   file at its path. Throws when it gives neither."
@@ -351,7 +333,7 @@
         ns-name (test-ns-name (:dir env) args)
         test (get args "test")
         sel (selection (:ctx env) path)
-        files (delay (project-files (or (:project-dir sel) (:dir env))))
+        files (delay (test-run/project-files (or (:project-dir sel) (:dir env))))
         code (test-run/snippet {:ns ns-name :test test})]
     (if-not (test-run/supported? (:id (:profile sel)))
       (unsupported-test-result sel)

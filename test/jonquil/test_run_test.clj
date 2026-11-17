@@ -205,3 +205,19 @@
     (is (= ["; Tests: no test named t in a.b."] (lines {:outcome :no-such-test} {:test "t"})))
     (is (= "; 3 more failures not listed."
            (last (lines {:tests 1 :fail 103 :failures [(failure {})] :failures-dropped 3} {}))))))
+
+(deftest form-name-reads-what-a-form-defines
+  (is (= ["fails" "a-b?" "f" nil nil nil nil]
+         (map tr/form-name ["(deftest fails (is 1))" "(deftest ^:slow a-b? [])" "(defn ^{:x 1} f [] 1)"
+                            "(+ 1 2)" "x" "(deftest)" nil]))))
+
+(deftest project-files-skips-build-and-dot-folders
+  (let [dir (java.io.File/createTempFile "jonquil-test-run" "")
+        _ (.delete dir)
+        mk (fn [rel] (let [f (java.io.File. dir ^String rel)] (.mkdirs (.getParentFile f)) (spit f "x") (.getPath f)))]
+    (try
+      (let [kept (set [(mk "test/demo/a_test.clj") (mk "src/demo/a.clj")])]
+        (doseq [rel [".git/config" "target/classes/x.clj" "node_modules/m/index.js"]] (mk rel))
+        (is (= kept (set (tr/project-files (.getPath dir))))))
+      (finally
+        (doseq [f (reverse (file-seq dir))] (.delete ^java.io.File f))))))

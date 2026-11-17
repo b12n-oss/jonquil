@@ -441,6 +441,39 @@
         (g/gtk-widget-grab-focus (:list locp)))
     (set-status! "; No locations yet: list a symbol's uses or definitions, or the find matches.")))
 
+(defn- show-failures!
+  "Makes the list of a test run's failures (jonquil.test-run/report's
+  report), each failing line's place read in its open tab's text, else in
+  its file. When no failure has a place, only the status line says so."
+  [{:keys [tree-pane active-tab set-status!] :as ctx} report]
+  (let [canonical (fn [f]
+                    (if (and f (.isAbsolute (java.io.File. ^String f)))
+                      (.getCanonicalPath (java.io.File. ^String f))
+                      f))
+        report (update report :failures (fn [fs] (mapv #(update % :file canonical) fs)))
+        open (open-texts ctx)
+        read-text (fn [p]
+                    (or (get open p)
+                        (when (.isAbsolute (java.io.File. ^String p))
+                          (try (slurp p) (catch :default _ nil)))))
+        texts (into {} (keep (fn [p] (when-let [t (read-text p)] [p t])))
+                    (distinct (keep :file (:failures report))))
+        root (or (:root @(:state tree-pane))
+                 (some-> @(:path (active-tab)) (java.io.File.) .getCanonicalFile .getParent))
+        lst (loc/failures report {:root root :texts texts})]
+    (if (seq (:entries lst))
+      (make-locations! ctx lst)
+      (set-status! (str "; " (:title lst))))))
+
+(defn- clear-failures!
+  "Clears the list when it is the failures of namespace ns-name, which a
+  passing run has just answered. Any other list stays."
+  [{:keys [state right hide-right-panel!] :as ctx} ns-name]
+  (let [lst (:list @state)]
+    (when (and (= :failures (:kind lst)) (= ns-name (:ns lst)))
+      (clear-locations! ctx)
+      (hide-right-panel! right :locations))))
+
 (defn- locations-fns
   [ctx]
   {:locations-uses-fn (fn [] (list-for-symbol! ctx loc/uses))
@@ -480,6 +513,9 @@
     (set-handlers! ctx)
     {:fns (merge (locations-fns ctx) (compare-fns ctx))
      :ui {:locations-pane locp}
+     ;; for the tests part, installed after this one
+     :exports {:show-failures! (fn [report] (show-failures! ctx report))
+               :clear-failures! (fn [ns-name] (clear-failures! ctx ns-name))}
      :hooks {:on-tab-removed (fn [_ t] (tab-closed! ctx (:id t)))}
      :panels {:locations {:root (:root locp)
                           :focus! (fn [] (g/gtk-widget-grab-focus (:list locp)))

@@ -28,6 +28,7 @@
     jonquil.parts.trace
     jonquil.parts.change-sets
     jonquil.parts.live-results
+    jonquil.parts.tests
     jonquil.parts.time-form
     jonquil.parts.worlds
     jonquil.parts
@@ -192,6 +193,7 @@
     jonquil.gtk.parts.trace
     jonquil.gtk.parts.change-sets
     jonquil.gtk.parts.live-results
+    jonquil.gtk.parts.tests
     jonquil.gtk.parts.time-form
     jonquil.gtk.parts.worlds
     jonquil.gtk.parts
