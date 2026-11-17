@@ -158,3 +158,50 @@
     (is (= {"message" "No test named t in a."} (get missing "error")))
     (is (= "" (get missing "output")))
     (is (not (contains? missing "ms")))))
+
+(deftest mark-snippet-is-one-qualified-form
+  (let [s (tr/mark-snippet {:ns "demo.core-test"})
+        form (read-string s)]
+    (is (= 'clojure.core/let (first form)))
+    (is (str/includes? s "(quote demo.core-test)"))
+    (is (str/includes? s ":jonquil/stale"))
+    (is (nil? (re-find #"[(\[ ](let|fn|count|keep|when|alter-meta!|vals) " s)))
+    (is (thrown? Exception (tr/mark-snippet {:ns "a) (b"})))))
+
+(deftest snippet-drop-marked
+  (let [s (tr/snippet {:ns "demo.core-test" :drop-marked? true})]
+    (is (str/includes? s ":jonquil/stale"))
+    (is (not (str/includes? s ":reload")) "the caller ran the text itself")))
+
+;; Runs clojure.test inside clojure.test, in a namespace of its own.
+(deftest mark-then-rerun-drops-the-renamed
+  (let [head "(ns jonquil.test-run-test.marked (:require [clojure.test :refer [deftest is]]))\n"
+        run! (fn [code] (binding [*ns* *ns*] (load-string code)))
+        value (fn [] (tr/read-value (pr-str (run! (tr/snippet {:ns "jonquil.test-run-test.marked"
+                                                               :drop-marked? true})))))]
+    (try
+      (run! (str head "(deftest keep-me (is true))\n(deftest old-name (is (= 1 2)))\n"))
+      (is (= 2 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.marked"}))))
+      (run! (str head "(deftest keep-me (is true))\n(deftest new-name (is true))\n"))
+      (let [v (value)]
+        (is (= [2 2 0] ((juxt :tests :pass :fail) v)))
+        (is (= :ran (:outcome v))))
+      (is (nil? (ns-resolve 'jonquil.test-run-test.marked 'old-name)))
+      (is (= 0 (run! (tr/mark-snippet {:ns "jonquil.test-run-test.no-such"}))))
+      (finally (remove-ns 'jonquil.test-run-test.marked)))))
+
+(deftest console-lines-for-each-status
+  (let [lines (fn [m opts] (tr/console-lines (tr/report (value m) (merge {:ns "a.b"} opts))))]
+    (is (= ["; Tests: 2 failures in demo.core-test: 3 tests, 3 assertions, 1 passed, 1 failed, 1 error"
+            "; FAIL fails (core_test.clj:9) outer > inner: msg"
+            ";   expected: (= 1 2)"
+            ";   actual:   (not (= 1 2))"
+            "; ERROR throws (core_test.clj:11)"
+            ";   expected: (= 1 (/ 1 0))"
+            ";   actual:   java.lang.ArithmeticException: Divide by zero"]
+           (tr/console-lines two-failures)))
+    (is (= ["; Tests: all passed in a.b: 3 tests, 4 assertions"] (lines {:tests 3 :pass 4} {})))
+    (is (= ["; Tests: no tests in a.b."] (lines {:outcome :no-tests} {})))
+    (is (= ["; Tests: no test named t in a.b."] (lines {:outcome :no-such-test} {:test "t"})))
+    (is (= "; 3 more failures not listed."
+           (last (lines {:tests 1 :fail 103 :failures [(failure {})] :failures-dropped 3} {}))))))

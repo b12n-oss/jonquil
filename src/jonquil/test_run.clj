@@ -43,7 +43,7 @@
      if-let into keep when-let ns-interns find-ns require identical? get remove or
      seq not doseq keys ns-unmap resolve symbol atom ns-resolve and filter vals cond
      nil? empty? = with-bindings binding pr-str assoc instance? ex-message class
-     count > subs < conj some replace *print-length* *print-level*})
+     count > subs < conj some replace alter-meta! *print-length* *print-level*})
 
 (defn- qualified
   "form with its clojure.core names written in full. The snippet runs in
@@ -126,6 +126,27 @@
           (doseq [s (remove fresh (keys after))]
             (ns-unmap ns-sym s)))))))
 
+;; The window runs the buffer itself between two evaluations, so there is
+;; no reload to compare across. mark-form tags every test the namespace
+;; holds before that Run. Evaluating a deftest again replaces its var's
+;; metadata, tag included, so after the Run the tag is left only on tests
+;; the buffer no longer defines, and drop-marked-form unmaps those.
+(def ^:private mark-form
+  (qualified
+   '(let [n (find-ns 'NS-SYM)]
+      (count (keep (fn [v]
+                     (when (:test (meta v))
+                       (alter-meta! v assoc :jonquil/stale true)))
+                   (if n (vals (ns-interns n)) []))))))
+
+(def ^:private drop-marked-form
+  (qualified
+   '(fn [ns-sym]
+      (when-let [n (find-ns ns-sym)]
+        (doseq [[s v] (ns-interns n)]
+          (when (:jonquil/stale (meta v))
+            (ns-unmap ns-sym s)))))))
+
 (def ^:private run-form
   (qualified
    '(do
@@ -155,21 +176,35 @@
   most max-failures rows) and :failures-dropped. A load failure is left to
   throw. The namespace is reloaded from disk first, and the tests the
   reload didn't redefine (renamed or deleted in the file) are unmapped.
-  :reload? false skips the reload. Throws when :ns or :test isn't a plain
-  symbol name."
-  [{:keys [ns test reload?] :or {reload? true}}]
+  :reload? false skips the reload. :drop-marked? true is for a namespace
+  the caller has just run itself after mark-snippet: no reload, and the
+  tests still carrying mark-snippet's tag are unmapped. Throws when :ns or
+  :test isn't a plain symbol name."
+  [{:keys [ns test reload? drop-marked?] :or {reload? true}}]
   (let [ns-sym (checked-symbol "namespace" ns)
         test-name (when (some? test) (name (checked-symbol "test" test)))
         fill (fn [form m] (walk/postwalk-replace m form))
         limits {'MAX-CHARS max-shown-chars 'MAX-FAILURES max-failures}
         form (fill run-form
-                   {'RELOAD (if reload? reload-form (qualified '(fn [_] nil)))
+                   {'RELOAD (cond
+                              drop-marked? drop-marked-form
+                              reload? reload-form
+                              :else (qualified '(fn [_] nil)))
                     'NS-SYM ns-sym
                     'TEST-NAME test-name
                     'SHOW (fill show-form limits)
                     'COLLECTOR (fill collector-form limits)})]
     (binding [*print-length* nil *print-level* nil]
       (pr-str form))))
+
+(defn mark-snippet
+  "Code that tags every test namespace :ns holds, for snippet's
+  :drop-marked? to find after the caller has run the namespace's text
+  again. Its value is how many it tagged, 0 when the namespace isn't
+  loaded. Throws when :ns isn't a plain symbol name."
+  [{:keys [ns]}]
+  (binding [*print-length* nil *print-level* nil]
+    (pr-str (walk/postwalk-replace {'NS-SYM (checked-symbol "namespace" ns)} mark-form))))
 
 (defn read-value
   "The snippet's map from an evaluation's printed value, a printed string
@@ -247,8 +282,11 @@
       (str (counted (+ fail error) "failure") " in " ns ": " ran ", "
            pass " passed, " fail " failed, " (counted error "error")))))
 
-(defn- failure-lines [{:keys [test kind file line context message expected actual]}]
-  [(str (if (= "error" kind) "ERROR " "FAIL ") test " (" file ":" line ")"
+(defn- failure-lines
+  "The three lines for one failure. shown-file turns its file into what
+  the first line shows."
+  [shown-file {:keys [test kind file line context message expected actual]}]
+  [(str (if (= "error" kind) "ERROR " "FAIL ") test " (" (shown-file file) ":" line ")"
         (when (seq context) (str " " (str/join " > " context)))
         (when message (str ": " message)))
    (str "  expected: " expected)
@@ -259,10 +297,26 @@
   line counting the failures left out. Ends with a newline."
   [{:keys [failures failures-dropped] :as report}]
   (str (str/join "\n" (concat [(summary-line report)]
-                              (mapcat failure-lines failures)
+                              (mapcat #(failure-lines identity %) failures)
                               (when (pos? failures-dropped)
                                 [(str failures-dropped " more failures not listed.")])))
        "\n"))
+
+(defn- file-name [path]
+  (when path (last (str/split path #"/"))))
+
+(defn console-lines
+  "The report as the window's console shows it: `; Tests: ` and the
+  summary, then three lines per failure with the file's name alone, then a
+  line counting the failures left out. Every line starts with `; `."
+  [{:keys [failures failures-dropped] :as report}]
+  (let [summary (summary-line report)
+        first-line (str "Tests: " (str/lower-case (subs summary 0 1)) (subs summary 1))]
+    (mapv #(str "; " %)
+          (concat [first-line]
+                  (mapcat #(failure-lines file-name %) failures)
+                  (when (pos? failures-dropped)
+                    [(str failures-dropped " more failures not listed.")])))))
 
 (defn- failure-data [{:keys [message] :as f}]
   (cond-> {"test" (:test f) "kind" (:kind f) "file" (:file f) "line" (:line f)
