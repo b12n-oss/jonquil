@@ -10,9 +10,9 @@
   the rest. The same report shows an agent's run (jonquil.mcp.window).
 
   Only the tab's own text runs. Another open tab with forms edited since
-  they last ran, or a file with unsaved edits that never ran, is named on
-  the console before the summary, since the tests ran against what the
-  runtime held."
+  they last ran, or a file that never ran and has unsaved edits or was
+  saved after the tests first ran here, is named on the console before the
+  summary, since the tests ran against what the runtime held."
   (:require [clojure.string :as str]
             [jonquil.changed :as changed]
             [jonquil.clj :as clj]
@@ -134,24 +134,33 @@
 (defn- unrun-line
   "The warning for tab t, or nil. A tab that has run is named when it holds
   forms edited since (the changed-form gutter's record). A tab that never
-  ran is named when it is a file with unsaved edits: what the runtime
-  loaded of it, if anything, is the file on disk."
-  [t]
+  ran is named when it is a file with unsaved edits, which no test run can
+  have seen, or a file saved after first-run-at, the time (ms) the tests
+  first ran in this window: the runtime may have loaded it before that
+  save, and a loaded namespace isn't read again."
+  [t first-run-at]
   (let [ed (:ed t)
         path @(:path t)
-        file-name (when path (.getName (java.io.File. ^String path)))]
+        file (when path (java.io.File. ^String path))]
     (if-let [ran (some-> (:changed ed) :ran deref)]
       (let [n (count (changed/changed (editor/editor-text ed) ran))]
         (when (pos? n)
-          (test-run/unrun-line (or file-name "An untitled tab") n)))
-      (when (and file-name (editor/dirty? ed))
-        (test-run/never-run-line file-name)))))
+          (test-run/unrun-line (if file (.getName file) "An untitled tab") n)))
+      (cond
+        (nil? file) nil
+        (editor/dirty? ed) (test-run/never-run-line (.getName file))
+        (and first-run-at (> (.lastModified file) first-run-at))
+        (test-run/saved-unrun-line (.getName file))))))
 
 (defn- unrun-lines
   "A warning line for each open tab, other than the one with id skip-id,
-  whose edits a test run didn't see (unrun-line). GTK thread."
-  [tabs skip-id]
-  (keep (fn [t] (when (not= skip-id (:id t)) (unrun-line t))) @tabs))
+  whose edits a test run may not have seen (unrun-line). first-run* holds
+  when the tests first ran in this window, and is set here on the first
+  call, so that run itself warns only about unsaved edits. GTK thread."
+  [{:keys [tabs first-run*]} skip-id]
+  (let [first-run-at @first-run*]
+    (when-not first-run-at (reset! first-run* (System/currentTimeMillis)))
+    (keep (fn [t] (when (not= skip-id (:id t)) (unrun-line t first-run-at))) @tabs)))
 
 (defn report-run!
   "Shows a test run's report (jonquil.test-run/report): its lines on the
@@ -201,10 +210,10 @@
   Each step starts only when the one before finished; a Run that was
   refused, found a problem or ended in an error has said so itself, and
   the tests don't run."
-  [{:keys [cv ev* sel* status-label set-status! tabs] :as ctx} {:keys [tab ns-name test]}]
+  [{:keys [cv ev* sel* status-label set-status!] :as ctx} {:keys [tab ns-name test]}]
   (let [token (new-token)
         run {:ns-name ns-name :test test :tab-path @(:path tab)
-             :warnings (vec (unrun-lines tabs (:id tab)))}
+             :warnings (vec (unrun-lines ctx (:id tab)))}
         test! (fn []
                 (set-status! (str "Running the tests in " ns-name "…"))
                 (when-not (eval-then! ctx (test-run/snippet {:ns ns-name :test test :drop-marked token})
@@ -254,7 +263,7 @@
   (let [project-root (fn []
                        (or (:root @(:state tree-pane))
                            (some-> @(:path (active-tab)) (java.io.File.) .getCanonicalFile .getParent)))
-        ctx {:active-tab active-tab :tabs tabs :cv cv :ev* ev* :sel* sel* :status-label status-label
+        ctx {:active-tab active-tab :tabs tabs :first-run* (atom nil) :cv cv :ev* ev* :sel* sel* :status-label status-label
              :set-status! set-status! :project-root project-root
              :show-failures! show-failures! :clear-failures! clear-failures!}]
     {:fns {:test-run-file-fn (fn [] (run-tests! ctx false))
@@ -262,7 +271,7 @@
      :ui {:mcp-test! (fn [run notify] (agent-run! ctx run notify))
           ;; asked after an agent's run, when the tab it ran has no unrun
           ;; forms left, so every tab is looked at
-          :test-unrun-lines (fn [] (vec (unrun-lines tabs nil)))
+          :test-unrun-lines (fn [] (vec (unrun-lines ctx nil)))
           :test-report! (fn [report opts] (report-run! ctx report opts))}}))
 
 (def part

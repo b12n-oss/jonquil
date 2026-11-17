@@ -235,3 +235,8 @@
 (deftest never-run-line-names-the-file
   (is (= "core.clj has unsaved edits that were never run, so the tests don't see them."
          (tr/never-run-line "core.clj"))))
+
+(deftest saved-unrun-line-says-when-it-matters
+  (is (= (str "core.clj was saved after the tests first ran here and was never run."
+              " If it was already loaded, the tests still use the old code.")
+         (tr/saved-unrun-line "core.clj"))))

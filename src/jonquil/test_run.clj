@@ -361,6 +361,15 @@
   [tab-name]
   (str tab-name " has unsaved edits that were never run, so the tests don't see them."))
 
+(defn saved-unrun-line
+  "The line warning that the file shown as tab-name was saved after the
+  tests first ran in this window and has not been run. Whether the tests
+  saw the change depends on whether the file was loaded before it, which
+  the window can't know, so the line says when it matters."
+  [tab-name]
+  (str tab-name " was saved after the tests first ran here and was never run."
+       " If it was already loaded, the tests still use the old code."))
+
 (defn- failure-data [{:keys [message] :as f}]
   (cond-> {"test" (:test f) "kind" (:kind f) "file" (:file f) "line" (:line f)
            "context" (:context f) "expected" (:expected f) "actual" (:actual f)}

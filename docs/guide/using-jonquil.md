@@ -169,7 +169,18 @@ It is named when its edits aren't saved:
 ; core.clj has unsaved edits that were never run, so the tests don't see them.
 ```
 
-Neither line can name a file that isn't open.
+Saving doesn't make the tests see an edit either. A namespace that is
+already loaded isn't read from disk again, so a fix you saved without running
+is still the old code to the tests. Jonquil can't tell what the runtime has
+loaded, so it names a file that never ran and was saved after the tests first
+ran in this window, and says when that matters:
+
+```
+; core.clj was saved after the tests first ran here and was never run. If it was already loaded, the tests still use the old code.
+```
+
+Running the tab clears either line. None of them can name a file that isn't
+open.
 
 ![Run Tests after shapes.clj was edited but not run: the console says shapes.clj has 1 form changed since it last ran, before the summary of one failure](../images/run-tests-unrun.png)
 
