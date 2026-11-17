@@ -252,3 +252,10 @@
 (deftest var-entries-doc-text
   (let [es (dr/var-entries find-var-value {:own? (constantly false)})]
     (is (= ["parse-line [s] [s opts]" "parse-long [s]" "zeta"] (map :doc (sort-by :doc es))))))
+
+(deftest apropos-snippet-finds-each-namespace-file-once
+  ;; the namespace's file is looked up per namespace, not per var: per var
+  ;; it was quadratic in a namespace whose vars have no file
+  (let [code (dr/apropos-snippet {:query ""})]
+    (is (clojure.string/includes? code ":let [nf"))
+    (is (not (clojure.string/includes? code ":ns-file (file-of")))))

@@ -389,10 +389,12 @@
 (defn show-doc-for!
   "Looks sym up (a qualified name, \"ns/name\") and shows its quick doc in
   the popover at the caret, as Docs for the Symbol does, or says none was
-  found. ctx is the source-ctx map."
-  [{:keys [ev* status-label help-pop close-popovers-fn]} sym]
+  found. A late answer (a server evaluator's) shows only while the tab is
+  still the active one and open. ctx is the source-ctx map."
+  [{:keys [ev* status-label help-pop close-popovers-fn active? ed]} sym]
   (ask-lookup! {:ev* ev* :status-label status-label}
-               {:sym sym :text "" :pos 0 :still? (constantly true) :label "quick doc"
+               {:sym sym :text "" :pos 0 :label "quick doc"
+                :still? (fn [] (boolean (and (active?) (live-editor? ed))))
                 :on-doc (fn [doc]
                           (if doc
                             (do (close-popovers-fn help-pop)

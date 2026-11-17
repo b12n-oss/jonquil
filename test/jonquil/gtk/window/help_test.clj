@@ -402,3 +402,14 @@
             [:report {:editor ::sp-ed} "bad"] [:handlers {:editor ::sp-ed} true] [:register ::def]
             [:register ::completion] [:completion-fns ::cv true] [:input-changed ::cv] [:focus-lost ::cv]]
            @log))))
+
+(deftest show-doc-for-checks-the-tab-is-still-there
+  (let [still (atom nil) active (atom true) destroyed (atom false)]
+    (with-redefs [win-help/ask-lookup! (fn [_ {:keys [still?]}] (reset! still still?))]
+      (win-help/show-doc-for! {:active? (fn [] @active) :ed {:destroyed? destroyed}} "user/x")
+      (is (true? (@still)))
+      (reset! active false)
+      (is (false? (@still)) "another tab is active now")
+      (reset! active true)
+      (reset! destroyed true)
+      (is (false? (@still)) "the tab was closed"))))

@@ -96,9 +96,10 @@
                (list 'pr-str
                      (walk/postwalk-replace
                       {'ROWS '(for [n (sort-by (fn [n] (str (ns-name n))) (all-ns))
+                                    :let [nf (file-of n)]
                                     [s v] (sort-by (fn [[s _]] (str s)) (ns-interns n))
                                     :when (has? (lower (str s)) q)]
-                                (assoc (row s v) :ns (str (ns-name n)) :ns-file (file-of n)))}
+                                (assoc (row s v) :ns (str (ns-name n)) :ns-file nf))}
                       (capped :vars)))))))
 
 (defn- printed

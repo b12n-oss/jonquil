@@ -23,7 +23,8 @@
    :query! (fn [code notify] (swap! log conj [:query (string? code)]) (when notify-map (notify notify-map)))
    :active-tab (fn [] @tab*)
    :open-palette! (fn [tab entries] (swap! log conj [:palette (:id tab) (mapv :name entries)]))
-   :files (fn [_] ["/p/src/demo/found.clj"])})
+   :files (fn [_] ["/p/src/demo/found.clj"])
+   :paths* (atom nil)})
 
 (defn- run [opts]
   (with-redefs [jonquil.gtk.callbacks/on-gui! (fn [f] (f))]
@@ -120,3 +121,55 @@
       (is (clojure.string/includes? @code* "50000") "the command's own cap, not the MCP tools' 5000")
       (is (= [:status "Listing the first 50000 vars: 7 more are loaded. Own vars past the cut may be missing."]
              (last @log))))))
+
+(deftest stopped-or-notice-says-so
+  (testing "a query stopped before it answered"
+    (is (= [[:query true] [:status "; Find a Var by Name: stopped before the runtime answered."]]
+           (run {:notify-map {:done {:result {:status :interrupted}}}}))))
+  (testing "the evaluator's notice"
+    (is (= [[:query true] [:status "; Find a Var by Name: Not running."]]
+           (run {:notify-map {:done {:result {:status :notice :text "Not running."}}}}))))
+  (testing "any other end"
+    (is (= [[:query true] [:status "; Find a Var by Name: the query ended timeout."]]
+           (run {:notify-map {:done {:result {:status :timeout}}}})))))
+
+(deftest a-throw-while-listing-says-so
+  (with-redefs [jonquil.gtk.callbacks/on-gui! (fn [f] (f))]
+    (let [log (atom [])
+          c (assoc (ctx log {:notify-map (ok value)}) :open-palette! (fn [_ _] (throw (ex-info "no palette" {}))))]
+      (find-var! c)
+      (is (= [:status "; Find a Var by Name: no palette"] (last @log))))))
+
+(deftest the-answer-is-read-off-the-gtk-thread
+  (let [order (atom []) thunk (atom nil)]
+    (with-redefs [jonquil.gtk.callbacks/on-gui! (fn [f] (swap! order conj :on-gui) (reset! thunk f))]
+      (let [log (atom [])
+            c (assoc (ctx log {:notify-map (ok value)})
+                     :files (fn [_] (swap! order conj :files) ["/p/src/demo/found.clj"]))]
+        (find-var! c)
+        (is (= [:files :on-gui] @order) "the project's files are listed and the entries made before the GTK turn")
+        (@thunk)
+        (is (= [:palette 1 ["needle-fn"]] (second @log)))))))
+
+(deftest open-reuses-the-listed-files
+  (with-redefs [jonquil.gtk.callbacks/on-gui! (fn [f] (f))]
+    (let [log (atom []) walks (atom 0)
+          c (merge (ctx log {:notify-map (ok value)}) (dissoc (open-ctx log nil) :sel* :set-status! :active-tab)
+                   {:files (fn [_] (swap! walks inc) ["/p/src/demo/found.clj"])})]
+      (find-var! c)
+      (open-var! c {:ns "demo.found" :name "needle-fn" :file "src/demo/found.clj" :line 3})
+      (is (= 1 @walks))
+      (is (= [:open {:tab 1} "demo.found/needle-fn" "/p/src/demo/found.clj" 3] (last @log))))))
+
+(deftest a-late-lookup-checks-the-tab-is-still-there
+  (let [still (atom nil) active (atom true) destroyed (atom false)
+        c (assoc (open-ctx (atom []) nil)
+                 :source-ctx (fn [_] {:active? (fn [] @active) :ed {:destroyed? destroyed}})
+                 :ask-lookup! (fn [_ {:keys [still?]}] (reset! still still?)))]
+    (open-var! c {:ns "user" :name "x" :file nil :line nil})
+    (is (true? (@still)))
+    (reset! active false)
+    (is (false? (@still)) "another tab is active now")
+    (reset! active true)
+    (reset! destroyed true)
+    (is (false? (@still)) "the tab was closed")))
