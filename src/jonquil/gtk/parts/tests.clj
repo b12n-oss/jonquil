@@ -134,8 +134,8 @@
 (defn- unrun-line
   "The warning for tab t, or nil. A tab that has run is named when it holds
   forms edited since (the changed-form gutter's record). A tab that never
-  ran is named when it is a file with unsaved edits, which no test run can
-  have seen, or a file saved after first-run-at, the time (ms) the tests
+  ran is named when it is a file with an ns form and unsaved edits, which
+  no test run can have seen, or a file saved after first-run-at, the time (ms) the tests
   first ran in this window: the runtime may have loaded it before that
   save, and a loaded namespace isn't read again."
   [t first-run-at]
@@ -147,7 +147,8 @@
         (when (pos? n)
           (test-run/unrun-line (if file (.getName file) "An untitled tab") n)))
       (cond
-        (nil? file) nil
+        ;; a README or a deps.edn is nothing a test run loads or a Run clears
+        (or (nil? file) (nil? (clj/buffer-ns (editor/editor-text ed)))) nil
         (editor/dirty? ed) (test-run/never-run-line (.getName file))
         (and first-run-at (> (.lastModified file) first-run-at))
         (test-run/saved-unrun-line (.getName file))))))

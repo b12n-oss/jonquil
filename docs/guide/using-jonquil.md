@@ -179,8 +179,9 @@ ran in this window, and says when that matters:
 ; core.clj was saved after the tests first ran here and was never run. If it was already loaded, the tests still use the old code.
 ```
 
-Running the tab clears either line. None of them can name a file that isn't
-open.
+Running the tab clears either line. Only files with an `ns` form are named,
+so a README or a `deps.edn` you have open never is. None of the lines can
+name a file that isn't open.
 
 ![Run Tests after shapes.clj was edited but not run: the console says shapes.clj has 1 form changed since it last ran, before the summary of one failure](../images/run-tests-unrun.png)
 

@@ -170,7 +170,8 @@
 (defn row-run-tests-warns-about-a-file-saved-since
   "A source file that never ran, saved after the tests first ran in this
   window, is named before the summary: the tests may have loaded it
-  before that save. A file saved before the tests' first run isn't named."
+  before that save. A file saved before the tests' first run isn't named,
+  and neither is a file with no ns form, however recently it was saved."
   [ui]
   (go-row :run-tests-warns-about-a-file-saved-since support/check
     (let [d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-tests-")))
@@ -187,7 +188,10 @@
                             (await-until 15000 50 #(str/includes? (subs (support/console-text ui) mark)
                                                                   "; Tests: all passed in"))
                             (on-gtk (subs (support/console-text ui) mark))))
-          _ (on-gtk ((:open-file! ui) (.getPath src)))
+          notes (io/file d "notes.md")
+          _ (spit notes "# Notes\n")
+          _ (.setLastModified notes (+ (System/currentTimeMillis) 5000))
+          _ (on-gtk ((:open-file! ui) (.getPath src)) ((:open-file! ui) (.getPath notes)))
           before (run-and-read!)
           _ (spit src "(ns jonquil-selftest.saved-since-source)\n(def a 2)\n")
           _ (.setLastModified src (+ (System/currentTimeMillis) 5000))
@@ -197,6 +201,7 @@
        (try
          (support/check :run-tests-warns-about-a-file-saved-since
                         (and (not (str/includes? before "saved_since_source.clj"))
+                             (not (str/includes? (str before after) "notes.md"))
                              (str/includes? after want)
                              (< (str/index-of after want) (str/index-of after "; Tests: all passed in")))
                         {:before before :after after})
