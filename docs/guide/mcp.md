@@ -119,7 +119,9 @@ Three tools describe what the project's runtime has loaded, so an agent
 doesn't have to evaluate `(all-ns)` and read the printout back. Like
 `jonquil_test` they work for Jolt and JVM Clojure, and any other dialect gets
 the status `unsupported`. Only loaded code counts: a file that never ran
-doesn't show until it does.
+doesn't show until it does. In a window, **Find a Var by Name…** in the Help
+menu runs the same query for you and lists the vars in the palette (see
+[Finding a var by name](help-and-inspector.md#finding-a-var-by-name)).
 
 | Tool | Arguments |
 |---|---|
