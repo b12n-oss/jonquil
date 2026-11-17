@@ -222,6 +222,7 @@
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen
+    jonquil.mcp.result
     jonquil.main])
 
 (defn -main [& _]

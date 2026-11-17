@@ -13,6 +13,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.help :as help]
+            [jonquil.mcp.result :as result]
             [jonquil.nrepl.attach]
             [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.connection]
@@ -30,19 +31,24 @@
 
 (defn- prop [type description] {"type" type "description" description})
 
+(def max-output-prop
+  (prop "integer" "Keep at most this many characters of printed output, the last ones. Default 100000, at most 1000000."))
+
 (def tool-defs
   [{"name" "jonquil_eval"
     "description" "Evaluate code as a REPL line in the project at path, in that project's dialect. Definitions persist between calls."
     "inputSchema" {"type" "object"
                    "properties" {"code" (prop "string" "The code to evaluate.")
                                  "path" (prop "string" "A file or directory selecting the project. Default: the server's directory.")
-                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")}
+                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
+                                 "max_output_chars" max-output-prop}
                    "required" ["code"]}}
    {"name" "jonquil_run_file"
     "description" "Run a file's text the way the Run button does, in the file's project."
     "inputSchema" {"type" "object"
                    "properties" {"path" (prop "string" "The file to run.")
-                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")}
+                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
+                                 "max_output_chars" max-output-prop}
                    "required" ["path"]}}
    {"name" "jonquil_check_brackets"
     "description" "Check brackets in text or in a file. Answers ok, or names the first unclosed or unmatched bracket and its line."
@@ -123,43 +129,67 @@
         sep (if (or (str/blank? output) (str/ends-with? output "\n")) "" "\n")]
     (str output sep (str/replace (str line) #"\n+$" ""))))
 
+(defn done-result
+  "The {:text :error? :data} for an evaluation that finished with result r.
+  out is {:output :err :dropped} (jonquil.mcp.result), ms the wall time."
+  [r {:keys [output err dropped]} ms]
+  (let [status (:status r)]
+    {:text (str (result/dropped-line dropped) (result-text output r))
+     :error? (= :error status)
+     :data (result/eval-data {:status status :output output :err err :dropped dropped :ms ms
+                              :ns (:ns r)
+                              :value (when (= :ok status) (:printed r))
+                              :error-text (when (= :error status) (console/error-text r))})}))
+
+(defn timeout-result
+  "The {:text :error? :data} for an evaluation that missed its deadline:
+  what it printed, then sentence. out and ms as done-result's."
+  [sentence {:keys [output err dropped]} ms]
+  {:text (str (result/dropped-line dropped) output sentence)
+   :error? true
+   :data (result/eval-data {:status :timeout :output output :err err :dropped dropped :ms ms})})
+
 (defn- timed-out-result!
-  "The {:text :error?} for an evaluation that missed its deadline. Interrupts
-  e and waits grace-ms for it to finish; if it is still stuck, evicts it and
-  stops it. output is a fn giving what was collected so far."
-  [e done output {:keys [timeout-ms grace-ms evict!]}]
+  "The result for an evaluation that missed its deadline. Interrupts e and
+  waits grace-ms for it to finish; if it is still stuck, evicts it and
+  stops it. output is a fn giving what was collected so far, elapsed the
+  wall time."
+  [e done {:keys [output elapsed]} {:keys [timeout-ms grace-ms evict!]}]
   (ev/interrupt! e)
   (let [stuck? (= ::timeout (deref done grace-ms ::timeout))]
     (when stuck?
       (evict!)
       (try (ev/stop! e) (catch :default _ nil)))
-    {:text (str (output)
-                (if stuck?
-                  (str "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped."
-                       " The runtime was stopped; a fresh one will be started on the next call.")
-                  (str "Timed out after " timeout-ms " ms; interrupted.")))
-     :error? true}))
+    (timeout-result (if stuck?
+                      (str "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped."
+                           " The runtime was stopped; a fresh one will be started on the next call.")
+                      (str "Timed out after " timeout-ms " ms; interrupted."))
+                    (output) (elapsed))))
 
 (defn- run-eval!
-  "Evaluates code on e and blocks for the result: {:text :error?}. limits
-  holds :opts (eval options), :timeout-ms, :grace-ms and :evict! (called when
-  e is stuck past the grace)."
-  [e code {:keys [opts timeout-ms] :as limits}]
-  (let [out (atom [])
+  "Evaluates code on e and blocks for the result: {:text :error? :data}.
+  limits holds :opts (eval options), :timeout-ms, :max-output (characters
+  of output kept), :grace-ms and :evict! (called when e is stuck past the
+  grace)."
+  [e code {:keys [opts timeout-ms max-output] :as limits}]
+  (let [cap (or max-output result/default-max-output-chars)
+        out (atom result/empty-output)
         done (promise)
+        t0 (System/currentTimeMillis)
+        elapsed (fn [] (- (System/currentTimeMillis) t0))
         warning (ev/eval! e code
                           (assoc opts
-                                 :on-output (fn [_ s] (swap! out conj s))
+                                 :on-output (fn [kind s] (swap! out result/add-output kind s cap))
                                  :on-wait-input (fn [waiting?] (when waiting? (ev/send-eof! e)))
                                  :on-complete (fn [r] (deliver done r))))
-        output (fn [] (apply str @out))]
+        output (fn [] (result/output-of @out cap))]
     (if warning
-      {:text (str warning) :error? true}
+      {:text (str warning) :error? true
+       :data (result/eval-data {:status :refused :output ""})}
       (let [r (deref done timeout-ms ::timeout)]
         (if (= ::timeout r)
-          (timed-out-result! e done output limits)
-          {:text (result-text (output) r)
-           :error? (= :error (:status r))})))))
+          (timed-out-result! e done {:output output :elapsed elapsed} limits)
+          (done-result r (output) (elapsed)))))))
 
 (defn timeout-of
   "The call's timeout_ms when a positive number, else the 30000 ms default."
@@ -212,10 +242,12 @@
 
 (defn- run-in!
   "run-eval! on evaluator e for the selection at path, evicting e from the
-  cache when it is stuck. step holds :path :e :code :opts :timeout-ms."
-  [{:keys [ctx cache grace-ms]} {:keys [path e code opts timeout-ms]}]
+  cache when it is stuck. step holds :path :e :code :opts and the call's
+  :args, read for its timeout and output cap."
+  [{:keys [ctx cache grace-ms]} {:keys [path e code opts args]}]
   (let [k (dialect/selection-key (selection ctx path))]
-    (run-eval! e code {:opts opts :timeout-ms timeout-ms :grace-ms grace-ms
+    (run-eval! e code {:opts opts :timeout-ms (timeout-of args)
+                       :max-output (result/max-output-of args) :grace-ms grace-ms
                        :evict! (fn [] (swap! cache (fn [m] (if (identical? e (get m k)) (dissoc m k) m))))})))
 
 (defn- tool-eval [env args]
@@ -223,7 +255,7 @@
         path (get args "path")]
     (with-ev env path
       (fn [_ e] (run-in! env {:path path :e e :code code :opts {:run? false :owner :repl}
-                              :timeout-ms (timeout-of args)})))))
+                              :args args})))))
 
 (defn- tool-run [env args]
   (let [p (absolute (:dir env) (required-string args "path"))
@@ -235,7 +267,7 @@
       (let [text (slurp f)]
         (with-ev env p
           (fn [_ e] (run-in! env {:path p :e e :code text :opts {:run? true :path p :owner :run}
-                                  :timeout-ms (timeout-of args)})))))))
+                                  :args args})))))))
 
 (defn- tool-brackets [env args] (brackets-result (:dir env) args))
 

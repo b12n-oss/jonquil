@@ -6,6 +6,11 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- The MCP tools that evaluate code (`jonquil_eval`, `jonquil_run`, `jonquil_run_file` and `jonquil_run_selection`) answer with structured content beside their text: the status, the printed value, the output, the error's message, type and line, the namespace and the time taken. An agent can read those fields without taking the text apart.
+- The same tools take `max_output_chars` (default 100000). A program that prints more than that gets an answer holding the last characters and a first line saying how many were dropped. Headless, a program that prints without end no longer grows the server's memory until its timeout.
+
 ## [0.4.4] - 2026-11-17
 
 ### Added

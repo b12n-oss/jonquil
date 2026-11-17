@@ -21,6 +21,7 @@
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
             [jonquil.mcp.describe :as describe]
+            [jonquil.mcp.result :as result]
             [jonquil.mcp.tools :as tools]
             [jonquil.plugin-mcp :as plugin-mcp]
             [jonquil.tabs :as tabs]))
@@ -39,19 +40,22 @@
     "description" "Evaluate code as a REPL entry at the window's console prompt: echoed, visible, in the history as if typed."
     "inputSchema" {"type" "object"
                    "properties" {"code" (prop "string" "The code to evaluate.")
-                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")}
+                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
+                                 "max_output_chars" tools/max-output-prop}
                    "required" ["code"]}}
    {"name" "jonquil_run"
     "description" "Run the active tab the way the Run button does: banner, bracket check, reset-on-run as configured."
     "inputSchema" {"type" "object"
-                   "properties" {"timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")}
+                   "properties" {"timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
+                                 "max_output_chars" tools/max-output-prop}
                    "required" []}}
    {"name" "jonquil_run_selection"
     "description" "Select a character range in the active tab (visible) and run it as Cmd/Ctrl+E does."
     "inputSchema" {"type" "object"
                    "properties" {"start" (prop "integer" "Start offset, in characters.")
                                  "end" (prop "integer" "End offset, in characters.")
-                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")}
+                                 "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
+                                 "max_output_chars" tools/max-output-prop}
                    "required" ["start" "end"]}}
    {"name" "jonquil_stop"
     "description" "Interrupt the running evaluation; reports whether it stopped within 5 seconds."
@@ -210,18 +214,21 @@
 ;; --- evaluation --------------------------------------------------------------
 
 (defn- notify->result
-  "A notify map as a tool result: :done is result-text, the rest are errors."
-  [m]
+  "A notify map as a tool result: :done is the evaluation's result, the
+  rest are errors. limits holds :max-output and :elapsed (a fn, the wall
+  time so far)."
+  [m {:keys [max-output elapsed]}]
   (if-let [{:keys [result output]} (:done m)]
-    {:text (tools/result-text output result) :error? (= :error (:status result))}
-    {:text (str (or (:busy m) (:refused m) (:problem m) (:none m))) :error? true}))
+    (tools/done-result result (result/clip output max-output) (elapsed))
+    {:text (str (or (:busy m) (:refused m) (:problem m) (:none m))) :error? true
+     :data (result/eval-data {:status :refused :output ""})}))
 
 (defn- now-ms [] (System/currentTimeMillis))
 
 (defn- timed-out
   "await-eval past its deadline: stops the evaluation through a gui turn,
   then waits up to grace-ms more for p's notify. The timeout result."
-  [{:keys [ui gui timeout-ms grace-ms]} p reader]
+  [{:keys [ui gui timeout-ms grace-ms max-output elapsed]} p reader]
   (gui-call gui
             ;; as tool-stop: never interrupt an idle evaluator (an attach
             ;; evaluator would detach)
@@ -229,17 +236,29 @@
             gui-deadline-ms)
   (let [r2 (deref p grace-ms ::pending)]
     (if (= ::pending r2)
-      {:text (str (reader) "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped.")
-       :error? true}
-      {:text (str (or (:output (:done r2)) (reader)) "Timed out after " timeout-ms " ms; interrupted.")
-       :error? true})))
+      (tools/timeout-result (str "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped.")
+                            (result/clip (reader) max-output) (elapsed))
+      (tools/timeout-result (str "Timed out after " timeout-ms " ms; interrupted.")
+                            (result/clip (or (:output (:done r2)) (reader)) max-output) (elapsed)))))
+
+(defn- waiting-result
+  "The early answer for an evaluation that stopped to read console input."
+  [reader {:keys [max-output elapsed]}]
+  (let [{:keys [output dropped] :as out} (result/clip (reader) max-output)]
+    {:text (str (result/dropped-line dropped) output
+                "\n; waiting for console input (a person can type in the window, or call jonquil_stop)")
+     :error? false
+     :data (result/eval-data (assoc out :status :waiting-for-input :ms (elapsed)))}))
 
 (defn- await-eval
   "Fires a hook in one gui turn ((fire notify) returns the output reader) and
   waits for its notify: the result, or the early waiting-for-input result,
-  or the timeout path (stop through a gui turn, then up to grace-ms more)."
-  [{:keys [ui gui fire timeout-ms grace-ms]}]
+  or the timeout path (stop through a gui turn, then up to grace-ms more).
+  :max-output is how many characters of output the answer keeps."
+  [{:keys [ui gui fire timeout-ms grace-ms max-output]}]
   (let [p (promise)
+        t0 (now-ms)
+        limits {:max-output max-output :elapsed (fn [] (- (now-ms) t0))}
         ;; Accepted property of the bounded deref: if this turn outlives its
         ;; deadline the tool throws, but the queued thunk may still run later
         ;; and start an evaluation whose notify delivers into this dead
@@ -249,18 +268,17 @@
     (loop []
       (let [r (deref p (max 1 (min slice-ms (- deadline (now-ms)))) ::pending)]
         (cond
-          (not= ::pending r) (notify->result r)
+          (not= ::pending r) (notify->result r limits)
 
           (ev/waiting-for-input? ((:evaluator* ui)))
-          {:text (str (reader) "\n; waiting for console input (a person can type in the window, or call jonquil_stop)")
-           :error? false}
+          (waiting-result reader limits)
 
           ;; the notify may land between the slice's deref and here
           (and (>= (now-ms) deadline) (realized? p))
-          (notify->result @p)
+          (notify->result @p limits)
 
           (>= (now-ms) deadline)
-          (timed-out {:ui ui :gui gui :timeout-ms timeout-ms :grace-ms grace-ms} p reader)
+          (timed-out (merge limits {:ui ui :gui gui :timeout-ms timeout-ms :grace-ms grace-ms}) p reader)
 
           :else (recur))))))
 
@@ -505,7 +523,8 @@
         grace-ms (or grace-ms default-grace-ms)
         await! (fn [args fire]
                  (await-eval {:ui ui :gui gui :fire fire :grace-ms grace-ms
-                              :timeout-ms (tools/timeout-of args)}))
+                              :timeout-ms (tools/timeout-of args)
+                              :max-output (result/max-output-of args)}))
         handlers (window-handlers {:ui ui :dir dir :grace-ms grace-ms :await! await!
                                    :client-fn (or client-fn (constantly nil))
                                    :turn (fn [f] (gui-call gui f gui-deadline-ms))})]

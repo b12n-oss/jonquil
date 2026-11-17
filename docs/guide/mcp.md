@@ -38,9 +38,33 @@ process, and `{:dialect :clj}` attaches to its nREPL server.
 - `jonquil_eval` and `jonquil_run_file` take `timeout_ms` (default 30 s). On
   expiry the evaluation is interrupted and the tool errors; 5 s later, if it
   still runs, that runtime is stopped and the next call starts a fresh one.
+- Both also take `max_output_chars` (default 100000, at most 1000000). When a
+  program prints more, the answer keeps the last characters and starts with a
+  line saying how many were dropped.
 - Closing stdin ends the server and its runtimes.
 - With an out-of-process runtime, `jonquil_doc` and `jonquil_complete` use the
   editor's offline tables until a first evaluation starts the runtime.
+
+### Structured results
+
+The tools that evaluate (`jonquil_eval` and `jonquil_run_file` here,
+`jonquil_eval`, `jonquil_run` and `jonquil_run_selection` in a window) answer
+with the same text as before, and with the parts of that text as
+`structuredContent`, so an agent doesn't have to take the text apart:
+
+| Field | What it holds |
+|---|---|
+| `status` | `ok`, `error`, `interrupted`, `timeout`, `waiting-for-input` (a window whose program reads stdin), `notice`, or `refused` (the evaluation never started) |
+| `value` | The printed result, for `ok` |
+| `output` | What the code printed, stdout and stderr in the order they arrived |
+| `err` | The stderr part alone. Headless only; a window doesn't keep the two apart |
+| `error` | For `error`: `message`, and `type`, `line` and `column` when the runtime gave them |
+| `ns` | The namespace after the evaluation, when the runtime reports it |
+| `ms` | Wall time in milliseconds, as the tool saw it |
+| `dropped_chars` | How many characters `max_output_chars` cut from the front of `output` |
+
+`structuredContent` belongs to MCP's 2025-06-18 revision. A client on an
+older one ignores the field and reads the text.
 
 ## Window mode
 
@@ -90,7 +114,8 @@ Every call shows in the window's [Messages panel](help-and-inspector.md#messages
 <summary><strong>Timeouts, other projects' tabs, disconnecting and trust</strong></summary>
 
 `jonquil_eval`, `jonquil_run` and `jonquil_run_selection` take `timeout_ms`
-(default 30000). A program that stops to read stdin makes the call return early
+(default 30000) and `max_output_chars` (default 100000), and answer with
+[structured results](#structured-results). A program that stops to read stdin makes the call return early
 with what it printed; type into the console or call `jonquil_stop`.
 
 The window serves its launch project. Run on another project's tab is
