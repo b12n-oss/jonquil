@@ -2,7 +2,8 @@
   "Find a Var by Name (jonquil.gtk.parts.find-var) with the evaluator, the
   palette and the window's jump and doc fns stubbed: what each answer of
   the query does, and where Return and Shift+Return go."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.gtk.callbacks]
             [jonquil.gtk.parts.find-var :as part]))
 
@@ -118,7 +119,7 @@
           c (assoc (ctx log {}) :query! (fn [code notify] (reset! code* code)
                                           (notify (ok "{:vars [{:ns \"a\" :name \"b\" :arglists []}] :dropped 7}"))))]
       (find-var! c)
-      (is (clojure.string/includes? @code* "50000") "the command's own cap, not the MCP tools' 5000")
+      (is (str/includes? @code* "50000") "the command's own cap, not the MCP tools' 5000")
       (is (= [:status "Listing the first 50000 vars: 7 more are loaded. Own vars past the cut may be missing."]
              (last @log))))))
 
