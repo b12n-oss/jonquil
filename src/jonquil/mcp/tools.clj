@@ -1,5 +1,5 @@
 (ns jonquil.mcp.tools
-  "The seven MCP tools over a per-project evaluator.
+  "The ten MCP tools over a per-project evaluator.
 
   `make-tools` returns the table jonquil.mcp consumes:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`.
@@ -10,6 +10,7 @@
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.clj :as clj]
+            [jonquil.describe-run :as describe]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
@@ -79,6 +80,29 @@
                    "properties" {"prefix" (prop "string" "The symbol prefix.")
                                  "path" (prop "string" "A file or directory selecting the project.")}
                    "required" ["prefix"]}}
+   {"name" "jonquil_namespaces"
+    "description" "The namespaces loaded in the project's runtime, the program's own first, each with its file and number of vars. Jolt and JVM Clojure."
+    "inputSchema" {"type" "object"
+                   "properties" {"all" (prop "boolean" "Also list Clojure's and libraries' namespaces. Default false: they are only counted.")
+                                 "limit" (prop "integer" "List at most this many. Default 500, at most 5000.")
+                                 "path" (prop "string" "A file or directory selecting the project.")}
+                   "required" []}}
+   {"name" "jonquil_vars"
+    "description" "A loaded namespace's vars: name, arglists, first doc line, file and line, private and macro flags. Jolt and JVM Clojure."
+    "inputSchema" {"type" "object"
+                   "properties" {"ns" (prop "string" "The namespace.")
+                                 "private" (prop "boolean" "Include private vars, marked. Default true.")
+                                 "limit" (prop "integer" "List at most this many. Default 500, at most 5000.")
+                                 "path" (prop "string" "A file or directory selecting the project.")}
+                   "required" ["ns"]}}
+   {"name" "jonquil_apropos"
+    "description" "Loaded vars whose name contains query, any case, the program's own first. Jolt and JVM Clojure."
+    "inputSchema" {"type" "object"
+                   "properties" {"query" (prop "string" "Text the var's name contains.")
+                                 "all" (prop "boolean" "Also search Clojure's and libraries' namespaces. Default true.")
+                                 "limit" (prop "integer" "List at most this many. Default 50, at most 5000.")
+                                 "path" (prop "string" "A file or directory selecting the project.")}
+                   "required" ["query"]}}
    {"name" "jonquil_project"
     "description" "The dialect, runtime and project directory the other tools would use for path. Starts nothing."
     "inputSchema" {"type" "object"
@@ -280,6 +304,13 @@
           (fn [_ e] (run-in! env {:path p :e e :code text :opts {:run? true :path p :owner :run}
                                   :args args})))))))
 
+(defn quiet-opts
+  "Options for evaluating Jonquil's own code on evaluator e: a REPL entry,
+  quiet where e honours it, so the REPL's history and *1 stay as they were."
+  [e]
+  (cond-> {:run? false :owner :repl}
+    (satisfies? ev/QuietEval e) (assoc :quiet (str "jonquil-query-" (random-uuid) ":"))))
+
 ;; --- tests -------------------------------------------------------------------
 
 (defn- test-ns-name
@@ -343,8 +374,7 @@
     (if-not (test-run/supported? (:id (:profile sel)))
       (unsupported-test-result sel)
       (let [e (evaluator-for! (:cache env) sel)
-            opts (cond-> {:run? false :owner :repl}
-                   (satisfies? ev/QuietEval e) (assoc :quiet (str "jonquil-test-" (random-uuid) ":")))]
+            opts (quiet-opts e)]
         (dissoc (test-result (run-in! env {:path path :e e :code code :opts opts :args args})
                              {:ns-name ns-name :test test :files files})
                 :report)))))
@@ -381,6 +411,69 @@
   {:text (selection-text (selection (:ctx env) (get args "path")))
    :error? false})
 
+;; --- describing the runtime --------------------------------------------------
+
+(defn describe-result
+  "A describe tool's answer from r, an eval tool's answer for a
+  jonquil.describe-run snippet: (answer-fn value) for the value read back,
+  r itself (an error, without its value) when the evaluation didn't finish
+  with one."
+  [r answer-fn]
+  (let [d (:data r)]
+    (cond
+      (not= "ok" (get d "status")) (assoc r :error? true :data (dissoc d "value"))
+      :else (if-let [v (test-run/read-value (get d "value"))]
+              (answer-fn v)
+              (let [message "The query returned something unreadable."]
+                {:text (str message "\n" (:text r))
+                 :error? true
+                 :data {"status" "error" "error" {"message" message}}})))))
+
+(defn unsupported-describe-result
+  "The answer of describe tool tool-name for a project whose dialect it
+  can't ask."
+  [sel tool-name]
+  {:text (str tool-name " answers for Jolt and JVM Clojure for now. This project is "
+              (:name (:profile sel)) ".")
+   :error? true
+   :data {"status" "unsupported"}})
+
+(defn describe-request
+  "The code and answer fn for describe tool tool-name called with args,
+  {:code s :answer (fn [value] answer)}. root is the project directory and
+  files a delay of its file paths, where a var's file is looked up."
+  [tool-name args {:keys [root files]}]
+  (let [opts {:root root :locate (fn [f] (test-run/locate @files f))
+              :limit (get args "limit")}]
+    (case tool-name
+      "jonquil_namespaces"
+      {:code (describe/namespaces-snippet)
+       :answer #(describe/namespaces-answer % (assoc opts :all? (true? (get args "all"))))}
+      "jonquil_vars"
+      (let [ns-name (required-string args "ns")]
+        {:code (describe/vars-snippet {:ns ns-name})
+         :answer #(describe/vars-answer % (assoc opts :ns ns-name
+                                                 :private? (not (false? (get args "private")))))})
+      "jonquil_apropos"
+      (let [query (required-string args "query")]
+        {:code (describe/apropos-snippet {:query query})
+         :answer #(describe/apropos-answer % (assoc opts :query query
+                                                    :all? (not (false? (get args "all")))))}))))
+
+(defn- tool-describe [tool-name]
+  (fn [env args]
+    (let [path (get args "path")
+          sel (selection (:ctx env) path)
+          root (or (:project-dir sel) (:dir env))]
+      (if-not (describe/supported? (:id (:profile sel)))
+        (unsupported-describe-result sel tool-name)
+        (let [{:keys [code answer]} (describe-request tool-name args
+                                                      {:root root
+                                                       :files (delay (test-run/project-files root))})
+              e (evaluator-for! (:cache env) sel)]
+          (describe-result (run-in! env {:path path :e e :code code :opts (quiet-opts e) :args args})
+                           answer))))))
+
 (def ^:private tool-fns
   {"jonquil_eval" tool-eval
    "jonquil_run_file" tool-run
@@ -388,6 +481,9 @@
    "jonquil_check_brackets" tool-brackets
    "jonquil_doc" tool-doc
    "jonquil_complete" tool-complete
+   "jonquil_namespaces" (tool-describe "jonquil_namespaces")
+   "jonquil_vars" (tool-describe "jonquil_vars")
+   "jonquil_apropos" (tool-describe "jonquil_apropos")
    "jonquil_project" tool-project})
 
 (defn make-tools
