@@ -69,14 +69,36 @@
                               (update s :failures-dropped inc))))))
          nil))))
 
+;; A reload redefines what the file holds and removes nothing, so a test
+;; that was renamed or deleted would stay in the namespace and keep running.
+;; A reloaded deftest has a new :test fn. The ones whose fn is unchanged
+;; after a reload are no longer in the file, and are unmapped. When no test
+;; changed at all, nothing shows the file was read: KEEP-UNCHANGED says
+;; whether to run the tests as they are (Jolt, where a namespace defined
+;; only in the session reloads as a no-op) or to unmap them too.
+(def ^:private reload-form
+  '(fn [ns-sym]
+     (let [test-fns (fn []
+                      (if-let [n (find-ns ns-sym)]
+                        (into {} (keep (fn [[s v]] (when-let [f (:test (meta v))] [s f]))
+                                       (ns-interns n)))
+                        {}))
+           before (test-fns)
+           _ (require ns-sym :reload)
+           after (test-fns)
+           fresh (into {} (remove (fn [[s f]] (identical? f (get before s))) after))]
+       (when (or (seq fresh) (not KEEP-UNCHANGED))
+         (doseq [s (remove fresh (keys after))]
+           (ns-unmap ns-sym s))))))
+
 (def ^:private run-form
   '(do
      (require 'clojure.test)
-     RELOAD
      (let [tv (fn [n] (resolve (symbol "clojure.test" n)))
            state (atom {:tests 0 :pass 0 :fail 0 :error 0 :failures [] :failures-dropped 0})
            collect (COLLECTOR state tv SHOW)
            ns-sym 'NS-SYM
+           _ (RELOAD ns-sym)
            vars (if TEST-NAME
                   (let [v (ns-resolve ns-sym (symbol TEST-NAME))]
                     (when (and v (:test (meta v))) [v]))
@@ -95,15 +117,20 @@
   whose value is a string holding the run as EDN: :outcome (:ran, :no-tests
   or :no-such-test), the counts :tests :pass :fail :error, :failures (at
   most max-failures rows) and :failures-dropped. A load failure is left to
-  throw. :reload? false skips reloading the namespace from disk. Throws
-  when :ns or :test isn't a plain symbol name."
-  [{:keys [ns test reload?] :or {reload? true}}]
+  throw. The namespace is reloaded from disk first, and the tests the
+  reload didn't redefine (renamed or deleted in the file) are unmapped.
+  :keep-unchanged? true runs the tests as they are when the reload
+  redefined none of them. :reload? false skips the reload. Throws when :ns
+  or :test isn't a plain symbol name."
+  [{:keys [ns test reload? keep-unchanged?] :or {reload? true}}]
   (let [ns-sym (checked-symbol "namespace" ns)
         test-name (when (some? test) (name (checked-symbol "test" test)))
         fill (fn [form m] (walk/postwalk-replace m form))
         limits {'MAX-CHARS max-shown-chars 'MAX-FAILURES max-failures}
         form (fill run-form
-                   {'RELOAD (when reload? (list 'require (list 'quote ns-sym) :reload))
+                   {'RELOAD (if reload?
+                              (fill reload-form {'KEEP-UNCHANGED (boolean keep-unchanged?)})
+                              '(fn [_] nil))
                     'NS-SYM ns-sym
                     'TEST-NAME test-name
                     'SHOW (fill show-form limits)

@@ -290,6 +290,23 @@
     (spit f (text 1))
     (is (= "ok" (status)))))
 
+(deftest test-forgets-renamed-and-deleted-tests
+  (let [f (io/file (:dir @test-env) "test" "demo" "stale_test.clj")
+        head "(ns demo.stale-test (:require [clojure.test :refer [deftest is]]))\n"
+        run (fn [args] (:data (run-tests (merge {"ns" "demo.stale-test"} args))))]
+    (spit f (str head "(deftest keep-me (is true))\n"
+                 "(deftest old-name (is (= 1 2)))\n"
+                 "(deftest deleted (is (= 1 3)))\n"))
+    (is (= {"tests" 3 "assertions" 3 "pass" 1 "fail" 2 "error" 0} (get (run {}) "counts")))
+    (spit f (str head "(deftest keep-me (is true))\n(deftest new-name (is (= 1 1)))\n"))
+    (let [d (run {})]
+      (is (= "ok" (get d "status")))
+      (is (= {"tests" 2 "assertions" 2 "pass" 2 "fail" 0 "error" 0} (get d "counts"))))
+    (is (= "error" (get (run {"test" "old-name"}) "status")) "the old name is gone")
+    (is (= "ok" (get (run {"test" "new-name"}) "status")))
+    (spit f head)
+    (is (= "no-tests" (get (run {}) "status")) "a file left with no tests runs none")))
+
 (deftest test-no-such-test
   (let [r (run-tests {"ns" "demo.core-test" "test" "nope"})]
     (is (:error? r))

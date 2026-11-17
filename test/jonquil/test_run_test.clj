@@ -12,11 +12,17 @@
   (let [s (tr/snippet {:ns "demo.core-test"})
         form (read-string s)]
     (is (= 'do (first form)))
-    (is (str/includes? s "(require (quote demo.core-test) :reload)"))
+    (is (str/includes? s "(require ns-sym :reload)"))
+    (is (str/includes? s "(quote demo.core-test)"))
     (is (= form (read-string (str s " :more"))) "nothing after the first form")))
 
 (deftest snippet-without-reload
   (is (not (str/includes? (tr/snippet {:ns "demo.core-test" :reload? false}) ":reload"))))
+
+(deftest snippet-keep-unchanged
+  (let [guard (fn [opts] (str/includes? (tr/snippet (merge {:ns "a"} opts)) "(not false)"))]
+    (is (guard {}) "by default unchanged tests are unmapped")
+    (is (not (guard {:keep-unchanged? true})))))
 
 (deftest snippet-rejects-odd-names
   (is (thrown? Exception (tr/snippet {:ns "a) (b"})))
