@@ -182,9 +182,10 @@
                      (:failures report))
         all (into [] (map-indexed (fn [i e] (assoc e :id i))) (take LIST-MAX placed))
         total (+ (get counts "fail") (get counts "error"))
-        unplaced (- total (count all))]
+        unplaced (- total (count all))
+        counted (fn [k word] (let [n (get counts k)] (str n " " word (when (not= 1 n) "s"))))]
     {:title (str total (if (= 1 total) " failure in " " failures in ") ns
-                 " (" (get counts "tests") " tests, " (get counts "assertions") " assertions)"
+                 " (" (counted "tests" "test") ", " (counted "assertions" "assertion") ")"
                  (when (pos? unplaced) (str ", " unplaced " without a place")))
      :scope :project :kind :failures :ns ns :root root
      :all all :entries all :index nil

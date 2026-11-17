@@ -146,6 +146,8 @@ one row per failure with its file, line, test and message. Enter or a click
 goes to the failing line, and F8 and Shift+F8 step through them. A failure in
 another file opens that file.
 
+![Run Tests in This File on a test file: the summary and each failure's expected and actual values on the console, and the Locations panel listing the two failures with the first one's line selected in the editor](../images/run-tests.png)
+
 When every test passes, the console says so in one line. The Locations panel
 is left as it was, unless it was showing that namespace's failures, which are
 then cleared.
@@ -160,6 +162,14 @@ edited since they last ran, the console says so before the summary:
 
 Run that tab, or use Run Changed Forms there, and run the tests again. The
 line can only name open tabs that have run at least once.
+
+![Run Tests after shapes.clj was edited but not run: the console says shapes.clj has 1 form changed since it last ran, before the summary of one failure](../images/run-tests-unrun.png)
+
+On Jolt, the first time a test file requires a source namespace, that
+namespace's file is loaded from disk, even when you ran its tab a moment
+before with edits you hadn't saved. From then on, running the source tab is
+what the tests see. So after the first test run, run an edited source tab
+again, or save it before the first run.
 
 On JVM Clojure the two helper evaluations around the Run show in the session's
 history, and `*1` holds the run's data afterwards. On Jolt the REPL is left as

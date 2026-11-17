@@ -1207,6 +1207,8 @@
    [:nrepl-bb scene-nrepl-bb]
    [:cljs-shadow scene-cljs-shadow]
    [:find-usages panels/scene-find-usages]
+   [:run-tests panels/scene-run-tests]
+   [:run-tests-unrun panels/scene-run-tests-unrun]
    [:compare-form panels/scene-compare-form]
    [:reader panels/scene-reader]
    [:change-sets panels/scene-change-sets]

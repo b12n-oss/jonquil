@@ -216,7 +216,7 @@
              :failures [{:test "t" :kind "fail" :file "/p/a.clj" :line 1 :context []
                          :message nil :expected "true" :actual "false"}]}
         lst (fn [text] (loc/failures one {:root "/p" :texts {"/p/a.clj" text}}))]
-    (is (= "1 failure in a (1 tests, 1 assertions)" (:title (lst "(is false)"))))
+    (is (= "1 failure in a (1 test, 1 assertion)" (:title (lst "(is false)"))))
     (is (= "a.clj:1: fail: t: false" (loc/row-text (lst "(is false)") (first (:entries (lst "(is false)")))))
         "a failure with no message says what it got")
     (is (empty? (:entries (lst ""))) "a line the text doesn't have")

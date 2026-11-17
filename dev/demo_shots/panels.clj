@@ -1,10 +1,10 @@
 (ns demo-shots.panels
   "The Lisp Machine panel scenes of dev/demo_shots.clj: find usages, compare
-  form, the Reader, change sets, breakpoint, trace, line counts, processes
-  and messages. Each scene is (fn [ui] ch) like the scenes in demo-shots."
+  form, the Reader, change sets, breakpoint, trace, line counts, processes,
+  messages and the two Run Tests scenes. Each scene is (fn [ui] ch) like the scenes in demo-shots."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [demo-shots.support :refer [all-saved! caret-to-line! check! console-enter! demo-project! idle?
+            [demo-shots.support :refer [all-saved! caret-to-line! check! console-enter! console-text demo-project! idle?
                                         image-path out-end-offset own-pid panel-key! place-cursor!
                                         run-palette! since status-text]]
             [gtk-async :as ga :refer [await-until go-row on-gtk]]
@@ -280,3 +280,88 @@
       (on-gtk (all-saved! ui)
               (check! :messages (and (not (:error? r1)) (not (:error? r2)) listed? (zero? exit))
                       {:rows rows :screenshot-exit exit :screenshot-err err})))))
+
+;; --- Run Tests -----------------------------------------------------------------
+
+(def ^:private shapes-source
+  (str "(ns demo.shapes)\n\n"
+       "(defn area\n  \"The area of a w by h rectangle.\"\n  [w h]\n  (+ w h))\n\n"
+       "(defn ratio\n  \"How many times h goes into w.\"\n  [w h]\n  (/ w h))\n"))
+
+(def ^:private shapes-tests
+  (str "(ns demo.shapes-test\n"
+       "  (:require [clojure.test :refer [deftest is testing]]\n"
+       "            [demo.shapes :as shapes]))\n\n"
+       "(deftest area-test\n"
+       "  (testing \"a 2 by 3 rectangle\"\n"
+       "    (is (= 6 (shapes/area 2 3)) \"area multiplies\")))\n\n"
+       "(deftest ratio-test\n"
+       "  (is (= 2 (shapes/ratio 4 2)))\n"
+       "  (is (= 0 (shapes/ratio 4 0))))\n"))
+
+(def ^:private area-tests
+  "shapes-tests with the area test alone, so the console holds one failure."
+  (subs shapes-tests 0 (str/index-of shapes-tests "(deftest ratio-test")))
+
+(defn- shapes-project!
+  "The Run Tests scenes' project, opened as the window's folder: a source
+  file with a wrong area and tests, the test file's text. Returns the two
+  files' paths."
+  [ui tests]
+  (let [root (demo-project! {"deps.edn" "{:paths [\"src\" \"test\"]}\n"
+                             ".jonquil.edn" "{:runtime :in-process}\n"
+                             "src/demo/shapes.clj" shapes-source
+                             "test/demo/shapes_test.clj" tests})]
+    (on-gtk ((:simulate-folder-result! ui) {:path root}))
+    {:source (str root "/src/demo/shapes.clj") :tests (str root "/test/demo/shapes_test.clj")}))
+
+(defn scene-run-tests
+  "Run Tests in This File on a test file with one failure and one thrown
+  exception: the summary and each failure's expected and actual values on
+  the console, the two failures in the Locations list, the first one's
+  line selected."
+  [ui]
+  (go-row :run-tests check!
+    (let [{:keys [tests]} (shapes-project! ui shapes-tests)
+          pane (:locations-pane ui)
+          _ (on-gtk ((:open-file! ui) tests)
+                    (run-palette! ui "run the tests in this file"))
+          listed? (await-until 15000 20 #(= 2 (count (lpane/row-texts pane))))
+          _ (on-gtk (run-palette! ui "go to the next place in the list"))
+          rows (on-gtk (lpane/row-texts pane))
+          title (on-gtk (lpane/title-text pane))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :run-tests "png") (own-pid))]
+      (on-gtk (all-saved! ui)
+              (check! :run-tests
+                      (and listed? (= "2 failures in demo.shapes-test (2 tests, 3 assertions)" title)
+                           (str/includes? (first rows) "shapes_test.clj:7: fail: area-test")
+                           (zero? exit))
+                      {:rows rows :title title :screenshot-exit exit :screenshot-err err})))))
+
+(defn scene-run-tests-unrun
+  "Run Tests after the source tab was fixed but not run again: the console
+  names that tab before the summary, and the failure the fix is for is
+  still listed."
+  [ui]
+  (go-row :run-tests-unrun check!
+    (let [{:keys [source tests]} (shapes-project! ui area-tests)
+          _ (on-gtk ((:open-file! ui) source) ((:run!* ui)))
+          ran? (await-until 10000 20 #(and (idle? ui) (str/includes? (console-text ui) "ratio")))
+          _ (on-gtk (let [ed (:ed ((:active-tab* ui)))
+                          text (editor/editor-text ed)
+                          i (str/index-of text "(+ w h)")]
+                      (editor/apply-op-plain! ed {:edits [[i (+ i 7) "(* w h)"]] :caret i}))
+                    ;; only the test run's own lines, so the warning is in view
+                    ((:clear-console!* ui))
+                    ((:open-file! ui) tests)
+                    (run-palette! ui "run the tests in this file"))
+          warned? (await-until 15000 20 #(str/includes? (console-text ui) "; Tests: "))
+          text (on-gtk (console-text ui))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :run-tests-unrun "png") (own-pid))]
+      (on-gtk (all-saved! ui)
+              (check! :run-tests-unrun
+                      (and ran? warned? (zero? exit)
+                           (str/includes? text "; shapes.clj has 1 form changed since it last ran. The tests use what last ran."))
+                      {:console text :screenshot-exit exit :screenshot-err err})))))
