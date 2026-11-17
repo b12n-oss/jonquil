@@ -7,7 +7,8 @@
   through the popover registry (:popover/close-all); every other window
   shortcut waits while the entry has focus, as in the rename popover
   (jonquil.command-registry/window-answer's fixed stage). Up, Down, PageUp and PageDown move the selection; Return in the
-  entry or a click on a row runs the selected entry. Running hides the
+  entry or a click on a row runs the selected entry, Shift+Return its
+  :alt-id when it has one. Running hides the
   popover first, then calls the on-run handler set-handlers! installed
   with the entry's command id, so a command that opens a popover of its own
   isn't closed by the palette's close."
@@ -25,6 +26,8 @@
 (def ^:private KEY-DOWN 0xff54)
 (def ^:private KEY-PAGE-UP 0xff55)
 (def ^:private KEY-PAGE-DOWN 0xff56)
+(def ^:private KEY-RETURN 0xff0d)
+(def ^:private KEY-KP-ENTER 0xff8d)
 
 (defn- report! [pal where e]
   (when-let [f @(:on-error pal)] (f (str "; " where ": " (ex-message e)))))
@@ -38,55 +41,70 @@
 
 (defn- render!
   "Rebuilds the list's rows from the shown entries, one left-aligned label
-  each (as jonquil.gtk.completion's render! builds its rows), then selects
-  the current index."
+  each (as jonquil.gtk.completion's render! builds its rows), at most
+  data/max-rows of them, then selects the current index. The line under
+  the list says how many more match, and hides when none do."
   [pal]
-  (let [lb (:list-box pal)]
+  (let [lb (:list-box pal)
+        shown (:shown @(:state pal))
+        more (- (count shown) data/max-rows)]
     (g/gtk-list-box-remove-all lb)
-    (doseq [e (:shown @(:state pal))]
+    (doseq [e (take data/max-rows shown)]
       (let [label (g/gtk-label-new (data/row-text e))]
         (g/gtk-label-set-xalign label 0.0)
         (g/gtk-widget-set-halign label g/ALIGN-START)
         (g/gtk-list-box-append lb label)))
+    (g/gtk-label-set-text (:more-label pal) (if (pos? more) (str more " more: type more of the name") ""))
+    (g/gtk-widget-set-visible (:more-label pal) (if (pos? more) 1 0))
     (select! pal)))
 
 (defn- refilter! [pal]
   (let [query (or (g/editable-text (:entry pal)) "")]
-    (swap! (:state pal) (fn [st] (assoc st :shown (data/filter-entries (:all st) query) :index 0)))
+    (swap! (:state pal) (fn [st] (assoc st :shown ((:filter st) (:all st) query) :index 0)))
     (render! pal)))
 
-(defn- move! [pal delta]
-  (swap! (:state pal) data/move delta)
+(defn- move!
+  "Moves the selection by delta, kept within the rows render! drew."
+  [pal delta]
+  (swap! (:state pal) (fn [st] (update (data/move st delta) :index min (dec data/max-rows))))
   (select! pal))
 
 (defn run-selected!
   "Runs the selected entry: hides the popover, then calls on-run with its
-  command id. Does nothing when no entry is shown."
-  [pal]
-  (let [{:keys [shown index]} @(:state pal)]
-    (when-let [{:keys [id]} (get shown index)]
-      (popover/hide! pal)
-      (when-let [f @(:on-run pal)] (f id)))))
+  command id, or with its :alt-id when alt? and it has one. Does nothing
+  when no entry is shown."
+  ([pal] (run-selected! pal false))
+  ([pal alt?]
+   (let [{:keys [shown index]} @(:state pal)]
+     (when-let [{:keys [id alt-id]} (get shown index)]
+       (popover/hide! pal)
+       (when-let [f @(:on-run pal)] (f (if (and alt? alt-id) alt-id id)))))))
 
 (defn handle-key!
   "The entry's own keys, on its capture-phase controller (public for
-  rows): Up/Down by one, PageUp/PageDown by a page. 1 when taken, 0 for
-  every other key, and 0 for every key while an IME preedit is active, so
-  a composition's own arrows (its candidate list) reach the input method,
-  as jonquil.gtk.find-bar/handle-key! does."
-  [pal keyval]
-  (if @(:preedit-active? pal)
-    0
-    (condp = keyval
-      KEY-UP (do (move! pal -1) 1)
-      KEY-DOWN (do (move! pal 1) 1)
-      KEY-PAGE-UP (do (move! pal (- PAGE-STEP)) 1)
-      KEY-PAGE-DOWN (do (move! pal PAGE-STEP) 1)
-      0)))
+  rows): Up/Down by one, PageUp/PageDown by a page, and Shift+Return
+  (or KP_Enter) runs the selected entry's other action (run-selected! with
+  alt?). state is the key's modifier mask, 0 when left out. 1 when taken,
+  0 for every other key (plain Return is the entry's activate), and 0 for
+  every key while an IME preedit is active, so a composition's own arrows
+  (its candidate list) reach the input method, as
+  jonquil.gtk.find-bar/handle-key! does."
+  ([pal keyval] (handle-key! pal keyval 0))
+  ([pal keyval state]
+   (cond
+     @(:preedit-active? pal) 0
+     (and (contains? #{KEY-RETURN KEY-KP-ENTER} keyval) (not (zero? (bit-and state g/SHIFT-MASK))))
+     (do (run-selected! pal true) 1)
+     :else (condp = keyval
+             KEY-UP (do (move! pal -1) 1)
+             KEY-DOWN (do (move! pal 1) 1)
+             KEY-PAGE-UP (do (move! pal (- PAGE-STEP)) 1)
+             KEY-PAGE-DOWN (do (move! pal PAGE-STEP) 1)
+             0))))
 
 (defn- pack-palette!
   "Sizes the entry, list and scroller, then packs them into the box and sets the box as the popover's child."
-  [{:keys [entry list-box scroll box pp]}]
+  [{:keys [entry list-box scroll more-label box pp]}]
   (g/gtk-widget-set-size-request entry WIDTH -1)
   (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
   (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
@@ -95,6 +113,9 @@
   (g/gtk-scrolled-window-set-child scroll list-box)
   (g/gtk-box-append box entry)
   (g/gtk-box-append box scroll)
+  (g/gtk-label-set-xalign more-label 0.0)
+  (g/gtk-widget-set-visible more-label 0)
+  (g/gtk-box-append box more-label)
   (popover/set-child! pp box))
 
 (defn- connect-entry!
@@ -126,8 +147,8 @@
   "Connects the key handler, the entry's preedit tracking and the capture-phase key controller."
   [pal entry keyctl]
   (g/g-signal-connect-data keyctl "key-pressed"
-                           (callable (fn [_ctl keyval _keycode _state _data]
-                                       (try (handle-key! pal keyval)
+                           (callable (fn [_ctl keyval _keycode state _data]
+                                       (try (handle-key! pal keyval state)
                                             (catch :default e (report! pal "palette" e) 1)))
                                      [:pointer :uint :uint :uint :pointer] :int)
                            ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -148,7 +169,8 @@
 (defn make-palette
   "Builds the palette on view (an editor's GtkTextView): the
   jonquil.gtk.popover map (autohide, below the caret) plus :entry,
-  :list-box, :state (an atom of {:all :shown :index}) and the :on-run and
+  :list-box, :more-label (the line under the list saying how many more
+  match), :state (an atom of {:all :shown :index :filter}) and the :on-run and
   :on-error handler atoms set-handlers! fills. Every signal handler runs
   inside try/catch, since a throw out of a GTK callback kills the process;
   a throw goes to :on-error."
@@ -156,13 +178,14 @@
   (let [entry (g/gtk-entry-new)
         list-box (g/gtk-list-box-new)
         scroll (g/gtk-scrolled-window-new)
+        more-label (g/gtk-label-new "")
         box (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
         keyctl (g/gtk-event-controller-key-new)
         pp (popover/make-popover view {:autohide? true :position :bottom})
-        pal (assoc pp :entry entry :list-box list-box
-                   :state (atom {:all [] :shown [] :index 0})
+        pal (assoc pp :entry entry :list-box list-box :more-label more-label
+                   :state (atom {:all [] :shown [] :index 0 :filter data/filter-entries})
                    :on-run (atom nil) :on-error (atom nil) :preedit-active? (atom false))]
-    (pack-palette! {:entry entry :list-box list-box :scroll scroll :box box :pp pp})
+    (pack-palette! {:entry entry :list-box list-box :scroll scroll :more-label more-label :box box :pp pp})
     (connect-entry! pal entry)
     (connect-list-box! pal list-box)
     (connect-keys! pal entry keyctl)
@@ -185,15 +208,18 @@
   jonquil.gtk.help-popover/show-rename! does). No composition can be
   under way in an entry that's about to take focus, so it starts with none:
   one the palette was closed over (Escape, a click outside) may never have
-  reported its end."
-  [pal entries]
-  (reset! (:preedit-active? pal) false)
-  (reset! (:state pal) {:all entries :shown entries :index 0})
-  (g/gtk-editable-set-text (:entry pal) "")
-  (render! pal)
-  (popover/show-at-caret! pal)
-  (g/gtk-widget-grab-focus (:entry pal))
-  nil)
+  reported its end. :filter (fn [entries query]) is how typing filters,
+  data/filter-entries when left out; each open sets it afresh, so a
+  palette opened for vars then for commands filters commands by doc again."
+  ([pal entries] (open! pal entries {}))
+  ([pal entries {:keys [filter] :or {filter data/filter-entries}}]
+   (reset! (:preedit-active? pal) false)
+   (reset! (:state pal) {:all entries :shown entries :index 0 :filter filter})
+   (g/gtk-editable-set-text (:entry pal) "")
+   (render! pal)
+   (popover/show-at-caret! pal)
+   (g/gtk-widget-grab-focus (:entry pal))
+   nil))
 
 (defn set-query!
   "Sets the entry's text, which refilters the list as typing does."

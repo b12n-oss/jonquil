@@ -5,6 +5,7 @@
   (:require [gtk-selftest-window.completion :as completion]
             [gtk-selftest-window.locations :as locations-rows]
             [gtk-selftest-window.tests-part :as tests-part-rows]
+            [gtk-selftest-window.find-var :as find-var]
             [gtk-selftest-window.palette :as palette-rows]
             [gtk-selftest-window.plugins :as plugin-rows]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
@@ -93,6 +94,11 @@
    palette-rows/row-palette-closes-its-own-tab
    palette-rows/row-palette-entry-keeps-window-keys
    palette-rows/row-palette-entry-signals
+   palette-rows/row-palette-vars-filter-by-name
+   palette-rows/row-palette-render-cap-and-more-row
+   palette-rows/row-palette-shift-return-runs-the-alt-id
+   palette-rows/row-palette-open-resets-the-mode
+   find-var/row-find-var-lists-and-shows-doc
    palette-rows/row-describe-key-consumes
    palette-rows/row-describe-key-skips-modifier
    palette-rows/row-key-bindings-lists

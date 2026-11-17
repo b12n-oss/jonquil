@@ -93,7 +93,7 @@
    :hide-right-panel! win-right-slot/hide-right-panel!
    :alert-pending? win-alerts/alert-pending? :show-alert! win-alerts/show-alert!
    :make-eval-opts win-run/make-eval-opts :refuse-foreign! win-run/refuse-foreign!
-   :mcp-eval! win-run/mcp-eval!
+   :mcp-eval! win-run/mcp-eval! :mcp-query! win-run/mcp-query!
    :unread-label unread-label :pending-label pending-label})
 
 (defn- tooling-wctx
@@ -110,7 +110,7 @@
    :saved-listeners win-files/saved-listeners
    :inspect! (fn [start]
                (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
-   :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to!
+   :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to! :show-doc-for! win-help/show-doc-for!
    :run-example! win-run/do-run-example!
    :open-file-line! win-help/open-file-line!
    :source-ctx source-ctx

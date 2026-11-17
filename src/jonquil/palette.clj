@@ -112,6 +112,21 @@
                  (every? #(str/includes? text %) words)))
              entries)))
 
+(def max-rows
+  "How many rows the palette's popover draws at most; past that it says
+  how many more match. Find a Var by Name can list thousands."
+  200)
+
+(defn filter-names
+  "The entries whose :name holds query, case ignored, order kept. A blank
+  query keeps all. Find a Var by Name filters this way, so a word in a
+  var's arglists or namespace doesn't match it."
+  [entries query]
+  (let [q (str/lower-case (str/trim (or query "")))]
+    (if (str/blank? q)
+      entries
+      (filterv #(str/includes? (str/lower-case (str (:name %))) q) entries))))
+
 (defn bang?
   "True when text, an entry typed at the Interactions prompt, is a `!`
   command rather than code: one line whose first non-blank character is !,

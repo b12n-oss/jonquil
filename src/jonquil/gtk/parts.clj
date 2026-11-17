@@ -23,10 +23,11 @@
             [jonquil.gtk.parts.replay :as replay]
             [jonquil.gtk.parts.trace :as trace]
             [jonquil.gtk.parts.tests :as tests]
+            [jonquil.gtk.parts.find-var :as find-var]
             [jonquil.gtk.parts.time-form :as time-form]
             [jonquil.gtk.parts.worlds :as worlds]))
 
 (def installs
   "Install fns, in order: the real parts, then any registered in
   jonquil.parts.extra."
-  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part prefs/part terminal/part menus/part trace/part live-results/part locations/part tests/part debugger/part breakpoints/part command-palette/part file-tree/part plugins/part change-sets/part docs/part replay/part] @extra/installs*))
+  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part prefs/part terminal/part menus/part trace/part live-results/part locations/part tests/part debugger/part breakpoints/part command-palette/part file-tree/part plugins/part find-var/part change-sets/part docs/part replay/part] @extra/installs*))

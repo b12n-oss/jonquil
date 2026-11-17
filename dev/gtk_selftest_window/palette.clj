@@ -289,6 +289,102 @@
                   (reset! (:preedit-active? p) false)
                   (close! ui)))))))
 
+;; --- vars mode (Find a Var by Name) --------------------------------------
+
+(defn- var-entry [ns n]
+  {:id [:var/open {:ns ns :name n :file nil :line nil}] :alt-id [:var/doc (str ns "/" n)]
+   :name n :doc (str n " [x]") :chords [] :source ns})
+
+(defn- with-run-log
+  "Calls f with pal's on-run swapped for one that logs each id into an
+  atom, which f gets; the window's handler comes back after."
+  [p f]
+  (let [log (atom []) old @(:on-run p)]
+    (reset! (:on-run p) #(swap! log conj %))
+    (try (f log) (finally (reset! (:on-run p) old)))))
+
+(defn- row-count [p]
+  (loop [i 0] (if (ffi/null? (g/gtk-list-box-get-row-at-index (:list-box p) i)) i (recur (inc i)))))
+
+(defn- more-text [p]
+  (when-not (zero? (g/gtk-widget-get-visible (:more-label p))) (g/label-text (:more-label p))))
+
+(defn row-palette-vars-filter-by-name
+  "Opened with a :filter, the palette filters by that fn: a name filter
+  keeps a var whose name holds the query and drops one whose namespace or
+  arglists hold it."
+  [ui]
+  (go-row :palette-vars-filter-by-name support/check
+    (on-gtk (let [p (:palette ui)]
+              (try
+                (palette/open! p [(var-entry "demo.parse" "needle-fn") (var-entry "demo.needle" "other")]
+                               {:filter pal-data/filter-names})
+                (palette/set-query! p "NEEDLE")
+                (let [shown (mapv :name (:shown @(:state p)))]
+                  (support/check :palette-vars-filter-by-name (= ["needle-fn"] shown) {:shown shown}))
+                (finally (close! ui)))))))
+
+(defn row-palette-render-cap-and-more-row
+  "250 entries draw max-rows (200) rows and the line under the list says
+  50 more; a query that leaves fewer hides it again. Down from the last
+  drawn row stays on it."
+  [ui]
+  (go-row :palette-render-cap-and-more-row support/check
+    (on-gtk (let [p (:palette ui)]
+              (try
+                (palette/open! p (mapv #(var-entry "demo.many" (str "v" %)) (range 250))
+                               {:filter pal-data/filter-names})
+                (let [n (row-count p) more (more-text p)
+                      _ (dotimes [_ 30] (palette/handle-key! p 0xff56))
+                      last-index (:index @(:state p))
+                      _ (palette/set-query! p "v12")
+                      n2 (row-count p) more2 (more-text p)]
+                  (support/check :palette-render-cap-and-more-row
+                                 (and (= 200 n) (= "50 more: type more of the name" more) (= 199 last-index)
+                                      (= 11 n2) (nil? more2))
+                                 {:rows n :more more :last last-index :rows2 n2 :more2 more2}))
+                (finally (close! ui)))))))
+
+(defn row-palette-shift-return-runs-the-alt-id
+  "Shift+Return (Return or KP_Enter with Shift) runs the selected entry's
+  :alt-id and is taken (1); plain Return is left to the entry's activate,
+  which runs :id. An entry with no :alt-id runs its :id on Shift+Return."
+  [ui]
+  (go-row :palette-shift-return-runs-the-alt-id support/check
+    (on-gtk (let [p (:palette ui)]
+              (try
+                (with-run-log p
+                  (fn [log]
+                    (palette/open! p [(var-entry "demo.a" "f")] {:filter pal-data/filter-names})
+                    (let [shift (palette/handle-key! p 0xff0d g/SHIFT-MASK)
+                          plain (palette/handle-key! p 0xff0d 0)
+                          _ (palette/open! p [(var-entry "demo.a" "g")] {:filter pal-data/filter-names})
+                          kp (palette/handle-key! p 0xff8d g/SHIFT-MASK)
+                          _ (palette/open! p [{:id :x/y :doc "Y" :chords [] :source "built-in"}])
+                          no-alt (palette/handle-key! p 0xff0d g/SHIFT-MASK)]
+                      (support/check :palette-shift-return-runs-the-alt-id
+                                     (and (= 1 shift kp no-alt) (= 0 plain)
+                                          (= [[:var/doc "demo.a/f"] [:var/doc "demo.a/g"] :x/y] @log))
+                                     {:shift shift :plain plain :kp kp :no-alt no-alt :log @log}))))
+                (finally (close! ui)))))))
+
+(defn row-palette-open-resets-the-mode
+  "Opened for vars, closed, then opened as the command palette: the
+  command palette filters by doc and id again."
+  [ui]
+  (go-row :palette-open-resets-the-mode support/check
+    (on-gtk (let [p (:palette ui)]
+              (try
+                (palette/open! p [(var-entry "demo.a" "f")] {:filter pal-data/filter-names})
+                (close! ui)
+                ((:open-palette!* ui))
+                (palette/set-query! p "close the tab")
+                (let [shown (palette/shown-docs p)]
+                  (support/check :palette-open-resets-the-mode
+                                 (and (seq shown) (= (:filter @(:state p)) pal-data/filter-entries))
+                                 {:shown shown}))
+                (finally (close! ui)))))))
+
 ;; --- describing keys --------------------------------------------------------
 
 (def ^:private KEY-L 0x06c)

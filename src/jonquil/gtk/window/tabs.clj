@@ -438,7 +438,7 @@
   ;; not a registry command: the window-key-args fn that runs it, by the
   ;; entry's first element. The tab, panel (as its key does), Compare with
   ;; tab (LM3), named layout (LM8), Use theme and Restore an Earlier World
-  ;; entries.
+  ;; entries, and Find a Var by Name's (open the var, Shift+Return its doc).
   {:tab/switch :switch-tab-fn
    :panel/switch :panel-focus-fn
    :compare/tab :compare-tab-fn
@@ -446,7 +446,9 @@
    :theme/use :theme-use-fn
    :pages/open :docs-page-fn
    :world/restore-from :world-restore-from-fn
-   :change-set/open :change-set-open-fn})
+   :change-set/open :change-set-open-fn
+   :var/open :find-var-open-fn
+   :var/doc :find-var-doc-fn})
 
 (defn- palette-run!
   "The command palette's run of id, as its key would: a tab, panel, layout or earlier-world entry through window-key-args' fns, anything else as a registry command with the window's, this editor's and the console's ctx. A throw is said on the status line."

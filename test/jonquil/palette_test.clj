@@ -280,3 +280,20 @@
           (str "`!" q "` picks as on main")))
     (is (= :help/quick-doc (first-id es "doc")))
     (is (= :help/quick-doc (:run (palette/bang-pick es "!docs"))))))
+
+(def ^:private var-rows
+  [{:name "parse-line" :doc "parse-line [s]" :source "demo.parse"}
+   {:name "other" :doc "other [x]" :source "demo.parse"}
+   {:name "Parse-Long" :doc "Parse-Long [s]" :source "clojure.core"}])
+
+(deftest filter-names-substring-any-case
+  (is (= ["parse-line" "Parse-Long"] (map :name (palette/filter-names var-rows "PARSE"))))
+  (is (= ["parse-line"] (map :name (palette/filter-names var-rows "e-li")))))
+
+(deftest filter-names-blank-keeps-all
+  (is (= var-rows (palette/filter-names var-rows "")))
+  (is (= var-rows (palette/filter-names var-rows "  ")))
+  (is (= var-rows (palette/filter-names var-rows nil))))
+
+(deftest max-rows-is-two-hundred
+  (is (= 200 palette/max-rows)))

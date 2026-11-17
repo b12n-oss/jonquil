@@ -160,6 +160,7 @@
               {:command :help/remove-cli :label "Remove the jonquil Command"}]]}
  {:label "Help"
   :sections [[{:command :help/quick-doc :label "Docs for the Symbol"}
+              {:command :help/find-var :label "Find a Var by Name…"}
               {:command :pages/guide :label "Open a Guide Page…"}
               {:command :pages/bookmarks :label "Open a Bookmarked Page…"}]
              [{:command :help/describe-key :label "Describe the Next Key"}

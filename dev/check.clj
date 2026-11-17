@@ -27,6 +27,7 @@
     jonquil.parts.replay
     jonquil.parts.trace
     jonquil.parts.change-sets
+    jonquil.parts.find-var
     jonquil.parts.live-results
     jonquil.parts.tests
     jonquil.parts.time-form
@@ -192,6 +193,7 @@
     jonquil.gtk.parts.replay
     jonquil.gtk.parts.trace
     jonquil.gtk.parts.change-sets
+    jonquil.gtk.parts.find-var
     jonquil.gtk.parts.live-results
     jonquil.gtk.parts.tests
     jonquil.gtk.parts.time-form
