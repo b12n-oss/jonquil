@@ -93,6 +93,10 @@
    palette-rows/row-palette-closes-its-own-tab
    palette-rows/row-palette-entry-keeps-window-keys
    palette-rows/row-palette-entry-signals
+   palette-rows/row-palette-vars-filter-by-name
+   palette-rows/row-palette-render-cap-and-more-row
+   palette-rows/row-palette-shift-return-runs-the-alt-id
+   palette-rows/row-palette-open-resets-the-mode
    palette-rows/row-describe-key-consumes
    palette-rows/row-describe-key-skips-modifier
    palette-rows/row-key-bindings-lists
