@@ -581,12 +581,14 @@
   [evaluating? frames?]
   (let [base {:evaluating? evaluating?}]
     (if frames?
+      #_{:clj-kondo/ignore [:missing-protocol-method]}
       (reify ev/Evaluator
         (evaluating? [_] (:evaluating? base))
         (set-mode! [_ _] nil)
         ev/Frames
         (error-frames! [_ _] nil)
         (eval-in-frame! [_ _ _] nil))
+      #_{:clj-kondo/ignore [:missing-protocol-method]}
       (reify ev/Evaluator
         (evaluating? [_] (:evaluating? base))
         (set-mode! [_ _] nil)))))
