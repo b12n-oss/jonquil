@@ -99,6 +99,26 @@ held is still a selection.
 
 ![F12 on clojure.string/join in a JVM Clojure window: the source panel shows string.clj from the Clojure jar, read-only, on join's definition](../images/clj-source.png)
 
+### Finding a var by name
+
+When you know part of a name but not where it lives, **Find a Var by
+Name…** in the Help menu (or the palette) lists every var your program has
+loaded. Type part of the name and the list narrows, ignoring case. Each row
+shows the name, its arglists and its namespace, with your project's own vars
+ahead of Clojure's and the libraries'.
+
+- Return goes to the definition. A var in your project opens in a tab at its
+  line. Any other var goes where Jump to Definition would take it, which is
+  the source panel for library code, or its documentation when the runtime
+  can't say where it is.
+- Shift+Return shows the var's documentation, as Docs for the Symbol does.
+
+The list is asked for fresh each time, so a var you defined a moment ago is
+in it, and asking prints nothing in the console. The popover draws the first
+200 matches and says how many more there are, so type a little more to
+reach the rest. It works for Jolt and JVM Clojure. A busy runtime gets a
+note in the status bar instead, so try again once the evaluation finishes.
+
 ### Rename
 
 Shift+F6 or F2 opens a popup prefilled with the symbol. Enter applies,
