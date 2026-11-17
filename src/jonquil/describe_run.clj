@@ -272,3 +272,24 @@
                                   (left-out-line hidden))]
                             data)
       :else (answer [(str "No loaded var's name contains " (pr-str (str query)) ".")] data))))
+
+;; --- Find a Var by Name ------------------------------------------------------
+
+(defn var-entries
+  "apropos-snippet's value v as palette entries for Find a Var by Name: the
+  program's own vars first (own? as apropos-answer judges it), the rest
+  after them, each part sorted by name then namespace. An entry is {:id
+  [:var/open {:ns :name :file :line}] :alt-id [:var/doc \"ns/name\"] :name
+  :doc \"name arglists...\" :chords [] :source ns}; :file is the runtime's
+  own, nil for a var with none."
+  [v opts]
+  (let [opts (remembering opts)
+        [kept _] (own-first (sort-by (juxt :name :ns) (:vars v)) #(or (:file %) (:ns-file %)) true opts)]
+    (mapv (fn [{:keys [ns name arglists file line]}]
+            {:id [:var/open {:ns ns :name name :file file :line line}]
+             :alt-id [:var/doc (str ns "/" name)]
+             :name name
+             :doc (str/join " " (cons name arglists))
+             :chords []
+             :source ns})
+          kept)))

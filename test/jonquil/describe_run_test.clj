@@ -233,3 +233,22 @@
            :dropped 0}]
     (dr/apropos-answer v (assoc counting :query "v"))
     (is (<= @calls 2))))
+
+(def ^:private find-var-value
+  {:vars [{:ns "clojure.core" :name "parse-long" :arglists ["[s]"] :file "clojure/core.clj" :line 9}
+          {:ns "demo.parse" :name "parse-line" :arglists ["[s]" "[s opts]"] :file "src/demo/parse.clj" :line 3}
+          {:ns "demo.a" :name "zeta" :arglists [] :file nil :line nil :ns-file "src/demo/a.clj"}]
+   :dropped 0})
+
+(deftest var-entries-own-first
+  (let [es (dr/var-entries find-var-value {:own? #(clojure.string/starts-with? % "src/")})]
+    (is (= ["parse-line" "zeta" "parse-long"] (map :name es)))
+    (is (= {:id [:var/open {:ns "demo.parse" :name "parse-line" :file "src/demo/parse.clj" :line 3}]
+            :alt-id [:var/doc "demo.parse/parse-line"]
+            :name "parse-line" :doc "parse-line [s] [s opts]" :chords [] :source "demo.parse"}
+           (first es)))
+    (is (= [:var/open {:ns "demo.a" :name "zeta" :file nil :line nil}] (:id (second es))))))
+
+(deftest var-entries-doc-text
+  (let [es (dr/var-entries find-var-value {:own? (constantly false)})]
+    (is (= ["parse-line [s] [s opts]" "parse-long [s]" "zeta"] (map :doc (sort-by :doc es))))))
