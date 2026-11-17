@@ -663,7 +663,7 @@
         r (call (tools-for (describe-ui {:r vars-value :seen seen})) "jonquil_vars" {"ns" "demo.core"})]
     (is (false? (:error? r)))
     (is (= (:data (dr/vars-answer vars-value {:ns "demo.core" :root "/nonexistent/jonquil-wdesc"
-                                               :locate (constantly nil)}))
+                                              :locate (constantly nil)}))
            (:data r)))
     (is (str/includes? (first @seen) "(quote demo.core)"))))
 

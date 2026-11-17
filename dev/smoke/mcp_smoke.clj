@@ -214,6 +214,12 @@
   (tool! srv "jonquil_eval" {"code" ":before"} 60000)
   (describe-checks! srv label true))
 
+(defn- runtime-tool-checks!
+  "jonquil_test, then the describe tools, over the server's runtime."
+  [srv proj label]
+  (test-tool-checks! srv proj label)
+  (describe-tool-checks! srv proj label))
+
 (defn- main []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
         xdg (str tmp "/xdg")
@@ -238,8 +244,7 @@
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
         (structured-checks! srv)
-        (test-tool-checks! srv proj "in-process")
-        (describe-tool-checks! srv proj "in-process")
+        (runtime-tool-checks! srv proj "in-process")
         (let [r1 (tool! srv "jonquil_eval" {"code" "(do (.start (Thread. (fn [] (println \"noise\")))) (Thread/sleep 200) :ok)"} 30000)
               r2 (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 30000)]
           (check! "background println does not reach stdout"
@@ -259,8 +264,7 @@
           (handshake! srv "nrepl")
           (let [r (tool! srv "jonquil_eval" {"code" "(+ 5 5)"} 60000)]
             (check! "nrepl eval (+ 5 5) => 10" (and (string? (:text r)) (str/includes? (:text r) "=> 10")) r))
-          (test-tool-checks! srv nrepl-proj "nrepl")
-          (describe-tool-checks! srv nrepl-proj "nrepl")
+          (runtime-tool-checks! srv nrepl-proj "nrepl")
           (let [kids (children pid)]
             (check! (str "nrepl run started a child (pid " (str/join "," kids) ")") (seq kids) kids)
             (stop! srv "nrepl")
