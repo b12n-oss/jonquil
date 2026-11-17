@@ -142,6 +142,54 @@
                               (into #{:this} (filter (set match-kinds)) shown)
                               (:matches lst)))))
 
+(defn- line-range
+  "[start end] of 1-based line's text in text, its indentation left out;
+  nil when text has no such line or the line is blank."
+  [^String text line]
+  (when (and line (pos? line))
+    (loop [n 1 start 0]
+      (let [nl (.indexOf text "\n" (int start))
+            end (if (neg? nl) (count text) nl)]
+        (cond
+          (= n line) (let [body (subs text start end)
+                           lead (- (count body) (count (str/triml body)))]
+                       (when-not (str/blank? body) [(+ start lead) end]))
+          (neg? nl) nil
+          :else (recur (inc n) (inc nl)))))))
+
+(defn- failure-detail
+  "What a failure's row says after the test's name: the testing strings
+  and the message, a thrown exception's text for an error, and what the
+  assertion got when a failure has nothing else to say."
+  [{:keys [kind context message actual]}]
+  (let [ctx (when (seq context) (str/join " > " context))
+        parts (remove nil? [ctx message (when (= "error" kind) actual)])
+        detail (if (seq parts) (str/join ": " parts) (str actual))]
+    (if (> (count detail) TEXT-MAX) (subs detail 0 TEXT-MAX) detail)))
+
+(defn failures
+  "A project list of a test run's failures, from jonquil.test-run/report's
+  report: :kind :failures, :ns the namespace that ran, one entry per
+  failure whose line is found, the whole line its place. texts maps a
+  failure's file to the text its line numbers count in (an open tab's,
+  else the file's); root is the project directory rows are shown under.
+  Failures with no place are left out and counted in the title."
+  [{:keys [ns counts] :as report} {:keys [root texts]}]
+  (let [placed (keep (fn [f]
+                       (when-let [[s e] (some-> (get texts (:file f)) (line-range (:line f)))]
+                         {:path (:file f) :line (:line f) :start s :end e
+                          :test (:test f) :fail-kind (:kind f) :text (failure-detail f)}))
+                     (:failures report))
+        all (into [] (map-indexed (fn [i e] (assoc e :id i))) (take LIST-MAX placed))
+        total (+ (get counts "fail") (get counts "error"))
+        unplaced (- total (count all))]
+    {:title (str total (if (= 1 total) " failure in " " failures in ") ns
+                 " (" (get counts "tests") " tests, " (get counts "assertions") " assertions)"
+                 (when (pos? unplaced) (str ", " unplaced " without a place")))
+     :scope :project :kind :failures :ns ns :root root
+     :all all :entries all :index nil
+     :hashes (into {} (map (fn [p] [p (hash (get texts p))])) (distinct (map :path all)))}))
+
 (def ^:private how-words {:call "call" :value "value" :definition "def" :ns "ns"})
 
 (def ^:private match-words {:other ", other var" :unresolved ", unresolved"})
@@ -149,14 +197,17 @@
 (defn row-text
   "The panel's row for entry e of lst: line: text, and for a project list
   path:line: kind: text, the path relative to lst's :root, the kind saying
-  when the place isn't the searched-for var."
-  [lst {:keys [line text path how match]}]
+  when the place isn't the searched-for var. A failures list's row is
+  path:line: fail or error: the test: what it says."
+  [lst {:keys [line text path how match test fail-kind]}]
   (if (= :project (:scope lst))
     (let [root (:root lst)
           rel (if (and root path (str/starts-with? path (str root "/")))
                 (subs path (inc (count root)))
                 path)]
-      (str rel ":" line ": " (how-words how) (match-words match) ": " text))
+      (if (= :failures (:kind lst))
+        (str rel ":" line ": " fail-kind ": " test ": " text)
+        (str rel ":" line ": " (how-words how) (match-words match) ": " text)))
     (str line ": " text)))
 
 (defn step

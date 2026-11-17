@@ -168,3 +168,58 @@
         "outside the root: the whole path"))
   (is (= "4: (area 1)" (loc/row-text (loc/uses "(area 1)" "area") {:line 4 :text "(area 1)"}))
       "a buffer list: line and text"))
+
+;; --- a test run's failures -----------------------------------------------------
+
+(def ^:private test-text
+  (str "(ns demo.core-test)\n"
+       "\n"
+       "(deftest fails\n"
+       "  (testing \"outer\"\n"
+       "    (is (= 1 2) \"msg\")))\n"
+       "\n"
+       "(deftest throws\n"
+       "  (is (= 1 (/ 1 0))))\n"))
+
+(def ^:private run-report
+  {:ns "demo.core-test"
+   :counts {"tests" 3 "assertions" 3 "pass" 0 "fail" 2 "error" 1}
+   :failures [{:test "fails" :kind "fail" :file "/p/test/demo/core_test.clj" :line 5
+               :context ["outer"] :message "msg" :expected "(= 1 2)" :actual "(not (= 1 2))"}
+              {:test "throws" :kind "error" :file "/p/test/demo/core_test.clj" :line 8
+               :context [] :message nil :expected "(= 1 (/ 1 0))"
+               :actual "java.lang.ArithmeticException: Divide by zero"}
+              {:test "elsewhere" :kind "fail" :file "/p/test/demo/gone_test.clj" :line 3
+               :context [] :message nil :expected "true" :actual "false"}]})
+
+(deftest failures-list-entries
+  (let [lst (loc/failures run-report {:root "/p" :texts {"/p/test/demo/core_test.clj" test-text}})
+        [a b] (:entries lst)]
+    (is (= "3 failures in demo.core-test (3 tests, 3 assertions), 1 without a place" (:title lst)))
+    (is (= [:project :failures "demo.core-test"] ((juxt :scope :kind :ns) lst)))
+    (is (= 2 (count (:entries lst))) "the failure in a file with no text is left out")
+    (is (= (:entries lst) (:all lst)))
+    (is (= [0 1] (map :id (:entries lst))))
+    (is (= "(is (= 1 2) \"msg\")))" (subs test-text (:start a) (:end a))) "the line, its indentation left out")
+    (is (= "(is (= 1 (/ 1 0))))" (subs test-text (:start b) (:end b))))
+    (is (= {"/p/test/demo/core_test.clj" (hash test-text)} (:hashes lst)))
+    (is (nil? (:index lst)))))
+
+(deftest failures-row-text
+  (let [lst (loc/failures run-report {:root "/p" :texts {"/p/test/demo/core_test.clj" test-text}})]
+    (is (= ["test/demo/core_test.clj:5: fail: fails: outer: msg"
+            "test/demo/core_test.clj:8: error: throws: java.lang.ArithmeticException: Divide by zero"]
+           (map #(loc/row-text lst %) (:entries lst))))))
+
+(deftest failures-list-edges
+  (let [one {:ns "a" :counts {"tests" 1 "assertions" 1 "pass" 0 "fail" 1 "error" 0}
+             :failures [{:test "t" :kind "fail" :file "/p/a.clj" :line 1 :context []
+                         :message nil :expected "true" :actual "false"}]}
+        lst (fn [text] (loc/failures one {:root "/p" :texts {"/p/a.clj" text}}))]
+    (is (= "1 failure in a (1 tests, 1 assertions)" (:title (lst "(is false)"))))
+    (is (= "a.clj:1: fail: t: false" (loc/row-text (lst "(is false)") (first (:entries (lst "(is false)")))))
+        "a failure with no message says what it got")
+    (is (empty? (:entries (lst ""))) "a line the text doesn't have")
+    (is (empty? (:entries (loc/failures (assoc-in one [:failures 0 :line] 9) {:texts {"/p/a.clj" "x\ny"}}))))
+    (is (= {:moved? true :index 0}
+           (let [{l :list m :moved?} (loc/step (lst "(is false)") 1)] {:moved? m :index (:index l)})))))

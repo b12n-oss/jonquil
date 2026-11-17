@@ -48,7 +48,8 @@
   [pane lst]
   (let [lb (:list pane)
         rows (mapv #(loc/row-text lst %) (:entries lst))
-        project? (= :project (:scope lst))]
+        ;; a failures list is a project list with nothing to filter by
+        project? (and (= :project (:scope lst)) (not= :failures (:kind lst)))]
     (reset! (:rows pane) rows)
     (g/gtk-label-set-text (:title pane) (:title lst))
     (g/gtk-widget-set-visible (:filter-box pane) (if project? 1 0))
