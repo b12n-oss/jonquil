@@ -6,6 +6,10 @@ everything that shipped before that.
 
 ## [Unreleased]
 
+### Added
+
+- Three MCP tools describe what a project's runtime has loaded: `jonquil_namespaces` lists the loaded namespaces, `jonquil_vars` lists a namespace's vars with their arglists, first doc line, file and line, and `jonquil_apropos` finds vars by part of their name. The program's own namespaces come first, and the answers come as text and as structured content. They work for Jolt and JVM Clojure, headless and over a window, where they leave the console alone. See [Asking what's loaded](docs/guide/mcp.md#asking-whats-loaded).
+
 ## [0.5.0] - 2026-11-17
 
 ### Added

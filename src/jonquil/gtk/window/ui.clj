@@ -147,6 +147,7 @@
                  (let [t (active-tab)]
                    (win-run/mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
                                       text {:hook-source :repl :hook-tab (:id t)} notify)))
+   :mcp-query!* (fn [code notify] (win-run/mcp-query! {:ev* ev*} code notify))
    :mcp-run-selection!* (fn [start end notify]
                           (win-run/mcp-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
                                                        :status-label status-label}

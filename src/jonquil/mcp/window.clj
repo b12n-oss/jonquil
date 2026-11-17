@@ -1,5 +1,5 @@
 (ns jonquil.mcp.window
-  "The twenty-one MCP tools over a live Jonquil window, four of them over its
+  "The twenty-four MCP tools over a live Jonquil window, four of them over its
   plugins folder (through jonquil.plugin-mcp) and one saving a change set
   an agent proposes (jonquil.change-sets).
 
@@ -15,6 +15,7 @@
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.clj :as clj]
+            [jonquil.describe-run :as describe-run]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.editor :as editor]
@@ -36,6 +37,12 @@
 (defn- prop [type description] {"type" type "description" description})
 
 (def ^:private plugin-id-doc "The plugin id: lowercase letters, digits and dashes, starting with a letter.")
+
+;; the describe tools take the headless arguments, less path: a window
+;; answers for its own project
+(defn- describe-def [tool-name]
+  (-> (first (filter #(= tool-name (get % "name")) tools/tool-defs))
+      (update-in ["inputSchema" "properties"] dissoc "path")))
 
 (def window-tool-defs
   [{"name" "jonquil_eval"
@@ -106,6 +113,9 @@
     "inputSchema" {"type" "object"
                    "properties" {"prefix" (prop "string" "The symbol prefix.")}
                    "required" ["prefix"]}}
+   (describe-def "jonquil_namespaces")
+   (describe-def "jonquil_vars")
+   (describe-def "jonquil_apropos")
    {"name" "jonquil_check_brackets"
     "description" "Check brackets in text or in a file. Answers ok, or names the first unclosed or unmatched bracket and its line."
     "inputSchema" {"type" "object"
@@ -546,6 +556,23 @@
         (cond-> (with-warnings (dissoc answer :report) warnings)
           shown (update :text str "\n; The window could not show this run: " shown))))))
 
+(defn- tool-describe
+  "A describe tool over the window's runtime: the query is evaluated
+  quietly and with no console entry (the ui's :mcp-query!*), so nothing
+  shows in the window. A busy runtime answers refused."
+  [tool-name]
+  (fn [{:keys [ui dir await!]} args]
+    (let [sel ((:selection* ui))
+          root (or (:project-dir sel) dir)]
+      (if-not (describe-run/supported? (:id (:profile sel)))
+        (tools/unsupported-describe-result sel tool-name)
+        (let [{:keys [code answer]} (tools/describe-request tool-name args
+                                                            {:root root
+                                                             :files (delay (test-run/project-files root))
+                                                             :run-hint "jonquil_open, then jonquil_run"})]
+          (tools/describe-result (await! args (fn [notify] ((:mcp-query!* ui) code notify)))
+                                 answer))))))
+
 (defn- window-handlers
   "Tool name -> (fn [args]) over ctx."
   [ctx]
@@ -563,6 +590,9 @@
      "jonquil_console" (h tool-console)
      "jonquil_doc" (h tool-doc)
      "jonquil_complete" (h tool-complete)
+     "jonquil_namespaces" (h (tool-describe "jonquil_namespaces"))
+     "jonquil_vars" (h (tool-describe "jonquil_vars"))
+     "jonquil_apropos" (h (tool-describe "jonquil_apropos"))
      "jonquil_check_brackets" (h tool-brackets)
      "jonquil_project" (h tool-project)
      "jonquil_plugins_list" (h tool-plugins-list)

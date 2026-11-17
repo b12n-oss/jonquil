@@ -28,10 +28,11 @@
 
 (defn- call [name args] ((:call (:t @env)) name args))
 
-(deftest defs-name-seven-tools
-  (is (= #{"jonquil_eval" "jonquil_run_file" "jonquil_test" "jonquil_check_brackets"
-           "jonquil_doc" "jonquil_complete" "jonquil_project"}
-         (set (map #(get % "name") (:defs (:t @env))))))
+(deftest defs-name-ten-tools
+  (is (= ["jonquil_eval" "jonquil_run_file" "jonquil_test" "jonquil_check_brackets"
+          "jonquil_doc" "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos"
+          "jonquil_project"]
+         (map #(get % "name") (:defs (:t @env)))))
   (is (every? #(vector? (get-in % ["inputSchema" "required"])) (:defs (:t @env)))))
 
 (defn- plain [r] (dissoc r :data))
@@ -411,3 +412,76 @@
     (ev! "42")
     (run-tests {"ns" "demo.core-test" "test" "passes"})
     (is (= "=> 42" (ev! "*1")))))
+
+;; --- the describe tools ------------------------------------------------------
+
+(deftest describe-result-passes-errors
+  (let [r {:text "Timed out after 5 ms." :error? true
+           :data {"status" "timeout" "output" "" "value" "x"}}]
+    (is (= (update r :data dissoc "value")
+           (tools/describe-result r (fn [_] (throw (ex-info "not called" {}))))))))
+
+(deftest describe-result-unreadable
+  (let [r (tools/describe-result {:text "=> 3" :error? false :data {"status" "ok" "value" "3"}}
+                                 identity)]
+    (is (:error? r))
+    (is (= "error" (get-in r [:data "status"])))
+    (is (str/starts-with? (:text r) "The query returned something unreadable."))))
+
+(deftest describe-result-reads-the-value
+  (let [r (tools/describe-result {:text "" :error? false
+                                  :data {"status" "ok" "value" (pr-str (pr-str {:vars []}))}}
+                                 (fn [v] {:text (str (count (:vars v))) :error? false :data {"status" "ok"}}))]
+    (is (= {:text "0" :error? false :data {"status" "ok"}} r))))
+
+(deftest describe-unsupported-dialect
+  (let [dir (temp-dirs/temp-dir! "jonquil-mcp-describe-")
+        cache (atom {})
+        t (tools/make-tools {:dir dir :cache cache
+                             :settings-path (str (io/file dir "settings.edn"))})]
+    (spit (io/file dir ".jonquil.edn") "{:dialect :cljs}")
+    (doseq [[tname args] [["jonquil_namespaces" {}] ["jonquil_vars" {"ns" "a.b"}]
+                          ["jonquil_apropos" {"query" "x"}]]]
+      (let [r ((:call t) tname args)]
+        (is (:error? r) tname)
+        (is (= {"status" "unsupported"} (:data r)) tname)
+        (is (str/starts-with? (:text r) (str tname " answers for Jolt and JVM Clojure for now. This project is ")) tname)))
+    (is (= {} @cache) "no runtime was made")))
+
+(deftest describe-tools-end-to-end
+  (let [f (io/file (dir) "src" "uf4" "described.clj")]
+    (io/make-parents f)
+    (spit f (str "(ns uf4.described)\n"
+                 "(defn parse-needle \"Splits one line.\\nMore.\" [s] s)\n"
+                 "(defn- hidden [] 1)\n"))
+    (is (false? (:error? (call "jonquil_run_file" {"path" (.getPath f)}))))
+    (call "jonquil_eval" {"code" ":before"})
+    (let [r (call "jonquil_vars" {"ns" "uf4.described"})
+          row (first (get-in r [:data "vars"]))]
+      (is (false? (:error? r)))
+      (is (= "uf4.described" (get-in r [:data "ns"])))
+      (is (= ["hidden" "parse-needle"] (map #(get % "name") (get-in r [:data "vars"]))))
+      (is (= "src/uf4/described.clj" (get row "file")))
+      (is (number? (get row "line"))))
+    (let [r (call "jonquil_namespaces" {})
+          own (filter #(get % "own") (get-in r [:data "namespaces"]))]
+      (is (some #(= "uf4.described" (get % "name")) own)))
+    (let [r (call "jonquil_apropos" {"query" "PARSE-NEEDLE"})]
+      (is (= [["uf4.described" "parse-needle"]]
+             (map (juxt #(get % "ns") #(get % "name")) (get-in r [:data "matches"])))))
+    (is (= "=> :before" (:text (call "jonquil_eval" {"code" "*1"}))) "the queries left *1 alone")
+    (is (:error? (call "jonquil_vars" {"ns" "uf4.never-loaded"})))
+    (is (thrown-with-msg? Exception #"Missing required argument: query"
+                          (call "jonquil_apropos" {})))))
+
+(deftest describe-request-own-file-with-a-second-copy
+  (let [{:keys [answer]} (tools/describe-request "jonquil_namespaces" {}
+                                                 {:root "/p" :files (delay ["/p/src/demo/core.clj" "/p/out/demo/core.clj"])})]
+    (is (= [true] (map #(get % "own")
+                       (get-in (answer {:namespaces [{:name "demo.core" :file "demo/core.clj" :vars 1}] :dropped 0})
+                               [:data "namespaces"]))))))
+
+(deftest describe-request-hint-is-the-servers
+  (let [{:keys [answer]} (tools/describe-request "jonquil_vars" {"ns" "a.b"}
+                                                 {:root "/p" :files (delay []) :run-hint "jonquil_run"})]
+    (is (str/includes? (:text (answer {:found? false})) "(jonquil_run)"))))

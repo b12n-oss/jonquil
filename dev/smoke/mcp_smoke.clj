@@ -179,6 +179,47 @@
                  (str/ends-with? (get f "file") "/test/demo/core_test.clj"))
             r)))
 
+(defn- describe-checks!
+  "jonquil_namespaces, jonquil_vars and jonquil_apropos after
+  demo.described ran; *1 was :before just before them. quiet? says
+  whether the runtime keeps *1 through a quiet evaluation."
+  [srv label quiet?]
+  (let [r (tool! srv "jonquil_namespaces" {} 60000)
+        own (map #(get % "name") (filter #(get % "own") (get-in r [:data "namespaces"])))]
+    (check! (str label " jonquil_namespaces lists the program's namespace as its own")
+            (some #{"demo.described"} own) r))
+  (let [r (tool! srv "jonquil_vars" {"ns" "demo.described"} 60000)
+        row (first (get-in r [:data "vars"]))]
+    (check! (str label " jonquil_vars answers a var's file and line")
+            (and (= "parse-needle" (get row "name")) (= "src/demo/described.clj" (get row "file"))
+                 (number? (get row "line")) (= "Splits one line." (get row "doc")))
+            r))
+  (let [r (tool! srv "jonquil_apropos" {"query" "PARSE-needle"} 60000)]
+    (check! (str label " jonquil_apropos finds the var by part of its name")
+            (= [["demo.described" "parse-needle"]]
+               (map (juxt #(get % "ns") #(get % "name")) (get-in r [:data "matches"])))
+            r))
+  (when quiet?
+    (let [r (tool! srv "jonquil_eval" {"code" "*1"} 60000)]
+      (check! (str label " the describe tools leave *1 alone") (= "=> :before" (:text r)) r))))
+
+(defn- describe-tool-checks!
+  "Runs src/demo/described.clj in proj with jonquil_run_file, then
+  describe-checks!."
+  [srv proj label]
+  (fs/create-dirs (str proj "/src/demo"))
+  (spit (str proj "/src/demo/described.clj")
+        "(ns demo.described)\n(defn parse-needle \"Splits one line.\\nMore.\" [s] s)\n")
+  (tool! srv "jonquil_run_file" {"path" (str proj "/src/demo/described.clj")} 60000)
+  (tool! srv "jonquil_eval" {"code" ":before"} 60000)
+  (describe-checks! srv label true))
+
+(defn- runtime-tool-checks!
+  "jonquil_test, then the describe tools, over the server's runtime."
+  [srv proj label]
+  (test-tool-checks! srv proj label)
+  (describe-tool-checks! srv proj label))
+
 (defn- main []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
         xdg (str tmp "/xdg")
@@ -199,11 +240,11 @@
       (try
         (handshake! srv "in-process")
         (let [r (request! srv "tools/list" {} 20000)]
-          (check! "tools/list has seven tools" (= 7 (count (get-in r ["result" "tools"]))) r))
+          (check! "tools/list has ten tools" (= 10 (count (get-in r ["result" "tools"]))) r))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
         (structured-checks! srv)
-        (test-tool-checks! srv proj "in-process")
+        (runtime-tool-checks! srv proj "in-process")
         (let [r1 (tool! srv "jonquil_eval" {"code" "(do (.start (Thread. (fn [] (println \"noise\")))) (Thread/sleep 200) :ok)"} 30000)
               r2 (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 30000)]
           (check! "background println does not reach stdout"
@@ -223,7 +264,7 @@
           (handshake! srv "nrepl")
           (let [r (tool! srv "jonquil_eval" {"code" "(+ 5 5)"} 60000)]
             (check! "nrepl eval (+ 5 5) => 10" (and (string? (:text r)) (str/includes? (:text r) "=> 10")) r))
-          (test-tool-checks! srv nrepl-proj "nrepl")
+          (runtime-tool-checks! srv nrepl-proj "nrepl")
           (let [kids (children pid)]
             (check! (str "nrepl run started a child (pid " (str/join "," kids) ")") (seq kids) kids)
             (stop! srv "nrepl")
@@ -240,6 +281,7 @@
   #{"jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop" "jonquil_open"
     "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab" "jonquil_replace_text"
     "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
+    "jonquil_namespaces" "jonquil_vars" "jonquil_apropos"
     "jonquil_check_brackets" "jonquil_project"
     "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
     "jonquil_test" "jonquil_change_set_propose"})
@@ -340,7 +382,7 @@
     (println "[mcp-smoke] startup plugin tool seen" (name path))
     (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
             (and (not= :no-list-changed path)
-                 (= 22 (count (get-in r ["result" "tools"])))
+                 (= 25 (count (get-in r ["result" "tools"])))
                  (= want (names-of r)))
             {:path path :r r}))
   (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
@@ -425,6 +467,29 @@
             (not (or (str/includes? text "clojure.core/require") (str/includes? text ":failures-dropped")))
             r)))
 
+(defn- window-describe-checks!
+  "The describe tools over a real window, after window-test-checks! loaded
+  demo.core-test from disk: the answer, *1 kept, and no console entry."
+  [srv]
+  (let [before (count (str (:text (tool! srv "jonquil_console" {"since" 0} 30000))))
+        _ (tool! srv "jonquil_eval" {"code" ":before"} 30000)
+        r (tool! srv "jonquil_vars" {"ns" "demo.core-test"} 60000)
+        row (first (filter #(= "fails" (get % "name")) (get-in r [:data "vars"])))
+        a (tool! srv "jonquil_apropos" {"query" "FAILS"} 60000)
+        one (tool! srv "jonquil_eval" {"code" "*1"} 30000)
+        text (str (:text (tool! srv "jonquil_console" {"since" 0} 30000)))]
+    (check! "window jonquil_vars answers a test var's file and line"
+            (and row (= "test/demo/core_test.clj" (get row "file")) (number? (get row "line")))
+            r)
+    (check! "window jonquil_apropos finds it by part of its name"
+            (some #(= ["demo.core-test" "fails"] [(get % "ns") (get % "name")]) (get-in a [:data "matches"]))
+            a)
+    (check! "window describe tools leave *1 alone" (str/includes? (str (:text one)) "=> :before") one)
+    (check! "and make no console entry"
+            (and (> (count text) before) (not (str/includes? text "ns-interns"))
+                 (not (str/includes? text "fails\" :arglists")))
+            text)))
+
 (defn- window-main []
   (let [{:keys [tmp xdg proj a]} (window-fixture!)
         srv (launch! proj xdg)
@@ -433,6 +498,7 @@
       (window-startup-checks! srv)
       (window-edit-checks! srv a)
       (window-test-checks! srv proj)
+      (window-describe-checks! srv)
       (plugin-checks! srv xdg)
       (window-dirty-eof-checks! srv a pid)
       (check! "every stdout line is JSON"
@@ -490,8 +556,8 @@
             (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
   (let [r (request! b1 "tools/list" {} 60000)
         names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-    (check! "tools/list has exactly the twenty-one window tools"
-            (and (= 21 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+    (check! "tools/list has exactly the twenty-four window tools"
+            (and (= 24 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
   (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
     (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
   (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]

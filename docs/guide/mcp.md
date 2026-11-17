@@ -11,12 +11,12 @@ claude mcp add jonquil -- jonquil --mcp /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp /path/to/project
 ```
 
-Seven tools. Most take an optional `path` selecting the project (default
+Ten tools. Most take an optional `path` selecting the project (default
 `DIR`); `jonquil_run_file` requires a file `path`, and `jonquil_check_brackets`
 takes `text` or a `path`.
 
 <details>
-<summary><strong>The seven tools</strong></summary>
+<summary><strong>The ten tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -26,6 +26,9 @@ takes `text` or a `path`.
 | `jonquil_check_brackets` | Names the first unclosed or unmatched bracket |
 | `jonquil_doc` | Documentation for a symbol |
 | `jonquil_complete` | Up to 50 completion candidates for a prefix |
+| `jonquil_namespaces` | The namespaces loaded in the runtime, the program's own first |
+| `jonquil_vars` | A loaded namespace's vars, with arglists, first doc line, file and line |
+| `jonquil_apropos` | Loaded vars whose name contains some text, the program's own first |
 | `jonquil_project` | The dialect, runtime and directory the other tools would use; starts nothing |
 
 </details>
@@ -110,6 +113,55 @@ when the tests couldn't run, so read `status` for pass or fail.
 - On Jolt the run leaves the REPL alone. On JVM Clojure it shows in the
   session's history, and `*1` holds the run's data afterwards.
 
+### Asking what's loaded
+
+Three tools describe what the project's runtime has loaded, so an agent
+doesn't have to evaluate `(all-ns)` and read the printout back. Like
+`jonquil_test` they work for Jolt and JVM Clojure, and any other dialect gets
+the status `unsupported`. Only loaded code counts: a file that never ran
+doesn't show until it does.
+
+| Tool | Arguments |
+|---|---|
+| `jonquil_namespaces` | `all` (default false), `limit` (default 500), `path` |
+| `jonquil_vars` | `ns`, `private` (default true), `limit` (default 500), `path` |
+| `jonquil_apropos` | `query`, `all` (default true), `limit` (default 50), `path` |
+
+A namespace counts as the program's own when its file is in the project
+folder. Those come first in every answer. `jonquil_namespaces` only counts
+Clojure's and libraries' namespaces unless you pass `all: true`, while
+`jonquil_apropos` searches them too unless you pass `all: false`, since an
+agent often wants a `clojure.core` function. The search matches any part of a
+var's name, ignoring case.
+
+```
+demo.core/blank? [s]  src/demo/core.clj:12
+clojure.string/blank? [s]  clojure/string.clj:288
+```
+
+The `structuredContent` holds the same rows, with `status`:
+
+- `jonquil_namespaces`: `namespaces` (each `name`, `file`, `vars`, `own`),
+  `hidden` and `dropped`.
+- `jonquil_vars`: `ns` and `vars` (each `name`, `arglists`, `doc`, `file`,
+  `line`, `private`, `macro`) and `dropped`. A namespace that isn't loaded
+  answers `not-found`.
+- `jonquil_apropos`: `query`, `matches` (each `ns`, `name`, `arglists`, `doc`,
+  `file`, `line`) and `dropped`.
+
+A few things to know about them:
+
+- `doc` is the docstring's first line. `jonquil_doc` gives the whole of it.
+- `file` is relative to the project when the file is in it, and the
+  runtime's own path otherwise. A var defined at the prompt has none.
+- `limit` can go up to 5000. `dropped` counts the rows past it, and the
+  text ends with a line saying how many.
+- On Jolt a macro has no file or line yet, because Jolt doesn't record them
+  for `defmacro`. Its namespace's file still decides whether it's the
+  program's own.
+- On Jolt the queries leave the REPL alone. On JVM Clojure they show in the
+  session's history and change `*1`.
+
 ### Structured results
 
 The tools that evaluate (`jonquil_eval` and `jonquil_run_file` here,
@@ -142,11 +194,11 @@ claude mcp add jonquil -- jonquil --mcp --window /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/project
 ```
 
-With `--window` the server offers twenty-one tools (headless keeps seven), acting
+With `--window` the server offers twenty-four tools (headless keeps ten), acting
 on the live window:
 
 <details>
-<summary><strong>The twenty-one window tools</strong></summary>
+<summary><strong>The twenty-four window tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -163,6 +215,7 @@ on the live window:
 | `jonquil_console` | `mark <N>` then the output since the `since` mark; pass back `N` to read only what's new |
 | `jonquil_doc` | Documentation for a symbol, from the window's evaluator |
 | `jonquil_complete` | Up to 50 completion candidates, one per line |
+| `jonquil_namespaces`, `jonquil_vars`, `jonquil_apropos` | As [headless](#asking-whats-loaded), without `path`. They run quietly: nothing shows on the console |
 | `jonquil_check_brackets` | "ok", or the sentence naming the first problem |
 | `jonquil_project` | The window's live dialect selection: label, runtime, directory, source, warnings |
 | `jonquil_plugins_list` | One line per plugin: version, loaded or disabled, effects, pending proposal, doc |
@@ -251,7 +304,7 @@ A plugin gives agents tools in `:mcp-tools`:
 ```
 
 A window serving MCP (`--mcp --window`, or one you attach to) serves each live
-plugin's tools as `plugin_<id>_<name>` after its twenty-one: `plugin_smoke-t_twice`
+plugin's tools as `plugin_<id>_<name>` after its twenty-four: `plugin_smoke-t_twice`
 for plugin `smoke-t` above.
 
 - Argument types: `string`, `integer`, `number`, `boolean`. A missing or
@@ -278,7 +331,7 @@ listening on in `settings.edn`:
 {:mcp-listen? true}
 ```
 
-That window serves the same twenty-one tools on a socket bound to 127.0.0.1, on
+That window serves the same twenty-four tools on a socket bound to 127.0.0.1, on
 a port the OS picks, to one client at a time. It publishes the port in
 `mcp/<pid>.edn` beside `settings.edn`. Then register the bridge:
 

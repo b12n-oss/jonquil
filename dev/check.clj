@@ -226,6 +226,7 @@
     jonquil.mcp.listen
     jonquil.mcp.result
     jonquil.test-run
+    jonquil.describe-run
     jonquil.main])
 
 (defn -main [& _]

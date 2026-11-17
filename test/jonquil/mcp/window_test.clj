@@ -7,6 +7,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window.run :as win-run]
             [jonquil.help :as help]
+            [jonquil.describe-run :as dr]
             [jonquil.mcp :as mcp]
             [jonquil.mcp.tools :as tools]
             [jonquil.mcp.window :as w]))
@@ -34,11 +35,12 @@
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 
-(deftest defs-are-the-twenty-one
+(deftest defs-are-the-twenty-four
   (is (= ["jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop"
           "jonquil_open" "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab"
           "jonquil_replace_text" "jonquil_save" "jonquil_console" "jonquil_doc"
-          "jonquil_complete" "jonquil_check_brackets" "jonquil_project"
+          "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos"
+          "jonquil_check_brackets" "jonquil_project"
           "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
           "jonquil_test" "jonquil_change_set_propose"]
          (map #(get % "name") (:defs (tools-for {}))))))
@@ -308,7 +310,7 @@
                        :call (fn [args] {:text (str "echo " (get args "text")) :error? false})}])
         f (w/with-plugin-tools (tools-for {}) {:plugin-tools* (fn [] @served)})
         names (fn [] (map #(get % "name") (:defs (f))))]
-    (is (= 22 (count (names))))
+    (is (= 25 (count (names))))
     (is (= "plugin_fmt_echo" (last (names))))
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
     (is (= {:text "Selected tab 1." :error? false :tab-id 1}
@@ -316,8 +318,8 @@
                       {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
     (reset! served [])
-    (is (= 21 (count (names))))
-    (is (= 21 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
+    (is (= 24 (count (names))))
+    (is (= 24 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
 
 (deftest plugin-tools-table-says-list-changed
   ;; a window that can watch its plugin tools declares it
@@ -345,7 +347,7 @@
     (is (= [{:kind :agent :summary "Claude Code switched to tab 1" :client "Claude Code"
              :target {:tab-id 1} :summary-tab 1}]
            @entries))
-    (is (= 21 (count (:defs (f)))) "the defs pass through")))
+    (is (= 24 (count (:defs (f)))) "the defs pass through")))
 
 (deftest with-messages-rethrows
   (let [entries (atom [])
@@ -634,3 +636,61 @@
     (is (= "failed" (get-in r [:data "status"])))
     (is (= 1 (get-in r [:data "counts" "fail"])))
     (is (str/ends-with? (:text r) "; The window could not show this run: no panel"))))
+
+;; --- the describe tools ------------------------------------------------------
+
+(def ^:private vars-value
+  {:found? true :dropped 0
+   :vars [{:name "parse-line" :arglists ["[s]"] :doc "Splits one line." :file "demo/core.clj"
+           :line 30 :private? false :macro? false}]})
+
+(defn- describe-ui
+  "A fake ui for the describe tools: a Jolt selection over /p, :mcp-query!*
+  recording the code it was sent and answering r (a notify map, or a value
+  to print), and an :mcp-eval!* that must not be called."
+  [{:keys [r seen profile]}]
+  ;; r is a value map, or {:busy s} for a busy runtime
+  {:selection* (fn [] {:profile {:id (or profile :jolt) :name "Jolt"} :project-dir "/nonexistent/jonquil-wdesc"})
+   :evaluator* (fn [] (evaluator {}))
+   :mcp-eval!* (fn [_ _] (throw (ex-info "a console entry was made" {})))
+   :mcp-query!* (fn [code notify]
+                  (when seen (swap! seen conj code))
+                  (notify (if (contains? r :busy) r {:done {:result {:status :ok :printed (pr-str (pr-str r))} :output ""}}))
+                  (fn [] ""))})
+
+(deftest window-describe-answers-like-headless
+  (let [seen (atom [])
+        r (call (tools-for (describe-ui {:r vars-value :seen seen})) "jonquil_vars" {"ns" "demo.core"})]
+    (is (false? (:error? r)))
+    (is (= (:data (dr/vars-answer vars-value {:ns "demo.core" :root "/nonexistent/jonquil-wdesc"
+                                              :locate (constantly nil)}))
+           (:data r)))
+    (is (str/includes? (first @seen) "(quote demo.core)"))))
+
+(deftest window-describe-each-tool-sends-its-query
+  (doseq [[tname args v] [["jonquil_namespaces" {} {:namespaces [] :dropped 0}]
+                          ["jonquil_apropos" {"query" "parse"} {:vars [] :dropped 0}]]]
+    (let [seen (atom [])
+          r (call (tools-for (describe-ui {:r v :seen seen})) tname args)]
+      (is (= "ok" (get-in r [:data "status"])) tname)
+      (is (= 1 (count @seen)) tname))))
+
+(deftest window-describe-busy-is-refused
+  (let [r (call (tools-for (describe-ui {:r {:busy "; busy"}})) "jonquil_apropos" {"query" "x"})]
+    (is (:error? r))
+    (is (= "refused" (get-in r [:data "status"])))))
+
+(deftest window-describe-no-console-entry
+  (is (not (:error? (call (tools-for (describe-ui {:r {:namespaces [] :dropped 0}})) "jonquil_namespaces" {})))
+      "only :mcp-query!* ran; the throwing :mcp-eval!* was never called"))
+
+(deftest window-describe-unsupported
+  (let [seen (atom [])
+        r (call (tools-for (describe-ui {:r vars-value :seen seen :profile :cljs})) "jonquil_vars" {"ns" "a.b"})]
+    (is (= {"status" "unsupported"} (:data r)))
+    (is (= [] @seen))))
+
+(deftest window-describe-not-loaded-names-a-window-tool
+  (let [r (call (tools-for (describe-ui {:r {:found? false :vars [] :dropped 0}})) "jonquil_vars" {"ns" "a.b"})]
+    (is (= "not-found" (get-in r [:data "status"])))
+    (is (str/includes? (:text r) "(jonquil_open, then jonquil_run)"))))
