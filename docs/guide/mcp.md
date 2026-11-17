@@ -156,8 +156,9 @@ A few things to know about them:
   runtime's own path otherwise. A var defined at the prompt has none.
 - `limit` can go up to 5000. `dropped` counts the rows past it, and the
   text ends with a line saying how many.
-- On Jolt a macro has no line yet, because Jolt doesn't record one for
-  `defmacro`.
+- On Jolt a macro has no file or line yet, because Jolt doesn't record them
+  for `defmacro`. Its namespace's file still decides whether it's the
+  program's own.
 - On Jolt the queries leave the REPL alone. On JVM Clojure they show in the
   session's history and change `*1`.
 

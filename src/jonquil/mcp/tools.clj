@@ -441,10 +441,15 @@
 (defn describe-request
   "The code and answer fn for describe tool tool-name called with args,
   {:code s :answer (fn [value] answer)}. root is the project directory and
-  files a delay of its file paths, where a var's file is looked up."
-  [tool-name args {:keys [root files]}]
-  (let [opts {:root root :locate (fn [f] (test-run/locate @files f))
-              :limit (get args "limit")}]
+  files a delay of its file paths, where a var's file is looked up.
+  run-hint names the server's tool for running a file (default
+  jonquil_run_file), for the answer about a namespace that isn't loaded."
+  [tool-name args {:keys [root files run-hint]}]
+  (let [opts (cond-> {:root root
+                      :locate (fn [f] (test-run/locate @files f))
+                      :own? (fn [f] (some? (describe/project-hit @files f)))
+                      :limit (get args "limit")}
+               run-hint (assoc :run-hint run-hint))]
     (case tool-name
       "jonquil_namespaces"
       {:code (describe/namespaces-snippet)

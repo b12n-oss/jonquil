@@ -568,7 +568,8 @@
         (tools/unsupported-describe-result sel tool-name)
         (let [{:keys [code answer]} (tools/describe-request tool-name args
                                                             {:root root
-                                                             :files (delay (test-run/project-files root))})]
+                                                             :files (delay (test-run/project-files root))
+                                                             :run-hint "jonquil_open, then jonquil_run"})]
           (tools/describe-result (await! args (fn [notify] ((:mcp-query!* ui) code notify)))
                                  answer))))))
 

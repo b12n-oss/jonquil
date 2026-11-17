@@ -473,3 +473,15 @@
     (is (:error? (call "jonquil_vars" {"ns" "uf4.never-loaded"})))
     (is (thrown-with-msg? Exception #"Missing required argument: query"
                           (call "jonquil_apropos" {})))))
+
+(deftest describe-request-own-file-with-a-second-copy
+  (let [{:keys [answer]} (tools/describe-request "jonquil_namespaces" {}
+                                                 {:root "/p" :files (delay ["/p/src/demo/core.clj" "/p/out/demo/core.clj"])})]
+    (is (= [true] (map #(get % "own")
+                       (get-in (answer {:namespaces [{:name "demo.core" :file "demo/core.clj" :vars 1}] :dropped 0})
+                               [:data "namespaces"]))))))
+
+(deftest describe-request-hint-is-the-servers
+  (let [{:keys [answer]} (tools/describe-request "jonquil_vars" {"ns" "a.b"}
+                                                 {:root "/p" :files (delay []) :run-hint "jonquil_run"})]
+    (is (str/includes? (:text (answer {:found? false})) "(jonquil_run)"))))

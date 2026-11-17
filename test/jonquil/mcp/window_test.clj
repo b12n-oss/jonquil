@@ -689,3 +689,8 @@
         r (call (tools-for (describe-ui {:r vars-value :seen seen :profile :cljs})) "jonquil_vars" {"ns" "a.b"})]
     (is (= {"status" "unsupported"} (:data r)))
     (is (= [] @seen))))
+
+(deftest window-describe-not-loaded-names-a-window-tool
+  (let [r (call (tools-for (describe-ui {:r {:found? false :vars [] :dropped 0}})) "jonquil_vars" {"ns" "a.b"})]
+    (is (= "not-found" (get-in r [:data "status"])))
+    (is (str/includes? (:text r) "(jonquil_open, then jonquil_run)"))))

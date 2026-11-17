@@ -173,7 +173,7 @@
 
 (deftest apropos-answer-no-match
   (is (= {:text "No loaded var's name contains \"zzz\"." :error? false
-          :data {"status" "ok" "query" "zzz" "matches" [] "dropped" 0}}
+          :data {"status" "ok" "query" "zzz" "matches" [] "hidden" 0 "dropped" 0}}
          (dr/apropos-answer {:vars [] :dropped 0} (assoc opts :query "zzz")))))
 
 (deftest file-shown-relative-or-as-given
@@ -188,3 +188,48 @@
   (is (= 5000 (dr/clamp-limit 9999 50)))
   (is (= 50 (dr/clamp-limit "x" 50)))
   (is (= 7 (dr/clamp-limit 7.6 50))))
+
+;; --- from the final review -----------------------------------------------
+
+(deftest apropos-snippet-rows-carry-the-namespace-file
+  (with-ns "uf4.fx.m" "(defmacro needle-macro [] nil)"
+    (fn []
+      (is (every? #(contains? % :ns-file)
+                  (:vars (value (dr/apropos-snippet {:query "needle-macro"}))))))))
+
+(deftest apropos-answer-own-macro-by-namespace-file
+  (let [v {:vars [{:ns "clojure.core" :name "mm-core" :arglists [] :file "clojure/core.clj" :line 1 :ns-file "clojure/core.clj"}
+                  {:ns "demo.core" :name "mm" :arglists [] :file nil :line nil :macro? true :ns-file "demo/core.clj"}]
+           :dropped 0}
+        {:keys [data]} (dr/apropos-answer v (assoc opts :query "mm" :all? false))]
+    (is (= [["demo.core" "mm"]] (map (juxt #(get % "ns") #(get % "name")) (get data "matches"))))))
+
+(deftest vars-answer-not-found-names-the-run-hint
+  (is (= "Namespace a.b isn't loaded. Run its file (jonquil_run), then call again."
+         (:text (dr/vars-answer {:found? false} (assoc opts :ns "a.b" :run-hint "jonquil_run"))))))
+
+(deftest apropos-answer-no-own-match-counts-the-rest
+  (let [{:keys [text data]} (dr/apropos-answer (update apropos-value :vars #(take 1 %))
+                                               (assoc opts :query "blank" :all? false))]
+    (is (= "No var of the program's own has a name containing \"blank\". (1 more in Clojure and libraries; pass all: true to list them)" text))
+    (is (= 1 (get data "hidden")))))
+
+(deftest clamp-limit-huge-numbers
+  (is (= 5000 (dr/clamp-limit 1e30 50)))
+  (is (= 5000 (dr/clamp-limit 99999999999999999999N 50)))
+  (is (= 1 (dr/clamp-limit -1e30 50))))
+
+(deftest own-with-a-second-copy-of-the-file
+  (let [two {:root "/p" :locate (fn [f] (tr/locate ["/p/src/demo/core.clj" "/p/out/demo/core.clj"] f))
+             :own? (fn [f] (some? (dr/project-hit ["/p/src/demo/core.clj" "/p/out/demo/core.clj"] f)))}
+        {:keys [data]} (dr/namespaces-answer {:namespaces [{:name "demo.core" :file "demo/core.clj" :vars 1}] :dropped 0} two)]
+    (is (= [true] (map #(get % "own") (get data "namespaces"))))
+    (is (= "demo/core.clj" (get-in data ["namespaces" 0 "file"])) "two candidates: shown as given")))
+
+(deftest answers-look-each-file-up-once
+  (let [calls (atom 0)
+        counting {:root "/p" :locate (fn [f] (swap! calls inc) (tr/locate files f))}
+        v {:vars (vec (for [i (range 50)] {:ns "demo.core" :name (str "v" i) :arglists [] :file "demo/core.clj" :line i}))
+           :dropped 0}]
+    (dr/apropos-answer v (assoc counting :query "v"))
+    (is (<= @calls 2))))
