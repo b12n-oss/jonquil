@@ -25,7 +25,7 @@
 
 (def ^:private name-re #"[A-Za-z*+!\-_?<>=][A-Za-z0-9.*+!\-_?<>=']*")
 
-(defn- checked-symbol
+(defn checked-symbol
   "s as a symbol when it is a plain symbol name that reads back as one
   (nil and true don't); throws naming what otherwise. A test name has no
   dot, which a runtime would take for a class name."
@@ -45,15 +45,17 @@
      nil? empty? = with-bindings binding pr-str assoc instance? ex-message class
      count > subs < conj some replace alter-meta! *print-length* *print-level*})
 
-(defn- qualified
-  "form with its clojure.core names written in full. The snippet runs in
-  whatever namespace the session is in, which may not refer clojure.core
-  or may have redefined one of its names."
-  [form]
-  (walk/postwalk #(if (and (symbol? %) (contains? core-names %))
+(defn qualify
+  "form with the clojure.core names in the set names written in full. Code
+  for the session runs in whatever namespace the session is in, which may
+  not refer clojure.core or may have redefined one of its names."
+  [names form]
+  (walk/postwalk #(if (and (symbol? %) (contains? names %))
                     (symbol "clojure.core" (name %))
                     %)
                  form))
+
+(defn- qualified [form] (qualify core-names form))
 
 ;; The forms below are data: `snippet` fills the capital names in and
 ;; prints the result. They resolve the vars of clojure.test, clojure.string
