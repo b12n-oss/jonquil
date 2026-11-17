@@ -386,6 +386,19 @@
       :else
       (win-status/set-status! status-label (str "No definition found for " symbol ".")))))
 
+(defn show-doc-for!
+  "Looks sym up (a qualified name, \"ns/name\") and shows its quick doc in
+  the popover at the caret, as Docs for the Symbol does, or says none was
+  found. ctx is the source-ctx map."
+  [{:keys [ev* status-label help-pop close-popovers-fn]} sym]
+  (ask-lookup! {:ev* ev* :status-label status-label}
+               {:sym sym :text "" :pos 0 :still? (constantly true) :label "quick doc"
+                :on-doc (fn [doc]
+                          (if doc
+                            (do (close-popovers-fn help-pop)
+                                (help-popover/show-doc! help-pop (help/doc-text sym doc)))
+                            (win-status/set-status! status-label (str "No documentation found for " sym "."))))}))
+
 (defn open-file-line!
   "Opens the file at path (absolute) at line, as a jump to a definition
   there would: the tab's own file moves its caret, a project file opens in

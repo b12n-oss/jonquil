@@ -173,6 +173,7 @@
     jonquil.gtk.editor-test
     jonquil.gtk.popover-test
     jonquil.gtk.change-sets-part-test
+    jonquil.gtk.find-var-part-test
     jonquil.gtk.processes-pane-test
     jonquil.gtk.messages-pane-test
     jonquil.inspect.view-test

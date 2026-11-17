@@ -11,7 +11,7 @@
    :open-keys-file-fn :reload-keys-fn :prefs-open-fn :terminal-show-fn :terminal-new-fn :reset-toggle-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :test-run-file-fn :test-run-caret-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
-   :replay-open-fn :replay-forget-fn :change-set-make-fn :change-set-list-fn
+   :replay-open-fn :replay-forget-fn :change-set-make-fn :change-set-list-fn :find-var-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :compare-last-run-fn :compare-form-disk-fn :compare-form-head-fn :compare-form-last-run-fn :layout-save-fn :layout-forget-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :step-fn :step-over-fn :step-out-fn :toggle-breakpoint-fn :clear-breakpoints-fn :instrument-tab-fn :uninstrument-tab-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :result-doc-fn :result-open-location-fn :panel-focus-fn
    :docs-show-fn :docs-bookmark-fn :docs-bookmarks-fn :docs-guide-fn])
@@ -76,6 +76,7 @@
    :panel/messages [:panel-focus-fn :messages] :panel/processes [:panel-focus-fn :processes]
    :processes/show [:processes-show-fn]
    :change-set/make [:change-set-make-fn] :change-set/browse [:change-set-list-fn]
+   :help/find-var [:find-var-fn]
    :pages/show [:docs-show-fn] :pages/bookmark [:docs-bookmark-fn]
    :pages/bookmarks [:docs-bookmarks-fn] :pages/guide [:docs-guide-fn]
    ;; Move to (issue #33): each part to each place
