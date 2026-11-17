@@ -26,26 +26,52 @@
 (def ^:private name-re #"[A-Za-z*+!\-_?<>=][A-Za-z0-9.*+!\-_?<>=']*")
 
 (defn- checked-symbol
-  "s as a symbol when it is a plain symbol name; throws naming what otherwise."
+  "s as a symbol when it is a plain symbol name that reads back as one
+  (nil and true don't); throws naming what otherwise. A test name has no
+  dot, which a runtime would take for a class name."
   [what s]
-  (if (and (string? s) (re-matches name-re s))
+  (if (and (string? s)
+           (re-matches name-re s)
+           (symbol? (edn/read-string s))
+           (or (not= "test" what) (not (str/includes? s "."))))
     (symbol s)
     (throw (ex-info (str "Not a " what " name: " (pr-str s)) {}))))
 
-;; The three forms below are data: `snippet` fills the capital names in and
-;; prints the result. They resolve clojure.test's vars by name at run time,
-;; so the code compiles before clojure.test is loaded.
+(def ^:private core-names
+  "The clojure.core names the snippet's forms use."
+  '#{fn let case swap! update inc first deref when name meta vec reverse some? str
+     if-let into keep when-let ns-interns find-ns require identical? get remove or
+     seq not doseq keys ns-unmap resolve symbol atom ns-resolve and filter vals cond
+     nil? empty? = with-bindings binding pr-str assoc instance? ex-message class
+     count > subs < conj some replace *print-length* *print-level*})
+
+(defn- qualified
+  "form with its clojure.core names written in full. The snippet runs in
+  whatever namespace the session is in, which may not refer clojure.core
+  or may have redefined one of its names."
+  [form]
+  (walk/postwalk #(if (and (symbol? %) (contains? core-names %))
+                    (symbol "clojure.core" (name %))
+                    %)
+                 form))
+
+;; The forms below are data: `snippet` fills the capital names in and
+;; prints the result. They resolve the vars of clojure.test, clojure.string
+;; and clojure.java.io by name at run time, so the code compiles before
+;; those are loaded.
 
 (def ^:private show-form
-  '(fn [v]
+  (qualified
+   '(fn [v]
      (let [s (binding [*print-length* 100 *print-level* 10]
                (if (instance? Throwable v)
                  (str (.getName (class v)) ": " (ex-message v))
                  (pr-str v)))]
-       (if (> (count s) MAX-CHARS) (str (subs s 0 MAX-CHARS) "...") s))))
+       (if (> (count s) MAX-CHARS) (str (subs s 0 MAX-CHARS) "...") s)))))
 
 (def ^:private collector-form
-  '(fn [state tv show]
+  (qualified
+   '(fn [state tv show]
      (fn [m]
        (case (:type m)
          :begin-test-var (swap! state update :tests inc)
@@ -67,32 +93,42 @@
                             (if (< (count (:failures s)) MAX-FAILURES)
                               (update s :failures conj row)
                               (update s :failures-dropped inc))))))
-         nil))))
+         nil)))))
 
 ;; A reload redefines what the file holds and removes nothing, so a test
 ;; that was renamed or deleted would stay in the namespace and keep running.
 ;; A reloaded deftest has a new :test fn. The ones whose fn is unchanged
 ;; after a reload are no longer in the file, and are unmapped. When no test
-;; changed at all, nothing shows the file was read: KEEP-UNCHANGED says
-;; whether to run the tests as they are (Jolt, where a namespace defined
-;; only in the session reloads as a no-op) or to unmap them too.
+;; changed at all, the file may not have been read: Jolt reloads a
+;; namespace it finds no file for as a no-op. So the unchanged tests go
+;; only when the namespace's file is on the load path, and a namespace
+;; defined in the session keeps its tests.
 (def ^:private reload-form
-  '(fn [ns-sym]
-     (let [test-fns (fn []
-                      (if-let [n (find-ns ns-sym)]
-                        (into {} (keep (fn [[s v]] (when-let [f (:test (meta v))] [s f]))
-                                       (ns-interns n)))
-                        {}))
-           before (test-fns)
-           _ (require ns-sym :reload)
-           after (test-fns)
-           fresh (into {} (remove (fn [[s f]] (identical? f (get before s))) after))]
-       (when (or (seq fresh) (not KEEP-UNCHANGED))
-         (doseq [s (remove fresh (keys after))]
-           (ns-unmap ns-sym s))))))
+  (qualified
+   '(fn [ns-sym]
+      (let [test-fns (fn []
+                       (if-let [n (find-ns ns-sym)]
+                         (into {} (keep (fn [[s v]] (when-let [f (:test (meta v))] [s f]))
+                                        (ns-interns n)))
+                         {}))
+            rv (fn [s] (deref (resolve s)))
+            on-path? (fn []
+                       (require 'clojure.string 'clojure.java.io)
+                       (let [swap (rv 'clojure.string/replace)
+                             base (swap (swap (str ns-sym) "-" "_") "." "/")]
+                         (some (fn [ext] ((rv 'clojure.java.io/resource) (str base ext)))
+                               [".clj" ".cljc" ".jolt"])))
+            before (test-fns)
+            _ (require ns-sym :reload)
+            after (test-fns)
+            fresh (into {} (remove (fn [[s f]] (identical? f (get before s))) after))]
+        (when (or (seq fresh) (on-path?))
+          (doseq [s (remove fresh (keys after))]
+            (ns-unmap ns-sym s)))))))
 
 (def ^:private run-form
-  '(do
+  (qualified
+   '(do
      (require 'clojure.test)
      (let [tv (fn [n] (resolve (symbol "clojure.test" n)))
            state (atom {:tests 0 :pass 0 :fail 0 :error 0 :failures [] :failures-dropped 0})
@@ -110,7 +146,7 @@
              ((deref (tv "test-vars")) vars)
              ((deref (tv "test-ns")) ns-sym))))
        (binding [*print-length* nil *print-level* nil]
-         (pr-str (assoc (deref state) :outcome outcome))))))
+         (pr-str (assoc (deref state) :outcome outcome)))))))
 
 (defn snippet
   "Code that runs namespace :ns (a string), or only its test :test, and
@@ -119,18 +155,15 @@
   most max-failures rows) and :failures-dropped. A load failure is left to
   throw. The namespace is reloaded from disk first, and the tests the
   reload didn't redefine (renamed or deleted in the file) are unmapped.
-  :keep-unchanged? true runs the tests as they are when the reload
-  redefined none of them. :reload? false skips the reload. Throws when :ns
-  or :test isn't a plain symbol name."
-  [{:keys [ns test reload? keep-unchanged?] :or {reload? true}}]
+  :reload? false skips the reload. Throws when :ns or :test isn't a plain
+  symbol name."
+  [{:keys [ns test reload?] :or {reload? true}}]
   (let [ns-sym (checked-symbol "namespace" ns)
         test-name (when (some? test) (name (checked-symbol "test" test)))
         fill (fn [form m] (walk/postwalk-replace m form))
         limits {'MAX-CHARS max-shown-chars 'MAX-FAILURES max-failures}
         form (fill run-form
-                   {'RELOAD (if reload?
-                              (fill reload-form {'KEEP-UNCHANGED (boolean keep-unchanged?)})
-                              '(fn [_] nil))
+                   {'RELOAD (if reload? reload-form (qualified '(fn [_] nil)))
                     'NS-SYM ns-sym
                     'TEST-NAME test-name
                     'SHOW (fill show-form limits)

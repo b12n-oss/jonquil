@@ -307,6 +307,26 @@
     (spit f head)
     (is (= "no-tests" (get (run {}) "status")) "a file left with no tests runs none")))
 
+;; A test file outside the source paths, loaded with Run: its namespace has
+;; no file the runtime can reload, so its tests stay and run as they are.
+(deftest test-keeps-a-namespace-loaded-from-off-the-path
+  (let [f (io/file (:dir @test-env) "examples" "demo" "offpath_test.clj")]
+    (.mkdirs (.getParentFile f))
+    (spit f (str "(ns demo.offpath-test (:require [clojure.test :refer [deftest is]]))\n"
+                 "(deftest here (is true))\n"))
+    ((:call (:t @test-env)) "jonquil_run_file" {"path" (.getPath f)})
+    (dotimes [_ 2]
+      (let [d (:data (run-tests {"ns" "demo.offpath-test"}))]
+        (is (= "ok" (get d "status")))
+        (is (= 1 (get-in d ["counts" "tests"])))))))
+
+(deftest test-runs-from-a-bare-namespace
+  (let [ev! (fn [code] ((:call (:t @test-env)) "jonquil_eval" {"code" code}))]
+    (ev! "(in-ns 'demo.bare-scratch)")
+    (try
+      (is (= "ok" (get-in (run-tests {"ns" "demo.core-test" "test" "passes"}) [:data "status"])))
+      (finally (ev! "(clojure.core/in-ns 'user)")))))
+
 (deftest test-no-such-test
   (let [r (run-tests {"ns" "demo.core-test" "test" "nope"})]
     (is (:error? r))

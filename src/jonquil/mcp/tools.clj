@@ -346,24 +346,13 @@
    :error? true
    :data {"status" "unsupported"}})
 
-(defn- session-only?
-  "True when no file under the project holds namespace ns-name. files is
-  the project's file paths."
-  [files ns-name]
-  (let [base (-> ns-name (str/replace "-" "_") (str/replace "." "/"))]
-    (not-any? #(test-run/locate files (str base %)) [".clj" ".cljc" ".jolt"])))
-
 (defn- tool-test [env args]
   (let [path (get args "path")
         ns-name (test-ns-name (:dir env) args)
         test (get args "test")
         sel (selection (:ctx env) path)
         files (delay (project-files (or (:project-dir sel) (:dir env))))
-        ;; Jolt reloads a namespace that has no file as a no-op, so there
-        ;; a namespace defined only in the session runs as it is.
-        code (test-run/snippet {:ns ns-name :test test
-                                :keep-unchanged? (and (= :jolt (:id (:profile sel)))
-                                                      (session-only? @files ns-name))})]
+        code (test-run/snippet {:ns ns-name :test test})]
     (if-not (test-run/supported? (:id (:profile sel)))
       (unsupported-test-result sel)
       (let [e (evaluator-for! (:cache env) sel)

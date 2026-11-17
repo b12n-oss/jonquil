@@ -12,28 +12,33 @@
   (let [s (tr/snippet {:ns "demo.core-test"})
         form (read-string s)]
     (is (= 'do (first form)))
-    (is (str/includes? s "(require ns-sym :reload)"))
+    (is (str/includes? s "(clojure.core/require ns-sym :reload)"))
     (is (str/includes? s "(quote demo.core-test)"))
     (is (= form (read-string (str s " :more"))) "nothing after the first form")))
 
 (deftest snippet-without-reload
   (is (not (str/includes? (tr/snippet {:ns "demo.core-test" :reload? false}) ":reload"))))
 
-(deftest snippet-keep-unchanged
-  (let [guard (fn [opts] (str/includes? (tr/snippet (merge {:ns "a"} opts)) "(not false)"))]
-    (is (guard {}) "by default unchanged tests are unmapped")
-    (is (not (guard {:keep-unchanged? true})))))
+;; The snippet runs in whatever namespace the session is in.
+(deftest snippet-names-clojure-core-in-full
+  (let [s (tr/snippet {:ns "demo.core-test" :test "a"})]
+    (is (nil? (re-find #"[(\[ ](let|fn|require|update|swap!|when|if-let|binding|pr-str|str|deref|resolve|count|first|some|replace) " s)))
+    (is (str/includes? s "(clojure.core/let ["))))
 
 (deftest snippet-rejects-odd-names
   (is (thrown? Exception (tr/snippet {:ns "a) (b"})))
   (is (thrown? Exception (tr/snippet {:ns "a" :test "x y"})))
   (is (thrown? Exception (tr/snippet {:ns nil})))
-  (is (thrown? Exception (tr/snippet {:ns "\"a\""}))))
+  (is (thrown? Exception (tr/snippet {:ns "\"a\""})))
+  (is (thrown? Exception (tr/snippet {:ns "nil"})))
+  (is (thrown? Exception (tr/snippet {:ns "a" :test "true"})))
+  (is (thrown? Exception (tr/snippet {:ns "a" :test "b.c"})))
+  (is (string? (tr/snippet {:ns "a.b-c" :test "d-e?"}))))
 
 (deftest snippet-bounds-printing
   (let [s (tr/snippet {:ns "demo.core-test"})]
-    (is (str/includes? s "*print-length* 100"))
-    (is (str/includes? s "*print-level* 10"))
+    (is (str/includes? s "clojure.core/*print-length* 100"))
+    (is (str/includes? s "clojure.core/*print-level* 10"))
     (is (str/includes? s (str tr/max-shown-chars)))))
 
 (deftest read-value-reads-twice

@@ -102,9 +102,9 @@ when the tests couldn't run, so read `status` for pass or fail.
 - On JVM Clojure an exception thrown inside library code reports the line
   of its `deftest`, since the throw itself is in another file.
 - On a timeout the results of the tests that had already run are lost.
-- Jolt leaves a namespace that exists only in the session as it is and runs
-  its tests. JVM Clojure answers `error` there, because there is no file to
-  reload.
+- A namespace with no file on the source paths (one defined in the session,
+  or loaded with `jonquil_run_file` from another folder) can't be reloaded.
+  Jolt runs its tests as they are. JVM Clojure answers `error`.
 - On Jolt the run leaves the REPL alone. On JVM Clojure it shows in the
   session's history, and `*1` holds the run's data afterwards.
 
