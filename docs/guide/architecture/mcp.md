@@ -14,13 +14,17 @@ one, so the headless entry never opens a window:
   into a response map or nil. `serve!` loops over a line reader and a line
   writer it is handed, skips blank lines and guards every message, so one bad
   request never ends the loop or mislabels its error.
-- `jonquil.mcp.tools` holds the six tool definitions and `make-tools`. It
+- `jonquil.mcp.tools` holds the seven tool definitions and `make-tools`. It
   keeps one evaluator per project selection (the same `.jonquil.edn` choice
   the window makes) and registers each with `jonquil.runtime-registry`, so
   `registry/stop-all!` stops them. An evaluation that passes its deadline is
   interrupted, and a dead one can't wedge its project.
+- `jonquil.test-run` is what `jonquil_test` and the window's Run Tests share.
+  It builds the code that runs a namespace's `clojure.test` tests in the
+  project's runtime with `report` rebound, reads the run back as data, and
+  makes the report, its text and its structured form. It starts no evaluator.
 
-**Window mode.** `jonquil.mcp.window` builds the twenty tools for
+**Window mode.** `jonquil.mcp.window` builds the twenty-one tools for
 `jonquil --mcp --window`. It never requires `jonquil.gtk.window`. It receives
 the window's `ui` map (the `:on-ready` map) and touches it only through
 `gui-call`, a thunk handed to the GTK thread with a bounded deref, so the
@@ -37,7 +41,7 @@ the ui's `:change-set-propose!*` hook (the change sets part, with the
 client's name from `make-window-tools`' `:client-fn`) and applies nothing.
 
 **Listener and bridge.** `jonquil.mcp.listen` lets a window with
-`:mcp-listen? true` serve those twenty tools to a socket client. It binds
+`:mcp-listen? true` serve those twenty-one tools to a socket client. It binds
 127.0.0.1 on an OS-picked port, accepts one connection at a time and runs
 `serve!` over it. It records the port in a per-window registry file
 (`<settings-dir>/mcp/<pid>.edn`), which `stop!` removes and startup

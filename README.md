@@ -21,6 +21,8 @@ Jonquil picks a dialect for whatever file is open:
 
 A short list of limits for each runtime is in [Known limits](docs/guide/known-limits.md).
 
+**Run Tests in This File** (Cmd/Ctrl+Shift+T) runs the tab and then its `clojure.test` tests, for Jolt and JVM Clojure. The console gets a summary and each failure's expected and actual values, the failures open in the Locations list, and a line says when another open file has edits the tests didn't see. See [Running tests](docs/guide/using-jonquil.md#running-tests).
+
 An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves seven tools (evaluate, run a file, run tests, check brackets, doc, completion, project info) over MCP on stdio, with no window. Add `--window` (`jonquil --mcp --window [DIR]`) and the agent drives a live window instead: twenty-one tools that open, edit, save and run tabs while you watch, and that let it propose plugins you then accept or reject in the window. A plugin can add tools of its own beside them. To drive a window you already have open, turn on `:mcp-listen? true` in the settings file and point the agent at `jonquil --mcp-attach [DIR]`, which bridges stdio to that window. See [Driving Jonquil from an agent (MCP)](docs/guide/mcp.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
