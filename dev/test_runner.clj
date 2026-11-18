@@ -73,6 +73,7 @@
     jonquil.mcp.world-test
     jonquil.test-run-test
     jonquil.describe-run-test
+    jonquil.namespaces-view-test
     jonquil.mcp.describe-test
     jonquil.session-test
     jonquil.commands-test

@@ -233,6 +233,7 @@
     jonquil.mcp.world
     jonquil.test-run
     jonquil.describe-run
+    jonquil.namespaces-view
     jonquil.main])
 
 (defn -main [& _]
