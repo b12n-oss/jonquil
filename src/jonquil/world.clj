@@ -66,21 +66,47 @@
          vec)))
 
 (defn- before-restore? [e] (= :before-restore (:kind e)))
+(defn- agent? [e] (= :agent (:kind e)))
+
+(defn- kind-group
+  "Which list an entry is kept in: an agent's saves (UF7), the saves made
+  before a restore, or the ones you made (an entry with no kind)."
+  [e]
+  (cond (agent? e) :agent (before-restore? e) :before-restore :else :save))
 
 (defn to-prune
   "The entries to delete, entries newest first: past the newest keep of
   the saves you made, and separately past the newest keep of those made
-  before a restore, so restores never push out a save you made."
+  before a restore and of an agent's saves, so neither ever pushes out a
+  save you made."
   [entries keep]
-  (let [{autos true saves false} (group-by before-restore? entries)]
-    (vec (concat (drop keep saves) (drop keep autos)))))
+  (let [groups (group-by kind-group entries)]
+    (vec (mapcat #(drop keep (get groups %)) [:save :before-restore :agent]))))
 
 (defn newest-save
   "The entry Restore World brings back: the newest save you made, skipping
-  the ones made before a restore (Restore an Earlier World lists those).
-  nil when there's none."
+  the ones made before a restore and an agent's (Restore an Earlier World
+  lists those). nil when there's none."
   [entries]
-  (first (remove before-restore? entries)))
+  (first (filter #(= :save (kind-group %)) entries)))
+
+(defn newest-agent-save
+  "The entry jonquil_world_restore brings back with no id: an agent's
+  newest save, or nil."
+  [entries]
+  (first (filter agent? entries)))
+
+(defn entry-id
+  "An entry's id for an agent: its world file's name without .world."
+  [{:keys [path]}]
+  (second (re-find #"([^/]+)\.world$" (str path))))
+
+(defn agent-entry
+  "The entry an agent's id names among entries: an agent's save, or one
+  made before a restore (so an agent can undo its restore), never a save
+  a person made. nil when there's none."
+  [entries id]
+  (first (filter #(and (#{:agent :before-restore} (kind-group %)) (= id (entry-id %))) entries)))
 
 (defn prune!
   "Deletes dir's saves past the newest keep, each world file with its
@@ -107,10 +133,10 @@
 
 (defn entry-label
   "An entry's palette row: when it was saved, whether it was the save made
-  before a restore, and what it holds when its record says."
+  before a restore or an agent's, and what it holds when its record says."
   [now {:keys [at kind saved placeholders]}]
   (str "Restore World saved "
-       (when (= :before-restore kind) "before a restore, ")
+       (case kind :before-restore "before a restore, " :agent "by an agent, " nil)
        (ago-text now at)
        (when saved
          (str " (" saved " " (vars-word saved)

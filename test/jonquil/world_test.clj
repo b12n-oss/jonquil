@@ -118,3 +118,31 @@
          (world/restore-report {:restored 2 :placeholders [{:var "demo/fut" :kind "x" :description "a future that has not completed"}]})))
   (is (= {:status "; Restore World: not a world image" :lines []}
          (world/restore-report {:error "not a world image"}))))
+
+;; --- UF7: an agent's saves ----------------------------------------------------
+
+(deftest agent-saves-are-kept-apart-test
+  (let [es (vec (concat (map (fn [i] {:path (str "agent" i) :at (+ 200 i) :kind :agent}) (range 5 0 -1))
+                        (map (fn [i] {:path (str "save" i) :at i :kind :save}) (range 3 0 -1))))]
+    (is (= ["save1" "agent3" "agent2" "agent1"] (map :path (world/to-prune es 2)))
+        "an agent's saves never push out one you made")))
+
+(deftest newest-save-skips-agent-saves-test
+  (is (= "s1" (:path (world/newest-save [{:path "g1" :kind :agent} {:path "s1" :kind :save}]))))
+  (is (= "g2" (:path (world/newest-agent-save [{:path "s3" :kind :save} {:path "g2" :kind :agent}
+                                               {:path "g1" :kind :agent}]))))
+  (is (nil? (world/newest-agent-save [{:path "s1" :kind :save} {:path "a1" :kind :before-restore}]))))
+
+(deftest agent-entry-label-test
+  (is (= "Restore World saved by an agent, just now (2 vars)"
+         (world/entry-label 1000 {:at 1000 :kind :agent :saved 2 :placeholders 0}))))
+
+(deftest entry-id-test
+  (is (= "0001763440000000" (world/entry-id {:path "/w/0001763440000000.world"})))
+  (let [es [{:path "/w/0000000000002.world" :kind :agent} {:path "/w/0000000000001.world" :kind :save}
+            {:path "/w/0000000000003.world" :kind :before-restore}]]
+    (is (= "/w/0000000000002.world" (:path (world/agent-entry es "0000000000002"))))
+    (is (= "/w/0000000000003.world" (:path (world/agent-entry es "0000000000003")))
+        "a save made before a restore, so an agent can undo its restore")
+    (is (nil? (world/agent-entry es "0000000000001")) "never a person's own save")
+    (is (nil? (world/agent-entry es "nope")))))
