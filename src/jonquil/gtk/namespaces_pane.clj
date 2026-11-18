@@ -163,10 +163,10 @@
   "Wires the list, the filter, ⟳ and Close to the handlers."
   [{lb :list :keys [filter refresh close] :as pane}]
   (connect3! lb "row-activated"
-            (fn [_b row _d]
-              (when-let [r (get @(:rows pane) (g/gtk-list-box-row-get-index row))]
-                (on-gui! #(call! pane :on-activate r false)))
-              nil))
+             (fn [_b row _d]
+               (when-let [r (get @(:rows pane) (g/gtk-list-box-row-get-index row))]
+                 (on-gui! #(call! pane :on-activate r false)))
+               nil))
   (connect3! lb "row-selected"
              (fn [_b _row _d] (when-not @(:showing? pane) (call! pane :on-select (selected-row pane))) nil))
   (connect-key! lb (fn [k s] (on-list-key pane k s)))
