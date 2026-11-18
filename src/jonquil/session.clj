@@ -379,18 +379,29 @@
       (swap! state assoc :eval-thread (Thread/currentThread)))
     (when dir
       (roots/use-project-deps! dir)
-      (eval-auto-require! {:ctx ctx :state state :dir dir :opts opts}))))
+      (eval-auto-require! {:ctx ctx :state state :dir dir :opts opts}))
+    ;; buffer-ns-opts: the file's namespace, now that auto-require ran
+    (when-let [b (::buffer-ns opts)]
+      (if-let [n (find-ns b)] (set! *ns* n) (reset! (::missing opts) true)))))
 
 (defn- eval-wrapper
   "Break on error; a quiet eval (completion, help, a plugin's) never pauses"
   [state opts]
   ;; Break on error; a quiet eval (completion,
   ;; help, a plugin's) never pauses
-  (when (and (:break-on? @state) (not (:quiet opts)))
-    (debugger/break-wrapper
-     (:break @state)
-     (assoc (:break-handlers @state)
-            :resolve-file (fn [f] (:file (source/resolve-file {:file f})))))))
+  (let [w (when (and (:break-on? @state) (not (:quiet opts)))
+            (debugger/break-wrapper
+             (:break @state)
+             (assoc (:break-handlers @state)
+                    :resolve-file (fn [f] (:file (source/resolve-file {:file f}))))))]
+    (if-let [missing (::missing opts)]
+      ;; the file's namespace is still missing: nothing is evaluated, and
+      ;; an interrupt leaves *1 and *e as they were
+      (fn [thunk]
+        (if @missing
+          (throw (ex-info "not loaded" {:jolt/interrupted true}))
+          (if w (w thunk) (thunk))))
+      w)))
 
 (defn- keep-result-ref
   "LM1: the console's line keeps a handle to this value"
@@ -547,28 +558,30 @@
     (evaluate! session code (if (and b (find-ns b)) b (:prompt-ns @state))
                (assoc opts :owner (:owner opts :repl)))))
 
-(defn- not-loaded!
-  "Answers a Selection or Form eval whose file namespace doesn't exist yet
-  with the not-loaded notice, off the caller's thread as a real eval's
-  result arrives."
-  [opts ns-sym]
-  (future
-    (try (when-let [f (:on-complete opts)]
-           (f {:status :notice :text (clj/not-loaded-message (str ns-sym))}))
-         (catch Throwable _ nil)))
-  nil)
+(defn- buffer-ns-opts
+  "opts for an eval whose file namespace b wasn't there when it was sent:
+  auto-require may still load it, so the worker looks again after
+  :before-eval (eval-before-fn) and evaluates in b, or, still missing,
+  sends nothing and the caller's on-complete gets the not-loaded notice."
+  [opts b]
+  (let [missing (atom false)
+        notice {:status :notice :text (clj/not-loaded-message (str b))}]
+    (-> opts
+        (assoc ::buffer-ns b ::missing missing)
+        (update :on-complete (fn [f] (fn [r] (when f (f (if @missing notice r)))))))))
 
 (defn submit-repl!
   "Evaluates one REPL entry in the namespace the last evaluation left, and
   records it in the history. With :ns-source (Run Selection, Run Form) it
   evaluates in that text's namespace instead, or answers a notice when that
-  namespace isn't loaded, and the prompt stays where it was. Returns nil or
+  namespace isn't loaded even after the project's auto-require, and the
+  prompt stays where it was. Returns nil or
   the engine's warning string."
   ([session code] (submit-repl! session code {}))
   ([{:keys [ctx state] :as session} code opts]
-   (let [b (some-> (:ns-source opts) clj/buffer-ns symbol)]
-     (if (and b (not (find-ns b)))
-       (not-loaded! opts b)
-       (do (swap! (:history ctx) eval/history-add code)
-           (evaluate! session code (or b (:prompt-ns @state))
-                      (assoc opts :owner (:owner opts :repl))))))))
+   (swap! (:history ctx) eval/history-add code)
+   (let [b (some-> (:ns-source opts) clj/buffer-ns symbol)
+         opts (assoc opts :owner (:owner opts :repl))]
+     (if (or (nil? b) (find-ns b))
+       (evaluate! session code (or b (:prompt-ns @state)) opts)
+       (evaluate! session code (:prompt-ns @state) (buffer-ns-opts opts b))))))

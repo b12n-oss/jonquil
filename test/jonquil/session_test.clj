@@ -912,3 +912,21 @@
     (repl-sync s "(in-ns 'demo.uf6n)")
     (is (= "\"demo.uf6n\"" (:printed (run ev/eval! s "(str *ns*)" {:ns-source "(+ 1 2)"}))))
     (remove-ns 'demo.uf6n)))
+
+(deftest buffer-ns-auto-required-first-test
+  ;; review #2: a first Run Form in a file the project auto-requires runs
+  ;; there, since auto-require loads the namespace before the check
+  (let [s (session/make-session)
+        dir (str (temp-dirs/temp-dir! "jonquil-uf6-ar-"))]
+    (spit (io/file dir "deps.edn") "{:paths [\"src\"]}")
+    (io/make-parents (io/file dir "src/demo/uf6ar.clj"))
+    (spit (io/file dir "src/demo/uf6ar.clj") "(ns demo.uf6ar)\n(def loaded :yes)\n")
+    (swap! (:state s) assoc :project-dir dir :auto-require '[demo.uf6ar] :auto-require-dir dir)
+    (is (= ":yes" (:printed (run ev/eval! s "loaded" {:ns-source "(ns demo.uf6ar)"}))))
+    (is (= 'user (ev/prompt-ns s)))))
+
+(deftest buffer-ns-notice-leaves-repl-vars-test
+  (let [s (session/make-session)]
+    (repl-sync s ":before")
+    (is (= :notice (:status (run ev/eval! s "(/ 1 0)" {:ns-source "(ns never.loaded.uf6b)"}))))
+    (is (= "[:before nil]" (:printed (repl-sync s "[*1 *e]"))))))
