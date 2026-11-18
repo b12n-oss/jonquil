@@ -256,35 +256,62 @@
       (on-gtk (check! :processes (and shown? ran? listed? (zero? exit))
                       {:rows rows :screenshot-exit exit :screenshot-err err})))))
 
+(def ^:private shop-src
+  (str "(ns demo.shop)\n\n"
+       "(def catalog\n  {:apple {:cents 120 :stock 14}\n   :pear {:cents 90 :stock 3}\n   :plum {:cents 45 :stock 0}})\n\n"
+       "(defn price \"The price of item in cents.\" [item] (:cents (catalog item)))\n\n"
+       "(defn total \"What a cart of items costs.\" [items] (reduce + (map price items)))\n\n"
+       "(def ^:private tax-rate 0.1)\n\n"
+       "(defmacro with-cart [& body] `(do ~@body))\n"))
+
+(def ^:private cart-src
+  "(ns demo.cart\n  (:require [demo.shop :as shop]))\n\n(defn checkout \"Totals the cart.\" [items] (shop/total items))\n")
+
+(defn- run-file!
+  "Opens path in a tab and runs it, waiting for its value."
+  [ui path]
+  (let [mark (on-gtk (let [m (out-end-offset ui)] ((:open-file! ui) path) m))
+        _ (await-until 3000 20 #(= path (some-> ((:active-tab* ui)) :path deref)))
+        _ (on-gtk ((:run!* ui)))]
+    (await-until 8000 20 #(and (idle? ui) (str/includes? (since ui mark) "=>")))))
+
+(defn- nsp-rows [p] (namespaces-pane/row-texts p))
+
 (defn scene-namespaces
-  "The Namespaces panel stepped into a demo namespace a Run defined, its
-  first var selected."
+  "The Namespaces panel three ways, in a demo project whose two files ran:
+  the top level (namespaces.png), demo.shop's vars (namespaces-vars.png),
+  and Shift+Return on catalog showing its value in the Inspector
+  (namespaces-inspect.png)."
   [ui]
   (go-row :namespaces check!
-    (let [code (str "(ns demo.shop)\n"
-                    "(defn price \"The price of item in cents.\" [item] (:cents item))\n"
-                    "(defn total \"What a cart of items costs.\" [items] (reduce + (map price items)))\n"
-                    "(def ^:private tax-rate 0.1)\n"
-                    "(defmacro with-cart [& body] `(do ~@body))\n"
-                    "(ns user)")
+    (let [root (demo-project! {"deps.edn" "{:paths [\"src\"]}\n"
+                               ".jonquil.edn" "{:runtime :in-process}\n"
+                               "src/demo/shop.clj" shop-src
+                               "src/demo/cart.clj" cart-src})
           p (:namespaces-pane ui)
-          mark (on-gtk (let [m (out-end-offset ui)]
-                         (editor/set-text! (:editor ui) code)
-                         ((:run!* ui))
-                         m))
-          ran? (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark) "=>")))
-          _ (on-gtk (panel-key! ui \0))
-          shown? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root p))))
           handler (fn [k] (k @(:handlers p)))
-          _ (on-gtk ((handler :on-filter) "demo.shop"))
-          found? (await-until 5000 50 #(some #{"demo.shop"} (namespaces-pane/row-texts p)))
-          _ (on-gtk ((handler :on-activate) (first (filter (fn [r] (= "demo.shop" (:name r))) @(:rows p))) false))
-          stepped? (await-until 5000 50 #(= 4 (count (namespaces-pane/row-texts p))))
+          _ (on-gtk ((:simulate-folder-result! ui) {:path root}))
+          ran-shop? (run-file! ui (str root "/src/demo/shop.clj"))
+          ran-cart? (run-file! ui (str root "/src/demo/cart.clj"))
+          _ (on-gtk (panel-key! ui \0))
+          top? (await-until 5000 50 #(= ["demo.cart" "demo.shop"] (take 2 (nsp-rows p))))
+          _ (on-gtk (namespaces-pane/select! p 1))
           _ (ga/settle 2)
-          {:keys [exit err]} (ga/screenshot (image-path :namespaces "png") (own-pid))]
-      (on-gtk (check! :namespaces (and ran? shown? found? stepped? (zero? exit))
-                      {:rows (namespaces-pane/row-texts p) :crumb (namespaces-pane/crumb-text p)
-                       :screenshot-exit exit :screenshot-err err})))))
+          shot1 (ga/screenshot (image-path :namespaces "png") (own-pid))
+          _ (on-gtk ((handler :on-activate) {:kind :ns :key "demo.shop" :name "demo.shop"} false))
+          vars? (await-until 5000 50 #(= ["catalog" "price" "tax-rate" "total" "with-cart"] (nsp-rows p)))
+          _ (on-gtk (namespaces-pane/select! p 1))
+          _ (ga/settle 2)
+          shot2 (ga/screenshot (image-path :namespaces-vars "png") (own-pid))
+          _ (on-gtk ((handler :on-activate) (first @(:rows p)) true))
+          inspected? (await-until 8000 50 #(some? ((:inspector-state* ui))))
+          _ (ga/settle 3)
+          shot3 (ga/screenshot (image-path :namespaces-inspect "png") (own-pid))
+          exits (mapv :exit [shot1 shot2 shot3])]
+      (on-gtk (all-saved! ui)
+              (check! :namespaces (and ran-shop? ran-cart? top? vars? inspected? (every? zero? exits))
+                      {:ran [ran-shop? ran-cart?] :top top? :vars vars? :inspected inspected?
+                       :rows (nsp-rows p) :footer (namespaces-pane/footer-text p) :exits exits})))))
 
 (defn scene-messages
   "The Messages panel with a few entries: a client called Claude Code

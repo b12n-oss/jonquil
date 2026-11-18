@@ -130,7 +130,7 @@ sit in a **Libraries** group below them, folded until you press Return on it
 or click it. A namespace counts as yours when its file is in the project, so
 one with no file (`user`, say) goes under Libraries.
 
-![The Namespaces panel stepped into demo.shop, listing price, a dimmed private tax-rate, total and the with-cart macro, with the selected var's arglists and doc in the footer](../images/namespaces.png)
+![The Namespaces panel after shop.clj and cart.clj ran: demo.cart with 1 var and demo.shop with 5 at the top, a folded Libraries group of 314 below them, and the footer counting 2 own namespaces and 314 from libraries](../images/namespaces.png)
 
 - Return on a namespace steps into it and lists its vars, each with its
   arglists and the first line of its doc. Private vars are dimmed, and a
@@ -145,6 +145,10 @@ one with no file (`user`, say) goes under Libraries.
 - The filter at the top narrows the rows shown by name, ignoring case, and
   opens the Libraries group while it has text. Return in the filter acts on
   the first row and Down moves into the list.
+
+![The panel stepped into demo.shop: catalog, price with its arglists and doc, a dimmed private tax-rate, total, and the with-cart macro, with price selected and its full name, doc and file:line in the footer](../images/namespaces-vars.png)
+
+![After Shift+Return on catalog: the console shows (deref (var demo.shop/catalog)) and its map, and the Inspector shows the map's three items with their :cents and :stock](../images/namespaces-inspect.png)
 
 The panel asks the runtime when it opens, when you press ⟳, and a moment
 after each evaluation finishes while it's on screen, so a `defn` you just ran
