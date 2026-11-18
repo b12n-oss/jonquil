@@ -68,6 +68,7 @@
     jonquil.mcp.window-test
     jonquil.mcp.listen-test
     jonquil.mcp.result-test
+    jonquil.mcp.frames-test
     jonquil.test-run-test
     jonquil.describe-run-test
     jonquil.mcp.describe-test

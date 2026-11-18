@@ -17,7 +17,10 @@
   "tool -> (fn [args result] {:kind :what & [:detail :target]}); :what
   follows the client's name in the summary."
   {"jonquil_eval" (fn [args r]
-                    {:kind :agent :what "evaluated code"
+                    {:kind :agent
+                     :what (if-let [i (get-in args ["frame" "index"])]
+                             (str "evaluated code in frame " i)
+                             "evaluated code")
                      :detail (str (messages/cap-text (str (get args "code"))) "\n\n"
                                   (messages/cap-text (str (:text r))))})
    "jonquil_run" (fn [_ r] {:kind :agent :what (str "ran " (tab r)) :tab? true})
@@ -38,6 +41,7 @@
    "jonquil_tabs" (fn [_ _] (read-of "the tabs"))
    "jonquil_read_tab" (fn [_ r] (assoc (read-of (tab r)) :tab? true))
    "jonquil_console" (fn [_ _] (read-of "the console"))
+   "jonquil_frames" (fn [_ _] (read-of "the last error's frames"))
    "jonquil_doc" (fn [args _] (read-of (str "the docs for " (arg args "symbol"))))
    "jonquil_complete" (fn [args _] (read-of (str "completions for " (arg args "prefix"))))
    "jonquil_project" (fn [_ _] (read-of "the project"))

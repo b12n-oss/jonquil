@@ -305,9 +305,11 @@
   interrupted (interrupt-token!), or {:error \"That frame is gone.\"}.
   Locals that can't be parameters are left out. What the forms print,
   realizing the value included, is captured up to OUT-MAX characters.
-  Nothing unwinds or resumes; the forms' own side effects happen."
+  Nothing unwinds or resumes; the forms' own side effects happen. i counts
+  the frames frames-data lists (user-frames): one of the evaluator's own is
+  no frame."
   [e i code {:keys [frames-fn token]}]
-  (if-let [fr (when frames-fn (get (vec (frames-fn e)) i))]
+  (if-let [fr (when frames-fn (get (vec (user-frames (frames-fn e))) i))]
     (let [syms (->> (keys (:locals fr)) (filter param?) sort vec)
           target (or (find-ns (label-ns (str (:fn fr)))) (the-ns 'user))
           sb (StringBuilder.)

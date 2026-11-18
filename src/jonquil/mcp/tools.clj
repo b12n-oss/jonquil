@@ -1,5 +1,5 @@
 (ns jonquil.mcp.tools
-  "The ten MCP tools over a per-project evaluator.
+  "The eleven MCP tools over a per-project evaluator.
 
   `make-tools` returns the table jonquil.mcp consumes:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`.
@@ -15,6 +15,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.help :as help]
+            [jonquil.mcp.frames :as frames]
             [jonquil.mcp.result :as result]
             [jonquil.nrepl.attach]
             [jonquil.nrepl.cljs-node]
@@ -44,7 +45,8 @@
                    "properties" {"code" (prop "string" "The code to evaluate.")
                                  "path" (prop "string" "A file or directory selecting the project. Default: the server's directory.")
                                  "timeout_ms" (prop "integer" "Deadline in milliseconds. Default 30000.")
-                                 "max_output_chars" max-output-prop}
+                                 "max_output_chars" max-output-prop
+                                 "frame" frames/frame-prop}
                    "required" ["code"]}}
    {"name" "jonquil_run_file"
     "description" "Run a file's text the way the Run button does, in the file's project."
@@ -103,6 +105,7 @@
                                  "limit" (prop "integer" "List at most this many. Default 50, at most 5000.")
                                  "path" (prop "string" "A file or directory selecting the project.")}
                    "required" ["query"]}}
+   frames/frames-def
    {"name" "jonquil_project"
     "description" "The dialect, runtime and project directory the other tools would use for path. Starts nothing."
     "inputSchema" {"type" "object"
@@ -285,12 +288,18 @@
                        :max-output (result/max-output-of args) :grace-ms grace-ms
                        :evict! (fn [] (swap! cache (fn [m] (if (identical? e (get m k)) (dissoc m k) m))))})))
 
+(declare frame-eval!)
+
 (defn- tool-eval [env args]
   (let [code (required-string args "code")
-        path (get args "path")]
+        path (get args "path")
+        req (frames/frame-arg args)]
     (with-ev env path
-      (fn [_ e] (run-in! env {:path path :e e :code code :opts {:run? false :owner :repl}
-                              :args args})))))
+      (fn [sel e]
+        (if req
+          (frame-eval! env sel e (assoc req :code code) args)
+          (run-in! env {:path path :e e :code code :opts {:run? false :owner :repl}
+                        :args args}))))))
 
 (defn- tool-run [env args]
   (let [p (absolute (:dir env) (required-string args "path"))
@@ -479,6 +488,79 @@
           (describe-result (run-in! env {:path path :e e :code code :opts (quiet-opts e) :args args})
                            answer))))))
 
+;; --- the last error's frames (UF5) -------------------------------------------
+
+(defn frames-opts
+  "frames-answer's opts for selection sel (env's :dir when it has no
+  project): files shown relative to its project, and whether it is JVM
+  Clojure."
+  [env sel]
+  (let [root (or (:project-dir sel) (:dir env))
+        files (delay (test-run/project-files root))]
+    {:root root :locate (fn [f] (test-run/locate @files f)) :jvm? (= :clj (:id (:profile sel)))}))
+
+(defn frames-refusal
+  "The answer refusing a frames call on evaluator e: its runtime has no
+  frames, or it is evaluating. nil when the call can go ahead."
+  [sel e]
+  (cond (not (satisfies? ev/Frames e)) (frames/unsupported-result sel)
+        (ev/evaluating? e) frames/busy-result))
+
+(defn- tool-frames [env args]
+  (with-ev env (get args "path")
+    (fn [sel e]
+      (or (frames-refusal sel e)
+          (let [t (timeout-of args)
+                d (frames/await-callback (fn [deliver!] (ev/error-frames! e deliver!)) t)]
+            (if (= ::frames/timeout d)
+              (frames/frames-timeout-result t)
+              (frames/frames-answer d (frames-opts env sel))))))))
+
+(defn- frame-eval-timed-out
+  "The answer for a frame evaluation past its timeout-ms. stop, the fn the
+  evaluator gave through req's :on-stop, stops that frame evaluation alone
+  (never the person's own evaluation, stepping or paused break), then up
+  to grace-ms is given for it to end. Without one it may run on."
+  [{:keys [stop p timeout-ms grace-ms ms]}]
+  (if stop
+    (do (stop)
+        (frames/frame-eval-timeout-result
+         (if (= ::frames/timeout (deref p grace-ms ::frames/timeout))
+           (str "Timed out after " timeout-ms " ms; interrupted, but the frame evaluation has not stopped.")
+           (str "Timed out after " timeout-ms " ms; interrupted."))
+         (ms)))
+    (frames/frame-eval-timeout-result
+     (str "Timed out after " timeout-ms " ms; the frame evaluation may still be running in the runtime.")
+     (ms))))
+
+(defn run-frame-eval
+  "jonquil_eval with a frame, once nothing refused it: JVM Clojure answers
+  that it keeps no locals, else (start! req on-result) runs req
+  ({:frame-i :error-id :code}, plus the :on-stop the evaluator answers
+  with its stop fn) and the answer waits for it until the call's
+  deadline; grace-ms is the wait after a stop."
+  [{:keys [sel start! grace-ms]} req args]
+  (if (= :clj (:id (:profile sel)))
+    frames/jvm-frame-result
+    (let [t (timeout-of args)
+          t0 (System/currentTimeMillis)
+          ms (fn [] (- (System/currentTimeMillis) t0))
+          p (promise)
+          stop* (atom nil)
+          _ (start! (assoc req :on-stop (fn [f] (reset! stop* f))) (fn [r] (deliver p r)))
+          r (deref p t ::frames/timeout)]
+      (if (= ::frames/timeout r)
+        (frame-eval-timed-out {:stop @stop* :p p :timeout-ms t :grace-ms grace-ms :ms ms})
+        (frames/frame-eval-answer r {:max-output (result/max-output-of args) :ms (ms)})))))
+
+(defn- frame-eval!
+  "jonquil_eval with a frame on evaluator e: req is {:frame-i :error-id :code}."
+  [env sel e req args]
+  (or (frames-refusal sel e)
+      (run-frame-eval {:sel sel :grace-ms (:grace-ms env)
+                       :start! (fn [r on-result] (ev/eval-in-frame! e r on-result))}
+                      req args)))
+
 (def ^:private tool-fns
   {"jonquil_eval" tool-eval
    "jonquil_run_file" tool-run
@@ -489,6 +571,7 @@
    "jonquil_namespaces" (tool-describe "jonquil_namespaces")
    "jonquil_vars" (tool-describe "jonquil_vars")
    "jonquil_apropos" (tool-describe "jonquil_apropos")
+   "jonquil_frames" tool-frames
    "jonquil_project" tool-project})
 
 (defn make-tools

@@ -155,6 +155,10 @@
       (is (some #(str/starts-with? (str error) %) ["RuntimeException" "ExceptionInfo" "EOFException"]) (pr-str error))))
   (testing "no such frame"
     (is (= {:error "That frame is gone."} (debugger/eval-in-frame div-zero 9 "x" {:frames-fn fake}))))
+  (testing "a frame of the evaluator's own, past the ones frames-data lists, is no frame either"
+    (let [with-harness (fn [_] [{:fn 'user/f :file nil :line 1 :locals {'x 1}}
+                                {:fn 'jonquil.eval/run :file nil :line 9 :locals {'y 2}}])]
+      (is (= {:error "That frame is gone."} (debugger/eval-in-frame div-zero 1 "y" {:frames-fn with-harness})))))
   (testing "locals that can't be parameters are left out, the rest still bind"
     (let [odd (fn [_] [{:fn 'demo.core/inner :file nil :line 1 :locals {'x 21 'if 1 '& 2 'a.b 3 'fn 4}}])]
       (is (= {:out "" :text "21"} (debugger/eval-in-frame div-zero 0 "x" {:frames-fn odd})))

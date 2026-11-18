@@ -993,9 +993,11 @@
     (child-op! this {:op "jonquil-debug-mode" :msg {} :unavailable "The debugger needs Jolt."
                      :reply toggle-reply}
                on-done))
-  (eval-in-frame! [this {:keys [frame-i code error-id]} on-result]
+  (eval-in-frame! [this {:keys [frame-i code error-id on-stop]} on-result]
     ;; the evaluator's usual bound: a longer form keeps running in the
-    ;; child, and this says it didn't answer
+    ;; child, and this says it didn't answer. on-stop gets the child's
+    ;; frame-only interrupt
+    (when on-stop (try (on-stop (fn [] (interrupt-frame-eval! this))) (catch Throwable _)))
     (child-op! this {:op "jonquil-frame-eval"
                      :msg (cond-> {:frame frame-i :code code} error-id (assoc :error-id error-id))
                      :not-running {:error "No error yet."} :unavailable "The debugger needs Jolt."

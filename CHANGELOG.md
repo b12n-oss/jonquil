@@ -10,6 +10,7 @@ everything that shipped before that.
 
 - Three MCP tools describe what a project's runtime has loaded: `jonquil_namespaces` lists the loaded namespaces, `jonquil_vars` lists a namespace's vars with their arglists, first doc line, file and line, and `jonquil_apropos` finds vars by part of their name. The program's own namespaces come first, and the answers come as text and as structured content. They work for Jolt and JVM Clojure, headless and over a window, where they leave the console alone. See [Asking what's loaded](docs/guide/mcp.md#asking-whats-loaded).
 - **Find a Var by Name…** in the Help menu and the palette lists every var the runtime has loaded, your project's own first, and narrows as you type part of a name. Return goes to the definition and Shift+Return shows the doc. For Jolt and JVM Clojure. See [Finding a var by name](docs/guide/help-and-inspector.md#finding-a-var-by-name).
+- `jonquil_frames` gives an agent the last error's call stack, innermost first, with each frame's locals, and `jonquil_eval` takes a `frame` to run code with that frame's locals bound, so a local's name prints its whole value. An `error_id` from `jonquil_frames` makes sure the code never runs in a newer error's frame. Both work headless and over a window, where they leave the console and the Frames panel alone. Locals need Jolt (with debug mode on to keep all of them); JVM Clojure lists frames only. See [Reading the last error](docs/guide/mcp.md#reading-the-last-error).
 
 ## [0.5.0] - 2026-11-17
 
