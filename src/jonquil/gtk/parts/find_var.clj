@@ -4,9 +4,7 @@
   with no console entry) and lists them in the active tab's palette,
   filtered by name. Return opens the var's definition, Shift+Return shows
   its doc. The command is jonquil.parts.find-var/spec."
-  (:require [clojure.string :as str]
-            [jonquil.console :as console]
-            [jonquil.describe-run :as describe-run]
+  (:require [jonquil.describe-run :as describe-run]
             [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.palette :as palette]
             [jonquil.palette :as pal-data]
@@ -21,23 +19,6 @@
   project with a few libraries loads well over 5000, and own namespaces
   that sort late would fall off."
   50000)
-
-(defn- answer-value
-  "The query's notify map as [:value v] or [:problem sentence]. Every end
-  but :ok says what happened, as the console's result line would."
-  [m]
-  (let [r (get-in m [:done :result])
-        status (:status r)
-        problem (fn [s] [:problem (str TITLE ": " s)])]
-    (cond
-      (:busy m) (problem "the runtime is busy. Try again when it's done.")
-      (= :ok status) (if-let [v (test-run/read-value (:printed r))]
-                       [:value v]
-                       (problem "the runtime's answer couldn't be read."))
-      (= :error status) (problem (first (str/split-lines (str (console/error-text r) "\n"))))
-      (= :interrupted status) (problem "stopped before the runtime answered.")
-      (= :notice status) (problem (str (:text r)))
-      :else (problem (str "the query ended " (if status (name status) "with no answer") ".")))))
 
 (defn- project-paths
   "The files of the project at root, remembered in paths* for the Return
@@ -56,7 +37,7 @@
   [:entries entries dropped]."
   [{:keys [sel*] :as ctx} m]
   (try
-    (let [[k x] (answer-value m)]
+    (let [[k x] (describe-run/query-answer m TITLE)]
       (cond
         (= :problem k) [:problem x]
         (empty? (:vars x)) [:problem "No vars are loaded."]

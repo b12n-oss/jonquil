@@ -8,6 +8,7 @@
   No evaluator here, and nothing reads the disk."
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
+            [jonquil.console :as console]
             [jonquil.test-run :as test-run]))
 
 (def runtime-cap
@@ -24,7 +25,7 @@
   '#{fn let when if-let when-let str string? number? sequential? vec map keep first
      meta vals ns-interns all-ns ns-name find-ns sort-by count take drop boolean
      not= apply take-while = binding pr-str *print-length* *print-level* require
-     resolve deref for and or max - assoc})
+     resolve deref for and or max - assoc bound?})
 
 ;; The forms below are data: the snippet fns fill the capital names in and
 ;; print the result. Every var's row is built from a meta map read inside
@@ -45,7 +46,8 @@
          :file (when (and (string? f) (not= f "NO_SOURCE_PATH")) f)
          :line (when (number? l) l)
          :private? (boolean (:private m))
-         :macro? (boolean (:macro m))}))))
+         :macro? (boolean (:macro m))
+         :bound? (try (boolean (bound? v)) (catch Throwable _ false))}))))
 
 (defn- capped
   "rows (a sorted seq in the runtime) as {:rows first-cap :dropped rest}."
@@ -275,6 +277,24 @@
       :else (answer [(str "No loaded var's name contains " (pr-str (str query)) ".")] data))))
 
 ;; --- Find a Var by Name ------------------------------------------------------
+
+(defn query-answer
+  "A quiet query's notify map m as [:value v] or [:problem sentence], each
+  sentence starting with title. Every end but :ok says what happened, as
+  the console's result line would."
+  [m title]
+  (let [r (get-in m [:done :result])
+        status (:status r)
+        problem (fn [s] [:problem (str title ": " s)])]
+    (cond
+      (:busy m) (problem "the runtime is busy. Try again when it's done.")
+      (= :ok status) (if-let [v (test-run/read-value (:printed r))]
+                       [:value v]
+                       (problem "the runtime's answer couldn't be read."))
+      (= :error status) (problem (first (str/split-lines (str (console/error-text r) "\n"))))
+      (= :interrupted status) (problem "stopped before the runtime answered.")
+      (= :notice status) (problem (str (:text r)))
+      :else (problem (str "the query ended " (if status (name status) "with no answer") ".")))))
 
 (defn var-entries
   "apropos-snippet's value v as palette entries for Find a Var by Name: the
