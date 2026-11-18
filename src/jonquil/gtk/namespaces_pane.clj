@@ -175,6 +175,13 @@
   (connect2! filter "activate"
              (fn [_ _] (when-let [r (first-row pane)] (on-gui! #(call! pane :on-activate r false))) nil))
   (connect-key! filter (fn [k _] (when (filter-key k) (focus-list! pane) (select! pane 0) true)))
+  (let [click (g/gtk-gesture-click-new)]
+    ;; the crumb line's "All namespaces": a click steps back
+    (g/g-signal-connect-data click "pressed"
+                             (callable (fn [_g _n _x _y _d] (on-gui! #(call! pane :on-back)) nil)
+                                       [:pointer :int :double :double :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-widget-add-controller (:crumb pane) click))
   (connect2! refresh "clicked" (fn [_ _] (call! pane :on-refresh) nil))
   (connect2! close "clicked" (fn [_ _] (call! pane :on-close) nil)))
 
