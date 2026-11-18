@@ -80,6 +80,7 @@
     jonquil.trace-rt-test
     jonquil.world-rt-test
     jonquil.world-test
+    jonquil.world-ops-test
     jonquil.results-rt-test
     jonquil.results-test
     jonquil.keymap-test

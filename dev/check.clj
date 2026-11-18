@@ -100,6 +100,7 @@
     jonquil.trace-rt
     jonquil.world-rt
     jonquil.world
+    jonquil.world-ops
     jonquil.results-rt
     jonquil.results
     jonquil.keymap

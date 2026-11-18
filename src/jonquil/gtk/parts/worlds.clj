@@ -7,7 +7,8 @@
             [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.palette :as palette]
-            [jonquil.world :as world]))
+            [jonquil.world :as world]
+            [jonquil.world-ops :as world-ops]))
 
 (defn- world-ev
   "The evaluator when it supports worlds, else nil."
@@ -26,40 +27,11 @@
   (doseq [l lines] (cview/append! cv :system (str l "\n")))
   (set-status! status))
 
-(defn- drop-file! [path] (.delete (java.io.File. ^String path)))
-
-(defn- record-save!
-  "Records a finished save r (which lists it), then prunes the history,
-  sparing protect. A failure deletes the file and answers an :error."
-  [r {:keys [path dir at kind protect]}]
-  (if (:error r)
-    (do (drop-file! path) r)
-    (try
-      (world/record! path {:at at :kind kind :saved (:saved r)
-                           :placeholders (count (:placeholders r))})
-      (world/prune! dir world/KEEP protect)
-      r
-      (catch :default ex
-        (drop-file! path)
-        (drop-file! (world/record-path path))
-        {:error (str "the world couldn't be recorded: " (or (ex-message ex) (str ex)))}))))
-
 (defn- world-save!
-  "One save into the history: opts is {:ev :dir :kind :protect :on-done}.
-  On success it's recorded,
-  which is what lists it, then the history is pruned,
-  sparing protect (a save about to be restored). On
-  failure the file is deleted, so a half-written or
-  timed-out world is never picked. on-done always
-  runs, with the answer, on the GTK thread."
-  [{:keys [ev dir kind protect on-done]}]
-  (let [at (System/currentTimeMillis)
-        path (world/free-entry-path dir at)]
-    (ev/world-op! ev :save {:path path}
-                  (fn [r]
-                    (on-gui! (fn []
-                               (on-done (record-save! r {:path path :dir dir :at at
-                                                         :kind kind :protect protect}))))))))
+  "One save into the history through world-ops/save!: opts is {:ev :dir
+  :kind :protect :on-done}; on-done runs with the answer on the GTK thread."
+  [{:keys [on-done] :as opts}]
+  (world-ops/save! opts (fn [r] (on-gui! (fn [] (on-done r))))))
 
 (defn- world-save-fn
   [{:keys [set-status!] :as ctx}]
@@ -76,32 +48,27 @@
   (doseq [l (:lines (world/save-report s))]
     (cview/append! cv :system (str l "\n"))))
 
-(defn- restore-after-save!
-  "The restore proper, once the safety save s of what was there has landed.
-  opts is {:ev :path :picked?}."
-  [{:keys [set-status!] :as ctx} {e :ev :keys [path picked?]} s]
+(defn- restore-reported!
+  "Reports a world-ops/restore! answer {:first s :restore r}: when the
+  safety save s failed, that nothing was restored; else what s could only
+  keep as placeholders, then the restore. GTK thread."
+  [{:keys [set-status!] :as ctx} picked? {s :first r :restore}]
   (if (:error s)
     ;; never restore over data that couldn't be kept
     (do (world-report! ctx (world/save-report s))
         (set-status!
          (str "; Restore World didn't run: what you have now couldn't be saved first. " (:error s))))
-    (do
-      (name-placeholders! ctx s)
-      (ev/world-op! e :restore {:path path}
-                    (fn [r]
-                      (on-gui! (fn []
-                                 (world-report!
-                                  ctx
-                                  (world/restore-report
-                                   r {:saved-first? true :picked? picked?
-                                      :first-placeholders (count (:placeholders s))})))))))))
+    (do (name-placeholders! ctx s)
+        (world-report! ctx (world/restore-report
+                            r {:saved-first? true :picked? picked?
+                               :first-placeholders (count (:placeholders s))})))))
 
 (defn- world-restore-from!
   [{:keys [set-status!] :as ctx} path picked?]
   (if-let [e (world-ev ctx)]
     (do (set-status! "; Saving what you have, then restoring...")
-        (world-save! {:ev e :dir (world-dir! ctx) :kind :before-restore :protect #{path}
-                      :on-done (fn [s] (restore-after-save! ctx {:ev e :path path :picked? picked?} s))}))
+        (world-ops/restore! {:ev e :dir (world-dir! ctx) :path path}
+                            (fn [a] (on-gui! (fn [] (restore-reported! ctx picked? a))))))
     (set-status! "; Restore World needs Jolt.")))
 
 (defn- world-restore-fn
