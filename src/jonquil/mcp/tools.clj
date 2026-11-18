@@ -1,5 +1,5 @@
 (ns jonquil.mcp.tools
-  "The thirteen MCP tools over a per-project evaluator.
+  "The fifteen MCP tools over a per-project evaluator.
 
   `make-tools` returns the table jonquil.mcp consumes:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`.
@@ -19,6 +19,7 @@
             [jonquil.mcp.changed :as mcp-changed]
             [jonquil.mcp.frames :as frames]
             [jonquil.mcp.result :as result]
+            [jonquil.mcp.world :as mcp-world]
             [jonquil.nrepl.attach]
             [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.connection]
@@ -29,7 +30,9 @@
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]
-            [jonquil.test-run :as test-run]))
+            [jonquil.test-run :as test-run]
+            [jonquil.world :as world]
+            [jonquil.world-ops :as world-ops]))
 
 (def ^:private default-timeout-ms 30000)
 (def ^:private interrupt-grace-ms 5000)
@@ -110,6 +113,8 @@
    frames/frames-def
    mcp-changed/changed-def
    mcp-changed/run-changed-def
+   mcp-world/save-def
+   mcp-world/restore-def
    {"name" "jonquil_project"
     "description" "The dialect, runtime and project directory the other tools would use for path. Starts nothing."
     "inputSchema" {"type" "object"
@@ -329,6 +334,39 @@
           (when (ok? r)
             (swap! (:changed env) assoc p {:e e :ran (changed/record nil text :run) :last-run text}))
           r)))))
+
+;; --- UF7: the world ---------------------------------------------------------
+
+(defn- with-world
+  "Calls (f e dir) with the project's evaluator and its world folder, the
+  one a window on that project uses; the unsupported answer when the
+  runtime can't save a world."
+  [{:keys [ctx] :as env} args f]
+  (with-ev env (get args "path")
+    (fn [sel e]
+      (if (satisfies? ev/World e)
+        (f e (world/world-dir (:settings-path ctx) (:project-dir sel)))
+        (mcp-world/unsupported-answer sel)))))
+
+(defn- await-world
+  "Runs (start! on-done) and answers (answer result), or the timeout answer."
+  [args start! answer]
+  (let [t (timeout-of args)
+        r (frames/await-callback start! t)]
+    (if (= ::frames/timeout r) (mcp-world/timeout-answer t) (answer r))))
+
+(defn- tool-world-save [env args]
+  (with-world env args
+    (fn [e dir]
+      (await-world args #(world-ops/save! {:ev e :dir dir :kind :agent} %) mcp-world/save-answer))))
+
+(defn- tool-world-restore [env args]
+  (with-world env args
+    (fn [e dir]
+      (let [{:keys [path answer]} (mcp-world/restore-target (world/entries dir) (get args "id"))]
+        (or answer
+            (await-world args #(world-ops/restore! {:ev e :dir dir :path path} %)
+                         mcp-world/restore-answer))))))
 
 ;; --- UF6: changed forms ------------------------------------------------------
 
@@ -625,6 +663,8 @@
    "jonquil_frames" tool-frames
    "jonquil_changed" tool-changed
    "jonquil_run_changed" tool-run-changed
+   "jonquil_world_save" tool-world-save
+   "jonquil_world_restore" tool-world-restore
    "jonquil_project" tool-project})
 
 (defn make-tools
