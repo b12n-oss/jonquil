@@ -119,6 +119,39 @@ in it, and asking prints nothing in the console. The popover draws the first
 reach the rest. It works for Jolt and JVM Clojure. A busy runtime gets a
 note in the status bar instead, so try again once the evaluation finishes.
 
+### Browsing namespaces
+
+The Namespaces panel shows what your program has loaded without asking you
+for a name first. Open it with Cmd/Ctrl+Alt+0 or **Namespaces** in the View
+menu's panel list. It lists every loaded namespace with how many vars it
+holds, your project's own at the top. Clojure's and the libraries' namespaces
+sit in a **Libraries** group below them, folded until you press Return on it
+or click it. A namespace counts as yours when its file is in the project, so
+one with no file (`user`, say) goes under Libraries.
+
+![The Namespaces panel stepped into demo.shop, listing price, a dimmed private tax-rate, total and the with-cart macro, with the selected var's arglists and doc in the footer](../images/namespaces.png)
+
+- Return on a namespace steps into it and lists its vars, each with its
+  arglists and the first line of its doc. Private vars are dimmed and macros
+  say so. The line above the list names the namespace and its var count, and
+  Backspace, or a click on that line, steps back out.
+- Return on a var goes to its definition, the same way Find a Var by Name
+  does.
+- Shift+Return on a var shows its value in the Inspector. It evaluates
+  `(deref (var ns/name))` the way Inspect Form evaluates a form, so it shows
+  in the console and `*1` holds the value afterwards. A macro, or a var with
+  no value yet, gets a note in the status bar instead.
+- The filter at the top narrows the rows shown by name, ignoring case, and
+  opens the Libraries group while it has text. Return in the filter acts on
+  the first row and Down moves into the list.
+
+The panel asks the runtime when it opens, when you press ⟳, and a moment
+after each evaluation finishes while it's on screen, so a `defn` you just ran
+shows up. Asking prints nothing in the console. The footer says so when the
+runtime is busy and keeps the rows it had, and a namespace that went away
+while you were in it takes you back to the top. It works for Jolt and JVM
+Clojure.
+
 ### Rename
 
 Shift+F6 or F2 opens a popup prefilled with the symbol. Enter applies,
@@ -158,9 +191,9 @@ line, always goes to the evaluator.
 The panels on the right share one place, so opening one hides the one that
 was there. The palette lists **Switch to panel: name** for each panel you've
 had open in this window, the one you saw last first, leaving out the one on
-screen. Cmd/Ctrl+Alt+1 to 8 each go to one panel: 1 the Inspector, 2
-Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages and 8
-Processes (Cmd/Ctrl+Alt+9 shows a doc in [the docs panel](#the-docs-panel)). Both focus the panel
+screen. Cmd/Ctrl+Alt+0 to 8 each go to one panel: 1 the Inspector, 2
+Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages, 8
+Processes and 0 [Namespaces](#browsing-namespaces) (Cmd/Ctrl+Alt+9 shows a doc in [the docs panel](#the-docs-panel)). Both focus the panel
 when it's showing. Otherwise Frames, Trace and Plugins open the way their own
 commands do, asking for the last error, the recorded calls or the plugin
 list as they are now. The Inspector, Source and Locations come back with
