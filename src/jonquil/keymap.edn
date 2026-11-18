@@ -57,7 +57,7 @@
   {:key "h" :mods #{:cmd} :command :find/open-replace}
   {:keys #{"equal" "plus"} :mods #{:cmd} :command :view/zoom-in}
   {:key "minus" :mods #{:cmd} :command :view/zoom-out}
-  {:key "0" :mods #{:cmd} :command :view/zoom-reset}
+  {:key "0" :mods #{:cmd} :not #{:alt} :command :view/zoom-reset}
   ;; the panels, ahead of Cmd/Ctrl+1..6's tabs, whose bindings don't rule
   ;; out Alt; on macOS Option remaps the digit's keyval, so :physical?
   {:key "1" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/inspector}

@@ -217,6 +217,11 @@
         "macOS: Option+8's bullet, through the physical key")
     (is (= [:pages/show nil] (run 0xaa (bit-or meta-m alt) "9"))
         "macOS: Option+9's ordinal indicator, through the physical key")
+    (is (= [:panel/namespaces nil] (run (int \0) (bit-or ctrl alt) nil))
+        "Linux: Ctrl+Alt+0 is the Namespaces panel, not Ctrl+0's zoom reset")
+    (is (= [:panel/namespaces nil] (run 0xba (bit-or meta-m alt) "0"))
+        "macOS: Option+0's masculine ordinal, through the physical key")
+    (is (= [:view/zoom-reset nil] (run (int \0) ctrl nil)) "Ctrl+0 still resets the zoom")
     (is (= [:tab/select {:n 1}] (run 0x31 ctrl nil)) "Ctrl+1 is still tab 1")
     (is (not= :panel/inspector (first (run 0x31 (bit-or ctrl alt shift) nil))) "Shift held: not a panel key")))
 
