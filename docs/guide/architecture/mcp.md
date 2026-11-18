@@ -14,7 +14,7 @@ one, so the headless entry never opens a window:
   into a response map or nil. `serve!` loops over a line reader and a line
   writer it is handed, skips blank lines and guards every message, so one bad
   request never ends the loop or mislabels its error.
-- `jonquil.mcp.tools` holds the thirteen tool definitions and `make-tools`. It
+- `jonquil.mcp.tools` holds the fifteen tool definitions and `make-tools`. It
   keeps one evaluator per project selection (the same `.jonquil.edn` choice
   the window makes) and registers each with `jonquil.runtime-registry`, so
   `registry/stop-all!` stops them. An evaluation that passes its deadline is
@@ -43,7 +43,16 @@ one, so the headless entry never opens a window:
   of the forms it sent, and the record only counts while `:e` is still the
   project's cached evaluator, so an evicted runtime reads as `never-ran`.
 
-**Window mode.** `jonquil.mcp.window` builds the twenty-seven tools for
+- `jonquil.mcp.world` makes the answers of `jonquil_world_save` and
+  `jonquil_world_restore` for both tables. The steps around the runtime's
+  world op (write, record and prune a save; save what's there before a
+  restore) live in `jonquil.world-ops`, which the window's worlds part
+  uses too, and an agent's saves are the `:agent` kind in `jonquil.world`,
+  pruned apart from the person's. Headless, the world folder is
+  `world/world-dir` of the server's settings path and the selection's
+  project folder, the one a window on that project uses.
+
+**Window mode.** `jonquil.mcp.window` builds the twenty-nine tools for
 `jonquil --mcp --window`. It never requires `jonquil.gtk.window`. It receives
 the window's `ui` map (the `:on-ready` map) and touches it only through
 `gui-call`, a thunk handed to the GTK thread with a bounded deref, so the
@@ -67,9 +76,12 @@ text, its ran set and its last-run text, read on the GTK thread, and
 `:mcp-run-changed!*` runs `win-run/mcp-run-changed!`, Run Changed Forms over
 any tab with a `notify`. Its `{:unchanged {:status :text}}` notify, for a tab
 that never ran or has nothing changed, maps to a result that isn't an error.
+The world tools go through the worlds part's `:mcp-world!*`, fired on the
+GTK thread, which runs the same `jonquil.world-ops` steps as Save World and
+Restore World and reports to the person the same way.
 
 **Listener and bridge.** `jonquil.mcp.listen` lets a window with
-`:mcp-listen? true` serve those twenty-seven tools to a socket client. It binds
+`:mcp-listen? true` serve those twenty-nine tools to a socket client. It binds
 127.0.0.1 on an OS-picked port, accepts one connection at a time and runs
 `serve!` over it. It records the port in a per-window registry file
 (`<settings-dir>/mcp/<pid>.edn`), which `stop!` removes and startup

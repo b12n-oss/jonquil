@@ -11,12 +11,12 @@ claude mcp add jonquil -- jonquil --mcp /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp /path/to/project
 ```
 
-Thirteen tools. Most take an optional `path` selecting the project (default
+Fifteen tools. Most take an optional `path` selecting the project (default
 `DIR`); `jonquil_run_file` requires a file `path`, and `jonquil_check_brackets`
 takes `text` or a `path`.
 
 <details>
-<summary><strong>The thirteen tools</strong></summary>
+<summary><strong>The fifteen tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -32,6 +32,8 @@ takes `text` or a `path`.
 | `jonquil_frames` | The last error's call stack with each frame's locals; `jonquil_eval` can then run code in a frame |
 | `jonquil_changed` | The top-level forms edited since they last ran, each with its name, lines and old and new text |
 | `jonquil_run_changed` | Runs only those forms, in the file's namespace |
+| `jonquil_world_save` | Saves the session's data to the project's world history, in the agent's own list, and answers its id |
+| `jonquil_world_restore` | Brings back the agent's newest world, or the one an id names, after saving what's there |
 | `jonquil_project` | The dialect, runtime and directory the other tools would use; starts nothing |
 
 </details>
@@ -287,6 +289,54 @@ never ran answers "Run the tab once first (jonquil_run)."
 
 ![A tab with two forms marked in the gutter as changed, and the Messages panel listing what Claude Code did: it listed the changed forms in the tab, then ran 2 changed forms](../images/mcp-changed.png)
 
+### Saving and restoring the session's data
+
+Before an experiment that could wreck the data an agent has built up at
+the prompt, say an atom filled from a slow source, it can call
+`jonquil_world_save`. That writes the session's data to the project's
+world history, the way [Save World](using-jonquil.md#saving-the-world)
+does for a person, and answers the world's `id`. If the experiment goes
+wrong, `jonquil_world_restore` puts the data back.
+
+```
+Saved 2 vars as world 1795001234567.
+```
+
+With no `id`, `jonquil_world_restore` brings back the newest world an agent
+saved; with one, that world. Before it restores anything it saves what's
+there now, and answers that save's id as `undo_id`, so restoring that id
+undoes the restore:
+
+```
+Restored 2 vars. What was there is saved as world 1795001290011: restore that id to undo this.
+```
+
+An agent's saves are kept in a list of their own, 10 at most, so they never
+push out a save the person made, and Restore World in the window still
+brings back the person's newest. An agent can't restore one of the person's
+saves; `id` takes an agent's world or an `undo_id`. Restore an Earlier World
+lists the agent's saves for the person, as "saved by an agent".
+
+Both tools take `timeout_ms` (default 30 s), and headless `path` selects the
+project. A world is data only, the same as for a person: functions aren't
+saved, and something that can't be written as it is, an open file say,
+comes back as a placeholder the answer names. It's Jolt only, in process or
+in the Jolt child.
+
+| `status` | When |
+|---|---|
+| `ok` | Saved (`id`, `saved`, `placeholders`) or restored (`restored`, `placeholders`, `undo_id`) |
+| `no-world` | `jonquil_world_restore` with no `id`, and no agent has saved this project's world yet. Not an error |
+| `unknown-id` | `id` names no world an agent can restore in this project, or that world is gone |
+| `unsupported` | The project's dialect isn't Jolt |
+| `timeout` | The runtime didn't finish in `timeout_ms`; the save or restore may still finish afterwards |
+| `error` | Nothing was saved, because a var holds something that can't be written at all (listed under `unwritable`), or the restore failed. A restore whose first save fails restores nothing |
+
+Over a window the person sees the same lines Save World and Restore World
+print, in the status bar and the console, and Messages logs each call.
+
+![Restore an Earlier World listing three saves: the one made before the agent's restore, the agent's own, labelled "saved by an agent", and the person's, beside the Messages panel showing Claude Code saved the world, then restored a world](../images/mcp-world.png)
+
 ### Structured results
 
 The tools that evaluate (`jonquil_eval` and `jonquil_run_file` here,
@@ -319,11 +369,11 @@ claude mcp add jonquil -- jonquil --mcp --window /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/project
 ```
 
-With `--window` the server offers twenty-seven tools (headless keeps thirteen), acting
+With `--window` the server offers twenty-nine tools (headless keeps fifteen), acting
 on the live window:
 
 <details>
-<summary><strong>The twenty-seven window tools</strong></summary>
+<summary><strong>The twenty-nine window tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -343,6 +393,7 @@ on the live window:
 | `jonquil_namespaces`, `jonquil_vars`, `jonquil_apropos` | As [headless](#asking-whats-loaded), without `path`. They run quietly: nothing shows on the console |
 | `jonquil_frames` | As [headless](#reading-the-last-error), without `path`, and quiet too. `jonquil_eval` with a `frame` runs quietly as well, unlike a plain `jonquil_eval` |
 | `jonquil_changed`, `jonquil_run_changed` | As [headless](#running-only-what-changed), over a tab `id` (the active tab without it). `jonquil_run_changed` runs the forms on the console as Run Changed Forms does |
+| `jonquil_world_save`, `jonquil_world_restore` | As [headless](#saving-and-restoring-the-sessions-data), without `path`. The status bar and console say what Save World and Restore World say |
 | `jonquil_check_brackets` | "ok", or the sentence naming the first problem |
 | `jonquil_project` | The window's live dialect selection: label, runtime, directory, source, warnings |
 | `jonquil_plugins_list` | One line per plugin: version, loaded or disabled, effects, pending proposal, doc |
@@ -431,7 +482,7 @@ A plugin gives agents tools in `:mcp-tools`:
 ```
 
 A window serving MCP (`--mcp --window`, or one you attach to) serves each live
-plugin's tools as `plugin_<id>_<name>` after its twenty-seven: `plugin_smoke-t_twice`
+plugin's tools as `plugin_<id>_<name>` after its twenty-nine: `plugin_smoke-t_twice`
 for plugin `smoke-t` above.
 
 - Argument types: `string`, `integer`, `number`, `boolean`. A missing or
@@ -458,7 +509,7 @@ listening on in `settings.edn`:
 {:mcp-listen? true}
 ```
 
-That window serves the same twenty-seven tools on a socket bound to 127.0.0.1, on
+That window serves the same twenty-nine tools on a socket bound to 127.0.0.1, on
 a port the OS picks, to one client at a time. It publishes the port in
 `mcp/<pid>.edn` beside `settings.edn`. Then register the bridge:
 
