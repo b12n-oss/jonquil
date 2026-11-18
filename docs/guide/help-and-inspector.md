@@ -132,25 +132,25 @@ one with no file (`user`, say) goes under Libraries.
 ![The Namespaces panel stepped into demo.shop, listing price, a dimmed private tax-rate, total and the with-cart macro, with the selected var's arglists and doc in the footer](../images/namespaces.png)
 
 - Return on a namespace steps into it and lists its vars, each with its
-  arglists and the first line of its doc. Private vars are dimmed and macros
-  say so. The line above the list names the namespace and its var count, and
-  Backspace, or a click on that line, steps back out.
+  arglists and the first line of its doc. Private vars are dimmed, and a
+  macro is marked "macro". The line above the list names the namespace and
+  counts its vars. Backspace, or a click on that line, steps back out.
 - Return on a var goes to its definition, the same way Find a Var by Name
   does.
 - Shift+Return on a var shows its value in the Inspector. It evaluates
-  `(deref (var ns/name))` the way Inspect Form evaluates a form, so it shows
-  in the console and `*1` holds the value afterwards. A macro, or a var with
-  no value yet, gets a note in the status bar instead.
+  `(deref (var ns/name))` the way Inspect Form evaluates a form, so the
+  evaluation shows in the console and `*1` holds the value afterwards. A
+  macro, or a var with no value yet, gets a note in the status bar instead.
 - The filter at the top narrows the rows shown by name, ignoring case, and
   opens the Libraries group while it has text. Return in the filter acts on
   the first row and Down moves into the list.
 
 The panel asks the runtime when it opens, when you press ⟳, and a moment
 after each evaluation finishes while it's on screen, so a `defn` you just ran
-shows up. Asking prints nothing in the console. The footer says so when the
-runtime is busy and keeps the rows it had, and a namespace that went away
-while you were in it takes you back to the top. It works for Jolt and JVM
-Clojure.
+shows up. Asking prints nothing in the console. When the runtime is busy,
+the footer says so and the rows stay as they were. If a namespace goes away
+while you're in it, you land back at the top with a note saying which one.
+Close, at the bottom, hides the panel. It works for Jolt and JVM Clojure.
 
 ### Rename
 
@@ -191,10 +191,10 @@ line, always goes to the evaluator.
 The panels on the right share one place, so opening one hides the one that
 was there. The palette lists **Switch to panel: name** for each panel you've
 had open in this window, the one you saw last first, leaving out the one on
-screen. Cmd/Ctrl+Alt+0 to 8 each go to one panel: 1 the Inspector, 2
+screen. Cmd/Ctrl+Alt+1 to 8 and 0 each go to one panel: 1 the Inspector, 2
 Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages, 8
 Processes and 0 [Namespaces](#browsing-namespaces) (Cmd/Ctrl+Alt+9 shows a doc in [the docs panel](#the-docs-panel)). Both focus the panel
-when it's showing. Otherwise Frames, Trace and Plugins open the way their own
+when it's showing. Otherwise Frames, Trace, Plugins and Namespaces open the way their own
 commands do, asking for the last error, the recorded calls or the plugin
 list as they are now. The Inspector, Source and Locations come back with
 what they showed when it still holds. Until something fills them, their
