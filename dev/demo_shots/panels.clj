@@ -1,7 +1,7 @@
 (ns demo-shots.panels
   "The Lisp Machine panel scenes of dev/demo_shots.clj: find usages, compare
   form, the Reader, change sets, breakpoint, trace, line counts, processes,
-  messages and the two Run Tests scenes. Each scene is (fn [ui] ch) like the scenes in demo-shots."
+  namespaces, messages and the two Run Tests scenes. Each scene is (fn [ui] ch) like the scenes in demo-shots."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [demo-shots.support :refer [all-saved! caret-to-line! check! console-enter! console-text demo-project! idle?
@@ -16,6 +16,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.locations-pane :as lpane]
             [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.namespaces-pane :as namespaces-pane]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.processes-pane :as processes-pane]
@@ -254,6 +255,36 @@
           _ (on-gtk (reset! @(resolve 'user/stop?) true))]
       (on-gtk (check! :processes (and shown? ran? listed? (zero? exit))
                       {:rows rows :screenshot-exit exit :screenshot-err err})))))
+
+(defn scene-namespaces
+  "The Namespaces panel stepped into a demo namespace a Run defined, its
+  first var selected."
+  [ui]
+  (go-row :namespaces check!
+    (let [code (str "(ns demo.shop)\n"
+                    "(defn price \"The price of item in cents.\" [item] (:cents item))\n"
+                    "(defn total \"What a cart of items costs.\" [items] (reduce + (map price items)))\n"
+                    "(def ^:private tax-rate 0.1)\n"
+                    "(defmacro with-cart [& body] `(do ~@body))\n"
+                    "(ns user)")
+          p (:namespaces-pane ui)
+          mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) code)
+                         ((:run!* ui))
+                         m))
+          ran? (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark) "=>")))
+          _ (on-gtk (panel-key! ui \0))
+          shown? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root p))))
+          handler (fn [k] (k @(:handlers p)))
+          _ (on-gtk ((handler :on-filter) "demo.shop"))
+          found? (await-until 5000 50 #(some #{"demo.shop"} (namespaces-pane/row-texts p)))
+          _ (on-gtk ((handler :on-activate) (first (filter (fn [r] (= "demo.shop" (:name r))) @(:rows p))) false))
+          stepped? (await-until 5000 50 #(= 4 (count (namespaces-pane/row-texts p))))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :namespaces "png") (own-pid))]
+      (on-gtk (check! :namespaces (and ran? shown? found? stepped? (zero? exit))
+                      {:rows (namespaces-pane/row-texts p) :crumb (namespaces-pane/crumb-text p)
+                       :screenshot-exit exit :screenshot-err err})))))
 
 (defn scene-messages
   "The Messages panel with a few entries: a client called Claude Code
