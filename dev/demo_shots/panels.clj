@@ -316,7 +316,7 @@
           _ (on-gtk (panel-key! ui \7)
                     (messages-pane/set-kind! mp :agent-read true))
           rows? (await-until 3000 20 #(<= 2 (count (filter (fn [r] (str/includes? r "changed form"))
-                                                         (messages-pane/row-texts mp)))))
+                                                           (messages-pane/row-texts mp)))))
           rows (on-gtk (messages-pane/row-texts mp))
           _ (ga/settle 2)
           {:keys [exit err]} (ga/screenshot (image-path :mcp-changed "png") (own-pid))]
