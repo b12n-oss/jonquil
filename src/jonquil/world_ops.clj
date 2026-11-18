@@ -27,23 +27,26 @@
 
 (defn save!
   "One save of ev's data into dir's history as kind (:save, :agent or
-  :before-restore), sparing protect when pruning. on-done always runs, with
+  :before-restore), sparing protect when pruning; on-path, when given, hears
+  the file's path before the op starts. on-done always runs, with
   the runtime's answer plus :path, or {:error ..} and no file left behind."
-  [{:keys [ev dir kind protect]} on-done]
+  [{:keys [ev dir kind protect on-path]} on-done]
   (let [at (System/currentTimeMillis)
         path (world/free-entry-path dir at)]
+    (when on-path (on-path path))
     (ev/world-op! ev :save {:path path}
                   (fn [r]
                     (on-done (record-save! r {:path path :dir dir :at at :kind kind
                                               :protect (or protect #{})}))))))
 
 (defn restore!
-  "Saves what's there first (kind :before-restore, sparing path), then
+  "Saves what's there first (kind first-kind, :before-restore by default,
+  sparing path; on-first-path hears that save's path at once), then
   restores path. on-done gets {:first s :restore r}, where s is that first
   save's answer; when it failed there is no :restore and nothing was
   restored, so data that couldn't be kept is never overwritten."
-  [{:keys [ev dir path]} on-done]
-  (save! {:ev ev :dir dir :kind :before-restore :protect #{path}}
+  [{:keys [ev dir path first-kind on-first-path]} on-done]
+  (save! {:ev ev :dir dir :kind (or first-kind :before-restore) :protect #{path} :on-path on-first-path}
          (fn [s]
            (if (:error s)
              (on-done {:first s})

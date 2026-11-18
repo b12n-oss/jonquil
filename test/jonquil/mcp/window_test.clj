@@ -869,7 +869,7 @@
   (let [seen (atom [])
         t (tools-for (world-ui seen (fn [_] {:saved 2 :placeholders [] :path "/w/0000000000007.world"})))
         r (call t "jonquil_world_save" {})]
-    (is (= [[:save {:id nil}]] @seen))
+    (is (= [[:save nil]] (map (fn [[op a]] [op (:id a)]) @seen)))
     (is (= {"status" "ok" "id" "0000000000007" "saved" 2 "placeholders" []} (:data r)))))
 
 (deftest window-world-restore
@@ -877,7 +877,7 @@
         t (tools-for (world-ui seen (fn [_] {:first {:saved 1 :placeholders [] :path "/w/0000000000009.world"}
                                              :restore {:restored 2 :placeholders []}})))
         r (call t "jonquil_world_restore" {"id" "0000000000007"})]
-    (is (= [[:restore {:id "0000000000007"}]] @seen))
+    (is (= [[:restore "0000000000007"]] (map (fn [[op a]] [op (:id a)]) @seen)))
     (is (= "0000000000009" (get-in r [:data "undo_id"])))))
 
 (deftest window-world-answers-and-unsupported
@@ -889,3 +889,11 @@
 (deftest window-world-timeout
   (let [t (tools-for {:mcp-world!* (fn [_ _ _] nil) :evaluator* (fn [] (evaluator {}))})]
     (is (= "timeout" (get-in (call t "jonquil_world_save" {"timeout_ms" 100}) [:data "status"])))))
+
+(deftest window-world-restore-timeout-carries-undo-id
+  ;; review #3: the safety save's id, though the restore didn't finish in time
+  (let [t (tools-for {:mcp-world!* (fn [_ {:keys [on-first-path]} _] (on-first-path "/w/0000000000011.world"))
+                      :evaluator* (fn [] (evaluator {}))})
+        r (call t "jonquil_world_restore" {"timeout_ms" 100})]
+    (is (= "timeout" (get-in r [:data "status"])))
+    (is (= "0000000000011" (get-in r [:data "undo_id"])))))

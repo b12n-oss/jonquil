@@ -48,9 +48,11 @@ one, so the headless entry never opens a window:
   world op (write, record and prune a save; save what's there before a
   restore) live in `jonquil.world-ops`, which the window's worlds part
   uses too, and an agent's saves are the `:agent` kind in `jonquil.world`,
-  pruned apart from the person's. Headless, the world folder is
-  `world/world-dir` of the server's settings path and the selection's
-  project folder, the one a window on that project uses.
+  and the saves its restores make first `:agent-before-restore`, each pruned
+  apart from the person's. Headless, the world folder is
+  `world/world-dir` of the server's settings path and `world-root`, the
+  folder `file-tree/root-for` gives a window opened on that path, so both
+  use one history.
 
 **Window mode.** `jonquil.mcp.window` builds the twenty-nine tools for
 `jonquil --mcp --window`. It never requires `jonquil.gtk.window`. It receives

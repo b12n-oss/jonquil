@@ -314,8 +314,10 @@ Restored 2 vars. What was there is saved as world 1795001290011: restore that id
 An agent's saves are kept in a list of their own, 10 at most, so they never
 push out a save the person made, and Restore World in the window still
 brings back the person's newest. An agent can't restore one of the person's
-saves; `id` takes an agent's world or an `undo_id`. Restore an Earlier World
-lists the agent's saves for the person, as "saved by an agent".
+saves; `id` takes an agent's world or an `undo_id`. The saves an agent's
+restores make first are a list of their own too, so they never push out the
+ones your restores made. Restore an Earlier World lists both for the person,
+as "saved by an agent" and "saved before an agent's restore".
 
 Both tools take `timeout_ms` (default 30 s), and headless `path` selects the
 project. A world is data only, the same as for a person: functions aren't
@@ -329,7 +331,7 @@ in the Jolt child.
 | `no-world` | `jonquil_world_restore` with no `id`, and no agent has saved this project's world yet. Not an error |
 | `unknown-id` | `id` names no world an agent can restore in this project, or that world is gone |
 | `unsupported` | The project's dialect isn't Jolt |
-| `timeout` | The runtime didn't finish in `timeout_ms`; the save or restore may still finish afterwards |
+| `timeout` | The runtime didn't finish in `timeout_ms`. The save or restore may still finish afterwards; a restore's answer still carries `undo_id` |
 | `error` | Nothing was saved, because a var holds something that can't be written at all (listed under `unwritable`), or the restore failed. A restore whose first save fails restores nothing |
 
 Over a window the person sees the same lines Save World and Restore World

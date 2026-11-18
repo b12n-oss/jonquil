@@ -70,18 +70,22 @@
 
 (defn- kind-group
   "Which list an entry is kept in: an agent's saves (UF7), the saves made
-  before a restore, or the ones you made (an entry with no kind)."
+  before an agent's restore, the saves made before a person's restore, or
+  the ones you made (an entry with no kind)."
   [e]
-  (cond (agent? e) :agent (before-restore? e) :before-restore :else :save))
+  (cond (agent? e) :agent
+        (= :agent-before-restore (:kind e)) :agent-before-restore
+        (before-restore? e) :before-restore
+        :else :save))
 
 (defn to-prune
   "The entries to delete, entries newest first: past the newest keep of
   the saves you made, and separately past the newest keep of those made
-  before a restore and of an agent's saves, so neither ever pushes out a
-  save you made."
+  before your restores, of an agent's saves and of those made before an
+  agent's restores, so no list ever pushes out another's."
   [entries keep]
   (let [groups (group-by kind-group entries)]
-    (vec (mapcat #(drop keep (get groups %)) [:save :before-restore :agent]))))
+    (vec (mapcat #(drop keep (get groups %)) [:save :before-restore :agent :agent-before-restore]))))
 
 (defn newest-save
   "The entry Restore World brings back: the newest save you made, skipping
@@ -106,7 +110,8 @@
   made before a restore (so an agent can undo its restore), never a save
   a person made. nil when there's none."
   [entries id]
-  (first (filter #(and (#{:agent :before-restore} (kind-group %)) (= id (entry-id %))) entries)))
+  (first (filter #(and (#{:agent :before-restore :agent-before-restore} (kind-group %)) (= id (entry-id %)))
+                 entries)))
 
 (defn prune!
   "Deletes dir's saves past the newest keep, each world file with its
@@ -136,7 +141,11 @@
   before a restore or an agent's, and what it holds when its record says."
   [now {:keys [at kind saved placeholders]}]
   (str "Restore World saved "
-       (case kind :before-restore "before a restore, " :agent "by an agent, " nil)
+       (case kind
+         :before-restore "before a restore, "
+         :agent-before-restore "before an agent's restore, "
+         :agent "by an agent, "
+         nil)
        (ago-text now at)
        (when saved
          (str " (" saved " " (vars-word saved)

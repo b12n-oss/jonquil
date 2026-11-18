@@ -146,3 +146,14 @@
         "a save made before a restore, so an agent can undo its restore")
     (is (nil? (world/agent-entry es "0000000000001")) "never a person's own save")
     (is (nil? (world/agent-entry es "nope")))))
+
+(deftest agent-restore-safety-saves-are-kept-apart-test
+  ;; review #2: an agent's restores never push out the saves a person's
+  ;; restores made
+  (let [es (vec (concat (map (fn [i] {:path (str "ab" i) :at (+ 300 i) :kind :agent-before-restore}) (range 5 0 -1))
+                        (map (fn [i] {:path (str "auto" i) :at (+ 100 i) :kind :before-restore}) (range 2 0 -1))))]
+    (is (= ["ab3" "ab2" "ab1"] (map :path (world/to-prune es 2)))))
+  (is (= "/w/0000000000004.world"
+         (:path (world/agent-entry [{:path "/w/0000000000004.world" :kind :agent-before-restore}] "0000000000004"))))
+  (is (= "Restore World saved before an agent's restore, just now"
+         (world/entry-label 1000 {:at 1000 :kind :agent-before-restore}))))

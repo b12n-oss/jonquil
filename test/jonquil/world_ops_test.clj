@@ -63,3 +63,14 @@
     (is (nil? (:restore r)))
     (testing "never restore over data that couldn't be kept"
       (is (not-any? #(= :restore (clojure.core/first %)) @seen)))))
+
+(deftest restore-names-its-safety-save-first-test
+  ;; review #2 and #3: the agent's kind, and the path known before the op
+  (let [dir (str (temp-dirs/temp-dir! "jonquil-world-ops-"))
+        e (fake-ev (atom []) {:save-answer {:saved 1 :placeholders []} :restore-answer {:restored 1 :placeholders []}})
+        early (atom nil)
+        {s :first} (call-sync ops/restore! {:ev e :dir dir :path (str dir "/0000000000001.world")
+                                            :first-kind :agent-before-restore
+                                            :on-first-path (fn [p] (reset! early p))})]
+    (is (= (:path s) @early))
+    (is (= :agent-before-restore (:kind (first (world/entries dir)))))))

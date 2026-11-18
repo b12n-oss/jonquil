@@ -102,14 +102,26 @@
   {:text (str "Saving the world needs Jolt. This project is " (:name (:profile sel)) ".")
    :error? true :data {"status" "unsupported"}})
 
-(defn timeout-answer [timeout-ms]
-  (let [m (str "The runtime didn't finish the world in " timeout-ms " ms.")]
-    {:text m :error? true :data {"status" "timeout" "error" m}}))
+(defn timeout-answer
+  "The answer when the runtime didn't finish in timeout-ms. The op isn't
+  cancelled and may still finish; for a restore, first-path is the save of
+  what was there, whose id undoes it if it does."
+  ([timeout-ms] (timeout-answer timeout-ms nil))
+  ([timeout-ms first-path]
+   (let [undo (some-> first-path (as-> p (world/entry-id {:path p})))
+         m (str "The runtime didn't finish the world in " timeout-ms " ms. It may still finish"
+                (if undo
+                  (str ", so the data may still change: what was there is being saved as world " undo
+                       ", and restoring that id undoes it.")
+                  ", so check before trying again."))]
+     {:text m :error? true :data (cond-> {"status" "timeout" "error" m} undo (assoc "undo_id" undo))})))
 
 (defn restore-target
   "{:path p} for the world args' id names among entries (an agent's newest
   without one), or {:answer a} when there's none to restore."
   [entries id]
-  (if id
-    (if-let [e (world/agent-entry entries id)] {:path (:path e)} {:answer (unknown-id-answer id)})
-    (if-let [e (world/newest-agent-save entries)] {:path (:path e)} {:answer no-world-answer})))
+  ;; an id may come as a number, since it's all digits; blank is none
+  (let [id (some-> id str str/trim not-empty)]
+    (if id
+      (if-let [e (world/agent-entry entries id)] {:path (:path e)} {:answer (unknown-id-answer id)})
+      (if-let [e (world/newest-agent-save entries)] {:path (:path e)} {:answer no-world-answer}))))

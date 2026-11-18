@@ -337,6 +337,14 @@
 
 ;; --- UF7: the world ---------------------------------------------------------
 
+(defn world-root
+  "The folder a window opened on path would root its file tree at
+  (file-tree/root-for), which names the project's world folder: a
+  directory as it is, a file's project directory or else its folder."
+  [dir path]
+  (let [p (absolute dir (or path dir))]
+    (if (.isDirectory (io/file p)) (ft/root-for {:dir p}) (ft/root-for {:file p}))))
+
 (defn- with-world
   "Calls (f e dir) with the project's evaluator and its world folder, the
   one a window on that project uses; the unsupported answer when the
@@ -345,28 +353,31 @@
   (with-ev env (get args "path")
     (fn [sel e]
       (if (satisfies? ev/World e)
-        (f e (world/world-dir (:settings-path ctx) (:project-dir sel)))
+        (f e (world/world-dir (:settings-path ctx) (world-root (:dir ctx) (get args "path"))))
         (mcp-world/unsupported-answer sel)))))
-
-(defn- await-world
-  "Runs (start! on-done) and answers (answer result), or the timeout answer."
-  [args start! answer]
-  (let [t (timeout-of args)
-        r (frames/await-callback start! t)]
-    (if (= ::frames/timeout r) (mcp-world/timeout-answer t) (answer r))))
 
 (defn- tool-world-save [env args]
   (with-world env args
     (fn [e dir]
-      (await-world args #(world-ops/save! {:ev e :dir dir :kind :agent} %) mcp-world/save-answer))))
+      (let [t (timeout-of args)
+            r (frames/await-callback #(world-ops/save! {:ev e :dir dir :kind :agent} %) t)]
+        (if (= ::frames/timeout r) (mcp-world/timeout-answer t) (mcp-world/save-answer r))))))
 
 (defn- tool-world-restore [env args]
   (with-world env args
     (fn [e dir]
-      (let [{:keys [path answer]} (mcp-world/restore-target (world/entries dir) (get args "id"))]
+      (let [{:keys [path answer]} (mcp-world/restore-target (world/entries dir) (get args "id"))
+            t (timeout-of args)
+            first-path (atom nil)]
         (or answer
-            (await-world args #(world-ops/restore! {:ev e :dir dir :path path} %)
-                         mcp-world/restore-answer))))))
+            (let [r (frames/await-callback
+                     #(world-ops/restore! {:ev e :dir dir :path path :first-kind :agent-before-restore
+                                           :on-first-path (fn [p] (reset! first-path p))}
+                                          %)
+                     t)]
+              (if (= ::frames/timeout r)
+                (mcp-world/timeout-answer t @first-path)
+                (mcp-world/restore-answer r))))))))
 
 ;; --- UF6: changed forms ------------------------------------------------------
 

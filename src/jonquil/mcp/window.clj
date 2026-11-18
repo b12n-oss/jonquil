@@ -625,12 +625,14 @@
   [{:keys [ui turn]} args op answer]
   (let [t (tools/timeout-of args)
         p (promise)
+        first-path (atom nil)
         f (:mcp-world!* ui)]
     (if-not f
       (mcp-world/unsupported-answer ((:selection* ui)))
-      (do (turn (fn [] (f op {:id (get args "id")} (fn [r] (deliver p r)))))
+      (do (turn (fn [] (f op {:id (get args "id") :on-first-path (fn [x] (reset! first-path x))}
+                          (fn [r] (deliver p r)))))
           (let [r (deref p t ::timeout)]
-            (cond (= ::timeout r) (mcp-world/timeout-answer t)
+            (cond (= ::timeout r) (mcp-world/timeout-answer t @first-path)
                   (:unsupported r) (mcp-world/unsupported-answer ((:selection* ui)))
                   (:answer r) (:answer r)
                   :else (answer r)))))))

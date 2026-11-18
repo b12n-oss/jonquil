@@ -69,3 +69,16 @@
   (is (= #{"path" "id" "timeout_ms"} (set (keys (get-in mw/restore-def ["inputSchema" "properties"])))))
   (is (= #{"timeout_ms"} (set (keys (get-in mw/window-save-def ["inputSchema" "properties"])))))
   (is (= #{"id" "timeout_ms"} (set (keys (get-in mw/window-restore-def ["inputSchema" "properties"]))))))
+
+(deftest timeout-answers-say-it-may-still-finish-test
+  ;; review #3
+  (is (str/includes? (:text (mw/timeout-answer 500)) "may still finish"))
+  (let [r (mw/timeout-answer 500 "/w/0000000000009.world")]
+    (is (= "0000000000009" (get-in r [:data "undo_id"])))
+    (is (str/includes? (:text r) "0000000000009"))))
+
+(deftest restore-target-reads-any-id-test
+  ;; review #4: a number, and blank as none
+  (let [es [{:path "/w/1795001234567.world" :kind :agent}]]
+    (is (= "/w/1795001234567.world" (:path (mw/restore-target es 1795001234567))))
+    (is (= "/w/1795001234567.world" (:path (mw/restore-target es " "))) "blank reads as no id")))

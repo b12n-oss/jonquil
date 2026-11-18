@@ -96,10 +96,12 @@
 (defn- mcp-world!
   "The MCP world tools' hook (UF7), GTK thread. op :save saves into the
   agent's own list; op :restore brings back args' :id, or the agent's
-  newest, saving what's there first. The person sees what Save World and
+  newest, saving what's there first (args' :on-first-path hears where, at
+  once; that save is kind :agent-before-restore, kept apart from the
+  person's own before-restore saves). The person sees what Save World and
   Restore World would say. on-done (any thread) gets world-ops' answer,
   {:answer a} when there's nothing to restore, or {:unsupported true}."
-  [{:keys [set-status!] :as ctx} op {:keys [id]} on-done]
+  [{:keys [set-status!] :as ctx} op {:keys [id on-first-path]} on-done]
   (if-let [e (world-ev ctx)]
     (let [dir (world-dir! ctx)]
       (case op
@@ -110,7 +112,8 @@
                    (if answer
                      (on-done {:answer answer})
                      (do (set-status! "; An agent is restoring a world: saving what you have first...")
-                         (world-ops/restore! {:ev e :dir dir :path path}
+                         (world-ops/restore! {:ev e :dir dir :path path :first-kind :agent-before-restore
+                                              :on-first-path on-first-path}
                                              (fn [a]
                                                (on-gui! (fn [] (restore-reported! ctx true a)))
                                                (on-done a))))))))

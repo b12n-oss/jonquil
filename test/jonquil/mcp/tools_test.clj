@@ -787,3 +787,15 @@
     (spit (io/file dir ".jonquil.edn") "{:dialect :clj}")
     (is (= "unsupported" (status (call "jonquil_world_save" {}))))
     (is (= "unsupported" (status (call "jonquil_world_restore" {}))))))
+
+(deftest world-folder-is-the-windows
+  ;; review #1: a folder with no project marker, and a subfolder, use the
+  ;; folder a window opened on them would use
+  (let [plain (temp-dirs/temp-dir! "jonquil-mcp-world-plain-")
+        settings (str (io/file (temp-dirs/temp-dir! "jonquil-mcp-world-s-") "settings.edn"))
+        call (:call (tools/make-tools {:dir (str plain) :settings-path settings}))]
+    (spit (io/file plain ".jonquil.edn") "{:runtime :in-process}")
+    (call "jonquil_eval" {"code" "(def uf7-plain 1)"})
+    (is (= "ok" (status (call "jonquil_world_save" {}))))
+    (is (= 1 (count (jonquil.world/entries (jonquil.world/world-dir settings (ft/root-for {:dir (str plain)})))))
+        "the window's folder for that directory, not the shared no-folder one")))
