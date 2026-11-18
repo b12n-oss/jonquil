@@ -50,9 +50,10 @@
           (recur (rest tops) after (conj acc entry)))
         acc))))
 
-(defn- ident
-  "The [head name] a key defines, (def NAME ...) or any def-like head, or
-  nil: what a later run of the same definition replaces."
+(defn ident
+  "The [head name] a key defines, (def NAME ...) or any def-like head, with
+  ^metadata skipped, or nil: what a later run of the same definition
+  replaces. Public for jonquil.mcp.changed, whose forms are named by it."
   [key]
   (when-let [i (str/index-of key "(")]
     (let [[head & more] (rest (str/split (subs key i) #" "))]

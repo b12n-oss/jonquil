@@ -227,6 +227,7 @@
     jonquil.mcp.window
     jonquil.mcp.listen
     jonquil.mcp.result
+    jonquil.mcp.changed
     jonquil.mcp.frames
     jonquil.test-run
     jonquil.describe-run
