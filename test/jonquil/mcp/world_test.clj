@@ -1,6 +1,6 @@
 (ns jonquil.mcp.world-test
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [jonquil.mcp.world :as mw]))
 
 (def ^:private id "0001794978573311")
