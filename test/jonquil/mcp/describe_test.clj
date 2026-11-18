@@ -92,3 +92,18 @@
     (is (= :agent (:kind e)))
     (is (= "Claude Code proposed change set idea" (:summary e))))
   (is (:error? (call "jonquil_change_set_propose" {"name" "idea"} {:text "Refused: x." :error? true}))))
+
+(deftest changed-rows
+  (let [e (call "jonquil_changed" {} {:text "x" :error? false :tab-id 3})]
+    (is (= :agent-read (:kind e)))
+    (is (= "Claude Code listed changed forms in tab 3" (:summary e))))
+  (is (= "Claude Code listed changed forms in src/a.clj"
+         (:summary (call "jonquil_changed" {"path" "src/a.clj"} {:text "x" :error? false}))))
+  (let [e (call "jonquil_run_changed" {} {:text "; Running 2 changed forms\n=> #'a/g" :error? false :tab-id 3})]
+    (is (= :agent (:kind e)))
+    (is (= "Claude Code ran 2 changed forms in tab 3" (:summary e))))
+  (is (= "Claude Code ran 1 changed form in tab 3"
+         (:summary (call "jonquil_run_changed" {} {:text "; Running 1 changed form\n=> 1" :error? false :tab-id 3}))))
+  (let [e (call "jonquil_run_changed" {} {:text "Nothing has changed since the last run." :error? false :tab-id 3})]
+    (is (= :agent-read (:kind e)))
+    (is (= "Claude Code found nothing to run in tab 3" (:summary e)))))

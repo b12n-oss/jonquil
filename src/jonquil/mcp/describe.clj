@@ -13,6 +13,18 @@
 
 (defn- read-of [what] {:kind :agent-read :what (str "read " what)})
 
+(defn- where [args r] (or (arg args "path") (tab r)))
+
+(defn- run-changed-row
+  "jonquil_run_changed's row: how many forms it ran, from the answer's
+  first line (jonquil.mcp.changed/sent-line), or a read when there was
+  nothing to run."
+  [args r]
+  (if-let [[_ n] (re-find #"^; Running (\d+) changed form" (str (:text r)))]
+    {:kind :agent :what (str "ran " n " changed form" (when (not= "1" n) "s") " in " (where args r))
+     :tab? true :detail (messages/cap-text (str (:text r)))}
+    {:kind :agent-read :what (str "found nothing to run in " (where args r)) :tab? true}))
+
 (def ^:private rows
   "tool -> (fn [args result] {:kind :what & [:detail :target]}); :what
   follows the client's name in the summary."
@@ -42,6 +54,8 @@
    "jonquil_read_tab" (fn [_ r] (assoc (read-of (tab r)) :tab? true))
    "jonquil_console" (fn [_ _] (read-of "the console"))
    "jonquil_frames" (fn [_ _] (read-of "the last error's frames"))
+   "jonquil_changed" (fn [args r] {:kind :agent-read :what (str "listed changed forms in " (where args r)) :tab? true})
+   "jonquil_run_changed" run-changed-row
    "jonquil_doc" (fn [args _] (read-of (str "the docs for " (arg args "symbol"))))
    "jonquil_complete" (fn [args _] (read-of (str "completions for " (arg args "prefix"))))
    "jonquil_project" (fn [_ _] (read-of "the project"))
