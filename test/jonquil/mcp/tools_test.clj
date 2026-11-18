@@ -726,3 +726,13 @@
   (let [{:keys [call] :as e} (changed-env)]
     (is (thrown-with-msg? Exception #"No such file" (call "jonquil_changed" {"path" (file-of e "nope.clj")})))
     (is (thrown-with-msg? Exception #"Not a file" (call "jonquil_run_changed" {"path" (file-of e "src")})))))
+
+(deftest run-changed-prefix-only-when-it-ran
+  ;; review #5: a timeout ran nothing to the end, so no "; Running" line
+  (let [{:keys [call] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (call "jonquil_run_file" {"path" p})
+    (spit p (str uf6-text "(loop [] (recur))\n"))
+    (let [r (call "jonquil_run_changed" {"path" p "timeout_ms" 300})]
+      (is (= "timeout" (status r)))
+      (is (not (str/starts-with? (:text r) "; Running"))))))

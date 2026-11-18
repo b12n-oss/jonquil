@@ -846,3 +846,11 @@
     (is (true? (:error? r)))
     (is (= "another project's tab" (:text r)))
     (is (= "refused" (get-in r [:data "status"])))))
+
+(deftest window-run-changed-prefix-only-when-it-ran
+  (let [ui (changed-ui :mcp-run-changed!* (fn [_ notify]
+                                            (notify {:done {:result {:status :notice :text "; a.b isn't loaded"} :output ""}})
+                                            (fn [] "")))
+        r (call (tools-for ui) "jonquil_run_changed" {"id" 1})]
+    (is (= "notice" (get-in r [:data "status"])))
+    (is (not (str/starts-with? (:text r) "; Running")))))

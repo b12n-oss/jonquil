@@ -107,3 +107,10 @@
   (let [e (call "jonquil_run_changed" {} {:text "Nothing has changed since the last run." :error? false :tab-id 3})]
     (is (= :agent-read (:kind e)))
     (is (= "Claude Code found nothing to run in tab 3" (:summary e)))))
+
+(deftest run-changed-refusal-row
+  ;; review #5: a refusal or timeout isn't "found nothing to run"
+  (let [e (call "jonquil_run_changed" {} {:text "An evaluation is already running." :error? true :tab-id 3})]
+    (is (= :agent (:kind e)))
+    (is (= "Claude Code tried to run the changed forms in tab 3, which failed: An evaluation is already running."
+           (:summary e)))))

@@ -362,7 +362,7 @@
                             :opts {:run? false :owner :repl :ns-source text} :args args})]
         (when (ok? r)
           (swap! (:changed env) update-in [p :ran] changed/record code :form))
-        (update r :text #(str (mcp-changed/sent-line (count forms)) "\n" %))))))
+        (mcp-changed/with-sent-line r (count forms))))))
 
 (defn quiet-opts
   "Options for evaluating Jonquil's own code on evaluator e: a REPL entry,

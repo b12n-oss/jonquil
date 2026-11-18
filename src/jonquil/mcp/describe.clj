@@ -17,13 +17,16 @@
 
 (defn- run-changed-row
   "jonquil_run_changed's row: how many forms it ran, from the answer's
-  first line (jonquil.mcp.changed/sent-line), or a read when there was
-  nothing to run."
+  first line (jonquil.mcp.changed/sent-line); a failed try (refused,
+  timed out) when there's no such line and the answer is an error; else
+  a read, as there was nothing to run."
   [args r]
   (if-let [[_ n] (re-find #"^; Running (\d+) changed form" (str (:text r)))]
     {:kind :agent :what (str "ran " n " changed form" (when (not= "1" n) "s") " in " (where args r))
      :tab? true :detail (messages/cap-text (str (:text r)))}
-    {:kind :agent-read :what (str "found nothing to run in " (where args r)) :tab? true}))
+    (if (:error? r)
+      {:kind :agent :what (str "tried to run the changed forms in " (where args r)) :tab? true}
+      {:kind :agent-read :what (str "found nothing to run in " (where args r)) :tab? true})))
 
 (def ^:private rows
   "tool -> (fn [args result] {:kind :what & [:detail :target]}); :what

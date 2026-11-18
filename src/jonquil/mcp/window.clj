@@ -647,10 +647,7 @@
       (empty? forms) (changed-answer id forms)
       :else
       (let [r (await! args (fn [notify] ((:mcp-run-changed!* ui) id notify)))]
-        (with-tab (cond-> r
-                    (not (#{"never-ran" "no-changes" "refused"} (get-in r [:data "status"])))
-                    (update :text #(str (mcp-changed/sent-line (count forms)) "\n" %)))
-          id)))))
+        (with-tab (mcp-changed/with-sent-line r (count forms)) id)))))
 
 (defn- frame-eval!
   "jonquil_eval with a frame over the window's runtime, through the ui's

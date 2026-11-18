@@ -90,6 +90,15 @@
   [n]
   (str "; Running " n " changed form" (when (not= 1 n) "s")))
 
+(defn with-sent-line
+  "jonquil_run_changed's eval answer r with (sent-line n) first, when the
+  forms ran (ok or error): a refusal, notice or timeout ran nothing to
+  the end, so it keeps its own text."
+  [r n]
+  (cond-> r
+    (#{"ok" "error"} (get-in r [:data "status"]))
+    (update :text #(str (sent-line n) "\n" %))))
+
 ;; --- the answer --------------------------------------------------------------
 
 (defn- form-text
