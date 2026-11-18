@@ -59,6 +59,11 @@
    "jonquil_frames" (fn [_ _] (read-of "the last error's frames"))
    "jonquil_changed" (fn [args r] {:kind :agent-read :what (str "listed changed forms in " (where args r)) :tab? true})
    "jonquil_run_changed" run-changed-row
+   "jonquil_world_save" (fn [_ r] {:kind :agent :what "saved the world" :detail (messages/cap-text (str (:text r)))})
+   "jonquil_world_restore" (fn [_ r]
+                             (if (= "no-world" (get-in r [:data "status"]))
+                               {:kind :agent-read :what "found no world to restore"}
+                               {:kind :agent :what "restored a world" :detail (messages/cap-text (str (:text r)))}))
    "jonquil_doc" (fn [args _] (read-of (str "the docs for " (arg args "symbol"))))
    "jonquil_complete" (fn [args _] (read-of (str "completions for " (arg args "prefix"))))
    "jonquil_project" (fn [_ _] (read-of "the project"))

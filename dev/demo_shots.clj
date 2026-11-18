@@ -1217,7 +1217,8 @@
    [:line-counts panels/scene-line-counts]
    [:processes panels/scene-processes]
    [:messages panels/scene-messages]
-   [:mcp-changed panels/scene-mcp-changed]])
+   [:mcp-changed panels/scene-mcp-changed]
+   [:mcp-world panels/scene-mcp-world]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 

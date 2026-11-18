@@ -8,6 +8,7 @@
             [jonquil.file-tree :as ft]
             [jonquil.mcp.tools :as tools]
             [jonquil.runtime-registry :as registry]
+            [jonquil.world]
             [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)
@@ -29,10 +30,10 @@
 
 (defn- call [name args] ((:call (:t @env)) name args))
 
-(deftest defs-name-thirteen-tools
+(deftest defs-name-fifteen-tools
   (is (= ["jonquil_eval" "jonquil_run_file" "jonquil_test" "jonquil_check_brackets"
           "jonquil_doc" "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
-          "jonquil_changed" "jonquil_run_changed" "jonquil_project"]
+          "jonquil_changed" "jonquil_run_changed" "jonquil_world_save" "jonquil_world_restore" "jonquil_project"]
          (map #(get % "name") (:defs (:t @env)))))
   (is (every? #(vector? (get-in % ["inputSchema" "required"])) (:defs (:t @env)))))
 
@@ -736,3 +737,65 @@
     (let [r (call "jonquil_run_changed" {"path" p "timeout_ms" 300})]
       (is (= "timeout" (status r)))
       (is (not (str/starts-with? (:text r) "; Running"))))))
+
+;; --- UF7: jonquil_world_save and jonquil_world_restore ------------------------
+
+(defn- world-env []
+  (let [dir (temp-dirs/temp-dir! "jonquil-mcp-world-")
+        settings (str (io/file (temp-dirs/temp-dir! "jonquil-mcp-world-settings-") "settings.edn"))]
+    (spit (io/file dir "deps.edn") "{}")
+    (spit (io/file dir ".jonquil.edn") "{:runtime :in-process}")
+    {:dir (str dir) :settings settings
+     :call (:call (tools/make-tools {:dir (str dir) :settings-path settings}))}))
+
+(defn- value [r] (get-in r [:data "value"]))
+
+(deftest world-save-then-restore
+  (let [{:keys [call]} (world-env)]
+    (is (= "no-world" (status (call "jonquil_world_restore" {}))))
+    (call "jonquil_eval" {"code" "(def uf7-data (atom [1 2]))"})
+    (let [s (call "jonquil_world_save" {})
+          id (get-in s [:data "id"])]
+      (is (= "ok" (status s)))
+      (is (string? id))
+      (call "jonquil_eval" {"code" "(reset! uf7-data :broken)"})
+      (let [r (call "jonquil_world_restore" {})]
+        (is (= "ok" (status r)))
+        (is (= "[1 2]" (value (call "jonquil_eval" {"code" "@uf7-data"}))))
+        (testing "undo_id brings back what was there before the restore"
+          (is (= "ok" (status (call "jonquil_world_restore" {"id" (get-in r [:data "undo_id"])}))))
+          (is (= ":broken" (value (call "jonquil_eval" {"code" "@uf7-data"})))))
+        (testing "an id from jonquil_world_save"
+          (is (= "ok" (status (call "jonquil_world_restore" {"id" id}))))
+          (is (= "[1 2]" (value (call "jonquil_eval" {"code" "@uf7-data"})))))))))
+
+(deftest world-restore-never-a-persons-save
+  (let [{:keys [call dir settings]} (world-env)
+        wdir (jonquil.world/world-dir settings dir)
+        person (jonquil.world/entry-path wdir 1000)]
+    (io/make-parents (io/file person))
+    (spit person "w")
+    (jonquil.world/record! person {:at 1000 :kind :save :saved 1 :placeholders 0})
+    (is (= "no-world" (status (call "jonquil_world_restore" {}))) "the person's newest isn't the agent's")
+    (let [r (call "jonquil_world_restore" {"id" (jonquil.world/entry-id {:path person})})]
+      (is (= "unknown-id" (status r)))
+      (is (true? (:error? r))))))
+
+(deftest world-unsupported-dialect
+  (let [dir (temp-dirs/temp-dir! "jonquil-mcp-world-clj-")
+        call (:call (tools/make-tools {:dir (str dir) :settings-path (str (io/file dir "settings.edn"))}))]
+    (spit (io/file dir ".jonquil.edn") "{:dialect :clj}")
+    (is (= "unsupported" (status (call "jonquil_world_save" {}))))
+    (is (= "unsupported" (status (call "jonquil_world_restore" {}))))))
+
+(deftest world-folder-is-the-windows
+  ;; review #1: a folder with no project marker, and a subfolder, use the
+  ;; folder a window opened on them would use
+  (let [plain (temp-dirs/temp-dir! "jonquil-mcp-world-plain-")
+        settings (str (io/file (temp-dirs/temp-dir! "jonquil-mcp-world-s-") "settings.edn"))
+        call (:call (tools/make-tools {:dir (str plain) :settings-path settings}))]
+    (spit (io/file plain ".jonquil.edn") "{:runtime :in-process}")
+    (call "jonquil_eval" {"code" "(def uf7-plain 1)"})
+    (is (= "ok" (status (call "jonquil_world_save" {}))))
+    (is (= 1 (count (jonquil.world/entries (jonquil.world/world-dir settings (ft/root-for {:dir (str plain)})))))
+        "the window's folder for that directory, not the shared no-folder one")))

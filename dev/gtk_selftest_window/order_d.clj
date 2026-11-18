@@ -41,6 +41,7 @@
    messages-rows/row-messages-selection-stays
    messages-rows/row-messages-unread-click-opens
    world-rows/row-world-save-restore
+   world-rows/row-world-agent-tools
    replay-rows/row-replay-records-console
    replay-rows/row-replay-records-saved-run
    replay-rows/row-replay-skips-errors

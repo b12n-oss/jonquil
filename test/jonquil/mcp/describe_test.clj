@@ -114,3 +114,14 @@
     (is (= :agent (:kind e)))
     (is (= "Claude Code tried to run the changed forms in tab 3, which failed: An evaluation is already running."
            (:summary e)))))
+
+(deftest world-rows
+  (let [e (call "jonquil_world_save" {} {:text "Saved 2 vars as world 7." :error? false})]
+    (is (= :agent (:kind e)))
+    (is (= "Claude Code saved the world" (:summary e))))
+  (is (= "Claude Code restored a world"
+         (:summary (call "jonquil_world_restore" {} {:text "Restored 2 vars." :error? false :data {"status" "ok"}}))))
+  (let [e (call "jonquil_world_restore" {} {:text "No world saved by an agent for this project yet." :error? false
+                                            :data {"status" "no-world"}})]
+    (is (= :agent-read (:kind e)))
+    (is (= "Claude Code found no world to restore" (:summary e)))))

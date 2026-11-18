@@ -70,6 +70,7 @@
     jonquil.mcp.result-test
     jonquil.mcp.changed-test
     jonquil.mcp.frames-test
+    jonquil.mcp.world-test
     jonquil.test-run-test
     jonquil.describe-run-test
     jonquil.mcp.describe-test
@@ -80,6 +81,7 @@
     jonquil.trace-rt-test
     jonquil.world-rt-test
     jonquil.world-test
+    jonquil.world-ops-test
     jonquil.results-rt-test
     jonquil.results-test
     jonquil.keymap-test
