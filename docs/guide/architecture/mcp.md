@@ -14,7 +14,7 @@ one, so the headless entry never opens a window:
   into a response map or nil. `serve!` loops over a line reader and a line
   writer it is handed, skips blank lines and guards every message, so one bad
   request never ends the loop or mislabels its error.
-- `jonquil.mcp.tools` holds the eleven tool definitions and `make-tools`. It
+- `jonquil.mcp.tools` holds the thirteen tool definitions and `make-tools`. It
   keeps one evaluator per project selection (the same `.jonquil.edn` choice
   the window makes) and registers each with `jonquil.runtime-registry`, so
   `registry/stop-all!` stops them. An evaluation that passes its deadline is
@@ -34,8 +34,16 @@ one, so the headless entry never opens a window:
   the refusals (busy, paused, unsupported). It calls no evaluator itself:
   both tables call `Frames` and hand the result over, and neither call
   records an error or touches `*1`.
+- `jonquil.mcp.changed` makes the answers of `jonquil_changed` and
+  `jonquil_run_changed` for both tables, from `jonquil.changed` and
+  `change-sets/from-changed`: the forms, the code to send and the
+  `never-ran` and `no-changes` answers. Headless, `make-tools` keeps a record
+  per file in its env, `{path {:e :ran :last-run}}`. `jonquil_run_file`
+  writes it after a run that ends `ok`, `jonquil_run_changed` adds the keys
+  of the forms it sent, and the record only counts while `:e` is still the
+  project's cached evaluator, so an evicted runtime reads as `never-ran`.
 
-**Window mode.** `jonquil.mcp.window` builds the twenty-five tools for
+**Window mode.** `jonquil.mcp.window` builds the twenty-seven tools for
 `jonquil --mcp --window`. It never requires `jonquil.gtk.window`. It receives
 the window's `ui` map (the `:on-ready` map) and touches it only through
 `gui-call`, a thunk handed to the GTK thread with a bounded deref, so the
@@ -54,9 +62,14 @@ The frames tools go through `:mcp-frames!*` and `:mcp-frame-eval!*`, which
 call the window evaluator's `Frames` directly, so the Frames panel and the
 console stay as they were. The debugger part adds `:mcp-paused?*`, read on
 the GTK thread, so they refuse while an evaluation is paused there.
+The changed-forms tools use two more keys. `:mcp-changed*` gives a tab's
+text, its ran set and its last-run text, read on the GTK thread, and
+`:mcp-run-changed!*` runs `win-run/mcp-run-changed!`, Run Changed Forms over
+any tab with a `notify`. Its `{:unchanged {:status :text}}` notify, for a tab
+that never ran or has nothing changed, maps to a result that isn't an error.
 
 **Listener and bridge.** `jonquil.mcp.listen` lets a window with
-`:mcp-listen? true` serve those twenty-five tools to a socket client. It binds
+`:mcp-listen? true` serve those twenty-seven tools to a socket client. It binds
 127.0.0.1 on an OS-picked port, accepts one connection at a time and runs
 `serve!` over it. It records the port in a per-window registry file
 (`<settings-dir>/mcp/<pid>.edn`), which `stop!` removes and startup

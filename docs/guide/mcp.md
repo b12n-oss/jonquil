@@ -11,12 +11,12 @@ claude mcp add jonquil -- jonquil --mcp /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp /path/to/project
 ```
 
-Eleven tools. Most take an optional `path` selecting the project (default
+Thirteen tools. Most take an optional `path` selecting the project (default
 `DIR`); `jonquil_run_file` requires a file `path`, and `jonquil_check_brackets`
 takes `text` or a `path`.
 
 <details>
-<summary><strong>The eleven tools</strong></summary>
+<summary><strong>The thirteen tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -30,6 +30,8 @@ takes `text` or a `path`.
 | `jonquil_vars` | A loaded namespace's vars, with arglists, first doc line, file and line |
 | `jonquil_apropos` | Loaded vars whose name contains some text, the program's own first |
 | `jonquil_frames` | The last error's call stack with each frame's locals; `jonquil_eval` can then run code in a frame |
+| `jonquil_changed` | The top-level forms edited since they last ran, each with its name, lines and old and new text |
+| `jonquil_run_changed` | Runs only those forms, in the file's namespace |
 | `jonquil_project` | The dialect, runtime and directory the other tools would use; starts nothing |
 
 </details>
@@ -223,6 +225,68 @@ A few things to know about them:
 - They only read a finished error. A paused evaluation (Break on error or a
   breakpoint) stays the person's to look at in the window.
 
+### Running only what changed
+
+After a file has run, an agent usually edits a form or two and only wants
+those to run again. `jonquil_changed` lists the top-level forms edited since
+they last ran, the same forms the [gutter marks](using-jonquil.md#changed-forms)
+in a tab, and `jonquil_run_changed` runs just those.
+
+Both take the file's `path`. `jonquil_changed` reads the file from disk on
+every call, so it sees edits an agent made with its own file tools, and it
+starts no runtime. Each form comes back with:
+
+- `name`, the symbol a `def`, `defn` or other def form makes, or null for any
+  other form
+- `line` and `end_line`, counted from 1
+- `text`, the form as it reads now
+- `before`, its text at the last whole run, or null for a form that wasn't
+  in the file then
+
+The text answer shows each form as a diff against `before`:
+
+```
+f  line 2-3
+- (defn f [] 1)
++ (defn f []
++   2)
+
+g (new)  line 5
++ (defn g [] 3)
+```
+
+Reindenting a form or editing its comments doesn't count as a change, and
+`(comment ...)` blocks are never listed.
+
+`jonquil_run_changed` sends the forms to the runtime as one evaluation, in
+the namespace of the file's `ns` form, and answers like `jonquil_eval` after
+a first line such as `; Running 2 changed forms`. It takes `timeout_ms` and
+`max_output_chars` too. When the forms run without an error they stop
+counting as changed. Their `before` still comes from the last whole run, so it
+only moves when `jonquil_run_file` runs the file again.
+
+| `status` | When |
+|---|---|
+| `ok` | `jonquil_changed`: the forms. `jonquil_run_changed`: they ran, and the rest of the answer is `jonquil_eval`'s |
+| `never-ran` | The file hasn't run in this runtime yet: run it once with `jonquil_run_file` |
+| `no-changes` | Nothing has changed since the last run |
+| `error`, `timeout`, ... | `jonquil_run_changed` only, as for `jonquil_eval` |
+
+`never-ran` and `no-changes` aren't errors. A run that fails, of the whole
+file or of the changed forms, leaves the record as it was, so the same forms
+are listed next time. A runtime that's replaced, as after a timeout stopped a
+stuck one, starts with no record, and the file reads as `never-ran` again.
+
+Over a window both tools take a tab `id` instead (the active tab by default)
+and compare against that tab's last Run, the way the gutter does, unsaved
+edits included. `jonquil_changed` changes nothing in the window.
+`jonquil_run_changed` does what Run Changed Forms does: the forms show on the
+console with their `; Running` line and their gutter marks clear. A tab from
+another project is refused, as `jonquil_run` refuses it, and a tab that
+never ran answers "Run the tab once first (jonquil_run)."
+
+![A tab with two forms marked in the gutter as changed, and the Messages panel listing what Claude Code did: it listed the changed forms in the tab, then ran 2 changed forms](../images/mcp-changed.png)
+
 ### Structured results
 
 The tools that evaluate (`jonquil_eval` and `jonquil_run_file` here,
@@ -255,11 +319,11 @@ claude mcp add jonquil -- jonquil --mcp --window /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/project
 ```
 
-With `--window` the server offers twenty-five tools (headless keeps eleven), acting
+With `--window` the server offers twenty-seven tools (headless keeps thirteen), acting
 on the live window:
 
 <details>
-<summary><strong>The twenty-five window tools</strong></summary>
+<summary><strong>The twenty-seven window tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -278,6 +342,7 @@ on the live window:
 | `jonquil_complete` | Up to 50 completion candidates, one per line |
 | `jonquil_namespaces`, `jonquil_vars`, `jonquil_apropos` | As [headless](#asking-whats-loaded), without `path`. They run quietly: nothing shows on the console |
 | `jonquil_frames` | As [headless](#reading-the-last-error), without `path`, and quiet too. `jonquil_eval` with a `frame` runs quietly as well, unlike a plain `jonquil_eval` |
+| `jonquil_changed`, `jonquil_run_changed` | As [headless](#running-only-what-changed), over a tab `id` (the active tab without it). `jonquil_run_changed` runs the forms on the console as Run Changed Forms does |
 | `jonquil_check_brackets` | "ok", or the sentence naming the first problem |
 | `jonquil_project` | The window's live dialect selection: label, runtime, directory, source, warnings |
 | `jonquil_plugins_list` | One line per plugin: version, loaded or disabled, effects, pending proposal, doc |
@@ -366,7 +431,7 @@ A plugin gives agents tools in `:mcp-tools`:
 ```
 
 A window serving MCP (`--mcp --window`, or one you attach to) serves each live
-plugin's tools as `plugin_<id>_<name>` after its twenty-five: `plugin_smoke-t_twice`
+plugin's tools as `plugin_<id>_<name>` after its twenty-seven: `plugin_smoke-t_twice`
 for plugin `smoke-t` above.
 
 - Argument types: `string`, `integer`, `number`, `boolean`. A missing or
@@ -393,7 +458,7 @@ listening on in `settings.edn`:
 {:mcp-listen? true}
 ```
 
-That window serves the same twenty-five tools on a socket bound to 127.0.0.1, on
+That window serves the same twenty-seven tools on a socket bound to 127.0.0.1, on
 a port the OS picks, to one client at a time. It publishes the port in
 `mcp/<pid>.edn` beside `settings.edn`. Then register the bridge:
 
