@@ -113,11 +113,49 @@ ahead of Clojure's and the libraries'.
   can't say where it is.
 - Shift+Return shows the var's documentation, as Docs for the Symbol does.
 
-The list is asked for fresh each time, so a var you defined a moment ago is
-in it, and asking prints nothing in the console. The popover draws the first
-200 matches and says how many more there are, so type a little more to
-reach the rest. It works for Jolt and JVM Clojure. A busy runtime gets a
-note in the status bar instead, so try again once the evaluation finishes.
+Jonquil asks the runtime for the list each time, so a var you defined a
+moment ago is in it, and the query prints nothing in the console. The
+popover draws the first 200 matches and says how many more there are; type
+a little more to reach the rest. It works for Jolt and JVM Clojure. When the
+runtime is busy, the status bar says so instead, and you can try again once
+the evaluation finishes.
+
+### Browsing namespaces
+
+The Namespaces panel shows what your program has loaded without asking you
+for a name first. Open it with Cmd/Ctrl+Alt+0 or **Namespaces** in the View
+menu's panel list. It lists every loaded namespace with how many vars it
+holds, your project's own at the top. Clojure's and the libraries' namespaces
+sit in a **Libraries** group below them, folded until you press Return on it
+or click it. A namespace counts as yours when its file is in the project, so
+one with no file (`user`, say) goes under Libraries.
+
+![The Namespaces panel after shop.clj and cart.clj ran: demo.cart with 1 var and demo.shop with 5 at the top, a folded Libraries group of 314 below them, and the footer counting 2 own namespaces and 314 from libraries](../images/namespaces.png)
+
+- Return on a namespace steps into it and lists its vars, each with its
+  arglists and the first line of its doc. Private vars are dimmed, and a
+  macro is marked "macro". The line above the list names the namespace and
+  counts its vars. Backspace, or a click on that line, steps back out.
+- Return on a var goes to its definition, the same way Find a Var by Name
+  does.
+- Shift+Return on a var shows its value in the Inspector. It evaluates
+  `(deref (var ns/name))` the way Inspect Form evaluates a form, so the
+  evaluation shows in the console and `*1` holds the value afterwards. A
+  macro, or a var with no value yet, gets a note in the status bar instead.
+- The filter at the top narrows the rows shown by name, ignoring case, and
+  opens the Libraries group while it has text. Return in the filter acts on
+  the first row and Down moves into the list.
+
+![The panel stepped into demo.shop: catalog, price with its arglists and doc, a dimmed private tax-rate, total, and the with-cart macro, with price selected and its full name, doc and file:line in the footer](../images/namespaces-vars.png)
+
+![After Shift+Return on catalog: the console shows (deref (var demo.shop/catalog)) and its map, and the Inspector shows the map's three items with their :cents and :stock](../images/namespaces-inspect.png)
+
+The panel asks the runtime when it opens, when you press ⟳, and a moment
+after each evaluation finishes while it's on screen, so a `defn` you just ran
+shows up. Asking prints nothing in the console. When the runtime is busy,
+the footer says so and the rows stay as they were. If a namespace goes away
+while you're in it, you land back at the top with a note saying which one.
+Close, at the bottom, hides the panel. It works for Jolt and JVM Clojure.
 
 ### Rename
 
@@ -158,10 +196,10 @@ line, always goes to the evaluator.
 The panels on the right share one place, so opening one hides the one that
 was there. The palette lists **Switch to panel: name** for each panel you've
 had open in this window, the one you saw last first, leaving out the one on
-screen. Cmd/Ctrl+Alt+1 to 8 each go to one panel: 1 the Inspector, 2
-Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages and 8
-Processes (Cmd/Ctrl+Alt+9 shows a doc in [the docs panel](#the-docs-panel)). Both focus the panel
-when it's showing. Otherwise Frames, Trace and Plugins open the way their own
+screen. Cmd/Ctrl+Alt+1 to 8 and 0 each go to one panel: 1 the Inspector, 2
+Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages, 8
+Processes and 0 [Namespaces](#browsing-namespaces) (Cmd/Ctrl+Alt+9 shows a doc in [the docs panel](#the-docs-panel)). Both focus the panel
+when it's showing. Otherwise Frames, Trace, Plugins and Namespaces open the way their own
 commands do, asking for the last error, the recorded calls or the plugin
 list as they are now. The Inspector, Source and Locations come back with
 what they showed when it still holds. Until something fills them, their
@@ -548,9 +586,9 @@ v0.8.24 or later, jolt-lang/jolt#1476). Return or a click on a local opens its v
 the inspector, where it lives, so even a huge or lazy value is never copied out.
 A local's row prints at most 8 items, 3 levels deep, and 100 characters. A lazy seq nothing has realized yet reads `<lazy seq, not realized>`, because printing it would run your code again (a `(map save! rows)` would save the rows again); opening it in the inspector realizes it.
 
-An agent connected over MCP reads the same frames with `jonquil_frames`, and
-can run code in one with `jonquil_eval`. It does that quietly, so the panel
-and the console don't change (see [Reading the last error](mcp.md#reading-the-last-error)).
+An agent connected over MCP reads the same frames with `jonquil_frames` and
+can run code in one with `jonquil_eval`, without changing the panel or the
+console (see [Reading the last error](mcp.md#reading-the-last-error)).
 
 ### Evaluating in a frame
 

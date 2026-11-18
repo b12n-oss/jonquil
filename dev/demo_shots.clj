@@ -1216,6 +1216,7 @@
    [:trace panels/scene-trace]
    [:line-counts panels/scene-line-counts]
    [:processes panels/scene-processes]
+   [:namespaces panels/scene-namespaces]
    [:messages panels/scene-messages]
    [:mcp-changed panels/scene-mcp-changed]
    [:mcp-world panels/scene-mcp-world]])

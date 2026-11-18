@@ -289,11 +289,11 @@ apart from yours, so restoring never pushes out a save you made. Restore
 World brings back the newest save you made. **Restore an Earlier World**
 lists them all in the palette ("Restore World saved 12 minutes ago (3
 vars)", or "saved before a restore, ...") to pick one, which is how you
-undo a restore you didn't mean. An agent connected over MCP has a list of
-its own, with up to 10 saves too, so its saves never push out yours, and
-Restore World never picks one; Restore an Earlier World shows them as
-"saved by an agent", and the saves its restores made first as "saved before
-an agent's restore" (see [Saving and restoring the session's data](mcp.md#saving-and-restoring-the-sessions-data)). What the save before a restore could only
+undo a restore you didn't mean. An agent connected over MCP keeps a list of
+its own, also up to 10 saves, so its saves never push out yours and Restore
+World never picks one. Restore an Earlier World shows them as "saved by an
+agent", and the saves its restores made first as "saved before an agent's
+restore" (see [Saving and restoring the session's data](mcp.md#saving-and-restoring-the-sessions-data)). What the save before a restore could only
 keep as a placeholder, an open file say, is named in the console, since
 undoing the restore can't bring that back either.
 

@@ -259,3 +259,29 @@
   (let [code (dr/apropos-snippet {:query ""})]
     (is (clojure.string/includes? code ":let [nf"))
     (is (not (clojure.string/includes? code ":ns-file (file-of")))))
+
+;; --- UF8 ---------------------------------------------------------------------
+
+(deftest vars-snippet-bound
+  (with-ns "uf8.fx.b" "(declare later) (def x 1)"
+    (fn []
+      (let [rows (:vars (value (dr/vars-snippet {:ns "uf8.fx.b"})))]
+        (is (false? (:bound? (row rows :name "later"))))
+        (is (true? (:bound? (row rows :name "x"))))))))
+
+(deftest vars-answer-ignores-bound
+  (let [v (update vars-value :vars (fn [rs] (mapv #(assoc % :bound? true) rs)))
+        {:keys [data]} (dr/vars-answer v (assoc opts :ns "demo.core"))]
+    (is (not-any? #(contains? % "bound") (get data "vars")))))
+
+(deftest query-answer-sentences
+  (let [ok (fn [p] {:done {:result {:status :ok :printed (pr-str p)}}})]
+    (is (= [:problem "; T: the runtime is busy. Try again when it's done."]
+           (dr/query-answer {:busy "; Busy."} "; T")))
+    (is (= [:value {:a 1}] (dr/query-answer (ok "{:a 1}") "; T")))
+    (is (= [:problem "; T: the runtime's answer couldn't be read."] (dr/query-answer (ok "{:a") "; T")))
+    (is (= [:problem "; T: Error [ex]: boom"]
+           (dr/query-answer {:done {:result {:status :error :error-text "Error [ex]: boom\nmore"}}} "; T")))
+    (is (= [:problem "; T: stopped before the runtime answered."]
+           (dr/query-answer {:done {:result {:status :interrupted}}} "; T")))
+    (is (= [:problem "; T: Not loaded."] (dr/query-answer {:done {:result {:status :notice :text "Not loaded."}}} "; T")))))

@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.order-d
-  "Rows 339 to 448 of the window self-test, in the order they run.
+  "Rows 339 to 449 of the window self-test, in the order they run.
   dev/gtk_selftest_window.clj joins the five parts order-a to order-e
   into its row list."
   (:require [gtk-selftest-window.change-sets :as change-sets-rows]
@@ -8,6 +8,7 @@
             [gtk-selftest-window.docs-panel :as docs-panel-rows]
             [gtk-selftest-window.gutter :as gutter-rows]
             [gtk-selftest-window.messages :as messages-rows]
+            [gtk-selftest-window.namespaces :as namespaces-rows]
             [gtk-selftest-window.panels :as panel-rows]
             [gtk-selftest-window.processes :as processes-rows]
             [gtk-selftest-window.prompt :as prompt]
@@ -20,6 +21,7 @@
   [panel-rows/row-panel-key-says-what-fills
    panel-rows/row-panel-stale-panels-leave
    processes-rows/row-processes-interrupt-and-forget
+   namespaces-rows/row-namespaces-panel
    change-sets-rows/row-change-set-make-apply-revert
    change-sets-rows/row-change-set-agent-proposal
    docs-panel-rows/row-docs-panel-show-follow-back-bookmark

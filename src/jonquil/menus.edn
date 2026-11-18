@@ -81,6 +81,7 @@
                            {:command :panel/plugins :label "Plugins"}
                            {:command :panel/messages :label "Messages"}
                            {:command :panel/processes :label "Processes"}
+                           {:command :panel/namespaces :label "Namespaces"}
                            {:command :pages/show :label "Documentation"}]]}]
              [{:command :focus/toggle :label "Switch between Editor and Console"}
               {:command :tab/next :label "Next Tab"}

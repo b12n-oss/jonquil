@@ -74,6 +74,7 @@
    :panel/locations [:panel-focus-fn :locations] :panel/frames [:panel-focus-fn :debugger]
    :panel/trace [:panel-focus-fn :trace] :panel/plugins [:panel-focus-fn :plugins]
    :panel/messages [:panel-focus-fn :messages] :panel/processes [:panel-focus-fn :processes]
+   :panel/namespaces [:panel-focus-fn :namespaces]
    :processes/show [:processes-show-fn]
    :change-set/make [:change-set-make-fn] :change-set/browse [:change-set-list-fn]
    :help/find-var [:find-var-fn]

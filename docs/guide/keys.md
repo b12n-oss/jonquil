@@ -159,6 +159,7 @@ it. All of them are under Edit > Structure and in the command palette.
 | Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
 | Escape | Source panel | Close the panel |
 | Cmd/Ctrl+Alt+1 to 8 | anywhere in the window | Focus the Inspector, Source, Locations, Frames, Trace, Plugins, Messages or Processes panel, bring it back, or open it ([Switching panels](help-and-inspector.md#switching-panels), [Messages](help-and-inspector.md#messages), [Processes](help-and-inspector.md#the-processes-panel)) |
+| Cmd/Ctrl+Alt+0 | anywhere in the window | Focus the Namespaces panel, or open it ([Browsing namespaces](help-and-inspector.md#browsing-namespaces)) |
 | Cmd/Ctrl+Alt+9 | anywhere in the window | Show the doc of the symbol at the caret in the docs panel, or focus the panel when there is none ([The docs panel](help-and-inspector.md#the-docs-panel)) |
 | [ or ] | docs panel | Back or forward through the pages shown |
 | Click on a symbol | docs panel | Open that symbol's doc as the next page |

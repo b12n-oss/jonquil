@@ -34,7 +34,8 @@
         [a cv* e sl bang*] @submit]
     (is (= (into (set (keys in)) #{:bang* :bottom-focus* :cv}) (set (keys w))))
     (is (= #{:view :scroll :failure* :after-eval* :recorder* :replay-root* :replay-tab*} (set (keys cv))))
-    (is (every? #(nil? @(% cv)) [:failure* :after-eval* :recorder* :replay-root* :replay-tab*]))
+    (is (every? #(nil? @(% cv)) [:failure* :recorder* :replay-root* :replay-tab*]))
+    (is (= {} @(:after-eval* cv)) "listeners keyed by part")
     (is (= 5 (count (set (map #(System/identityHashCode (% cv)) [:failure* :after-eval* :recorder* :replay-root* :replay-tab*])))))
     (is (nil? (@(:bang* w) "x")))
     (is (and (identical? at a) (identical? ev* e) (= ::sl sl) (identical? (:bang* w) bang*)))
@@ -82,3 +83,11 @@
       ((:apply-op! o) ::r)
       ((:repl-complete-fn w)))
     (is (= [[:status ::sl "m"] [:apply {:view ::view} ::r] [:complete {:view ::view} true ::rc ::sl]] @log))))
+
+(deftest after-eval-runs-every-listener
+  (let [log (atom [])
+        cv {:after-eval* (atom {:a (fn [] (swap! log conj :a) (throw (ex-info "boom" {})))
+                                :b (fn [] (swap! log conj :b))})}]
+    (win-run/after-eval! cv)
+    (is (= #{:a :b} (set @log)) "a throwing listener doesn't stop the others")
+    (is (nil? (win-run/after-eval! {:after-eval* (atom {})})))))

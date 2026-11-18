@@ -126,7 +126,9 @@ doesn't have to evaluate `(all-ns)` and read the printout back. Like
 the status `unsupported`. Only loaded code counts: a file that never ran
 doesn't show until it does. In a window, **Find a Var by Name…** in the Help
 menu runs the same query for you and lists the vars in the palette (see
-[Finding a var by name](help-and-inspector.md#finding-a-var-by-name)).
+[Finding a var by name](help-and-inspector.md#finding-a-var-by-name)), and
+the Namespaces panel shows the namespaces and their vars as these tools see
+them (see [Browsing namespaces](help-and-inspector.md#browsing-namespaces)).
 
 | Tool | Arguments |
 |---|---|
@@ -135,10 +137,11 @@ menu runs the same query for you and lists the vars in the palette (see
 | `jonquil_apropos` | `query`, `all` (default true), `limit` (default 50), `path` |
 
 A namespace counts as the program's own when its file is in the project
-folder. Those come first in every answer. `jonquil_namespaces` only counts
-Clojure's and libraries' namespaces unless you pass `all: true`, while
-`jonquil_apropos` searches them too unless you pass `all: false`, since an
-agent often wants a `clojure.core` function. The search matches any part of a
+folder. Those come first in every answer. `jonquil_namespaces` leaves
+Clojure's and the libraries' namespaces out, only counting them, unless you
+pass `all: true`. `jonquil_apropos` searches them too unless you pass
+`all: false`, since an agent often wants a `clojure.core` function. The
+search matches any part of a
 var's name, ignoring case.
 
 ```
@@ -154,7 +157,7 @@ The `structuredContent` holds the same rows, with `status`:
   `line`, `private`, `macro`) and `dropped`. A namespace that isn't loaded
   answers `not-found`.
 - `jonquil_apropos`: `query`, `matches` (each `ns`, `name`, `arglists`, `doc`,
-  `file`, `line`) and `dropped`.
+  `file`, `line`), `hidden` and `dropped`.
 
 A few things to know about them:
 
@@ -213,7 +216,7 @@ they were, too.
 | `timeout` | `jonquil_eval` only: the frame evaluation ran past `timeout_ms` |
 | `error` | The runtime couldn't answer, or the code in the frame threw |
 
-A few things to know about them:
+On locals, timeouts and pauses:
 
 - Jolt keeps every local only in debug mode. Without it a frame can come back
   with fewer locals or none, and the answer then suggests turning on **Debug
@@ -291,9 +294,9 @@ never ran answers "Run the tab once first (jonquil_run)."
 
 ### Saving and restoring the session's data
 
-Before an experiment that could wreck the data an agent has built up at
-the prompt, say an atom filled from a slow source, it can call
-`jonquil_world_save`. That writes the session's data to the project's
+An agent about to try something that could wreck the data it built up at
+the prompt (an atom filled from a slow source, say) can call
+`jonquil_world_save` first. That writes the session's data to the project's
 world history, the way [Save World](using-jonquil.md#saving-the-world)
 does for a person, and answers the world's `id`. If the experiment goes
 wrong, `jonquil_world_restore` puts the data back.
@@ -316,7 +319,7 @@ push out a save the person made, and Restore World in the window still
 brings back the person's newest. An agent can't restore one of the person's
 saves; `id` takes an agent's world or an `undo_id`. The saves an agent's
 restores make first are a list of their own too, so they never push out the
-ones your restores made. Restore an Earlier World lists both for the person,
+ones the person's restores made. Restore an Earlier World lists both for the person,
 as "saved by an agent" and "saved before an agent's restore".
 
 Both tools take `timeout_ms` (default 30 s), and headless `path` selects the
@@ -392,8 +395,8 @@ on the live window:
 | `jonquil_console` | `mark <N>` then the output since the `since` mark; pass back `N` to read only what's new |
 | `jonquil_doc` | Documentation for a symbol, from the window's evaluator |
 | `jonquil_complete` | Up to 50 completion candidates, one per line |
-| `jonquil_namespaces`, `jonquil_vars`, `jonquil_apropos` | As [headless](#asking-whats-loaded), without `path`. They run quietly: nothing shows on the console |
-| `jonquil_frames` | As [headless](#reading-the-last-error), without `path`, and quiet too. `jonquil_eval` with a `frame` runs quietly as well, unlike a plain `jonquil_eval` |
+| `jonquil_namespaces`, `jonquil_vars`, `jonquil_apropos` | As [headless](#asking-whats-loaded), without `path`. Nothing shows on the console |
+| `jonquil_frames` | As [headless](#reading-the-last-error), without `path`, and nothing shows on the console. `jonquil_eval` with a `frame` stays off the console too, unlike a plain `jonquil_eval` |
 | `jonquil_changed`, `jonquil_run_changed` | As [headless](#running-only-what-changed), over a tab `id` (the active tab without it). `jonquil_run_changed` runs the forms on the console as Run Changed Forms does |
 | `jonquil_world_save`, `jonquil_world_restore` | As [headless](#saving-and-restoring-the-sessions-data), without `path`. The status bar and console say what Save World and Restore World say |
 | `jonquil_check_brackets` | "ok", or the sentence naming the first problem |

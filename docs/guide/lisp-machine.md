@@ -40,7 +40,7 @@ Emacs took first:
 | Find Usages in Project, by how each place uses the name and which var it names | `xref-find-references` (`M-?`); Genera's who-calls, resolved from each file's `ns` form rather than from a callers database |
 | Save the layout, Use layout: name | `window-configuration-to-register` and `jump-to-register`; Genera's Select key brought up a whole activity |
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
-| Switch to a recent panel, Cmd/Ctrl+Alt+1 to 8 for each panel | none built in: `C-x o` cycles windows; Genera's Select key, where Select L brings up the Lisp Listener, is where this comes from |
+| Switch to a recent panel, Cmd/Ctrl+Alt+1 to 8 and 0 for each panel | none built in: `C-x o` cycles windows; Genera's Select key, where Select L brings up the Lisp Listener, is where this comes from |
 | The docs panel: a symbol's doc or a guide page beside the code, with Back, Forward and bookmarks | `describe-function` and the `*Help*` buffer, with `l` and `r` to go back and forward; Genera's Document Examiner, whose reading list and cross-references this follows |
 | The Messages panel: agent actions, files changed on disk, connections, with an unread count | the `*Messages*` buffer, which keeps the echo area's lines; Genera's notifications and Converse are where this comes from |
 | Time the form at the caret | `benchmark-run` |
@@ -48,6 +48,7 @@ Emacs took first:
 | Live console results: click to inspect, right-click verbs | none built in: CIDER inspects the last result; Genera's presentations are where this comes from |
 | Trace the function at the caret, the Trace panel | `trace-function` and the `*trace-output*` buffer; CIDER's `cider-toggle-trace-var` |
 | The Processes panel: the fibers your program spawned, Interrupt and Kill | `list-processes` (`M-x proced` for OS processes); Genera's Peek, which showed every process and let you arrest or kill one |
+| The Namespaces panel: loaded namespaces, then a namespace's vars, Return to jump and Shift+Return to inspect | none built in: CIDER's `cider-browse-ns` lists namespaces and their vars the same way |
 | Compare with the file on disk, git HEAD, another tab or the last Run, Take the other version here | `diff-buffer-with-file`, `vc-diff` and `ediff`'s per-hunk copy; Genera's Compare Files |
 | The changed-form marks, Run the forms changed since they last ran | none built in: `diff-hl` marks lines changed since the last commit, not since the last eval |
 | Change sets: the changed forms as a named, reviewable bundle you can apply to the REPL or revert | none built in: `git stash` and branches work on whole files and never touch the running Lisp |

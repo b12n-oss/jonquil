@@ -55,6 +55,15 @@
                               (console/unclosed-bracket-message (editor/editor-text ed)))]
                (cview/append! cv :system (str msg "\n"))))))
 
+(defn after-eval!
+  "Runs every listener in the console's :after-eval* map, each in its own
+  try so one that throws doesn't stop the rest. On the eval worker thread:
+  a listener only enqueues. Returns nil."
+  [cv]
+  (doseq [f (vals (some-> (:after-eval* cv) deref))]
+    (try (f) (catch :default _ nil)))
+  nil)
+
 (defn- complete-eval!
   "make-eval-opts' :on-complete, on the eval worker thread."
   [{:keys [ed cv ev* status-label run?]} result]
@@ -64,8 +73,7 @@
   ;; and REPL entry alike. A plain atom reset, safe to call from this
   ;; worker thread with no on-gui! (unlike everything else here).
   (docs/clear-doc-cache!)
-  (when-let [f (some-> (:after-eval* cv) deref)]
-    (try (f) (catch :default _ nil)))
+  (after-eval! cv)
   (win-status/set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
   (cview/reset-busy-hint! cv)
   (on-gui! (fn [] (cview/note-run-end! cv)))

@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
+            [jonquil.keymap :as keymap]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
@@ -45,6 +46,15 @@
 
 ;; Review focus 2: a dialect switch swaps the evaluator in ev*, and the
 ;; next refresh must read the new one.
+(deftest namespaces-part-owns-its-command-and-panel
+  (let [spec (some #(when (= :namespaces (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :namespaces] (get-in spec [:commands :panel/namespaces :call])))
+    (is (= [{:id :namespaces :label "Namespaces"}] (:panels spec)))
+    (is (contains? registry/window-commands :panel/namespaces))
+    (is (= "Namespaces" (:namespaces palette/PANEL-LABELS)))
+    (is (some #(and (= "0" (:key %)) (= :panel/namespaces (:command %)) (:physical? %))
+              (:window keymap/shipped)))))
+
 (deftest processes-refresh-reads-the-evaluator-per-call
   (let [statuses (atom [])
         ops (atom [])
@@ -137,7 +147,7 @@
     (is (= "Trace" (:trace palette/PANEL-LABELS)))))
 
 (defn- trace-wctx [ev* statuses]
-  {:ev* ev* :cv {:after-eval* (atom nil)} :right {:slot :slot :recent-panels (atom [])}
+  {:ev* ev* :cv {:after-eval* (atom {})} :right {:slot :slot :recent-panels (atom [])}
    :set-status! #(swap! statuses conj %) :status-label :lbl
    :active-tab (fn [] nil) :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
    :inspect! (fn [_])})
@@ -165,7 +175,7 @@
     (with-redefs [trace-pane/make-pane (fn [] {:root :root :list :list})
                   trace-pane/set-handlers! (fn [& _])]
       (let [c ((deref #'trace-part/install) wctx)]
-        (is (fn? @(:after-eval* (:cv wctx))))
+        (is (fn? (:trace @(:after-eval* (:cv wctx)))))
         (is (= :root (get-in c [:panels :trace :root])))))))
 
 (deftest live-results-part-owns-its-commands
