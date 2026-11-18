@@ -124,8 +124,8 @@
   (let [tracep (trace-pane/make-pane)
         ctx (assoc wctx :tracep tracep)
         show-fn (fn [] (trace-refresh! ctx true))]
-    (reset! (:after-eval* cv)
-            (fn [] (on-gui! (fn [] (refresh-when-showing! ctx)))))
+    (swap! (:after-eval* cv) assoc :trace
+           (fn [] (on-gui! (fn [] (refresh-when-showing! ctx)))))
     (set-handlers! ctx)
     {:fns {:trace-toggle-fn (fn [] (trace-toggle! ctx)) :trace-show-fn show-fn
            :trace-clear-fn (fn [] (trace-clear! ctx))

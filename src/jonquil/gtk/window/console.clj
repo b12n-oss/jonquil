@@ -37,8 +37,9 @@
                                       :evaluating? evaluating-fn
                                       :waiting? (fn [] (ev/waiting-for-input? @ev*))})
             :failure* (atom nil)
-            ;; a fn the window runs after every evaluation (the Trace panel's refresh)
-            :after-eval* (atom nil)
+            ;; {part-id fn}: what the window runs after every evaluation
+            ;; (the Trace and Namespaces panels' refreshes)
+            :after-eval* (atom {})
             ;; LM7: the fn (record result) that files a finished evaluation
             ;; in the project's record, and the replay tab as {:id :root},
             ;; the root it was opened for (or nil)

@@ -155,17 +155,44 @@
              (when (= :ok (:status result))
                (on-gui! (fn [] (open-or-queue! ctx))))))))
 
+(defn- eval-text-for-inspect!
+  "Inspect's eval of text with opts (inspect-form-opts'), echoed as a Run
+  is: the echo, then the eval (extra merged into its opts); a busy engine's
+  warning goes on the console."
+  [{:keys [tab cv ev*]} opts text extra]
+  (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+  (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+        warning (ev/eval! @ev* text (merge opts {:run? false} extra {:owner (:id tab)}))]
+    (when warning (cview/append! cv :system warning))))
+
 (defn- eval-for-inspect!
-  "Inspect Form's eval of form (commands/run-form's map) from snap: the opts
-  first, then the flash, the echo and the eval, as do-run-form! does; a busy
-  engine's warning goes on the console."
-  [{:keys [tab cv ev*] :as ctx} snap {:keys [text start end]}]
+  "Inspect Form's eval of form (commands/run-form's map) from snap: the
+  flash, then eval-text-for-inspect! in the buffer's namespace."
+  [{:keys [tab] :as ctx} snap {:keys [text start end]}]
   (let [opts (inspect-form-opts ctx)]
     ((:flash! (:flash-fns tab)) start end (:caret snap))
-    (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-    (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-          warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
-      (when warning (cview/append! cv :system warning)))))
+    (eval-text-for-inspect! ctx opts text {:ns-source (:text snap)})))
+
+(defn- inspect-refused?
+  "inspect-form!'s refusals, in order: a foreign tab (it says so itself),
+  no inspector (the status bar says so), an inspect! already in flight.
+  True when refused."
+  [{:keys [ev* status-label inspecting?] :as ctx}]
+  (cond
+    (win-run/refuse-foreign! ctx) true
+    (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
+    (do (win-status/set-status! status-label inspect/unavailable-message) true)
+    @inspecting? true
+    :else false))
+
+(defn inspect-text!
+  "Inspect for given code text (the Namespaces panel's Shift+Return): the
+  same refusals as inspect-form!, then text is echoed and evaluated as
+  Inspect Form does, with no flash and no buffer namespace, and an :ok
+  result opens the Inspector. ctx as inspect-form!'s."
+  [ctx text]
+  (when-not (inspect-refused? ctx)
+    (eval-text-for-inspect! ctx (inspect-form-opts ctx) text {})))
 
 (defn inspect-form!
   "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\": the same
@@ -186,22 +213,13 @@
   sent while the form evaluates (the person browsing the panel) doesn't
   drop the form's open: it waits in inspect-queued for that reply."
   {:arglists '([{:keys [tab cv ev* status-label inspecting? inspect-queued inspect-last-fn] :as ctx}])}
-  [{:keys [tab ev* status-label inspecting?] :as ctx}]
-  (let [{:keys [ed]} tab]
-    (cond
-    ;; A foreign tab can't evaluate this way either.
-      (win-run/refuse-foreign! ctx) nil
-
-      (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
-      (win-status/set-status! status-label inspect/unavailable-message)
-
-      @inspecting? nil
-
-      :else
-      (let [snap (editor/snapshot ed)]
-        (if-let [form (commands/run-form snap)]
-          (eval-for-inspect! ctx snap form)
-          (win-status/set-status! status-label "No form at the caret."))))))
+  [{:keys [tab status-label] :as ctx}]
+  ;; A foreign tab can't evaluate this way either.
+  (when-not (inspect-refused? ctx)
+    (let [snap (editor/snapshot (:ed tab))]
+      (if-let [form (commands/run-form snap)]
+        (eval-for-inspect! ctx snap form)
+        (win-status/set-status! status-label "No form at the caret.")))))
 
 (defn- pane-handlers
   "The pane's :on-request and :on-def fns, each guarded by try-inspect!.

@@ -20,7 +20,7 @@
 (defn- inspector-key-fns
   "The inspector's window command fns: the Inspect Last context, Inspect
   Last, Inspect Form and Close. w is build-key-fns's. Returns a map of
-  :inspect-last-ctx :inspect-last-fn :inspect-form-fn and
+  :inspect-last-ctx :inspect-last-fn :inspect-form-fn :inspect-text-fn and
   :close-inspector-fn."
   [{:keys [cv active-tab ev* sel* status-label right pane inspector-state inspecting? inspect-queued
            inspector-last-args on-view]}]
@@ -28,12 +28,16 @@
                           :inspecting? inspecting? :inspector-last-args inspector-last-args
                           :on-view on-view :status-label status-label :start [:start {}]}
         inspect-last-fn (fn [] (win-inspector/inspect-last! inspect-last-ctx))
-        inspect-form-fn (fn [] (win-inspector/inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
-                                                             :inspecting? inspecting? :inspect-queued inspect-queued
-                                                             :inspect-last-fn inspect-last-fn}))
+        form-ctx (fn [] {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
+                         :inspecting? inspecting? :inspect-queued inspect-queued
+                         :inspect-last-fn inspect-last-fn})
+        inspect-form-fn (fn [] (win-inspector/inspect-form! (form-ctx)))
+        ;; UF8: the Namespaces panel's Shift+Return
+        inspect-text-fn (fn [text] (win-inspector/inspect-text! (form-ctx) text))
         close-inspector-fn (fn [] (win-inspector/close-inspector-panel! right (:ed (active-tab))))]
     {:inspect-last-ctx inspect-last-ctx :inspect-last-fn inspect-last-fn
-     :inspect-form-fn inspect-form-fn :close-inspector-fn close-inspector-fn}))
+     :inspect-form-fn inspect-form-fn :inspect-text-fn inspect-text-fn
+     :close-inspector-fn close-inspector-fn}))
 
 (defn build-key-fns
   "activate!'s window command fns, in activate!'s order: Open, Save and
@@ -99,7 +103,7 @@
 (defn- tooling-wctx
   "The part of the parts' wctx about plugins, the inspector and the help
   and source fns. w is build-parts's."
-  [{:keys [cv ev* sel* status-label plugins-on* rp lp hp inspect-last-ctx source-ctx]}]
+  [{:keys [cv ev* sel* status-label plugins-on* rp lp hp inspect-last-ctx inspect-text-fn source-ctx]}]
   {:plugin-step! win-plugin-agent/plugin-step!
    :plugins-on* plugins-on* :review-pane rp
    :plugin-list-pane lp :plugin-history-pane hp
@@ -110,6 +114,7 @@
    :saved-listeners win-files/saved-listeners
    :inspect! (fn [start]
                (win-inspector/inspect-last! (assoc inspect-last-ctx :start start)))
+   :inspect-text! inspect-text-fn
    :ask-lookup! win-help/ask-lookup! :jump-to! win-help/jump-to! :show-doc-for! win-help/show-doc-for!
    :run-example! win-run/do-run-example!
    :open-file-line! win-help/open-file-line!

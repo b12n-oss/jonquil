@@ -137,7 +137,7 @@
     (is (= "Trace" (:trace palette/PANEL-LABELS)))))
 
 (defn- trace-wctx [ev* statuses]
-  {:ev* ev* :cv {:after-eval* (atom nil)} :right {:slot :slot :recent-panels (atom [])}
+  {:ev* ev* :cv {:after-eval* (atom {})} :right {:slot :slot :recent-panels (atom [])}
    :set-status! #(swap! statuses conj %) :status-label :lbl
    :active-tab (fn [] nil) :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
    :inspect! (fn [_])})
@@ -165,7 +165,7 @@
     (with-redefs [trace-pane/make-pane (fn [] {:root :root :list :list})
                   trace-pane/set-handlers! (fn [& _])]
       (let [c ((deref #'trace-part/install) wctx)]
-        (is (fn? @(:after-eval* (:cv wctx))))
+        (is (fn? (:trace @(:after-eval* (:cv wctx)))))
         (is (= :root (get-in c [:panels :trace :root])))))))
 
 (deftest live-results-part-owns-its-commands

@@ -351,3 +351,20 @@
                 (reset! log [])
                 (is (thrown? Exception ((:on-complete @sent) {:status :ok})))
                 (is (not-any? #{:gui} @log))))))
+
+(deftest inspect-text-evaluates-the-text-test
+  (let [log (atom [])
+        sent (atom nil)]
+    (form-env log sent {:ok? true :busy false}
+              (fn [ev*]
+                (win-inspector/inspect-text! (form-ctx log ev* (fn [] nil)) "(deref (var demo.core/x))")
+                (is (= [[:opts ::ed ::cv ev* ::l false]
+                        [:echo "(deref (var demo.core/x))" true]
+                        [:note-start]
+                        [:eval "(deref (var demo.core/x))" {:k 1 :run? false :owner 7}]]
+                       @log)))))
+  (let [log (atom [])]
+    (form-env log (atom nil) {:ok? false}
+              (fn [ev*]
+                (win-inspector/inspect-text! (form-ctx log ev* (fn [] nil)) "x")
+                (is (= [[::l inspect/unavailable-message]] @log))))))

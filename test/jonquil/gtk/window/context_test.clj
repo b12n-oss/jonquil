@@ -22,7 +22,7 @@
             :inspector-last-args ::last-args :on-view ::on-view :tab-ctx* ctx* :x 1}
         w (win-context/build-key-fns in)]
     (is (= (into (set (keys in))
-                 #{:open-fn :save-fn :save-as-fn :inspect-last-ctx :inspect-last-fn :inspect-form-fn
+                 #{:open-fn :save-fn :save-as-fn :inspect-last-ctx :inspect-last-fn :inspect-form-fn :inspect-text-fn
                    :close-inspector-fn :toggle-focus-fn :clear-console-fn :clear-last-fn :open-find-fn
                    :open-replace-fn})
            (set (keys w))))
@@ -87,7 +87,7 @@
     (is (= {:specs parts/specs} opts))
     (is (identical? (:part-error! w) err))
     (is (= #{:active-tab :alert-pending? :ask-lookup! :bang* :contain-click :cv :ev* :file-name :files-btn
-             :hide-right-panel! :inspect! :jump-to! :make-eval-opts :mcp-eval! :mcp-query! :show-doc-for! :new-tab! :on-saved :saved-listeners :open-file! :menu-btn :reset-chk :open-file-line!
+             :hide-right-panel! :inspect! :inspect-text! :jump-to! :make-eval-opts :mcp-eval! :mcp-query! :show-doc-for! :new-tab! :on-saved :saved-listeners :open-file! :menu-btn :reset-chk :open-file-line!
              :open-in-tab! :paned :panel-focus-fn :pending-label :place-caret-and-scroll! :plugin-console
              :plugin-history-pane :plugin-history-shown :plugin-list-pane :plugin-reviews-changed :plugin-step! :run-example!
              :plugins-on* :recent-tabs :refresh-labels! :refuse-foreign! :register-status-log! :rerun-failure! :run-ranges!
