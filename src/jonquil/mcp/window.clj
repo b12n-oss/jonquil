@@ -1,5 +1,5 @@
 (ns jonquil.mcp.window
-  "The twenty-seven MCP tools over a live Jonquil window, four of them over its
+  "The twenty-nine MCP tools over a live Jonquil window, four of them over its
   plugins folder (through jonquil.plugin-mcp) and one saving a change set
   an agent proposes (jonquil.change-sets).
 
@@ -26,6 +26,7 @@
             [jonquil.mcp.describe :as describe]
             [jonquil.mcp.frames :as frames]
             [jonquil.mcp.result :as result]
+            [jonquil.mcp.world :as mcp-world]
             [jonquil.mcp.tools :as tools]
             [jonquil.plugin-mcp :as plugin-mcp]
             [jonquil.tabs :as tabs]
@@ -125,6 +126,8 @@
    (update-in frames/frames-def ["inputSchema" "properties"] dissoc "path")
    mcp-changed/window-changed-def
    mcp-changed/window-run-changed-def
+   mcp-world/window-save-def
+   mcp-world/window-restore-def
    {"name" "jonquil_check_brackets"
     "description" "Check brackets in text or in a file. Answers ok, or names the first unclosed or unmatched bracket and its line."
     "inputSchema" {"type" "object"
@@ -613,6 +616,28 @@
             (frames/frames-timeout-result t)
             (frames/frames-answer d (tools/frames-opts ctx sel)))))))
 
+;; --- UF7: the world ---------------------------------------------------------
+
+(defn- world-call
+  "op (:save or :restore) through the worlds part's :mcp-world!*, fired on
+  the GUI thread, then waited for up to the call's timeout_ms: answer of
+  its result, its own :answer, or unsupported, timeout."
+  [{:keys [ui turn]} args op answer]
+  (let [t (tools/timeout-of args)
+        p (promise)
+        f (:mcp-world!* ui)]
+    (if-not f
+      (mcp-world/unsupported-answer ((:selection* ui)))
+      (do (turn (fn [] (f op {:id (get args "id")} (fn [r] (deliver p r)))))
+          (let [r (deref p t ::timeout)]
+            (cond (= ::timeout r) (mcp-world/timeout-answer t)
+                  (:unsupported r) (mcp-world/unsupported-answer ((:selection* ui)))
+                  (:answer r) (:answer r)
+                  :else (answer r)))))))
+
+(defn- tool-world-save [ctx args] (world-call ctx args :save mcp-world/save-answer))
+(defn- tool-world-restore [ctx args] (world-call ctx args :restore mcp-world/restore-answer))
+
 ;; --- UF6: changed forms ------------------------------------------------------
 
 (defn- changed-now
@@ -682,6 +707,8 @@
      "jonquil_frames" (h tool-frames)
      "jonquil_changed" (h tool-changed)
      "jonquil_run_changed" (h tool-run-changed)
+     "jonquil_world_save" (h tool-world-save)
+     "jonquil_world_restore" (h tool-world-restore)
      "jonquil_check_brackets" (h tool-brackets)
      "jonquil_project" (h tool-project)
      "jonquil_plugins_list" (h tool-plugins-list)

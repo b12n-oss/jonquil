@@ -11,6 +11,7 @@
             [jonquil.changed :as changed]
             [jonquil.mcp :as mcp]
             [jonquil.mcp.changed :as mc]
+            [jonquil.mcp.world :as mw]
             [jonquil.mcp.frames :as frames]
             [jonquil.mcp.tools :as tools]
             [jonquil.mcp.window :as w]))
@@ -38,12 +39,12 @@
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 
-(deftest defs-are-the-twenty-seven
+(deftest defs-are-the-twenty-nine
   (is (= ["jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop"
           "jonquil_open" "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab"
           "jonquil_replace_text" "jonquil_save" "jonquil_console" "jonquil_doc"
           "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
-          "jonquil_changed" "jonquil_run_changed"
+          "jonquil_changed" "jonquil_run_changed" "jonquil_world_save" "jonquil_world_restore"
           "jonquil_check_brackets" "jonquil_project"
           "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
           "jonquil_test" "jonquil_change_set_propose"]
@@ -314,7 +315,7 @@
                        :call (fn [args] {:text (str "echo " (get args "text")) :error? false})}])
         f (w/with-plugin-tools (tools-for {}) {:plugin-tools* (fn [] @served)})
         names (fn [] (map #(get % "name") (:defs (f))))]
-    (is (= 28 (count (names))))
+    (is (= 30 (count (names))))
     (is (= "plugin_fmt_echo" (last (names))))
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
     (is (= {:text "Selected tab 1." :error? false :tab-id 1}
@@ -322,8 +323,8 @@
                       {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
     (reset! served [])
-    (is (= 27 (count (names))))
-    (is (= 27 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
+    (is (= 29 (count (names))))
+    (is (= 29 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
 
 (deftest plugin-tools-table-says-list-changed
   ;; a window that can watch its plugin tools declares it
@@ -351,7 +352,7 @@
     (is (= [{:kind :agent :summary "Claude Code switched to tab 1" :client "Claude Code"
              :target {:tab-id 1} :summary-tab 1}]
            @entries))
-    (is (= 27 (count (:defs (f)))) "the defs pass through")))
+    (is (= 29 (count (:defs (f)))) "the defs pass through")))
 
 (deftest with-messages-rethrows
   (let [entries (atom [])
@@ -854,3 +855,37 @@
         r (call (tools-for ui) "jonquil_run_changed" {"id" 1})]
     (is (= "notice" (get-in r [:data "status"])))
     (is (not (str/starts-with? (:text r) "; Running")))))
+
+;; --- UF7: jonquil_world_save and jonquil_world_restore over a window ---------
+
+(defn- world-ui
+  "A ui whose :mcp-world!* answers answer for each call and records [op args]."
+  [seen answer]
+  {:mcp-world!* (fn [op args on-done] (swap! seen conj [op args]) (future (on-done (answer op))))
+   :selection* (fn [] {:profile {:name "JVM Clojure"}})
+   :evaluator* (fn [] (evaluator {}))})
+
+(deftest window-world-save
+  (let [seen (atom [])
+        t (tools-for (world-ui seen (fn [_] {:saved 2 :placeholders [] :path "/w/0000000000007.world"})))
+        r (call t "jonquil_world_save" {})]
+    (is (= [[:save {:id nil}]] @seen))
+    (is (= {"status" "ok" "id" "0000000000007" "saved" 2 "placeholders" []} (:data r)))))
+
+(deftest window-world-restore
+  (let [seen (atom [])
+        t (tools-for (world-ui seen (fn [_] {:first {:saved 1 :placeholders [] :path "/w/0000000000009.world"}
+                                             :restore {:restored 2 :placeholders []}})))
+        r (call t "jonquil_world_restore" {"id" "0000000000007"})]
+    (is (= [[:restore {:id "0000000000007"}]] @seen))
+    (is (= "0000000000009" (get-in r [:data "undo_id"])))))
+
+(deftest window-world-answers-and-unsupported
+  (let [t (tools-for (world-ui (atom []) (fn [_] {:answer mw/no-world-answer})))]
+    (is (= "no-world" (get-in (call t "jonquil_world_restore" {}) [:data "status"]))))
+  (let [t (tools-for (world-ui (atom []) (fn [_] {:unsupported true})))]
+    (is (= "unsupported" (get-in (call t "jonquil_world_save" {}) [:data "status"])))))
+
+(deftest window-world-timeout
+  (let [t (tools-for {:mcp-world!* (fn [_ _ _] nil) :evaluator* (fn [] (evaluator {}))})]
+    (is (= "timeout" (get-in (call t "jonquil_world_save" {"timeout_ms" 100}) [:data "status"])))))

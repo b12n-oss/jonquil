@@ -7,6 +7,7 @@
             [jonquil.gtk.callbacks :refer [on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.palette :as palette]
+            [jonquil.mcp.world :as mcp-world]
             [jonquil.world :as world]
             [jonquil.world-ops :as world-ops]))
 
@@ -92,6 +93,29 @@
                                           :chords [] :source "world"})
                                  es)))))
 
+(defn- mcp-world!
+  "The MCP world tools' hook (UF7), GTK thread. op :save saves into the
+  agent's own list; op :restore brings back args' :id, or the agent's
+  newest, saving what's there first. The person sees what Save World and
+  Restore World would say. on-done (any thread) gets world-ops' answer,
+  {:answer a} when there's nothing to restore, or {:unsupported true}."
+  [{:keys [set-status!] :as ctx} op {:keys [id]} on-done]
+  (if-let [e (world-ev ctx)]
+    (let [dir (world-dir! ctx)]
+      (case op
+        :save (do (set-status! "; An agent is saving the world...")
+                  (world-save! {:ev e :dir dir :kind :agent :protect #{}
+                                :on-done (fn [r] (world-report! ctx (world/save-report r)) (on-done r))}))
+        :restore (let [{:keys [path answer]} (mcp-world/restore-target (world/entries dir) id)]
+                   (if answer
+                     (on-done {:answer answer})
+                     (do (set-status! "; An agent is restoring a world: saving what you have first...")
+                         (world-ops/restore! {:ev e :dir dir :path path}
+                                             (fn [a]
+                                               (on-gui! (fn [] (restore-reported! ctx true a)))
+                                               (on-done a))))))))
+    (on-done {:unsupported true})))
+
 ;; Save World and Restore World (LM7, jonquil.world-rt through
 ;; ev/World): each project keeps its last world/KEEP saves beside
 ;; the settings file, and every restore saves what's there first,
@@ -99,14 +123,16 @@
 (defn- install
   "The worlds part for one window, reading the evaluator, the settings path,
   the console, the tree and the active tab from wctx. Answers the four world
-  fns; :world-restore-from-fn is what the palette's earlier-world entries
+  fns and the MCP tools' :mcp-world!* ui key; :world-restore-from-fn is what the palette's earlier-world entries
   dispatch to (wire-tab!)."
   [ctx]
   {:fns
    {:world-save-fn (fn [] (world-save-fn ctx))
     :world-restore-fn (fn [] (world-restore-fn ctx))
     :world-restore-earlier-fn (fn [] (world-restore-earlier-fn ctx))
-    :world-restore-from-fn (fn [path] (world-restore-from! ctx path true))}})
+    :world-restore-from-fn (fn [path] (world-restore-from! ctx path true))}
+   ;; for jonquil_world_save and jonquil_world_restore (UF7)
+   :ui {:mcp-world!* (fn [op args on-done] (mcp-world! ctx op args on-done))}})
 
 (def part
   "The worlds part's install fn, (part wctx) -> contribution."
