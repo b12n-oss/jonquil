@@ -113,11 +113,12 @@ ahead of Clojure's and the libraries'.
   can't say where it is.
 - Shift+Return shows the var's documentation, as Docs for the Symbol does.
 
-The list is asked for fresh each time, so a var you defined a moment ago is
-in it, and asking prints nothing in the console. The popover draws the first
-200 matches and says how many more there are, so type a little more to
-reach the rest. It works for Jolt and JVM Clojure. A busy runtime gets a
-note in the status bar instead, so try again once the evaluation finishes.
+Jonquil asks the runtime for the list each time, so a var you defined a
+moment ago is in it, and the query prints nothing in the console. The
+popover draws the first 200 matches and says how many more there are; type
+a little more to reach the rest. It works for Jolt and JVM Clojure. When the
+runtime is busy, the status bar says so instead, and you can try again once
+the evaluation finishes.
 
 ### Browsing namespaces
 
@@ -581,9 +582,9 @@ v0.8.24 or later, jolt-lang/jolt#1476). Return or a click on a local opens its v
 the inspector, where it lives, so even a huge or lazy value is never copied out.
 A local's row prints at most 8 items, 3 levels deep, and 100 characters. A lazy seq nothing has realized yet reads `<lazy seq, not realized>`, because printing it would run your code again (a `(map save! rows)` would save the rows again); opening it in the inspector realizes it.
 
-An agent connected over MCP reads the same frames with `jonquil_frames`, and
-can run code in one with `jonquil_eval`. It does that quietly, so the panel
-and the console don't change (see [Reading the last error](mcp.md#reading-the-last-error)).
+An agent connected over MCP reads the same frames with `jonquil_frames` and
+can run code in one with `jonquil_eval`, without changing the panel or the
+console (see [Reading the last error](mcp.md#reading-the-last-error)).
 
 ### Evaluating in a frame
 

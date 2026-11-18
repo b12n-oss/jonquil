@@ -75,23 +75,20 @@ quicker pass.
 `jolt mcp:smoke` runs `jonquil --mcp` over real stdio from the checkout,
 speaks JSON-RPC from a jolt script, and prints a PASS or FAIL line per check
 (43): handshake, tools, an evaluation, a background `println` that must not
-reach stdout, a bracket check, the test, describe, frames, changed-forms
-and world tools, a
-`{:runtime :nrepl}` project starting a real Jolt child, and a clean exit
-once stdin closes. Responses have
-deadlines, so a hang fails a check. `--bin ./jonquil` runs it against the
-binary `jolt app:build` made, which proves `jolt build` links the MCP
-namespaces. The nREPL step uses a jolt-lang/nrepl checkout if present,
+reach stdout, a bracket check, the test, describe, frames, changed-forms and
+world tools, a `{:runtime :nrepl}` project starting a real Jolt child, and a
+clean exit once stdin closes. Responses have deadlines, so a hang fails a
+check. `--bin ./jonquil` runs it against the binary `jolt app:build` made,
+which proves `jolt build` links the MCP namespaces. The nREPL step uses a jolt-lang/nrepl checkout if present,
 otherwise fetches v0.4.2 as a git dependency (git and network, first time).
 
 `--window` opens a real window (don't type while it runs) and checks the
 handshake and `listChanged`, the twenty-nine window tools plus a startup
 plugin's tool, open/Run/edit/save, a runaway evaluation that must time out
-within 10 s, the test, describe, frames, changed-forms and world tools, the plugin
-tools, and the
-EOF path: closing stdin with an
-unsaved edit must end the process within 20 s, leave no Jolt child, and
-leave the file unchanged. 43 checks; `--bin PATH` works too.
+within 10 s, the test, describe, frames, changed-forms and world tools, the
+plugin tools, and the EOF path: closing stdin with an unsaved edit must end
+the process within 20 s, leave no Jolt child, and leave the file unchanged.
+43 checks; `--bin PATH` works too.
 
 `--attach` starts a real window with `:mcp-listen? true` under a temp
 `XDG_CONFIG_HOME` (don't type) and runs `jonquil --mcp-attach` against it.
@@ -353,8 +350,8 @@ port.
   over the repo and prints its Markdown report: a refactoring queue worst
   first, git hotspots, unusual commits and files, unused requires and
   functions nothing mentions, then per-file numbers and coupling. Since
-  v0.5.0 it also lists near-duplicate definitions and gives each file a
-  redundancy score, with the limits it used at the top. The queue
+  jolt-metrics v0.5.0 it also lists near-duplicate definitions and gives
+  each file a redundancy score, with the limits it used at the top. The queue
   weighs each function by its reach, how many functions depend on it at any
   distance (from jolt-lsp's call graph), so a complex function the rest of
   the code goes through ranks first; the EDN and JSON reports also carry each

@@ -31,8 +31,8 @@ one, so the headless entry never opens a window:
 - `jonquil.mcp.frames` makes the answers of `jonquil_frames` and of
   `jonquil_eval` with a `frame` from what the evaluator's
   `jonquil.evaluator/Frames` gives (`error-frames!`, `eval-in-frame!`), plus
-  the refusals (busy, paused, unsupported). It calls no evaluator itself:
-  both tables call `Frames` and hand the result over, and neither call
+  the refusals (busy, paused, unsupported). It calls no evaluator itself.
+  Both tables call `Frames` and hand it the result, and neither call
   records an error or touches `*1`.
 - `jonquil.mcp.changed` makes the answers of `jonquil_changed` and
   `jonquil_run_changed` for both tables, from `jonquil.changed` and
@@ -47,12 +47,12 @@ one, so the headless entry never opens a window:
   `jonquil_world_restore` for both tables. The steps around the runtime's
   world op (write, record and prune a save; save what's there before a
   restore) live in `jonquil.world-ops`, which the window's worlds part
-  uses too, and an agent's saves are the `:agent` kind in `jonquil.world`,
-  and the saves its restores make first `:agent-before-restore`, each pruned
-  apart from the person's. Headless, the world folder is
+  uses too. In `jonquil.world` an agent's saves are the `:agent` kind and
+  the saves its restores make first are `:agent-before-restore`; each kind
+  is pruned apart from the person's. Headless, the world folder is
   `world/world-dir` of the server's settings path and `world-root`, the
-  folder `file-tree/root-for` gives a window opened on that path, so both
-  use one history.
+  folder `file-tree/root-for` gives a window opened on that path, so a
+  headless server and that window share one history.
 
 **Window mode.** `jonquil.mcp.window` builds the twenty-nine tools for
 `jonquil --mcp --window`. It never requires `jonquil.gtk.window`. It receives
