@@ -8,7 +8,9 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
-            [jonquil.gtk.popover :as popover]))
+            [jonquil.gtk.popover :as popover]
+            [jonquil.mcp.window :as mcp-window]
+            [temp-dirs]))
 
 (defn- run-palette!
   "support/run-palette!: the active tab's palette."
@@ -68,3 +70,32 @@
                              {:ran ran? :saved saved-status :reset reset? :restored restored-status
                               :back back? :undone undone? :zero zero? :again again? :deliberate deliberate?
                               :status (status ui) :tail (support/since ui m4)})))))
+
+(defn row-world-agent-tools
+  "UF7: the person saves wagent as :person, then an agent saves it as
+  :agent through jonquil_world_save, changes it, and jonquil_world_restore
+  brings :agent back. The person's Restore World then brings back :person:
+  their own newest save, never the agent's."
+  [ui]
+  (go-row :world-agent-tools support/check
+    (let [t (mcp-window/make-window-tools {:ui ui :dir (str (temp-dirs/temp-dir! "jonquil-selftest-world-"))})
+          call (fn [tname args] ((:call t) tname args))
+          [ran? _] (support/run-and-await ui "(def wagent (atom :person))" 5000 #(str/includes? % "#'user/wagent"))
+          _ (on-gtk (run-palette! ui "save world"))
+          saved? (await-until 5000 20 #(str/starts-with? (status ui) "; Saved "))
+          _ (call "jonquil_eval" {"code" "(reset! wagent :agent)"})
+          s (call "jonquil_world_save" {})
+          _ (call "jonquil_eval" {"code" "(reset! wagent :broken)"})
+          r (call "jonquil_world_restore" {})
+          v (call "jonquil_eval" {"code" "@wagent"})
+          _ (on-gtk (g/gtk-label-set-text (:status-label ui) "; row: waiting for the person's restore")
+                    (run-palette! ui "restore world"))
+          restored? (await-until 5000 20 #(str/starts-with? (status ui) "; Restored "))
+          m (enter! ui "@wagent")
+          person? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> :person")))]
+      (on-gtk (support/check :world-agent-tools
+                             (and ran? saved? (= "ok" (get-in s [:data "status"]))
+                                  (= "ok" (get-in r [:data "status"]))
+                                  (str/ends-with? (str (:text v)) "=> :agent")
+                                  restored? person?)
+                             {:save s :restore r :value v :status (status ui) :tail (support/since ui m)})))))

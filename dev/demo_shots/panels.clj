@@ -16,6 +16,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.locations-pane :as lpane]
             [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.popover :as popover]
             [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.trace-pane :as trace-pane]
             [jonquil.mcp.window :as window]))
@@ -324,6 +326,45 @@
               (check! :mcp-changed (and (not (:error? run)) (= "ok" (get-in listed [:data "status"]))
                                         (= "ok" (get-in ran [:data "status"])) rows? (zero? exit))
                       {:rows rows :listed listed :ran ran :screenshot-exit exit :screenshot-err err})))))
+
+;; --- Worlds over MCP (UF7) ------------------------------------------------------
+
+(defn scene-mcp-world
+  "jonquil_world_save and jonquil_world_restore from a client called Claude
+  Code, after the person's own Save World: Restore an Earlier World lists
+  the agent's saves apart from the person's, beside the Messages rows."
+  [ui]
+  (go-row :mcp-world check!
+    (let [mp (:messages-pane ui)
+          root (demo-project! {"src/talk/core.clj" "(ns talk.core)\n\n(def visits (atom {}))\n"})
+          _ (on-gtk ((:open-file! ui) (str root "/src/talk/core.clj")))
+          tools (window/with-messages
+                  (fn [] (window/make-window-tools {:ui ui :dir root})) ui (atom {:client "Claude Code"}))
+          call (fn [tname args] ((:call (tools)) tname args))
+          run (call "jonquil_run" {})
+          _ (call "jonquil_eval" {"code" "(swap! talk.core/visits assoc :home 3)"})
+          _ (on-gtk (run-palette! ui "save world"))
+          _ (await-until 5000 20 #(str/starts-with? (status-text ui) "; Saved "))
+          saved (call "jonquil_world_save" {})
+          _ (call "jonquil_eval" {"code" "(reset! talk.core/visits :oops)"})
+          restored (call "jonquil_world_restore" {})
+          _ (on-gtk (panel-key! ui \7)
+                    (messages-pane/set-kind! mp :agent-read true))
+          rows? (await-until 3000 20 #(some (fn [r] (str/includes? r "restored a world")) (messages-pane/row-texts mp)))
+          p (on-gtk (let [p (:palette ((:active-tab* ui)))]
+                      ((:open-palette!* ui))
+                      (palette/set-query! p "earlier world")
+                      (palette/run-selected! p)
+                      p))
+          listed? (await-until 3000 20 #(popover/open? p))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :mcp-world "png") (own-pid))]
+      (on-gtk (when (popover/open? p) (popover/hide! p))
+              (all-saved! ui)
+              (check! :mcp-world (and (not (:error? run)) (= "ok" (get-in saved [:data "status"]))
+                                      (= "ok" (get-in restored [:data "status"])) rows? listed? (zero? exit))
+                      {:saved saved :restored restored :rows (messages-pane/row-texts mp)
+                       :screenshot-exit exit :screenshot-err err})))))
 
 ;; --- Run Tests -----------------------------------------------------------------
 

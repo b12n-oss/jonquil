@@ -273,14 +273,35 @@
     (changed-sequence-checks! srv label {"path" p}
                               #(spit p (str/replace uf6-smoke-text "(defn f [] 1)" "(defn f [] 2)")))))
 
+(defn- world-checks!
+  "UF7: a var saved, changed, then put back by jonquil_world_restore, whose
+  undo_id brings the change back."
+  [srv label]
+  (tool! srv "jonquil_eval" {"code" "(def uf7-smoke (atom :saved))"} 60000)
+  (let [s (tool! srv "jonquil_world_save" {} 60000)
+        _ (tool! srv "jonquil_eval" {"code" "(reset! uf7-smoke :changed)"} 60000)
+        r (tool! srv "jonquil_world_restore" {} 60000)
+        v (tool! srv "jonquil_eval" {"code" "@uf7-smoke"} 60000)
+        u (tool! srv "jonquil_world_restore" {"id" (str (get-in r [:data "undo_id"]))} 60000)
+        v2 (tool! srv "jonquil_eval" {"code" "@uf7-smoke"} 60000)]
+    (check! (str label " jonquil_world_save answers an id")
+            (and (= "ok" (get-in s [:data "status"])) (string? (get-in s [:data "id"]))) s)
+    (check! (str label " jonquil_world_restore puts the saved value back")
+            (and (= "ok" (get-in r [:data "status"])) (str/ends-with? (str (:text v)) "=> :saved"))
+            {:restore r :eval v})
+    (check! (str label " its undo_id brings the change back")
+            (and (= "ok" (get-in u [:data "status"])) (str/ends-with? (str (:text v2)) "=> :changed"))
+            {:undo u :eval v2})))
+
 (defn- runtime-tool-checks!
   "jonquil_test, then the describe tools, then the frames tools, then the
-  changed-forms tools, over the server's runtime."
+  changed-forms tools, then the world tools, over the server's runtime."
   [srv proj label]
   (test-tool-checks! srv proj label)
   (describe-tool-checks! srv proj label)
   (frames-checks! srv label)
-  (changed-checks! srv proj label))
+  (changed-checks! srv proj label)
+  (world-checks! srv label))
 
 (defn- main []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
@@ -302,7 +323,7 @@
       (try
         (handshake! srv "in-process")
         (let [r (request! srv "tools/list" {} 20000)]
-          (check! "tools/list has thirteen tools" (= 13 (count (get-in r ["result" "tools"]))) r))
+          (check! "tools/list has fifteen tools" (= 15 (count (get-in r ["result" "tools"]))) r))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
         (structured-checks! srv)
@@ -344,7 +365,7 @@
     "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab" "jonquil_replace_text"
     "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
     "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
-    "jonquil_changed" "jonquil_run_changed"
+    "jonquil_changed" "jonquil_run_changed" "jonquil_world_save" "jonquil_world_restore"
     "jonquil_check_brackets" "jonquil_project"
     "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
     "jonquil_test" "jonquil_change_set_propose"})
@@ -445,7 +466,7 @@
     (println "[mcp-smoke] startup plugin tool seen" (name path))
     (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
             (and (not= :no-list-changed path)
-                 (= 28 (count (get-in r ["result" "tools"])))
+                 (= 30 (count (get-in r ["result" "tools"])))
                  (= want (names-of r)))
             {:path path :r r}))
   (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
@@ -580,6 +601,7 @@
       (window-describe-checks! srv)
       (frames-checks! srv "window")
       (window-changed-checks! srv proj a)
+      (world-checks! srv "window")
       (plugin-checks! srv xdg)
       (window-dirty-eof-checks! srv a pid)
       (check! "every stdout line is JSON"
@@ -637,8 +659,8 @@
             (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
   (let [r (request! b1 "tools/list" {} 60000)
         names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-    (check! "tools/list has exactly the twenty-seven window tools"
-            (and (= 27 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+    (check! "tools/list has exactly the twenty-nine window tools"
+            (and (= 29 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
   (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
     (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
   (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]

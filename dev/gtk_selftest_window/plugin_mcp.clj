@@ -142,10 +142,10 @@
               r ((:call t) "plugin_mcpt_echo" {"text" "hi"})
               console (on-gtk (g/buffer-text (:buf (:console ui))))]
           (support/check :plugin-mcp-tool-listed-and-called
-                         (and (= ["plugin_mcpt_echo" "plugin_mcpt_buf"] (subvec names 27))
+                         (and (= ["plugin_mcpt_echo" "plugin_mcpt_buf"] (subvec names 29))
                               (= {:text "hi" :error? false} r)
                               (str/includes? console "mcpt says hi"))
-                         {:names (subvec names (min 27 (count names))) :r r}))))))
+                         {:names (subvec names (min 29 (count names))) :r r}))))))
 
 (defn row-plugin-mcp-tool-gone-after-reload
   "A reload that drops the tools drops them from the next table, and a
@@ -162,7 +162,7 @@
               resp (mcp/handle-message tf {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
                                            "params" {"name" "plugin_mcpt_echo" "arguments" {"text" "x"}}})]
           (support/check :plugin-mcp-tool-gone-after-reload
-                         (and (= 29 before) (= 27 after)
+                         (and (= 31 before) (= 29 after)
                               (= "Unknown tool: plugin_mcpt_echo" (get-in resp ["error" "message"])))
                          {:before before :after after :resp resp}))))))
 
