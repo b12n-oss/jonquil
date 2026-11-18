@@ -7,7 +7,7 @@
         ;; The terminal in the window's bottom area (jonquil.gtk.parts.terminal).
         ;; Anchan loads VTE only when a terminal is first shown.
         io.github.b12n-oss/anchan {:git/url "https://github.com/b12n-oss/anchan.git"
-                                   :git/sha "f0a7a876774e7e6cd394f063632ad4366800a35e"}
+                                   :git/tag "v0.1.0" :git/sha "229072f"}
         ;; Saving settings.edn edits only the keys that change, so the
         ;; file's comments and layout stay (jonquil.settings/save-settings!).
         ;; It brings rewrite-clj from Maven.
