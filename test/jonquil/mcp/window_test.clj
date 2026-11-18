@@ -8,7 +8,9 @@
             [jonquil.gtk.window.run :as win-run]
             [jonquil.help :as help]
             [jonquil.describe-run :as dr]
+            [jonquil.changed :as changed]
             [jonquil.mcp :as mcp]
+            [jonquil.mcp.changed :as mc]
             [jonquil.mcp.frames :as frames]
             [jonquil.mcp.tools :as tools]
             [jonquil.mcp.window :as w]))
@@ -36,11 +38,12 @@
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 
-(deftest defs-are-the-twenty-five
+(deftest defs-are-the-twenty-seven
   (is (= ["jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop"
           "jonquil_open" "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab"
           "jonquil_replace_text" "jonquil_save" "jonquil_console" "jonquil_doc"
           "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
+          "jonquil_changed" "jonquil_run_changed"
           "jonquil_check_brackets" "jonquil_project"
           "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
           "jonquil_test" "jonquil_change_set_propose"]
@@ -311,7 +314,7 @@
                        :call (fn [args] {:text (str "echo " (get args "text")) :error? false})}])
         f (w/with-plugin-tools (tools-for {}) {:plugin-tools* (fn [] @served)})
         names (fn [] (map #(get % "name") (:defs (f))))]
-    (is (= 26 (count (names))))
+    (is (= 28 (count (names))))
     (is (= "plugin_fmt_echo" (last (names))))
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
     (is (= {:text "Selected tab 1." :error? false :tab-id 1}
@@ -319,8 +322,8 @@
                       {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
     (reset! served [])
-    (is (= 25 (count (names))))
-    (is (= 25 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
+    (is (= 27 (count (names))))
+    (is (= 27 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
 
 (deftest plugin-tools-table-says-list-changed
   ;; a window that can watch its plugin tools declares it
@@ -348,7 +351,7 @@
     (is (= [{:kind :agent :summary "Claude Code switched to tab 1" :client "Claude Code"
              :target {:tab-id 1} :summary-tab 1}]
            @entries))
-    (is (= 25 (count (:defs (f)))) "the defs pass through")))
+    (is (= 27 (count (:defs (f)))) "the defs pass through")))
 
 (deftest with-messages-rethrows
   (let [entries (atom [])
@@ -773,3 +776,73 @@
           r (call (tools-for ui) "jonquil_eval" (assoc (in-frame "(loop [] (recur))") "timeout_ms" 50))]
       (is (= "timeout" (get-in r [:data "status"])))
       (is (= "Timed out after 50 ms; the frame evaluation may still be running in the runtime." (:text r))))))
+
+;; --- UF6: jonquil_changed and jonquil_run_changed over a window -------------
+
+(def ^:private uf6-last "(ns a)\n(defn f [] 1)\n(def x 2)")
+(def ^:private uf6-now "(ns a)\n(defn f [] 2)\n(def x 2)\n(defn g [] 3)")
+
+(defn- changed-ui
+  "A ui whose tabs 1 (active, ran) and 2 (never ran) answer :mcp-changed*;
+  the eval and run keys throw unless more replaces them."
+  [& {:as more}]
+  (let [tabs {1 {:text uf6-now :last-run uf6-last :ran (changed/record nil uf6-last :run) :path "/p/a.clj"}
+              2 {:text uf6-now :last-run nil :ran nil :path "/p/b.clj"}}
+        boom (fn [& _] (throw (ex-info "must not be called" {})))]
+    (merge {:active-tab* (fn [] {:id 1})
+            :mcp-changed* (fn [id] (get tabs id))
+            :mcp-eval!* boom
+            :mcp-run-changed!* boom
+            :evaluator* (fn [] (evaluator {}))}
+           more)))
+
+(deftest window-changed-answers-like-headless
+  (let [r (call (tools-for (changed-ui)) "jonquil_changed" {"id" 1})
+        headless (mc/changed-answer (mc/changed-forms uf6-now uf6-last (changed/record nil uf6-last :run))
+                                    {:never-ran-text mc/never-ran-headless})]
+    (is (= (:data headless) (:data r)))
+    (is (= (:text headless) (:text r)))
+    (is (= 1 (:tab-id r)))))
+
+(deftest window-changed-default-tab
+  (is (= "ok" (get-in (call (tools-for (changed-ui)) "jonquil_changed" {}) [:data "status"])))
+  (let [r (call (tools-for (changed-ui)) "jonquil_changed" {"id" 2})]
+    (is (= {:text "Run the tab once first (jonquil_run)." :error? false :data {"status" "never-ran"} :tab-id 2} r))))
+
+(deftest window-changed-no-such-tab
+  (is (= {:text "No tab with id 9." :error? true} (call (tools-for (changed-ui)) "jonquil_changed" {"id" 9})))
+  (is (= {:text "No active tab." :error? true}
+         (call (tools-for (changed-ui :active-tab* (fn [] nil))) "jonquil_changed" {}))))
+
+(deftest window-changed-is-quiet
+  ;; changed-ui's eval and run keys throw: jonquil_changed only reads
+  (is (false? (:error? (call (tools-for (changed-ui)) "jonquil_changed" {"id" 1})))))
+
+(deftest window-run-changed-never-ran-not-an-error
+  (let [r (call (tools-for (changed-ui)) "jonquil_run_changed" {"id" 2})]
+    (is (= {:text mc/never-ran-window :error? false :data {"status" "never-ran"} :tab-id 2} r)))
+  (testing "the run key's own unchanged answer, as when the tab changed in between"
+    (let [ui (changed-ui :mcp-run-changed!* (fn [_ notify]
+                                              (notify {:unchanged {:status "no-changes" :text mc/no-changes-text}})
+                                              (fn [] "")))]
+      (is (= {:text mc/no-changes-text :error? false :data {"status" "no-changes"} :tab-id 1}
+             (call (tools-for ui) "jonquil_run_changed" {}))))))
+
+(deftest window-run-changed-runs-the-tab
+  (let [seen (atom nil)
+        ui (changed-ui :mcp-run-changed!* (fn [id notify]
+                                            (reset! seen id)
+                                            (notify {:done {:result {:status :ok :printed "#'a/g"} :output ""}})
+                                            (fn [] "")))
+        r (call (tools-for ui) "jonquil_run_changed" {"id" 1})]
+    (is (= 1 @seen))
+    (is (= "ok" (get-in r [:data "status"])))
+    (is (str/starts-with? (:text r) "; Running 2 changed forms\n"))
+    (is (= 1 (:tab-id r)))))
+
+(deftest window-run-changed-refused-foreign
+  (let [ui (changed-ui :mcp-run-changed!* (fn [_ notify] (notify {:refused "another project's tab"}) (fn [] "")))
+        r (call (tools-for ui) "jonquil_run_changed" {"id" 1})]
+    (is (true? (:error? r)))
+    (is (= "another project's tab" (:text r)))
+    (is (= "refused" (get-in r [:data "status"])))))
