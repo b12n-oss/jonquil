@@ -6,6 +6,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.gtk.callbacks]
+            [jonquil.gtk.namespaces-pane :as pane]
             [jonquil.gtk.parts.namespaces :as part]))
 
 (def ^:private refresh! @#'part/refresh!)
@@ -76,6 +77,15 @@
       (step-back! c)
       (is (= [:show ["demo.core" nil] nil "1 own namespace, 1 from libraries" 0] (last (shows log))))
       (is (= :top (:level @(:state* c)))))))
+
+(deftest back-from-a-library-opens-the-group
+  (with-gui
+    (let [log (atom []) c (ctx log (atom [(ok top-value) (ok vars-value) (ok top-value)]))]
+      (refresh! c)
+      (activate! c {:kind :ns :key "clojure.core" :name "clojure.core"} false)
+      (step-back! c)
+      (is (= [:show ["demo.core" nil "clojure.core"] nil "1 own namespace, 1 from libraries" 2] (last (shows log)))
+          "the folded Libraries group opens so the namespace can be selected"))))
 
 (deftest group-row-toggles
   (with-gui
@@ -172,3 +182,22 @@
       (testing "a more row does nothing"
         (activate! c {:kind :more} true)
         (is (= [:status "demo.core/w is a macro, with no value to inspect."] (last @log)))))))
+
+(deftest panel-open-shows-the-panel
+  ;; the right slot's panel key calls :open! for a part's panel
+  (with-gui
+    (let [log (atom [])
+          wctx {:cv {:after-eval* (atom {})} :right ::right :ev* (atom nil)
+                :sel* (atom {:profile {:id :bb :name "Babashka"} :project-dir "/p"})
+                :show-right-panel! (fn [r k] (swap! log conj [:show-panel r k]))
+                :hide-right-panel! (fn [& _]) :showing-panel (fn [_] nil) :active-tab (fn [] nil)
+                :set-status! (fn [_]) :mcp-query! (fn [& _]) :inspect-text! (fn [_])}]
+      (with-redefs [pane/make-pane (fn [] {:root ::root})
+                    pane/set-handlers! (fn [& _])
+                    pane/show! (fn [& _])
+                    pane/focus-list! (fn [_])
+                    pane/set-filter-text! (fn [& _])]
+        (let [c ((deref #'part/install) wctx)]
+          ((get-in c [:panels :namespaces :open!]))
+          (is (= [[:show-panel ::right :namespaces]] @log))
+          (is (fn? (:namespaces @(:after-eval* (:cv wctx))))))))))

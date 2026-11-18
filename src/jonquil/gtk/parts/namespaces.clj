@@ -111,10 +111,19 @@
   (focus-list!)
   (refresh! ctx))
 
+(defn- library?
+  "True when the cached top level lists n and it isn't the program's own."
+  [{:keys [state* own?]} n]
+  (let [own (own?)]
+    (boolean (some #(and (= n (:name %)) (not (and (:file %) (own (:file %)))))
+                   (:namespaces (:top @state*))))))
+
 (defn- step-back!
-  "Backspace: from a namespace back to the top level, on that namespace."
+  "Backspace: from a namespace back to the top level, on that namespace
+  (opening the Libraries group when it's one of them)."
   [{:keys [state*] :as ctx}]
   (when-let [n (ns-level @state*)]
+    (when (library? ctx n) (swap! state* assoc :expanded? true))
     (go-to! ctx :top n)))
 
 (defn- inspect-var!
@@ -218,7 +227,7 @@
      :ui {:namespaces-pane p}
      :panels {:namespaces {:root (:root p)
                            :focus! (fn [] (pane/focus-list! p))
-                           :open! (fn [] (render! ctx) (refresh! ctx))}}}))
+                           :open! show-fn}}}))
 
 (def part
   "The Namespaces part's install fn, (part wctx) -> contribution."
