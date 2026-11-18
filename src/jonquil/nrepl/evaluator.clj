@@ -317,8 +317,10 @@
     (when (:paused? old)
       (when-let [f (:on-resume (:break-handlers old))]
         (try (f {:continued? false}) (catch Throwable _ nil)))))
+  ;; a Selection or Form eval never moves the prompt (as jonquil.nrepl.jvm)
   (swap! (:state ev) (fn [s] (cond-> (assoc s :running nil)
-                               (:ns result) (assoc :prompt-ns (:ns result)))))
+                               (and (:ns result) (not (:ns-source opts)))
+                               (assoc :prompt-ns (:ns result)))))
   (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
   (try (when on-complete (on-complete result)) (catch Throwable _ nil))
   (tell-break! ev :on-eval-end opts))
@@ -418,9 +420,15 @@
           (when (and (:paused? old) on-resume) (on-resume how)))))
     (catch Throwable _ nil)))
 
+(defn- buffer-ns-of
+  "The file namespace a Run Selection or Run Form eval goes in (a string),
+  or nil: a REPL line, a Run and a quiet eval have none."
+  [{:keys [ns-source run? quiet]}]
+  (when (and ns-source (not run?) (not quiet)) (clj/buffer-ns ns-source)))
+
 (defn- main-msg
   "send-main!'s request: the Run's load-file or the REPL entry's eval."
-  [ev code session {:keys [run? path]}]
+  [ev code session {:keys [run? path] :as opts}]
   (if run?
     ;; file-path only for a buffer that is exactly its file: the child
     ;; records it as the vars' :file (Jolt's load-file, and
@@ -438,10 +446,11 @@
         saved (assoc :file-path saved)))
     ;; the prompt's namespace, as the JVM evaluator sends it: a plain
     ;; server (no jolt-lang/nrepl middleware) on a Jolt with
-    ;; jolt-lang/jolt #1460 keeps no ns across evals of its own
-    (let [prompt-ns (:prompt-ns @(:state ev))]
+    ;; jolt-lang/jolt #1460 keeps no ns across evals of its own. Run
+    ;; Selection and Run Form send the file's own namespace instead.
+    (let [ns (or (buffer-ns-of opts) (:prompt-ns @(:state ev)))]
       (cond-> {:op "eval" :code code :session session}
-        prompt-ns (assoc :ns (str prompt-ns))))))
+        ns (assoc :ns (str ns))))))
 
 (defn- feed-output!
   "Hands a reply's :out and :err to on-output, when there is one."
@@ -610,14 +619,22 @@
   it created for the owner, and finishes."
   [{:keys [ev code opts conn session owner]}]
   (let [before (ns-snapshot conn session)
-        quiet-out (atom [])
-        msgs (send-and-wait {:ev ev :code code :opts opts :quiet-out quiet-out})
-        after (ns-snapshot conn session)]
-    (when (and before after)
-      (swap! (:state ev) update-in [:created owner] (fnil into #{})
-             (session/namespaces-created (first before) (first after) (second after))))
-    (finish! ev opts (evaluation-result {:ev ev :code code :opts opts :msgs msgs :quiet-out quiet-out
-                                         :names (first after)}))))
+        b (buffer-ns-of opts)
+        notice {:status :notice :text (some-> b clj/not-loaded-message)}]
+    ;; the file's namespace isn't in the child yet: nothing is sent, as the
+    ;; JVM evaluator answers a namespace-not-found
+    (if (and b before (not-any? #(= b (str %)) (first before)))
+      (finish! ev opts notice)
+      (let [quiet-out (atom [])
+            msgs (send-and-wait {:ev ev :code code :opts opts :quiet-out quiet-out})
+            after (ns-snapshot conn session)]
+        (when (and before after)
+          (swap! (:state ev) update-in [:created owner] (fnil into #{})
+                 (session/namespaces-created (first before) (first after) (second after))))
+        (finish! ev opts (if (and b (clj/ns-not-found? msgs))
+                           notice
+                           (evaluation-result {:ev ev :code code :opts opts :msgs msgs :quiet-out quiet-out
+                                               :names (first after)})))))))
 
 (defn- run-started!
   "The worker's path once the runtime is up and no Stop came before the

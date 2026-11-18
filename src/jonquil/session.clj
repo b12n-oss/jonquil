@@ -408,7 +408,7 @@
            (cond-> (-> s
                        (update-in [:created (:owner opts)] (fnil into #{})
                                   (namespaces-created before (ns-names) (loaded-libs)))
-                       (cond-> (not (:quiet opts)) (assoc :prompt-ns (:ns result))))
+                       (cond-> (not (or (:quiet opts) (:ns-source opts))) (assoc :prompt-ns (:ns result))))
              (and (= :ok (:status result)) (not (:quiet opts)))
              (assoc :last-value (:value result))
              ;; the Frames panel's error; a quiet eval's
@@ -547,10 +547,28 @@
     (evaluate! session code (if (and b (find-ns b)) b (:prompt-ns @state))
                (assoc opts :owner (:owner opts :repl)))))
 
+(defn- not-loaded!
+  "Answers a Selection or Form eval whose file namespace doesn't exist yet
+  with the not-loaded notice, off the caller's thread as a real eval's
+  result arrives."
+  [opts ns-sym]
+  (future
+    (try (when-let [f (:on-complete opts)]
+           (f {:status :notice :text (clj/not-loaded-message (str ns-sym))}))
+         (catch Throwable _ nil)))
+  nil)
+
 (defn submit-repl!
   "Evaluates one REPL entry in the namespace the last evaluation left, and
-  records it in the history. Returns nil or the engine's warning string."
+  records it in the history. With :ns-source (Run Selection, Run Form) it
+  evaluates in that text's namespace instead, or answers a notice when that
+  namespace isn't loaded, and the prompt stays where it was. Returns nil or
+  the engine's warning string."
   ([session code] (submit-repl! session code {}))
   ([{:keys [ctx state] :as session} code opts]
-   (swap! (:history ctx) eval/history-add code)
-   (evaluate! session code (:prompt-ns @state) (assoc opts :owner (:owner opts :repl)))))
+   (let [b (some-> (:ns-source opts) clj/buffer-ns symbol)]
+     (if (and b (not (find-ns b)))
+       (not-loaded! opts b)
+       (do (swap! (:history ctx) eval/history-add code)
+           (evaluate! session code (or b (:prompt-ns @state))
+                      (assoc opts :owner (:owner opts :repl))))))))
