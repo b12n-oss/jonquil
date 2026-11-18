@@ -180,6 +180,8 @@
     jonquil.gtk.change-sets-part-test
     jonquil.gtk.find-var-part-test
     jonquil.gtk.processes-pane-test
+    jonquil.gtk.namespaces-part-test
+    jonquil.gtk.namespaces-pane-test
     jonquil.gtk.messages-pane-test
     jonquil.inspect.view-test
     jonquil.nrepl.info-middleware-test

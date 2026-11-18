@@ -62,9 +62,9 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :prefs :terminal :menus :trace :live-results :locations :tests :debugger :breakpoints :command-palette :file-tree :plugins :find-var :change-sets :reader :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :namespaces :prefs :terminal :menus :trace :live-results :locations :tests :debugger :breakpoints :command-palette :file-tree :plugins :find-var :change-sets :reader :replay] (mapv :id parts/specs)))
   (is (= #{:plugins/review :plugins/list :plugins/reload :tree/toggle :panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
-           :panel/processes :processes/show
+           :panel/processes :processes/show :panel/namespaces
            :change-set/make :change-set/browse :help/find-var
            :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
            :result/inspect :result/copy :result/define :result/jump :result/doc :result/open-location
@@ -473,7 +473,7 @@
 (deftest palette-labels-hold-the-core-panels
   (is (= "Processes" (:processes palette/PANEL-LABELS)))
   (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
-          :debugger "Frames" :plugins "Plugins" :messages "Messages"
+          :debugger "Frames" :plugins "Plugins" :messages "Messages" :namespaces "Namespaces"
           :processes "Processes" :trace "Trace" :change-sets "Change Sets" :reader "Reader"}
          palette/PANEL-LABELS)))
 

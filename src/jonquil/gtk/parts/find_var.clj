@@ -20,7 +20,7 @@
   that sort late would fall off."
   50000)
 
-(defn- project-paths
+(defn project-paths
   "The files of the project at root, remembered in paths* for the Return
   that follows, so a list's Return doesn't walk the disk again."
   [{:keys [files paths*]} root]
@@ -75,7 +75,7 @@
       (query! (describe-run/apropos-snippet {:query "" :cap FIND-CAP})
               (fn [m] (let [l (listing ctx m)] (on-gui! (fn [] (show-listing! ctx l)))))))))
 
-(defn- open-var!
+(defn open-var!
   "Return on a var: its file in the project opens at its line; any other
   var is looked up and jumped to as Jump to Definition would (its place
   when the lookup gives one it can open, else its doc). A late lookup

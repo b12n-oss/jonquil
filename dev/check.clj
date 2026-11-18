@@ -23,6 +23,7 @@
     jonquil.parts.prefs
     jonquil.parts.terminal
     jonquil.parts.processes
+    jonquil.parts.namespaces
     jonquil.parts.breakpoints
     jonquil.parts.replay
     jonquil.parts.trace
@@ -172,6 +173,7 @@
     jonquil.gtk.prefs-window
     jonquil.gtk.key-seq-hint
     jonquil.gtk.processes-pane
+    jonquil.gtk.namespaces-pane
     jonquil.gtk.docs-pane
     jonquil.gtk.messages-pane
     jonquil.gtk.console-view
@@ -195,6 +197,7 @@
     jonquil.gtk.parts.trace
     jonquil.gtk.parts.change-sets
     jonquil.gtk.parts.find-var
+    jonquil.gtk.parts.namespaces
     jonquil.gtk.parts.live-results
     jonquil.gtk.parts.tests
     jonquil.gtk.parts.time-form

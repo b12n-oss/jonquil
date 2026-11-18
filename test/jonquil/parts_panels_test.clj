@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
+            [jonquil.keymap :as keymap]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
@@ -45,6 +46,15 @@
 
 ;; Review focus 2: a dialect switch swaps the evaluator in ev*, and the
 ;; next refresh must read the new one.
+(deftest namespaces-part-owns-its-command-and-panel
+  (let [spec (some #(when (= :namespaces (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :namespaces] (get-in spec [:commands :panel/namespaces :call])))
+    (is (= [{:id :namespaces :label "Namespaces"}] (:panels spec)))
+    (is (contains? registry/window-commands :panel/namespaces))
+    (is (= "Namespaces" (:namespaces palette/PANEL-LABELS)))
+    (is (some #(and (= "0" (:key %)) (= :panel/namespaces (:command %)) (:physical? %))
+              (:window keymap/shipped)))))
+
 (deftest processes-refresh-reads-the-evaluator-per-call
   (let [statuses (atom [])
         ops (atom [])
