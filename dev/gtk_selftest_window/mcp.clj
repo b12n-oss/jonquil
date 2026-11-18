@@ -11,6 +11,7 @@
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [jonquil.changed :as changed]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -321,6 +322,41 @@
         (on-gtk (support/check :mcp-tools-run-selection
                                (and (not (:error? r)) (str/ends-with? (:text r) "=> 4"))
                                {:r r}))))))
+
+(defn- changed-marks
+  "How many forms tab id's gutter marks changed. GTK-thread only."
+  [ui id]
+  (let [t (some #(when (= id (:id %)) %) ((:tabs* ui)))
+        ran @(:ran (:changed (:ed t)))]
+    (count (changed/changed (editor/editor-text (:ed t)) ran))))
+
+(defn row-mcp-tools-run-changed
+  "UF6: open, Run, edit one form, then jonquil_changed lists it and
+  jonquil_run_changed runs it, after which the tab's gutter marks nothing."
+  [ui]
+  (go-row :mcp-tools-run-changed support/check
+    (let [t (tools-for ui)
+          text "(ns demo.uf6row)\n(defn f [] 1)\n(defn k [] :k)\n"
+          p (file! "uf6row.clj" text)]
+      (on-gtk (occupy-first! ui))
+      (try
+        (let [id (tab-id (:text (call t "jonquil_open" {"path" p})))
+              run (call t "jonquil_run")
+              _ (call t "jonquil_replace_text" {"text" (str/replace text "(defn f [] 1)" "(defn f [] 2)")})
+              marked (on-gtk (changed-marks ui id))
+              listed (call t "jonquil_changed")
+              ran (call t "jonquil_run_changed")
+              left (on-gtk (changed-marks ui id))
+              v (call t "jonquil_eval" {"code" "(demo.uf6row/f)"})]
+          (on-gtk (support/check :mcp-tools-run-changed
+                                 (and (not (:error? run)) (= 1 marked)
+                                      (= ["f"] (map #(get % "name") (get-in listed [:data "forms"])))
+                                      (= "ok" (get-in ran [:data "status"]))
+                                      (str/starts-with? (:text ran) "; Running 1 changed form\n")
+                                      (zero? left)
+                                      (str/ends-with? (:text v) "=> 2"))
+                                 {:run run :marked marked :listed listed :ran ran :left left :v v})))
+        (finally (on-gtk (close-extra-tabs! ui)))))))
 
 (defn row-mcp-tools-timeout-stop [ui]
   (go-row :mcp-tools-timeout-stop support/check

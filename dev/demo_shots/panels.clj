@@ -281,6 +281,50 @@
               (check! :messages (and (not (:error? r1)) (not (:error? r2)) listed? (zero? exit))
                       {:rows rows :screenshot-exit exit :screenshot-err err})))))
 
+;; --- Changed forms over MCP (UF6) ----------------------------------------------
+
+(def ^:private changed-source
+  (str "(ns talk.core)\n\n"
+       "(defn greet [name]\n  (str \"hi \" name))\n\n"
+       "(defn shout [s]\n  (str s \"!\"))\n\n"
+       "(def default-name \"world\")\n"))
+
+(defn scene-mcp-changed
+  "jonquil_changed and jonquil_run_changed from a client called Claude
+  Code: the tab ran, the agent edited two forms, listed them and ran just
+  those two, then edited two again, so the gutter marks them and the
+  Messages panel shows both rows (Reads ticked)."
+  [ui]
+  (go-row :mcp-changed check!
+    (let [mp (:messages-pane ui)
+          root (demo-project! {"src/talk/core.clj" changed-source})
+          t1 (on-gtk ((:open-file! ui) (str root "/src/talk/core.clj"))
+                     (last ((:tabs* ui))))
+          tools (window/with-messages
+                  (fn [] (window/make-window-tools {:ui ui :dir root})) ui (atom {:client "Claude Code"}))
+          call (fn [tname args] ((:call (tools)) tname args))
+          edit (fn [a b] (call "jonquil_replace_text"
+                               {"id" (:id t1)
+                                "text" (-> changed-source
+                                           (str/replace "(str \"hi \" name)" a)
+                                           (str/replace "(str s \"!\")" b))}))
+          run (call "jonquil_run" {})
+          _ (edit "(str \"hello, \" name)" "(str s \"!!\")")
+          listed (call "jonquil_changed" {"id" (:id t1)})
+          ran (call "jonquil_run_changed" {"id" (:id t1)})
+          _ (edit "(str \"hello, \" name \".\")" "(str s \"!!!\")")
+          _ (on-gtk (panel-key! ui \7)
+                    (messages-pane/set-kind! mp :agent-read true))
+          rows? (await-until 3000 20 #(<= 2 (count (filter (fn [r] (str/includes? r "changed form"))
+                                                         (messages-pane/row-texts mp)))))
+          rows (on-gtk (messages-pane/row-texts mp))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :mcp-changed "png") (own-pid))]
+      (on-gtk (all-saved! ui)
+              (check! :mcp-changed (and (not (:error? run)) (= "ok" (get-in listed [:data "status"]))
+                                        (= "ok" (get-in ran [:data "status"])) rows? (zero? exit))
+                      {:rows rows :listed listed :ran ran :screenshot-exit exit :screenshot-err err})))))
+
 ;; --- Run Tests -----------------------------------------------------------------
 
 (def ^:private shapes-source

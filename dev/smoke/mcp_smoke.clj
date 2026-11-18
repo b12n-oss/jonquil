@@ -241,13 +241,46 @@
     (finally
       (tool! srv "jonquil_eval" {"code" "((requiring-resolve 'jolt.profile/instrument!) false)"} 60000))))
 
+(defn- changed-sequence-checks!
+  "UF6: after a run of the file, edit-fn changes one form; jonquil_changed
+  lists it, jonquil_run_changed runs it, and then nothing has changed.
+  args selects the file (headless) or the tab (window)."
+  [srv label args edit-fn]
+  (edit-fn)
+  (let [c (tool! srv "jonquil_changed" args 60000)
+        r (tool! srv "jonquil_run_changed" args 60000)
+        after (tool! srv "jonquil_changed" args 60000)
+        v (tool! srv "jonquil_eval" {"code" "(demo.uf6smoke/f)"} 60000)]
+    (check! (str label " jonquil_changed lists the one edited form")
+            (and (= "ok" (get-in c [:data "status"]))
+                 (= ["f"] (map #(get % "name") (get-in c [:data "forms"]))))
+            c)
+    (check! (str label " jonquil_run_changed runs it")
+            (and (= "ok" (get-in r [:data "status"])) (str/ends-with? (str (:text v)) "=> 2"))
+            {:run r :eval v})
+    (check! (str label " then nothing has changed")
+            (= "no-changes" (get-in after [:data "status"])) after)))
+
+(def ^:private uf6-smoke-text "(ns demo.uf6smoke)\n(defn f [] 1)\n(defn k [] :k)\n")
+
+(defn- changed-checks!
+  "changed-sequence-checks! over src/demo/uf6smoke.clj on disk."
+  [srv proj label]
+  (let [p (str proj "/src/demo/uf6smoke.clj")]
+    (fs/create-dirs (str proj "/src/demo"))
+    (spit p uf6-smoke-text)
+    (tool! srv "jonquil_run_file" {"path" p} 60000)
+    (changed-sequence-checks! srv label {"path" p}
+                              #(spit p (str/replace uf6-smoke-text "(defn f [] 1)" "(defn f [] 2)")))))
+
 (defn- runtime-tool-checks!
-  "jonquil_test, then the describe tools, then the frames tools, over the
-  server's runtime."
+  "jonquil_test, then the describe tools, then the frames tools, then the
+  changed-forms tools, over the server's runtime."
   [srv proj label]
   (test-tool-checks! srv proj label)
   (describe-tool-checks! srv proj label)
-  (frames-checks! srv label))
+  (frames-checks! srv label)
+  (changed-checks! srv proj label))
 
 (defn- main []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
@@ -269,7 +302,7 @@
       (try
         (handshake! srv "in-process")
         (let [r (request! srv "tools/list" {} 20000)]
-          (check! "tools/list has eleven tools" (= 11 (count (get-in r ["result" "tools"]))) r))
+          (check! "tools/list has thirteen tools" (= 13 (count (get-in r ["result" "tools"]))) r))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
         (structured-checks! srv)
@@ -311,6 +344,7 @@
     "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab" "jonquil_replace_text"
     "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
     "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
+    "jonquil_changed" "jonquil_run_changed"
     "jonquil_check_brackets" "jonquil_project"
     "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"
     "jonquil_test" "jonquil_change_set_propose"})
@@ -411,7 +445,7 @@
     (println "[mcp-smoke] startup plugin tool seen" (name path))
     (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
             (and (not= :no-list-changed path)
-                 (= 26 (count (get-in r ["result" "tools"])))
+                 (= 28 (count (get-in r ["result" "tools"])))
                  (= want (names-of r)))
             {:path path :r r}))
   (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
@@ -519,6 +553,22 @@
                  (not (str/includes? text "fails\" :arglists")))
             text)))
 
+(defn- window-changed-checks!
+  "changed-sequence-checks! over a tab: open the file, Run it, then edit
+  the tab's text (unsaved) through jonquil_replace_text. a.clj's tab is
+  the active one again afterwards, as the later checks expect."
+  [srv proj a]
+  (let [p (str proj "/src/demo/uf6smoke.clj")]
+    (fs/create-dirs (str proj "/src/demo"))
+    (spit p uf6-smoke-text)
+    (tool! srv "jonquil_open" {"path" p} 60000)
+    (tool! srv "jonquil_run" {} 60000)
+    (changed-sequence-checks! srv "window" {}
+                              #(tool! srv "jonquil_replace_text"
+                                      {"text" (str/replace uf6-smoke-text "(defn f [] 1)" "(defn f [] 2)")} 30000))
+    (tool! srv "jonquil_save" {} 30000)
+    (tool! srv "jonquil_open" {"path" a} 60000)))
+
 (defn- window-main []
   (let [{:keys [tmp xdg proj a]} (window-fixture!)
         srv (launch! proj xdg)
@@ -529,6 +579,7 @@
       (window-test-checks! srv proj)
       (window-describe-checks! srv)
       (frames-checks! srv "window")
+      (window-changed-checks! srv proj a)
       (plugin-checks! srv xdg)
       (window-dirty-eof-checks! srv a pid)
       (check! "every stdout line is JSON"
@@ -586,8 +637,8 @@
             (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
   (let [r (request! b1 "tools/list" {} 60000)
         names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-    (check! "tools/list has exactly the twenty-five window tools"
-            (and (= 25 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+    (check! "tools/list has exactly the twenty-seven window tools"
+            (and (= 27 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
   (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
     (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
   (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]

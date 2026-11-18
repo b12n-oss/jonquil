@@ -117,6 +117,7 @@
    mcp/row-mcp-tools-replace-nul
    mcp/row-mcp-tools-run-eval-console
    mcp/row-mcp-tools-run-selection
+   mcp/row-mcp-tools-run-changed
    mcp/row-mcp-tools-timeout-stop
    mcp/row-mcp-tools-waiting-input
    mcp/row-mcp-tools-doc-complete-brackets-project
