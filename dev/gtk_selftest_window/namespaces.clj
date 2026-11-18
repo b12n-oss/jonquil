@@ -49,3 +49,23 @@
                              {:ran ran? :shown shown? :listed listed? :found found? :stepped stepped?
                               :crumb crumb :back back? :hidden hidden? :rows (rows ui)
                               :footer (np/footer-text p)})))))
+
+(defn row-namespaces-keys
+  "Keyboard and mouse on the Namespaces panel: Cmd/Ctrl+Alt+0 on the open
+  panel puts focus on the selected row (a list box with focus but no
+  focused row ignores the arrow keys), and one click only selects a row:
+  activating takes a double-click or Return."
+  [ui]
+  (go-row :namespaces-keys support/check
+    (let [p (:namespaces-pane ui)
+          lb (:list p)
+          _ (on-gtk (panel-key! ui \0))
+          listed? (await-until 5000 50 #(and (seq (rows ui)) (not= "Loading…" (np/footer-text p))))
+          _ (on-gtk (np/select! p 0) (panel-key! ui \0))
+          focused? (await-until 3000 20
+                                #(let [r (g/gtk-list-box-get-row-at-index lb 0)]
+                                   (and (not (ffi/null? r)) (pos? (g/gtk-widget-is-focus r)))))
+          single (on-gtk (g/gtk-list-box-get-activate-on-single-click lb))
+          _ (on-gtk ((handler ui :on-close)))]
+      (on-gtk (support/check :namespaces-keys (and listed? focused? (zero? single))
+                             {:listed listed? :row-focused focused? :activate-on-single-click single})))))

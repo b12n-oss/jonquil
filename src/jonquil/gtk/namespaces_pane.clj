@@ -116,7 +116,12 @@
     (try (g/gtk-editable-set-text (:filter pane) text)
          (finally (reset! (:showing? pane) false)))))
 
-(defn focus-list! [pane] (g/gtk-widget-grab-focus (:list pane)))
+(defn focus-list!
+  "Focuses the selected row, or the list when none is selected: a list box
+  whose own widget has focus, with no focused row, ignores the arrow keys."
+  [pane]
+  (let [r (g/gtk-list-box-get-selected-row (:list pane))]
+    (g/gtk-widget-grab-focus (if (ffi/null? r) (:list pane) r))))
 
 (defn row-texts
   "The shown rows' first labels, in order."
@@ -174,7 +179,7 @@
              (fn [e _] (when-not @(:showing? pane) (call! pane :on-filter (g/editable-text e))) nil))
   (connect2! filter "activate"
              (fn [_ _] (when-let [r (first-row pane)] (on-gui! #(call! pane :on-activate r false))) nil))
-  (connect-key! filter (fn [k _] (when (filter-key k) (focus-list! pane) (select! pane 0) true)))
+  (connect-key! filter (fn [k _] (when (filter-key k) (select! pane 0) (focus-list! pane) true)))
   (let [click (g/gtk-gesture-click-new)]
     ;; the crumb line's "All namespaces": a click steps back
     (g/g-signal-connect-data click "pressed"
@@ -192,6 +197,9 @@
   (g/gtk-box-append top filter)
   (g/gtk-box-append top refresh)
   (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
+  ;; a click only selects (the footer shows the var); a double-click or
+  ;; Return acts, so reading a var's details never jumps away
+  (g/gtk-list-box-set-activate-on-single-click lb 0)
   (g/gtk-scrolled-window-set-child scroll lb)
   (g/gtk-widget-set-vexpand scroll 1)
   (doseq [l [crumb footer]]

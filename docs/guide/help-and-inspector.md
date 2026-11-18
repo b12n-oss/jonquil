@@ -127,7 +127,9 @@ for a name first. Open it with Cmd/Ctrl+Alt+0 or **Namespaces** in the View
 menu's panel list. It lists every loaded namespace with how many vars it
 holds, your project's own at the top. Clojure's and the libraries' namespaces
 sit in a **Libraries** group below them, folded until you press Return on it
-or click it. A namespace counts as yours when its file is in the project, so
+or double-click it. A single click only selects a row, so you can read a
+var's details in the footer without leaving where you are; a double-click
+does what Return does. A namespace counts as yours when its file is in the project, so
 one with no file (`user`, say) goes under Libraries.
 
 ![The Namespaces panel after shop.clj and cart.clj ran: demo.cart with 1 var and demo.shop with 5 at the top, a folded Libraries group of 314 below them, and the footer counting 2 own namespaces and 314 from libraries](../images/namespaces.png)

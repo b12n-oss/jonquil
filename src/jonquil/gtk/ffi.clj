@@ -1158,6 +1158,8 @@
 (ffi/defcfn gtk-list-box-row-get-child "gtk_list_box_row_get_child" [:pointer] :pointer)
 (ffi/defcfn gtk-list-box-select-row "gtk_list_box_select_row" [:pointer :pointer] :void)
 (ffi/defcfn gtk-list-box-set-selection-mode "gtk_list_box_set_selection_mode" [:pointer :int] :void)
+(ffi/defcfn gtk-list-box-set-activate-on-single-click "gtk_list_box_set_activate_on_single_click" [:pointer :int] :void)
+(ffi/defcfn gtk-list-box-get-activate-on-single-click "gtk_list_box_get_activate_on_single_click" [:pointer] :int)
 ;; GtkSelectionMode: gtkenums.h:557-559 (NONE=0, SINGLE=1, BROWSE=2).
 ;; BROWSE (gtkenums.h:542: "Exactly one element is selected... the user
 ;; can't deselect a currently selected element except by selecting
