@@ -42,11 +42,12 @@
   :check {:extra-paths ["dev"]
           :main-opts ["-m" "check"]}
   ;; Code metrics report (jolt metrics): jolt-metrics' CLI. Report only.
-  ;; jolt-metrics at the commit jolt's own CI gate runs (jolt-lang/jolt#1640),
-  ;; which needs jolt 0.8.25
+  ;; jolt-metrics v0.5.0 (compression metrics, near-duplicates, hotspot
+  ;; floors, :thresholds in .jolt-metrics.edn)
   :metrics {:extra-deps {io.github.jlt-commons/jolt-metrics
                          {:git/url "https://github.com/jlt-commons/jolt-metrics"
-                          :git/sha "3e13e1f1b86e7ba2db3f28125279864ef7ff0818"}}
+                          :git/tag "v0.5.0"
+                          :git/sha "641dc7911b5142f1b3809b4ebba896ccefef1576"}}
             :main-opts ["-m" "metrics.cli"]}
   ;; GTK self-test: opens a real window and runs the front-end rows.
   :selftest {:extra-paths ["dev"]

@@ -16,6 +16,7 @@ everything that shipped before that.
 
 ### Changed
 
+- `jolt metrics` uses jolt-metrics v0.5.0, so its reports also list near-duplicate definitions and each file's redundancy score. `jolt metrics:gate` finds the same as before.
 - On Jolt, Run Selection and Run Form now evaluate in the namespace of the tab's `ns` form and leave the console prompt where it was, as they already did on JVM Clojure, in process and in a Jolt child alike. Before, they ran in whatever namespace the prompt was in, so a `defn` could land in the wrong namespace. When the tab's namespace isn't loaded yet, the console says so and nothing is sent: run the file first.
 
 ## [0.5.0] - 2026-11-17
