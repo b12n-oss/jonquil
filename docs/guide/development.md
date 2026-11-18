@@ -352,7 +352,9 @@ port.
 - `jolt metrics` runs [jolt-metrics](https://github.com/jlt-commons/jolt-metrics)
   over the repo and prints its Markdown report: a refactoring queue worst
   first, git hotspots, unusual commits and files, unused requires and
-  functions nothing mentions, then per-file numbers and coupling. The queue
+  functions nothing mentions, then per-file numbers and coupling. Since
+  v0.5.0 it also lists near-duplicate definitions and gives each file a
+  redundancy score, with the limits it used at the top. The queue
   weighs each function by its reach, how many functions depend on it at any
   distance (from jolt-lsp's call graph), so a complex function the rest of
   the code goes through ranks first; the EDN and JSON reports also carry each
@@ -366,8 +368,7 @@ port.
   `src/jonquil/parinfer.clj`, `src/jonquil/inspect/view.clj` and
   `test/jonquil/upstream/`) is left out too,
   since it follows DrClojure's source and is tracked in `UPSTREAM.md`. The
-  `:metrics` alias pins the library's version, at the commit Jolt's own CI
-  gate runs.
+  `:metrics` alias pins the library's release, v0.5.0.
 - `jolt metrics:gate` is the one metrics task that fails. It runs the
   report as EDN through `ci/metrics-gate.clj`, which checks
   `ci/metrics-allow.edn`, and fails on two things:
