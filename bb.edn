@@ -101,7 +101,7 @@
               (str home "/dev/jlt-commons/docs-engine")
               "../docs-engine"]
              (remove nil?)
-             (filter (fn [d] (fs/exists? (fs/file d "bb.edn"))))
+             (filter (fn [d] (fs/exists? (fs/file d "src" "site" "core.clj"))))
              first)))
 
     (defn free-port
@@ -234,19 +234,11 @@
       "Runs one of the engine's tasks against this project."
       [task & args]
       (if-let [engine (docs-engine-dir)]
-        ;; jolt has its own build and run commands, so `jolt run <task>` reaches
-        ;; the engine's task of that name. serve is the exception: the
-        ;; engine's server is http-kit, which jolt doesn't bundle, so its own
-        ;; info says serve stays babashka-only (bb serve <project> [port])
-        (let [bb?  (= "serve" task)
-              argv (into (if bb? ["bb" task (str (fs/cwd))] ["jolt" "run" task (str (fs/cwd))])
-                         (remove nil? args))]
-          (when (and bb? (not (fs/which "bb")))
-            (println "site:serve runs the docs engine's server, which needs babashka (bb) on PATH:")
-            (println "  https://github.com/babashka/babashka#installation")
-            (System/exit 1))
-          (let [res (apply shell {:dir (str engine) :continue true} argv)]
-            (when-not (zero? (:exit res)) (System/exit (:exit res)))))
+        ;; The engine runs on jolt. jolt has its own build and run commands,
+        ;; so `jolt run <task>` reaches the engine's task of that name.
+        (let [argv (into ["jolt" "run" task (str (fs/cwd))] (remove nil? args))
+              res  (apply shell {:dir (str engine) :continue true} argv)]
+          (when-not (zero? (:exit res)) (System/exit (:exit res))))
         (do
           (println "The docs engine is not checked out anywhere I looked:")
           (println "  $JLT_DOCS_ENGINE, ~/dev/jlt-commons/docs-engine, ../docs-engine")
