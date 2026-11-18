@@ -31,7 +31,7 @@ flowchart LR
 
 A window keeps its evaluator in the atom `ev*`. When the path changes (Open, Save As), `apply-selection!` (in `jonquil.gtk.window.runtime`) re-runs `select` and compares `selection-key`s. Equal keys keep the evaluator. Different keys interrupt and stop the old one off to the side while a new one registers and starts, and the inspector and source panels hide. A loose Jolt file in a Jolt window keeps the window's Jolt (`tabs/keeps-window-jolt?`).
 
-For attach and jank evaluators, `watch-connection!` updates the status-bar label on the GTK thread via `on-gui!`. `apply-reset-toggle!` makes Reset on Run insensitive for `:attach`. Run Selection and Run Form pass the whole buffer as `:ns-source`; attach, JVM and jank evaluators use it to pick the namespace, Jolt ignores it.
+For attach and jank evaluators, `watch-connection!` updates the status-bar label on the GTK thread via `on-gui!`. `apply-reset-toggle!` makes Reset on Run insensitive for `:attach`. Run Selection and Run Form pass the whole buffer as `:ns-source`, and the attach, JVM, jank and Jolt evaluators use it to pick the namespace. Jolt, in process and in the child, evaluates there without moving the prompt, as the JVM evaluator does, and answers the not-loaded notice when the namespace doesn't exist yet.
 
 ## Plug points for more dialects
 

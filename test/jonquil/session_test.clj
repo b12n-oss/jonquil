@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.breakpoints :as bp]
+            [jonquil.clj :as clj]
             [jonquil.debugger :as debugger]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
@@ -878,3 +879,54 @@
     (is (= ["Breakpoint at line 4" "Breakpoint at line 2" "2"]
            (over-run "(defn k [x]\n  (inc x))\n(defn kc []\n  (let [v (k 1)]\n    v))"
                      [2 4] "(kc)" [:over])))))
+
+;; UF6: Selection and Form evals (:ns-source, not :run?) go in the file's
+;; namespace, as jonquil.nrepl.jvm does, and the prompt stays put
+
+(deftest buffer-ns-eval-leaves-prompt-test
+  (let [s (session/make-session)]
+    (run session/run-definitions! s "(ns demo.uf6s)")
+    (repl-sync s "(in-ns 'user)")
+    (is (= "\"demo.uf6s\"" (:printed (run ev/eval! s "(str *ns*)" {:ns-source "(ns demo.uf6s)"}))))
+    (is (= 'user (ev/prompt-ns s)))
+    (remove-ns 'demo.uf6s)))
+
+(deftest buffer-ns-not-loaded-is-a-notice-test
+  (let [s (session/make-session)
+        r (run ev/eval! s "(def x 1)" {:ns-source "(ns never.loaded.uf6)"})]
+    (is (= :notice (:status r)))
+    (is (= (clj/not-loaded-message "never.loaded.uf6") (:text r)))
+    (is (nil? (find-ns 'never.loaded.uf6)))))
+
+(deftest console-line-still-moves-prompt-test
+  (let [s (session/make-session)]
+    (run session/run-definitions! s "(ns demo.uf6c)")
+    (repl-sync s "(in-ns 'user)")
+    (repl-sync s "(in-ns 'demo.uf6c)")
+    (is (= 'demo.uf6c (ev/prompt-ns s)))
+    (remove-ns 'demo.uf6c)))
+
+(deftest no-ns-form-uses-prompt-test
+  (let [s (session/make-session)]
+    (run session/run-definitions! s "(ns demo.uf6n)")
+    (repl-sync s "(in-ns 'demo.uf6n)")
+    (is (= "\"demo.uf6n\"" (:printed (run ev/eval! s "(str *ns*)" {:ns-source "(+ 1 2)"}))))
+    (remove-ns 'demo.uf6n)))
+
+(deftest buffer-ns-auto-required-first-test
+  ;; review #2: a first Run Form in a file the project auto-requires runs
+  ;; there, since auto-require loads the namespace before the check
+  (let [s (session/make-session)
+        dir (str (temp-dirs/temp-dir! "jonquil-uf6-ar-"))]
+    (spit (io/file dir "deps.edn") "{:paths [\"src\"]}")
+    (io/make-parents (io/file dir "src/demo/uf6ar.clj"))
+    (spit (io/file dir "src/demo/uf6ar.clj") "(ns demo.uf6ar)\n(def loaded :yes)\n")
+    (swap! (:state s) assoc :project-dir dir :auto-require '[demo.uf6ar] :auto-require-dir dir)
+    (is (= ":yes" (:printed (run ev/eval! s "loaded" {:ns-source "(ns demo.uf6ar)"}))))
+    (is (= 'user (ev/prompt-ns s)))))
+
+(deftest buffer-ns-notice-leaves-repl-vars-test
+  (let [s (session/make-session)]
+    (repl-sync s ":before")
+    (is (= :notice (:status (run ev/eval! s "(/ 1 0)" {:ns-source "(ns never.loaded.uf6b)"}))))
+    (is (= "[:before nil]" (:printed (repl-sync s "[*1 *e]"))))))

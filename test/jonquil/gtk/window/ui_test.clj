@@ -5,14 +5,14 @@
             [jonquil.gtk.window.ui :as win-ui]))
 
 (def ^:private ui-keys
-  "The ui map's 122 core keys (start!'s docstring names them with the parts' :ui keys)."
+  "The ui map's 124 core keys (start!'s docstring names them with the parts' :ui keys)."
   #{:activate-menu-action!* :activate-quit-action!* :active-tab* :alert-dialog-count :alert-pending? :alert-release!
     :app :clear-console!* :clear-last-output!* :close-choice! :close-inspector!* :close-popovers!* :close-tab!
     :close-tab-choice! :closing? :code-css* :complete!* :complete-alert-for-test! :completion :console :cycle-theme!*
     :dialect-label :dismiss-alerts!* :editor :evaluator* :file-tree :file-tree-visible?* :files-btn :find-bar
     :full-doc-popover :h-paned :handle-window-key! :help-popover :hint-label :inspect-form!* :inspect-last!* :inspector
     :inspector-last-args* :inspector-state* :jump!* :jump-back!* :line-col-label :load-settings!* :mcp-eval!* :mcp-run!*
-    :mcp-frame-eval!* :mcp-frames!* :mcp-query!* :mcp-run-selection!* :new-tab!* :notebook :open-file! :open-path! :open-paths! :palette :palette-ctx-keys
+    :mcp-changed* :mcp-frame-eval!* :mcp-frames!* :mcp-query!* :mcp-run-changed!* :mcp-run-selection!* :new-tab!* :notebook :open-file! :open-path! :open-paths! :palette :palette-ctx-keys
     :panel-focus!* :parinfer!* :parinfer-label :part-owners* :pending-alerts* :pending-label :plugin-history-pane
     :plugin-list-pane :poll-appearance!* :poll-arm-count* :poll-armed?* :quick-doc!* :recent-panels*
     :register-alert-choice-for-test! :register-popover!* :rename!* :rename-popover :rename-to!*

@@ -87,7 +87,10 @@ refuses to run a broken pane. A second Run during a run just warns.
 `docs/demos/hello.clj` is the simplest example.
 
 - **Cmd/Ctrl+E** evaluates the selection (or current line) at the console
-  prompt, echoed there and added to the REPL history.
+  prompt, echoed there and added to the REPL history. On Jolt and JVM
+  Clojure it runs in the namespace the tab's `ns` form names, and the prompt
+  stays where it was. If that namespace isn't loaded yet, the console asks
+  you to run the file first. Run Form works the same way.
 - **Cmd/Ctrl+Enter**, or Run Form in the right-click menu, runs the
   top-level form around the caret (inside `(comment ...)`, the form that
   holds the caret). With no form there, the status bar says so.

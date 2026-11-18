@@ -1,5 +1,5 @@
 (ns jonquil.mcp.window
-  "The twenty-five MCP tools over a live Jonquil window, four of them over its
+  "The twenty-seven MCP tools over a live Jonquil window, four of them over its
   plugins folder (through jonquil.plugin-mcp) and one saving a change set
   an agent proposes (jonquil.change-sets).
 
@@ -22,6 +22,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
+            [jonquil.mcp.changed :as mcp-changed]
             [jonquil.mcp.describe :as describe]
             [jonquil.mcp.frames :as frames]
             [jonquil.mcp.result :as result]
@@ -122,6 +123,8 @@
    (describe-def "jonquil_vars")
    (describe-def "jonquil_apropos")
    (update-in frames/frames-def ["inputSchema" "properties"] dissoc "path")
+   mcp-changed/window-changed-def
+   mcp-changed/window-run-changed-def
    {"name" "jonquil_check_brackets"
     "description" "Check brackets in text or in a file. Answers ok, or names the first unclosed or unmatched bracket and its line."
     "inputSchema" {"type" "object"
@@ -240,14 +243,18 @@
 ;; --- evaluation --------------------------------------------------------------
 
 (defn- notify->result
-  "A notify map as a tool result: :done is the evaluation's result, the
-  rest are errors. limits holds :max-output and :elapsed (a fn, the wall
+  "A notify map as a tool result: :done is the evaluation's result,
+  :unchanged a jonquil_run_changed with nothing to run, the rest are errors. limits holds :max-output and :elapsed (a fn, the wall
   time so far)."
   [m {:keys [max-output elapsed]}]
-  (if-let [{:keys [result output]} (:done m)]
-    (tools/done-result result (result/clip output max-output) (elapsed))
-    {:text (str (or (:busy m) (:refused m) (:problem m) (:none m))) :error? true
-     :data (result/eval-data {:status :refused :output ""})}))
+  (cond
+    (:done m) (let [{:keys [result output]} (:done m)]
+                (tools/done-result result (result/clip output max-output) (elapsed)))
+    ;; UF6: jonquil_run_changed found nothing to run; not an error
+    (:unchanged m) (let [{:keys [status text]} (:unchanged m)]
+                     {:text text :error? false :data {"status" status}})
+    :else {:text (str (or (:busy m) (:refused m) (:problem m) (:none m))) :error? true
+           :data (result/eval-data {:status :refused :output ""})}))
 
 (defn- now-ms [] (System/currentTimeMillis))
 
@@ -606,6 +613,42 @@
             (frames/frames-timeout-result t)
             (frames/frames-answer d (tools/frames-opts ctx sel)))))))
 
+;; --- UF6: changed forms ------------------------------------------------------
+
+(defn- changed-now
+  "[id forms] for args' tab (default the active one), read on the GUI
+  thread through :mcp-changed*: forms is mcp-changed/changed-forms' value.
+  A no-tab error result in place of forms when there is no such tab."
+  [{:keys [ui turn] :as ctx} args]
+  (let [id (or (number-arg args "id") (active-id ctx))
+        t (when id (turn (fn [] ((:mcp-changed* ui) id))))]
+    (cond
+      t [id (mcp-changed/changed-forms (:text t) (:last-run t) (:ran t))]
+      id [id (no-tab id)]
+      :else [nil {:text "No active tab." :error? true}])))
+
+(defn- error-result? [x] (and (map? x) (contains? x :error?)))
+
+(defn- changed-answer [id forms]
+  (with-tab (mcp-changed/changed-answer forms {:never-ran-text mcp-changed/never-ran-window}) id))
+
+(defn- tool-changed [ctx args]
+  (let [[id forms] (changed-now ctx args)]
+    (if (error-result? forms) forms (changed-answer id forms))))
+
+(defn- tool-run-changed
+  "jonquil_run_changed over tab id: answered here when there is nothing to
+  run, else through :mcp-run-changed!*, which echoes and runs the forms as
+  Run Changed does (the gutter clears)."
+  [{:keys [ui await!] :as ctx} args]
+  (let [[id forms] (changed-now ctx args)]
+    (cond
+      (error-result? forms) forms
+      (empty? forms) (changed-answer id forms)
+      :else
+      (let [r (await! args (fn [notify] ((:mcp-run-changed!* ui) id notify)))]
+        (with-tab (mcp-changed/with-sent-line r (count forms)) id)))))
+
 (defn- frame-eval!
   "jonquil_eval with a frame over the window's runtime, through the ui's
   :mcp-frame-eval!*: no console entry."
@@ -637,6 +680,8 @@
      "jonquil_vars" (h (tool-describe "jonquil_vars"))
      "jonquil_apropos" (h (tool-describe "jonquil_apropos"))
      "jonquil_frames" (h tool-frames)
+     "jonquil_changed" (h tool-changed)
+     "jonquil_run_changed" (h tool-run-changed)
      "jonquil_check_brackets" (h tool-brackets)
      "jonquil_project" (h tool-project)
      "jonquil_plugins_list" (h tool-plugins-list)

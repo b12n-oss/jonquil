@@ -135,9 +135,9 @@
                         (win-files/save-to! ed cv path p) (win-files/update-title! ed win path)))}))
 
 (defn- mcp-keys
-  "The run keys the MCP server calls: its notifying Run, eval and Run
-  Selection."
-  [{:keys [active-tab cv ev* sel* status-label]}]
+  "The run keys the MCP server calls: its notifying Run, eval, Run
+  Selection and Run Changed, and the changed forms' read."
+  [{:keys [active-tab cv ev* sel* status-label tabs]}]
   {;; Notifying hooks for the MCP server, each calls
    ;; notify once and returns an output reader.
    :mcp-run!* (fn [notify]
@@ -156,7 +156,20 @@
    :mcp-run-selection!* (fn [start end notify]
                           (win-run/mcp-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
                                                        :status-label status-label}
-                                                      start end notify))})
+                                                      start end notify))
+   ;; UF6: tab id's text and what it last ran as, for jonquil_changed, and
+   ;; Run Changed over that tab for jonquil_run_changed
+   :mcp-changed* (fn [id]
+                   (when-let [t (some #(when (= id (:id %)) %) @tabs)]
+                     (let [{:keys [ran last-run]} (:changed (:ed t))]
+                       {:text (editor/editor-text (:ed t)) :ran (some-> ran deref)
+                        :last-run (some-> last-run deref) :path @(:path t)})))
+   :mcp-run-changed!* (fn [id notify]
+                        (if-let [t (some #(when (= id (:id %)) %) @tabs)]
+                          (win-run/mcp-run-changed! {:tab t :cv cv :ev* ev* :sel* sel*
+                                                     :status-label status-label}
+                                                    notify)
+                          (do (notify {:refused (str "No tab with id " id ".")}) (fn [] ""))))})
 
 (defn- run-keys
   "The ui map's run keys: Run and Stop, the MCP server's notifying runs, Run Selection, Run Form, the focus toggle and the console's two clears."

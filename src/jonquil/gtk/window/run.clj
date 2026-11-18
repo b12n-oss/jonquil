@@ -12,6 +12,7 @@
             [jolt.ffi :as ffi]
             [jonquil.breakpoints :as bp]
             [jonquil.changed :as changed]
+            [jonquil.mcp.changed :as mcp-changed]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.cljs :as cljs]
@@ -394,9 +395,8 @@
   "submit-repl! with the same opts run uses, minus the banner -- and the
   same warning-append bookkeeping, since submit-repl! can return the same
   busy warning run-definitions! can. extra-opts is merged in last: Run
-  Selection and Run Form pass {:ns-source buffer-text}, which the attach
-  evaluator uses to switch the session into the buffer's namespace first;
-  the in-process and nREPL evaluators ignore it. ctx is the window's (its
+  Selection and Run Form pass {:ns-source buffer-text}, so the evaluator
+  runs the code in the buffer's namespace and leaves the prompt alone. ctx is the window's (its
   :cv, :ev* and :status-label)."
   [{:keys [cv ev* status-label]} ed text extra-opts]
   (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
@@ -547,8 +547,10 @@
                                                         :hook-code text :failure* (:failure* cv)
                                                         :changed (:changed ed))
                                                  out notify)
-                                 extra-opts))]
+                                 (dissoc extra-opts ::after-echo)))]
     (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+    ;; Run Changed's "; Running N changed forms", after the echo as there
+    (when-let [line (::after-echo extra-opts)] (cview/append! cv :system (str line "\n")))
     (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
           warning (ev/eval! @ev* text opts)]
       (when warning
@@ -745,6 +747,32 @@
         (if (empty? forms)
           (win-status/set-status! status-label "; Nothing has changed since the last run.")
           (send-changed! ctx text forms))))))
+
+(defn mcp-run-changed!
+  "jonquil_run_changed over tab (any tab of the window, not only the
+  active one): {:unchanged {:status :text}} when the tab never ran or
+  nothing changed, {:refused msg} for a foreign tab, else the changed
+  forms echoed and sent through mcp-eval! as do-run-changed! sends them,
+  so the eval hook records them and their gutter marks clear. Returns the
+  output reader, (fn [] \"\") on the no-eval paths."
+  [{:keys [tab ev*] :as ctx} notify]
+  (let [ed (:ed tab)
+        ran (some-> (:changed ed) :ran deref)
+        text (editor/editor-text ed)
+        forms (when ran (changed/changed text ran))
+        code (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) forms))
+        unchanged (fn [status t] (notify {:unchanged {:status status :text t}}) (fn [] ""))]
+    (cond
+      (nil? ran) (unchanged "never-ran" mcp-changed/never-ran-window)
+      (empty? forms) (unchanged "no-changes" mcp-changed/no-changes-text)
+      :else
+      (if-let [msg (or (refuse-foreign! ctx)
+                       (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))]
+        (do (notify {:refused msg}) (fn [] ""))
+        (mcp-eval! ctx code {:ns-source text :owner (:id tab)
+                             :hook-source :selection :hook-tab (:id tab)
+                             ::after-echo (mcp-changed/sent-line (count forms))}
+                   notify)))))
 
 (defn make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console

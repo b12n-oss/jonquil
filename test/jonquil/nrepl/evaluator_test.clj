@@ -5,6 +5,7 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.clj :as clj]
             [jonquil.console :as console]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
@@ -954,3 +955,33 @@
   (is (= {:out "" :text "1"} (nrepl/frame-eval-reply [{:text "1"}])))
   (is (= {:error "boom"} (nrepl/frame-eval-reply [{:error "boom"}])))
   (is (= {:error "The Jolt child answered without a value."} (nrepl/frame-eval-reply [{:status ["done" "error"]}]))))
+
+(defn- run-buffer
+  "A Run Selection / Run Form eval: :ns-source, not a Run."
+  [e code ns-source]
+  (let [done (promise)]
+    (ev/eval! e code {:run? false :ns-source ns-source :on-complete (fn [r] (deliver done r))})
+    (deref done 20000 :timeout)))
+
+(deftest buffer-ns-eval-test
+  ;; UF6: as jonquil.nrepl.jvm does, a Selection or Form eval goes in the
+  ;; file's namespace and the prompt stays where it was
+  (let [dir (temp-project) e (make dir)]
+    (try
+      (is (nil? (ev/start! e)))
+      (run e "(ns demo.uf6)" true)
+      (run e "(in-ns 'user)" false)
+      (testing "buffer-ns-eval-leaves-prompt"
+        (is (= "\"demo.uf6\"" (:printed (run-buffer e "(str *ns*)" "(ns demo.uf6)"))))
+        (is (= 'user (ev/prompt-ns e))))
+      (testing "buffer-ns-not-loaded-is-a-notice"
+        (let [r (run-buffer e "(def x 1)" "(ns never.loaded)")]
+          (is (= :notice (:status r)))
+          (is (= (clj/not-loaded-message "never.loaded") (:text r))))
+        (is (= "nil" (:printed (first (run e "(find-ns 'never.loaded)" false))))))
+      (testing "no-ns-form-uses-prompt"
+        (is (= "\"user\"" (:printed (run-buffer e "(str *ns*)" "(+ 1 2)")))))
+      (testing "console-line-still-moves-prompt"
+        (run e "(in-ns 'demo.uf6)" false)
+        (is (= 'demo.uf6 (ev/prompt-ns e))))
+      (finally (ev/stop! e)))))

@@ -1,5 +1,5 @@
 (ns jonquil.mcp.tools
-  "The eleven MCP tools over a per-project evaluator.
+  "The thirteen MCP tools over a per-project evaluator.
 
   `make-tools` returns the table jonquil.mcp consumes:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`.
@@ -7,6 +7,7 @@
   turns a throw into an error result. Requires no jonquil.gtk namespace."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [jonquil.changed :as changed]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.clj :as clj]
@@ -15,6 +16,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.help :as help]
+            [jonquil.mcp.changed :as mcp-changed]
             [jonquil.mcp.frames :as frames]
             [jonquil.mcp.result :as result]
             [jonquil.nrepl.attach]
@@ -106,6 +108,8 @@
                                  "path" (prop "string" "A file or directory selecting the project.")}
                    "required" ["query"]}}
    frames/frames-def
+   mcp-changed/changed-def
+   mcp-changed/run-changed-def
    {"name" "jonquil_project"
     "description" "The dialect, runtime and project directory the other tools would use for path. Starts nothing."
     "inputSchema" {"type" "object"
@@ -301,17 +305,64 @@
           (run-in! env {:path path :e e :code code :opts {:run? false :owner :repl}
                         :args args}))))))
 
-(defn- tool-run [env args]
+(defn- file-arg
+  "[absolute-path text] for args' required path; throws for a missing file
+  or a directory."
+  [env args]
   (let [p (absolute (:dir env) (required-string args "path"))
         f (io/file p)]
     (cond
       (not (.exists f)) (throw (ex-info (str "No such file: " p) {}))
       (.isDirectory f) (throw (ex-info (str "Not a file, a directory: " p) {}))
-      :else
-      (let [text (slurp f)]
-        (with-ev env p
-          (fn [_ e] (run-in! env {:path p :e e :code text :opts {:run? true :path p :owner :run}
-                                  :args args})))))))
+      :else [p (slurp f)])))
+
+(defn- ok? [r] (= "ok" (get-in r [:data "status"])))
+
+(defn- tool-run [env args]
+  (let [[p text] (file-arg env args)]
+    (with-ev env p
+      (fn [_ e]
+        (let [r (run-in! env {:path p :e e :code text :opts {:run? true :path p :owner :run}
+                              :args args})]
+          ;; UF6: what jonquil_changed compares against, kept per file only
+          ;; after a run that ended ok
+          (when (ok? r)
+            (swap! (:changed env) assoc p {:e e :ran (changed/record nil text :run) :last-run text}))
+          r)))))
+
+;; --- UF6: changed forms ------------------------------------------------------
+
+(defn- changed-record
+  "p's record when the project's cached evaluator is still the one that
+  ran it, else nil (never ran, or the evaluator was evicted). Starts
+  nothing."
+  [{:keys [ctx cache changed]} p]
+  (let [rec (get @changed p)]
+    (when (and rec (identical? (:e rec) (get @cache (dialect/selection-key (selection ctx p)))))
+      rec)))
+
+(defn- forms-now
+  "[p text rec forms] for args' file: its disk text now, its record and
+  the forms changed since they last ran (nil when it never ran)."
+  [env args]
+  (let [[p text] (file-arg env args)
+        rec (changed-record env p)]
+    [p text rec (mcp-changed/changed-forms text (:last-run rec) (:ran rec))]))
+
+(defn- tool-changed [env args]
+  (let [[_ _ _ forms] (forms-now env args)]
+    (mcp-changed/changed-answer forms {:never-ran-text mcp-changed/never-ran-headless})))
+
+(defn- tool-run-changed [env args]
+  (let [[p text rec forms] (forms-now env args)]
+    (if (empty? forms)
+      (mcp-changed/changed-answer forms {:never-ran-text mcp-changed/never-ran-headless})
+      (let [code (mcp-changed/run-code forms)
+            r (run-in! env {:path p :e (:e rec) :code code
+                            :opts {:run? false :owner :repl :ns-source text} :args args})]
+        (when (ok? r)
+          (swap! (:changed env) update-in [p :ran] changed/record code :form))
+        (mcp-changed/with-sent-line r (count forms))))))
 
 (defn quiet-opts
   "Options for evaluating Jonquil's own code on evaluator e: a REPL entry,
@@ -572,6 +623,8 @@
    "jonquil_vars" (tool-describe "jonquil_vars")
    "jonquil_apropos" (tool-describe "jonquil_apropos")
    "jonquil_frames" tool-frames
+   "jonquil_changed" tool-changed
+   "jonquil_run_changed" tool-run-changed
    "jonquil_project" tool-project})
 
 (defn make-tools
@@ -583,6 +636,8 @@
   [{:keys [dir cache grace-ms] :as ctx}]
   (let [env {:ctx ctx :dir dir
              :cache (or cache (atom {}))
+             ;; UF6: {abs-path {:e :ran :last-run}}, what each file last ran as
+             :changed (atom {})
              :grace-ms (or grace-ms interrupt-grace-ms)}
         handlers (into {} (map (fn [[tname f]] [tname (fn [args] (f env args))])) tool-fns)]
     {:defs tool-defs

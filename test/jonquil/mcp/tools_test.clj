@@ -29,10 +29,10 @@
 
 (defn- call [name args] ((:call (:t @env)) name args))
 
-(deftest defs-name-eleven-tools
+(deftest defs-name-thirteen-tools
   (is (= ["jonquil_eval" "jonquil_run_file" "jonquil_test" "jonquil_check_brackets"
           "jonquil_doc" "jonquil_complete" "jonquil_namespaces" "jonquil_vars" "jonquil_apropos" "jonquil_frames"
-          "jonquil_project"]
+          "jonquil_changed" "jonquil_run_changed" "jonquil_project"]
          (map #(get % "name") (:defs (:t @env)))))
   (is (every? #(vector? (get-in % ["inputSchema" "required"])) (:defs (:t @env)))))
 
@@ -628,3 +628,111 @@
         person (future (c "jonquil_eval" {"code" "(do (Thread/sleep 2500) :person-done)"}))]
     (is (= "Timed out after 1500 ms; interrupted." (:text @stuck)))
     (is (= "=> :person-done" (:text @person)) "the timeout stopped only the frame evaluation")))
+
+;; --- UF6: jonquil_changed and jonquil_run_changed ---------------------------
+
+(def ^:private uf6-text "(ns demo.uf6)\n(defn f [] 1)\n(defn k [] :same)\n")
+
+(defn- changed-env
+  "A fresh project with src/demo/uf6.clj and src/demo/other.clj, and its own
+  evaluator cache."
+  []
+  (let [dir (temp-dirs/temp-dir! "jonquil-mcp-changed-")
+        cache (atom {})]
+    (spit (io/file dir "deps.edn") "{}")
+    (spit (io/file dir ".jonquil.edn") "{:runtime :in-process}")
+    (io/make-parents (io/file dir "src/demo/uf6.clj"))
+    (spit (io/file dir "src/demo/uf6.clj") uf6-text)
+    (spit (io/file dir "src/demo/other.clj") "(ns demo.other)\n(defn f [] :other)\n")
+    {:dir dir :cache cache
+     :call (:call (tools/make-tools {:dir dir :cache cache
+                                     :settings-path (str (io/file dir "settings.edn"))}))}))
+
+(defn- file-of [{:keys [dir]} rel] (str (io/file dir rel)))
+(defn- status [r] (get-in r [:data "status"]))
+
+(deftest changed-never-ran
+  (let [{:keys [call] :as e} (changed-env)
+        r (call "jonquil_changed" {"path" (file-of e "src/demo/uf6.clj")})]
+    (is (= "never-ran" (status r)))
+    (is (false? (:error? r)))
+    (is (= "Run the file once first (jonquil_run_file)." (:text r)))
+    (is (= "never-ran" (status (call "jonquil_run_changed" {"path" (file-of e "src/demo/uf6.clj")}))))))
+
+(deftest changed-after-edit
+  (let [{:keys [call] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (is (= "ok" (status (call "jonquil_run_file" {"path" p}))))
+    (is (= "no-changes" (status (call "jonquil_changed" {"path" p}))))
+    (spit p (str/replace uf6-text "(defn f [] 1)" "(defn f [] 2)"))
+    (is (= [{"name" "f" "line" 2 "end_line" 2 "text" "(defn f [] 2)" "before" "(defn f [] 1)"}]
+           (get-in (call "jonquil_changed" {"path" p}) [:data "forms"])))))
+
+(deftest changed-reads-disk-each-call
+  (let [{:keys [call] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (call "jonquil_run_file" {"path" p})
+    (spit p (str uf6-text "(defn g [] 3)\n"))
+    (is (= ["g"] (map #(get % "name") (get-in (call "jonquil_changed" {"path" p}) [:data "forms"]))))
+    (spit p (str uf6-text "(defn h [] 4)\n"))
+    (is (= ["h"] (map #(get % "name") (get-in (call "jonquil_changed" {"path" p}) [:data "forms"]))))))
+
+(deftest run-changed-then-no-changes
+  (let [{:keys [call] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (call "jonquil_run_file" {"path" p})
+    (spit p (str/replace uf6-text "(defn f [] 1)" "(defn f [] 2)"))
+    (let [r (call "jonquil_run_changed" {"path" p})]
+      (is (= "ok" (status r)))
+      (is (str/starts-with? (:text r) "; Running 1 changed form\n")))
+    (is (= "no-changes" (status (call "jonquil_changed" {"path" p}))))
+    (let [r (call "jonquil_run_changed" {"path" p})]
+      (is (= "no-changes" (status r)))
+      (is (false? (:error? r))))
+    (is (= "2" (get-in (call "jonquil_eval" {"code" "(demo.uf6/f)" "path" p}) [:data "value"])))))
+
+(deftest run-changed-uses-the-files-namespace
+  (let [{:keys [call] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (call "jonquil_run_file" {"path" p})
+    (call "jonquil_run_file" {"path" (file-of e "src/demo/other.clj")})
+    (spit p (str uf6-text "(defn only-here [] :uf6)\n"))
+    (is (= "ok" (status (call "jonquil_run_changed" {"path" p}))))
+    (is (= "[true false :other]"
+           (get-in (call "jonquil_eval" {"code" "[(some? (resolve 'demo.uf6/only-here)) (some? (resolve 'demo.other/only-here)) (demo.other/f)]"
+                                         "path" p})
+                   [:data "value"])))))
+
+(deftest failed-run-keeps-record
+  (let [{:keys [call] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (call "jonquil_run_file" {"path" p})
+    (spit p (str uf6-text "(defn g [] 3)\n(throw (ex-info \"boom\" {}))\n"))
+    (is (= "error" (status (call "jonquil_run_file" {"path" p}))))
+    (is (= ["g" nil] (map #(get % "name") (get-in (call "jonquil_changed" {"path" p}) [:data "forms"])))
+        "the failed run left the record as it was")
+    (is (= "error" (status (call "jonquil_run_changed" {"path" p}))))
+    (is (= ["g" nil] (map #(get % "name") (get-in (call "jonquil_changed" {"path" p}) [:data "forms"])))
+        "so did the failed run_changed")))
+
+(deftest evicted-evaluator-is-never-ran
+  (let [{:keys [call cache] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (call "jonquil_run_file" {"path" p})
+    (reset! cache {})
+    (is (= "never-ran" (status (call "jonquil_changed" {"path" p}))))))
+
+(deftest changed-missing-file
+  (let [{:keys [call] :as e} (changed-env)]
+    (is (thrown-with-msg? Exception #"No such file" (call "jonquil_changed" {"path" (file-of e "nope.clj")})))
+    (is (thrown-with-msg? Exception #"Not a file" (call "jonquil_run_changed" {"path" (file-of e "src")})))))
+
+(deftest run-changed-prefix-only-when-it-ran
+  ;; review #5: a timeout ran nothing to the end, so no "; Running" line
+  (let [{:keys [call] :as e} (changed-env)
+        p (file-of e "src/demo/uf6.clj")]
+    (call "jonquil_run_file" {"path" p})
+    (spit p (str uf6-text "(loop [] (recur))\n"))
+    (let [r (call "jonquil_run_changed" {"path" p "timeout_ms" 300})]
+      (is (= "timeout" (status r)))
+      (is (not (str/starts-with? (:text r) "; Running"))))))
