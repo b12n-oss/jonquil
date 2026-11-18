@@ -230,6 +230,7 @@
     jonquil.mcp.result
     jonquil.mcp.changed
     jonquil.mcp.frames
+    jonquil.mcp.world
     jonquil.test-run
     jonquil.describe-run
     jonquil.main])

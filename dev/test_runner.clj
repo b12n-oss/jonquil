@@ -70,6 +70,7 @@
     jonquil.mcp.result-test
     jonquil.mcp.changed-test
     jonquil.mcp.frames-test
+    jonquil.mcp.world-test
     jonquil.test-run-test
     jonquil.describe-run-test
     jonquil.mcp.describe-test
