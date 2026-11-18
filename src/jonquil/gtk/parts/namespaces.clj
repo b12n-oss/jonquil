@@ -28,17 +28,18 @@
 (defn initial-state
   "Where a new panel starts: the top level, nothing fetched yet."
   []
-  {:level :top :top nil :vars nil :expanded? false :filter "" :selected nil :gen 0 :problem nil})
+  {:level :top :top nil :vars nil :expanded? false :filter "" :selected nil :gen 0 :problem nil
+   :notice nil :pending? false})
 
 (defn- ns-level
   "The namespace stepped into, or nil at the top level."
   [state]
   (let [l (:level state)] (when (vector? l) (second l))))
 
-(defn- top-view [{:keys [top expanded? filter selected problem]} own?]
+(defn- top-view [{:keys [top expanded? filter selected problem notice]} own?]
   (let [rows (view/top-rows (or top {:namespaces []}) {:own? own? :expanded? expanded? :filter filter})]
     {:rows rows :crumb nil :selected (view/reselect rows selected)
-     :footer (or problem (if top (view/top-footer top own?) "Loading…"))}))
+     :footer (or problem notice (if top (view/top-footer top own?) "Loading…"))}))
 
 (defn- ns-view [{:keys [vars filter selected problem] :as state}]
   (let [n (ns-level state)
@@ -57,6 +58,19 @@
   (let [st @state*]
     (show! (if (ns-level st) (ns-view st) (top-view st (own?))))))
 
+(declare refresh!)
+
+(defn- left!
+  "The namespace n stepped into is gone: back to the top level without it,
+  a notice saying so, and the top level asked for again."
+  [{:keys [state*] :as ctx} n]
+  (swap! state* (fn [s] (-> s
+                            (assoc :level :top :vars nil :selected nil :problem nil
+                                   :notice (str n " is no longer loaded."))
+                            (update-in [:top :namespaces] (fn [nss] (vec (remove #(= n (:name %)) nss)))))))
+  (render! ctx)
+  (refresh! ctx))
+
 (defn- apply-answer!
   "On the GTK thread: a query's answer [k x], asked under generation gen.
   An answer for a level the person has left is dropped. A namespace that
@@ -65,12 +79,10 @@
   (when (= gen (:gen @state*))
     (let [n (ns-level @state*)]
       (cond
-        (= :problem k) (swap! state* assoc :problem x)
-        (nil? n) (swap! state* assoc :top x :problem nil)
-        (:found? x) (swap! state* assoc :vars x :problem nil)
-        :else (swap! state* assoc :level :top :vars nil :selected n
-                     :problem (str n " is no longer loaded."))))
-    (render! ctx)))
+        (= :problem k) (do (swap! state* assoc :problem x) (render! ctx))
+        (nil? n) (do (swap! state* assoc :top x :problem nil) (render! ctx))
+        (:found? x) (do (swap! state* assoc :vars x :problem nil) (render! ctx))
+        :else (left! ctx n)))))
 
 (defn- refresh!
   "Asks the runtime for the level shown, fresh. A dialect the snippets
@@ -93,7 +105,7 @@
   "Moves to level, selecting selected there, with the filter cleared, then
   shows it and asks the runtime for it."
   [{:keys [state* set-filter! focus-list!] :as ctx} level selected]
-  (swap! state* assoc :level level :vars nil :filter "" :selected selected :problem nil)
+  (swap! state* assoc :level level :vars nil :filter "" :selected selected :problem nil :notice nil)
   (set-filter! "")
   (render! ctx)
   (focus-list!)
@@ -119,7 +131,7 @@
   (let [n (ns-level @state*)]
     (case kind
       :ns (go-to! ctx [:ns name] nil)
-      :group (do (swap! state* update :expanded? not) (render! ctx))
+      :group (do (swap! state* #(-> % (update :expanded? not) (assoc :notice nil))) (render! ctx))
       :var (if shift?
              (inspect-var! ctx n row)
              (open-var! {:ns n :name name :file file :line line}))
@@ -136,20 +148,33 @@
 (defn- filter!
   "The filter's text changed: the rows shown are narrowed."
   [{:keys [state*] :as ctx} text]
-  (swap! state* assoc :filter text)
+  (swap! state* assoc :filter text :notice nil)
   (render! ctx))
 
 (defn- after-eval!
-  "The after-eval listener: on the GTK thread, a moment after the eval
-  ends, refreshes while the panel shows and the runtime is idle."
-  [{:keys [schedule! showing? evaluating?] :as ctx}]
-  (on-gui! (fn [] (schedule! AFTER-EVAL-MS
-                             (fn [] (when (and (showing?) (not (evaluating?))) (refresh! ctx)))))))
+  "The after-eval listener: on the GTK thread, while the panel shows and
+  no refresh is pending, schedules one for a moment after the eval ends,
+  which runs when the panel still shows and the runtime is idle. A burst
+  of evals gets one refresh."
+  [{:keys [state* schedule! showing? evaluating?] :as ctx}]
+  (on-gui! (fn []
+             (when (and (showing?) (not (:pending? @state*)))
+               (swap! state* assoc :pending? true)
+               (schedule! AFTER-EVAL-MS
+                          (fn []
+                            (swap! state* assoc :pending? false)
+                            (when (and (showing?) (not (evaluating?))) (refresh! ctx))))))))
 
-(defn- schedule!
-  "Runs f once on the GTK loop after ms."
-  [ms f]
-  (g/g-timeout-add ms (callable (fn [_data] (f) 0) [:pointer] :int :on-throw 0) ffi/null))
+(defn- scheduler
+  "A (fn [ms f]) that runs f once on the GTK loop after ms, through one
+  callable made here (callable keeps every one it makes for good, so one
+  per call would leak). The part keeps at most one pending."
+  []
+  (let [f* (atom nil)
+        cb (callable (fn [_data] (when-let [f @f*] (reset! f* nil) (f)) 0) [:pointer] :int :on-throw 0)]
+    (fn [ms f]
+      (reset! f* f)
+      (g/g-timeout-add ms cb ffi/null))))
 
 (defn- own-fn
   "own? for the project now selected: the file found among its files."
@@ -171,7 +196,7 @@
      :set-filter! (fn [s] (pane/set-filter-text! p s)) :focus-list! (fn [] (pane/focus-list! p))
      :showing? (fn [] (= :namespaces (showing-panel right)))
      :evaluating? (fn [] (ev/evaluating? @ev*))
-     :schedule! schedule! :own? (own-fn sel* paths*)
+     :schedule! (scheduler) :own? (own-fn sel* paths*)
      :open-var! (fn [m] (find-var/open-var! fv m))}))
 
 (defn- install

@@ -86,11 +86,32 @@
 
 (deftest vanished-namespace-steps-back
   (with-gui
-    (let [log (atom []) c (ctx log (atom [(ok top-value) (ok {:found? false :vars [] :dropped 0})]))]
+    (let [log (atom [])
+          after {:namespaces [{:name "clojure.core" :file "clojure/core.clj" :vars 640}] :dropped 0}
+          c (ctx log (atom [(ok top-value) (ok {:found? false :vars [] :dropped 0}) (ok after)]))]
       (refresh! c)
       (activate! c {:kind :ns :key "demo.core" :name "demo.core"} false)
       (is (= :top (:level @(:state* c))))
-      (is (= [:show ["demo.core" nil] nil "demo.core is no longer loaded." 0] (last (shows log)))))))
+      (is (= [:query :namespaces] (last (filter #(= :query (first %)) @log))) "the top level is asked again")
+      (is (= [:show [nil] nil "demo.core is no longer loaded." nil] (last (shows log)))
+          "the gone namespace isn't listed, and the sentence outlives the fresh answer")
+      (activate! c {:kind :group} false)
+      (is (= "0 own namespaces, 1 from libraries" (nth (last (shows log)) 3)) "the next action clears it"))))
+
+(deftest after-eval-schedules-once
+  (with-gui
+    (let [log (atom []) fs (atom [])
+          c (assoc (ctx log (atom [(ok top-value)])) :schedule! (fn [_ms f] (swap! fs conj f)))]
+      (after-eval! c)
+      (after-eval! c)
+      (is (= 1 (count @fs)) "a burst of evals schedules one refresh")
+      ((first @fs))
+      (after-eval! c)
+      (is (= 2 (count @fs)) "after it runs, the next eval schedules again"))
+    (let [fs (atom [])
+          c (assoc (ctx (atom []) (atom []) :showing? false) :schedule! (fn [_ms f] (swap! fs conj f)))]
+      (after-eval! c)
+      (is (= [] @fs) "hidden: nothing is scheduled at all"))))
 
 (deftest stale-vars-answer-dropped
   (with-gui
